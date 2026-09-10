@@ -1,0 +1,90 @@
+.knowledge-workspace  {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  background: var(--bg-base);
+}
+.knowledge-switcher  {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) auto minmax(180px, 1fr);
+  min-height: 72px;
+  align-items: center;
+  gap: 20px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.knowledge-switcher__eyebrow  {
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.knowledge-switcher h1  {
+  margin: 2px 0 0;
+  color: var(--text-primary);
+  font-size: var(--text-xl);
+  text-wrap: balance;
+}
+.knowledge-switcher__tabs  {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-base);
+  box-shadow: var(--shadow-sm);
+}
+.knowledge-switcher__tabs button  {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+  transition-property: background-color, color, scale, box-shadow;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-standard);
+}
+.knowledge-switcher__tabs button:hover  {
+  color: var(--text-primary);
+}
+.knowledge-switcher__tabs button:active  {
+  scale: .96;
+}
+.knowledge-switcher__tabs button.is-active  {
+  background: var(--accent-muted);
+  box-shadow: var(--shadow-sm);
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+.knowledge-switcher__hint  {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  text-align: right;
+  text-wrap: pretty;
+}
+.knowledge-workspace__body  {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+@media (max-width: 767px)  {
+  .knowledge-switcher { grid-template-columns: 1fr auto;
+  min-height: 64px;
+  gap: 10px;
+  padding: 0 16px;
+} .knowledge-switcher__hint  {
+  display: none;
+} .knowledge-switcher__tabs button  {
+  padding: 0 10px;
+} }

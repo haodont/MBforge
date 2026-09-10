@@ -1,0 +1,44 @@
+.molecule-card {
+  position: relative;
+}
+
+.molecule-card__checkbox {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  cursor: pointer;
+}
+
+.molecule-card__name {
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.molecule-card__meta {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.molecule-card__activity {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.molecule-card__status {
+  display: inline-flex;
+}

@@ -1,0 +1,65 @@
+[
+  {
+    "doc_id": "91189224-0288-4572-a823-900cd6873ae2",
+    "stage": "pipeline",
+    "level": "start",
+    "message": "Processing CN120118069A.PDF",
+    "ts_ms": 1787222267154,
+    "task_id": "25af93f212ac436ba121a1fb8ed8c132",
+    "data": null
+  },
+  {
+    "doc_id": "91189224-0288-4572-a823-900cd6873ae2",
+    "stage": "extract",
+    "level": "success",
+    "message": "Extracted 103 pages (96796 chars)",
+    "ts_ms": 1787222418505,
+    "task_id": "25af93f212ac436ba121a1fb8ed8c132",
+    "data": "{\"page_count\": 103, \"parser\": \"pymupdf+ocr\", \"ocr\": {\"pages_requested\": 18, \"pages_succeeded\": 18, \"pages_failed\": 0, \"backend_counts\": {\"mineru\": 18}, \"retry_count\": 0, \"elapsed_ms\": 150126}, \"recoverable\": false}"
+  },
+  {
+    "doc_id": "91189224-0288-4572-a823-900cd6873ae2",
+    "stage": "density",
+    "level": "success",
+    "message": "Density: mixed (18/103 OCR)",
+    "ts_ms": 1787222418519,
+    "task_id": "25af93f212ac436ba121a1fb8ed8c132",
+    "data": "{\"doc_kind\": \"mixed\", \"avg_text_density\": 937.7864077669902, \"pages_needing_ocr\": 18, \"recoverable\": false}"
+  },
+  {
+    "doc_id": "91189224-0288-4572-a823-900cd6873ae2",
+    "stage": "markdown",
+    "level": "success",
+    "message": "Processed 242 molecules",
+    "ts_ms": 1787222467183,
+    "task_id": "25af93f212ac436ba121a1fb8ed8c132",
+    "data": "{\"molecule_count\": 242, \"rejected_count\": 16, \"skipped\": false, \"detection_error\": null, \"tool_stats\": {}, \"recoverable\": false}"
+  },
+  {
+    "doc_id": "91189224-0288-4572-a823-900cd6873ae2",
+    "stage": "pipeline",
+    "level": "start",
+    "message": "Processing CN120118069A.PDF",
+    "ts_ms": 1787223043022,
+    "task_id": "417ae0bf886f4964b9c81f806e28091b",
+    "data": null
+  },
+  {
+    "doc_id": "91189224-0288-4572-a823-900cd6873ae2",
+    "stage": "extract",
+    "level": "error",
+    "message": "OCR unavailable: no configured cloud OCR backend available",
+    "ts_ms": 1787223043343,
+    "task_id": "417ae0bf886f4964b9c81f806e28091b",
+    "data": "{\"exception_type\": \"OCRUnavailableError\", \"detail\": \"no configured cloud OCR backend available\", \"error_code\": \"OCR_UNAVAILABLE\", \"recoverable\": false}"
+  },
+  {
+    "doc_id": "91189224-0288-4572-a823-900cd6873ae2",
+    "stage": "pipeline",
+    "level": "extract",
+    "message": "Exception: extract failed: OCR unavailable: no configured cloud OCR backend available",
+    "ts_ms": 1787223043353,
+    "task_id": "417ae0bf886f4964b9c81f806e28091b",
+    "data": "{\"error\": \"extract failed: OCR unavailable: no configured cloud OCR backend available\"}"
+  }
+]

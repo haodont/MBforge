@@ -1,0 +1,30 @@
+[
+  {
+    "stage": "pipeline",
+    "event": "start",
+    "message": "Processing CN120118069A.PDF",
+    "data": {},
+    "ts": 1787223043.0219777
+  },
+  {
+    "stage": "extract",
+    "event": "error",
+    "message": "OCR unavailable: no configured cloud OCR backend available",
+    "data": {
+      "exception_type": "OCRUnavailableError",
+      "detail": "no configured cloud OCR backend available",
+      "error_code": "OCR_UNAVAILABLE",
+      "recoverable": false
+    },
+    "ts": 1787223043.3419323
+  },
+  {
+    "stage": "pipeline",
+    "event": "extract",
+    "message": "Exception: extract failed: OCR unavailable: no configured cloud OCR backend available",
+    "data": {
+      "error": "extract failed: OCR unavailable: no configured cloud OCR backend available"
+    },
+    "ts": 1787223043.3537078
+  }
+]

@@ -1,0 +1,4 @@
+{
+  "error": "RuntimeError: extract failed: OCR unavailable: no configured cloud OCR backend available",
+  "doc_id": "91189224-0288-4572-a823-900cd6873ae2"
+}

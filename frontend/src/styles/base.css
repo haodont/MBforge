@@ -1,0 +1,181 @@
+/* ==========================================================================
+   基础层：元素默认样式 + 全局工具类 + 关键帧
+   令牌一律引用 theme.css，禁止字面值。
+   ========================================================================== */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
+  line-height: 1.3;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+::selection {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+#root {
+  height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes messageIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes bounceIn {
+  0% { opacity: 0; transform: scale(0.9) translateY(10px); }
+  60% { opacity: 1; transform: scale(1.02) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-muted); }
+  50% { box-shadow: 0 0 0 3px var(--accent-ring); }
+}
+
+/* LoadingState component */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  gap: 12px;
+}
+.loading-state-message {
+  font-size: var(--text-md);
+  color: var(--text-muted);
+  text-align: center;
+}
+.loading-state-message--sub {
+  font-size: var(--text-sm);
+  margin-top: -4px;
+}
+
+/* ErrorState component */
+.error-state {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  background: var(--danger-muted);
+}
+.error-state--compact {
+  padding: 8px 12px;
+  gap: 8px;
+}
+.error-state-icon {
+  flex-shrink: 0;
+  color: var(--danger);
+  margin-top: 2px;
+}
+.error-state-body {
+  flex: 1;
+  min-width: 0;
+}
+.error-state-message {
+  font-size: var(--text-md);
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+.error-state--compact .error-state-message {
+  margin-bottom: 0;
+}
+.error-state-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Honor the user motion preference: stop every CSS-driven
+ * animation and transition defined in this stylesheet. Per-file
+ * overrides still apply where they exist. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

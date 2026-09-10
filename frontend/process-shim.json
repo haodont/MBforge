@@ -1,0 +1,17 @@
+{
+  "env": {},
+  "browser": true,
+  "version": "",
+  "nextTick": "function(cb){Promise.resolve().then(cb);}",
+  "platform": "browser",
+  "throwDeprecation": false,
+  "traceDeprecation": false,
+  "stderr": {
+    "isTTY": false,
+    "getColorDepth": "function(){return 1;}"
+  },
+  "stdout": {
+    "isTTY": false,
+    "getColorDepth": "function(){return 1;}"
+  }
+}

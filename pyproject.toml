@@ -1,0 +1,157 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.uv]
+# 依赖源默认走官方 PyPI；torch/torchvision 例外——Windows 上 PyPI 默认
+# wheel 是 CPU 编译版（+cpu），本机有 NVIDIA GPU，故从 download.pytorch.org
+# 的 cu128 索引安装 CUDA 编译版（需驱动 ≥570）。国内/内网用户仍可用
+# UV_DEFAULT_INDEX 覆盖 PyPI 主源。
+override-dependencies = [
+    "numpy>=1.26.4,<2.0.0",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
+[project]
+name = "mbforge"
+version = "0.3.0"
+description = "MBForge - Molecular Knowledge Base & AI Workbench"
+requires-python = ">=3.12,<3.13"
+
+readme = "README.md"
+license = { text = "CC BY-NC-SA 4.0" }
+authors = [
+    { name = "MBForge Team" }
+]
+
+# 依赖按运行组拆分（core 为默认依赖，始终安装；重型 AI / GPU 推理依赖放入
+# extras，由 dev 组在 `uv sync` 时一并拉入，保证开发/测试环境与旧行为一致）：
+#   - 默认 core：Web 服务、Agent、配置、文档解析、分子核心（rdkit 在应用导入
+#     路径上被顶层 import，故保留在 core）。
+#   - [local-models]：MolParser-Mobile 识别栈（transformers/timm/scipy/sklearn）
+#     与模型下载（modelscope，缺 SDK 时走直连下载）。
+#   - [gpu]：PyTorch（pytorch-cu128 索引，CUDA 12.8 构建）+ 分子图像检测。
+dependencies = [
+    # 现有子包依赖
+    "requests>=2.32.0",
+    "certifi>=2026.5.20",
+    "numpy>=1.26.4,<2.0.0",
+    "pillow>=10.4.0",
+    "rdkit>=2024.3.0",
+    # Utils
+    "platformdirs>=4.0.0",
+    "psutil>=7.2.2",
+    "pydantic>=2.2.0",
+    # LLM chat models (pipeline content-extraction fallback + readiness probe)
+    "langchain-core>=1.4.8",
+    "langchain-openai>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    "litellm>=1.87.0",
+    # SSE streaming
+    "sse-starlette>=2.0.0",
+    # Model Server (FastAPI)
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "httpx[socks]>=0.28.0",
+    # PDF rendering (PyMuPDF page images for MoldDet)
+    "pymupdf>=1.27.0",
+    "python-multipart>=0.0.29",
+    "typer>=0.25.1",
+]
+
+[project.scripts]
+mbforge = "mbforge.__main__:main"
+
+[project.optional-dependencies]
+# MolParser-Mobile 识别后端需要 timm 注册 vit_tiny_r_s16_p8_224（MolScribe
+# 已移除，不再需要锁定旧版 git rev）。
+local-models = [
+    "transformers>=4.55.0",
+    "timm>=1.0.9",
+    "scipy>=1.17.1",
+    "scikit-learn>=1.9.0",
+    "modelscope>=1.37.1",
+    # MolParser-Mobile 识别后端（E-SMILES 生成与后处理；PyPI 无此包，走官方 git）
+    "molparser @ git+https://github.com/dptech-corp/MolParser.git@74a6892ac603a27d56e68f963645b708695d1175",
+    "cairosvg",
+]
+# PyTorch（pytorch-cu128 索引，CUDA 12.8 构建）+ 分子图像检测。
+gpu = [
+    "torch>=2.6.0",
+    # ultralytics 在模块级 importlib.metadata 读取 torchvision 版本（无
+    # try/except），缺失即整体 import 失败；显式声明并锁定 cu128 源，避免
+    # 传递解析回 PyPI 的 CPU 构建。
+    "torchvision>=0.19.0",
+    "ultralytics>=8.3.0",
+    # Crop-label OCR 主引擎：RapidOCR v3 的 TORCH 引擎（CUDA），单读基准 ~128ms，
+    # 显著快于 CPU onnx（~495ms）。依赖 torch，故归入本条 extra。
+    "rapidocr>=3",
+]
+# 纯 CPU 兜底：crop-label OCR 的 onnxruntime 后端。生产主用 torch（gpu extra），
+# 无 GPU / CI 环境可显式 `--extra onnx` 装此包作为降级路径；torch 引擎本身不
+# 依赖 onnxruntime（惰性），故可整体跳过。
+onnx = [
+    "rapidocr-onnxruntime>=1.4.4",
+]
+
+[dependency-groups]
+dev = [
+    # 让 `uv sync` 与 `uv run`（默认安装 dev 组）保持全栈，等价于旧的统一依赖。
+    "mbforge[local-models,gpu]",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+    "pyyaml>=6.0",
+    "ruff>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ============================================================================
+# Ruff: Python linter & formatter
+# ============================================================================
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # Pyflakes
+    "I",   # isort (import sorting)
+    "N",   # pep8-naming
+    "W",   # pycodestyle warnings
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",  # line-too-long (handled by formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# (molscribe_inference vendored code removed with the MolParser migration.)
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+

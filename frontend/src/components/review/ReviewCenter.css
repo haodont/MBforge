@@ -1,0 +1,148 @@
+/* ReviewCenter 布局与领域样式。
+   基础 UI 原语（按钮/chip/select/分页/弹窗/提示）已收敛到 components/ui 与
+   styles/ui.css；此文件只保留复核中心特有的列表/详情双栏布局。 */
+.review-center  {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  padding: 24px;
+  color: var(--text-primary);
+}
+.review-center__header, .review-center__toolbar, .review-center__bulk  {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.review-center__header  {
+  justify-content: space-between;
+}
+.review-center__header-actions  {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.review-center__header h1  {
+  margin: 0;
+  font-size: 22px;
+}
+.review-center__pending  {
+  color: var(--accent);
+  font-size: 13px;
+}
+.review-center__toolbar  {
+  flex-wrap: wrap;
+}
+.review-center__chips  {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.review-center__status-filter  {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.review-center__bulk  {
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-hover);
+}
+.review-center__bulk-actions  {
+  display: flex;
+  gap: 8px;
+}
+.review-center__layout  {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+}
+.review-center__list  {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.review-center__list, .review-center__detail  {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+.review-center__row  {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.review-center__row.is-selected  {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.review-center__row-main  {
+  min-width: 0;
+}
+.review-center__row-title  {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.review-center__row-meta, .review-center__empty, .review-center__detail-meta  {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.review-center__status  {
+  align-self: start;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 11px;
+  background: var(--bg-hover);
+}
+.review-center__detail  {
+  padding: 16px;
+}
+.review-center__detail h2  {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.review-center__detail pre  {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: inherit;
+  line-height: 1.5;
+}
+.review-center__detail-actions  {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+.review-center__pagination  {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+@media (max-width: 800px)  {
+  .review-center__layout { grid-template-columns: 1fr;
+} .review-center__detail  {
+  min-height: 240px;
+} }

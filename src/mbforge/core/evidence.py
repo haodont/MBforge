@@ -1,0 +1,163 @@
+"""Immutable source evidence shared by extraction and domain objects."""
+
+from __future__ import annotations
+
+import hashlib
+import math
+from dataclasses import dataclass
+from pathlib import PurePath
+from typing import Any
+
+_SEP = "\x1f"
+
+
+def _stable_id(*parts: str) -> str:
+    """Keep the existing deterministic ID contract for domain objects."""
+    return hashlib.sha1(_SEP.join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _normalise_bbox(
+    bbox: tuple[float, float, float, float] | list[float] | None,
+) -> tuple[float, float, float, float]:
+    if bbox is None:
+        raise ValueError("bbox is required")
+    if not isinstance(bbox, (tuple, list)):
+        raise ValueError("bbox must be a four-coordinate tuple or list")
+    if len(bbox) != 4:
+        raise ValueError("bbox must contain exactly four coordinates")
+    x0, y0, x1, y1 = (float(value) for value in bbox)
+    values = (x0, y0, x1, y1)
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("bbox coordinates must be finite")
+    if min(values) < 0 or x0 > x1 or y0 > y1:
+        raise ValueError("bbox must satisfy 0 <= x0 <= x1 and 0 <= y0 <= y1")
+    return values
+
+
+def _location_id(
+    doc_id: str,
+    page: int,
+    bbox: tuple[float, float, float, float],
+    kind: str,
+) -> str:
+    parts = (
+        "evidence-v1",
+        doc_id,
+        str(page),
+        kind,
+        *(f"{round(value, 2):.2f}" for value in bbox),
+    )
+    return hashlib.sha256(_SEP.join(parts).encode("utf-8")).hexdigest()[:32]
+
+
+def _validate_coref(coref: str) -> None:
+    if not coref:
+        return
+    if "://" in coref or PurePath(coref).is_absolute():
+        raise ValueError("coref must be a relative library path")
+    if any(part == ".." for part in PurePath(coref).parts):
+        raise ValueError("coref must stay within the library layout")
+
+
+@dataclass(frozen=True)
+class SourceEvidence:
+    """One immutable source region and its raw content.
+
+    A source evidence object is valid only when it has a geometric location.
+    Secondary domain objects reference it by ``evidence_id``; they do not
+    create page-only source evidence of their own.
+    """
+
+    doc_id: str
+    page: int
+    bbox: tuple[float, float, float, float]
+    evidence_id: str = ""
+    raw_text: str = ""
+    coref: str = ""
+    kind: str = "text_span"
+
+    def __post_init__(self) -> None:
+        if not self.doc_id:
+            raise ValueError("doc_id must not be empty")
+        if (
+            not isinstance(self.page, int)
+            or isinstance(self.page, bool)
+            or self.page < 1
+        ):
+            raise ValueError("page must be a positive 1-based integer")
+        if not self.kind:
+            raise ValueError("kind must not be empty")
+        if not self.raw_text and not self.coref:
+            raise ValueError("evidence must contain raw_text or coref")
+        normalised = _normalise_bbox(self.bbox)
+        _validate_coref(self.coref)
+        if normalised != self.bbox:
+            object.__setattr__(self, "bbox", normalised)
+        if not self.evidence_id:
+            object.__setattr__(
+                self,
+                "evidence_id",
+                _location_id(
+                    self.doc_id,
+                    self.page,
+                    normalised,
+                    self.kind,
+                ),
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "doc_id": self.doc_id,
+            "page": self.page,
+            "evidence_id": self.evidence_id,
+            "bbox": list(self.bbox),
+            "raw_text": self.raw_text,
+            "coref": self.coref,
+            "kind": self.kind,
+        }
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        doc_id: str,
+        page: int,
+        bbox: tuple[float, float, float, float] | list[float],
+        raw_text: str = "",
+        coref: str = "",
+        kind: str = "text_span",
+    ) -> SourceEvidence:
+        normalised = _normalise_bbox(bbox)
+        return cls(
+            doc_id=doc_id,
+            page=page,
+            bbox=normalised,
+            raw_text=raw_text,
+            coref=coref,
+            kind=kind,
+            evidence_id=_location_id(
+                doc_id,
+                page,
+                normalised,
+                kind,
+            ),
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SourceEvidence:
+        bbox = data.get("bbox")
+        if bbox is None:
+            raise ValueError("bbox is required")
+        normalised = _normalise_bbox(bbox)
+        return cls(
+            doc_id=data["doc_id"],
+            page=data["page"],
+            bbox=normalised,
+            evidence_id=data.get("evidence_id", ""),
+            raw_text=data.get("raw_text", ""),
+            coref=data.get("coref", ""),
+            kind=data.get("kind", "text_span"),
+        )
+
+
+__all__ = ["SourceEvidence", "_stable_id"]

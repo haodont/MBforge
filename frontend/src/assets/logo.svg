@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MBForge Logo — single source of truth
+  ─────────────────────────────────────
+  4 个六边形：1 大（银灰，正六边形，居于 viewBox 正中央） + 3 小（青/靛/紫，centers 在大正六边形的 3 个交替顶点上）。
+  3 个小中心的几何关系：等边三角形 → 必然落在正六边形的 3 个 alternating vertices 上。
+  整体几何中心为 (36, 36) — viewBox 中心 = 银灰大正六边形的中心。
+  消费：① src/assets/logo.svg  自身
+        ② brand.tsx::MoleculeLogo  内嵌同一份 SVG（首页 hero）
+       ③ assets/icon/  通过 ImageMagick / rsvg-convert 从本 SVG 生成 32/128/512 PNG
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f0f1e"/>
+      <stop offset="1" stop-color="#1a1a2e"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="72" height="72" rx="16" fill="url(#bg)"/>
+
+  <!-- 大正六边形（center 36,36, R=12）—— 银灰，整个 icon 的正中央 -->
+  <polygon points="36,24 46.4,30 46.4,42 36,48 25.6,42 25.6,30"
+           stroke="#9ca3af" stroke-width="2" stroke-linejoin="round" opacity="0.75"/>
+
+  <!-- 小六边形 Top（center 36,24, r=8）—— cyan -->
+  <polygon points="36,16 42.9,20 42.9,28 36,32 29.1,28 29.1,20"
+           stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- 小六边形 BR（center 46.4,42, r=8）—— violet -->
+  <polygon points="46.4,34 53.3,38 53.3,46 46.4,50 39.5,46 39.5,38"
+           stroke="#a78bfa" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- 小六边形 BL（center 25.6,42, r=8）—— indigo -->
+  <polygon points="25.6,34 32.5,38 32.5,46 25.6,50 18.7,46 18.7,38"
+           stroke="#818cf8" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

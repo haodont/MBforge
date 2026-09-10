@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- 容器：纯白圆角方形（macOS squircle, 22% 圆角） -->
+  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="#FFFFFF"/>
+
+  <!-- 六边形外环：flat-top, 外接圆 R=400, 描边 28, 纯黑 -->
+  <polygon points="112,512 312,165 712,165 912,512 712,859 312,859"
+           fill="none" stroke="#000000" stroke-width="28" stroke-linejoin="miter"/>
+
+  <!-- 铁砧剪影：单 path 经典侧面轮廓
+       部件：顶面 + 角锥(右) | 腰(收) | 底座(展)
+       视觉重心通过左移 29px 补偿角锥外伸 -->
+  <path d="M 353 400
+           L 613 400
+           L 773 440
+           L 613 460
+           L 563 460
+           L 563 540
+           L 715 540
+           L 715 630
+           L 251 630
+           L 251 540
+           L 403 540
+           L 403 460
+           L 353 460
+           Z"
+        fill="#000000"/>
+</svg>
