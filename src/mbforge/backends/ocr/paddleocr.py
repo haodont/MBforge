@@ -59,6 +59,16 @@ class PaddleOCRBackend(OCRBackend):
             model_default="PaddleOCR-VL-1.6",
             base_url_key="host",
         )
+        # Post-processing toggles forwarded into the submit `optionalPayload`.
+        # Defaults keep the uploaded-image geometry unchanged (the bbox→PDF-point
+        # mapping depends on it); each may be enabled via OCRConfig.
+        self._optional_payload = {
+            "useDocOrientationClassify": bool(
+                (config or {}).get("doc_orientation_classify", False)
+            ),
+            "useDocUnwarping": bool((config or {}).get("doc_unwarping", False)),
+            "useChartRecognition": bool((config or {}).get("chart_recognition", False)),
+        }
 
     def is_configured(self) -> bool:
         return self._cloud.is_configured()
@@ -145,10 +155,10 @@ class PaddleOCRBackend(OCRBackend):
 
     def _submit(self, client: httpx.Client, base: str, image: bytes) -> str | None:
         """Upload image with model field and return job_id."""
-        optional_payload = {
-            "useDocOrientationClassify": False,
-            "useDocUnwarping": False,
-        }
+        # Three post-processing toggles, matching the official PaddleOCR v2
+        # example payload verbatim. Defaults are all False so bboxes stay in the
+        # uploaded-image coordinate space; each is configurable via OCRConfig.
+        optional_payload = dict(self._optional_payload)
         r = client.post(
             base,
             headers=self._cloud.auth_headers(),

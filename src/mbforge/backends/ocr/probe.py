@@ -54,3 +54,50 @@ async def probe_paddleocr(api_key: str, host: str, model: str) -> dict:
         )
     except Exception as exc:  # noqa: BLE001
         return _result(False, None, str(exc))
+
+
+def _local_models_url(host: str) -> str:
+    """URL of a local GenAI server's layout-parsing endpoint."""
+    return f"{(host or '').strip().rstrip('/')}/layout-parsing"
+
+
+async def probe_paddleocr_local(host: str, model: str = "") -> dict:
+    """Probe a local PaddleOCR GenAI ``/layout-parsing`` endpoint.
+
+    Sends the server the same tiny 1x1 PNG a real page would, with layout
+    pre-processing disabled, and treats any HTTP 200 with ``errorCode == 0``
+    as reachable. This confirms both liveness and that the endpoint speaks the
+    expected sync layout-parsing protocol (not the cloud async v2 job API).
+    """
+    host = (host or ocr_settings().get("paddleocr_local_host", "")).strip()
+    if not host:
+        return _result(False, None, "paddleocr_local_host 未设置")
+    url = _local_models_url(host)
+    body = {
+        "file": "data:image/png;base64,"
+        + __import__("base64").b64encode(_TINY_PNG).decode("ascii"),
+        "fileType": 1,
+        "useDocOrientationClassify": False,
+        "useDocUnwarping": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
+            r = await client.post(
+                url,
+                json=body,
+                headers={"Content-Type": "application/json"},
+            )
+        if r.status_code == 200:
+            try:
+                data = r.json()
+            except Exception:  # noqa: BLE001
+                data = {}
+            if data.get("errorCode") not in (None, 0):
+                return _result(
+                    False, r.status_code, f"errorCode={data.get('errorCode')}"
+                )
+            parsed = len((data.get("result") or {}).get("layoutParsingResults") or [])
+            return _result(True, r.status_code, f"就绪，返回版面块数={parsed}")
+        return _result(False, r.status_code, f"HTTP {r.status_code}")
+    except Exception as exc:  # noqa: BLE001
+        return _result(False, None, str(exc))

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import fitz
+import pymupdf
 
 from ..utils.logger import get_logger
 from .cancellation import CancelCheck
@@ -87,7 +87,7 @@ def extract_pdf_text(
     document so a partial evidence set is never silently ingested (the
     OCR-only contract does not degrade a page into "nothing read").
     """
-    doc = fitz.open(pdf_path)
+    doc = pymupdf.open(pdf_path)
     try:
         page_count = doc.page_count
         # All pages start blank; text + spans come exclusively from OCR.
@@ -263,7 +263,7 @@ def _ocr_pages(
     def _ocr_one(pos: int, page_idx: int) -> tuple[int, str, bool]:
         check()
         page = doc.load_page(page_idx)
-        mat = fitz.Matrix(_OCR_RENDER_ZOOM, _OCR_RENDER_ZOOM)
+        mat = pymupdf.Matrix(_OCR_RENDER_ZOOM, _OCR_RENDER_ZOOM)
         pix = page.get_pixmap(matrix=mat, alpha=False)
         image_bytes = pix.tobytes("png")
         text = ""

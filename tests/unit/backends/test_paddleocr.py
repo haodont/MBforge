@@ -48,9 +48,38 @@ def test_submit_keeps_bboxes_in_uploaded_image_coordinates() -> None:
     assert backend._submit(client, "https://example.test/jobs", b"page") == "job-1"
 
     data = client.post.call_args.kwargs["data"]
+    # Official PaddleOCR v2 example payload: three toggles, all defaulting False.
     assert json.loads(data["optionalPayload"]) == {
         "useDocOrientationClassify": False,
         "useDocUnwarping": False,
+        "useChartRecognition": False,
+    }
+
+
+def test_submit_forwards_enabled_post_processing_toggles() -> None:
+    """Enabled cloud post-processing toggles are passed verbatim to the submit."""
+    client = Mock()
+    client.post.return_value = httpx.Response(
+        200,
+        json={"code": 0, "data": {"jobId": "job-1"}},
+        request=httpx.Request("POST", "https://example.test"),
+    )
+    backend = PaddleOCRBackend(
+        {
+            "api_key": "test-key",
+            "doc_orientation_classify": True,
+            "doc_unwarping": True,
+            "chart_recognition": True,
+        }
+    )
+
+    backend._submit(client, "https://example.test/jobs", b"page")
+
+    data = client.post.call_args.kwargs["data"]
+    assert json.loads(data["optionalPayload"]) == {
+        "useDocOrientationClassify": True,
+        "useDocUnwarping": True,
+        "useChartRecognition": True,
     }
 
 

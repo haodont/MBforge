@@ -29,20 +29,35 @@ structure's own atom labels.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from PIL import Image
 
-try:
-    from sklearn.cluster import DBSCAN
+# Torch is loaded lazily so CPU-only installs can still start the API and use
+# the documented unsplit-crop fallback. The active development environment
+# installs Torch through the ``gpu`` extra.
+_TORCH_AVAILABLE: bool | None = None
 
-    _SKLEARN_AVAILABLE = True
-except ImportError:
-    _SKLEARN_AVAILABLE = False
+
+def _get_torch() -> Any | None:
+    """Return Torch when importable, caching an optional-dependency failure."""
+    global _TORCH_AVAILABLE
+    if _TORCH_AVAILABLE is False:
+        return None
+    try:
+        import torch
+    except (ImportError, OSError, RuntimeError):
+        _TORCH_AVAILABLE = False
+        return None
+    _TORCH_AVAILABLE = True
+    return torch
+
 
 # 输入 DBSCAN 的墨迹像素上限：超过则跳过聚类，返回未拆分的灰度图。
-# sklearn DBSCAN 在 2D 上 O(n log n)，30k 点内毫秒级；更大的墨迹面积
-# 只会出现在异常稠密的整页扫描上，此时不拆分退回原 crop 是安全行为。
+# Torch DBSCAN uses a spatial grid, so neighborhood checks stay local instead
+# of materializing an O(n²) distance matrix. Larger ink areas only occur in
+# unusually dense crops; subsampling them preserves the safe fallback.
 _DBSCAN_MAX_POINTS = 30_000
 
 
@@ -51,16 +66,22 @@ def _largest_ink_cluster_mask(
     eps: float = 8.0,
     min_samples: int = 15,
 ) -> np.ndarray | None:
-    """DBSCAN the foreground ink pixels, return the largest cluster as a mask.
+    """Run Torch DBSCAN on ink pixels and return the largest cluster mask.
 
     arr: grayscale image (uint8); ink = pixel < 200
 
+    A cell size equal to ``eps`` limits each region query to the point's
+    3x3 neighboring cells. Distances and labels are computed with Torch on
+    CPU tensors; CPU is deliberate because crops are small and the GPU is
+    reserved for MolDet/MolParser inference.
+
     Returns a boolean mask (same shape as ``arr``) covering the DBSCAN
     cluster with the most ink pixels, or ``None`` when clustering is not
-    applicable (sklearn missing, no foreground, over the point cap, or no
+    applicable (Torch missing, no foreground, over the point cap, or no
     non-noise cluster formed).
     """
-    if not _SKLEARN_AVAILABLE:
+    torch = _get_torch()
+    if torch is None:
         return None
 
     ys, xs = np.nonzero(arr < 200)
@@ -76,18 +97,98 @@ def _largest_ink_cluster_mask(
         ys, xs = ys[::stride], xs[::stride]
 
     coords = np.column_stack([ys, xs]).astype(np.float32)
-    labels = DBSCAN(eps=eps, min_samples=min_samples).fit(coords).labels_
+    points = torch.as_tensor(coords, dtype=torch.float32, device="cpu")
+    cell_coords = torch.floor(points / eps).to(dtype=torch.int64)
 
-    counts: dict[int, int] = {}
-    for lbl in labels:
-        if lbl == -1:
-            continue
-        counts[int(lbl)] = counts.get(int(lbl), 0) + 1
-    if not counts:
+    # Sort cells once and retain contiguous ranges for O(1) candidate lookup.
+    # Coordinates are non-negative pixel positions, so a flattened integer key
+    # is sufficient and avoids a Python tuple lookup for every candidate.
+    max_cell_x = int(cell_coords[:, 1].max().item())
+    cell_stride = max_cell_x + 1
+    cell_keys = cell_coords[:, 0] * cell_stride + cell_coords[:, 1]
+    sorted_keys, order = torch.sort(cell_keys)
+    unique_keys, counts = torch.unique_consecutive(sorted_keys, return_counts=True)
+    starts = torch.cat(
+        (
+            torch.zeros(1, dtype=torch.int64),
+            torch.cumsum(counts, dim=0)[:-1],
+        )
+    )
+    cell_ranges: dict[int, tuple[int, int]] = {
+        int(key): (int(start), int(start + count))
+        for key, start, count in zip(
+            unique_keys.tolist(), starts.tolist(), counts.tolist(), strict=True
+        )
+    }
+
+    eps_squared = float(eps * eps)
+
+    def region_query(point_index: int) -> list[int]:
+        """Return all point indices within ``eps`` of one point."""
+        cell_y = int(cell_coords[point_index, 0].item())
+        cell_x = int(cell_coords[point_index, 1].item())
+        candidate_chunks = []
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                neighbor_y = cell_y + dy
+                neighbor_x = cell_x + dx
+                if neighbor_y < 0 or neighbor_x < 0 or neighbor_x > max_cell_x:
+                    continue
+                cell_range = cell_ranges.get(neighbor_y * cell_stride + neighbor_x)
+                if cell_range is not None:
+                    start, stop = cell_range
+                    candidate_chunks.append(order[start:stop])
+        if not candidate_chunks:
+            return []
+        candidates = torch.cat(candidate_chunks)
+        delta = points[candidates] - points[point_index]
+        within_eps = (delta * delta).sum(dim=1) <= eps_squared
+        return candidates[within_eps].tolist()
+
+    # Standard DBSCAN expansion over the Torch-backed region queries. A Python
+    # queue is intentional here: the graph traversal is irregular, while all
+    # distance and neighborhood calculations remain Torch operations.
+    point_count = len(coords)
+    visited = [False] * point_count
+    labels = [-1] * point_count
+    cluster_id = 0
+    with torch.inference_mode():
+        for point_index in range(point_count):
+            if visited[point_index]:
+                continue
+            visited[point_index] = True
+            neighbors = region_query(point_index)
+            if len(neighbors) < min_samples:
+                continue
+
+            cluster_id += 1
+            labels[point_index] = cluster_id
+            seeds = list(neighbors)
+            queued = set(seeds)
+            seed_index = 0
+            while seed_index < len(seeds):
+                neighbor_index = seeds[seed_index]
+                seed_index += 1
+                if not visited[neighbor_index]:
+                    visited[neighbor_index] = True
+                    neighbor_neighbors = region_query(neighbor_index)
+                    if len(neighbor_neighbors) >= min_samples:
+                        for candidate in neighbor_neighbors:
+                            if candidate not in queued:
+                                queued.add(candidate)
+                                seeds.append(candidate)
+                if labels[neighbor_index] == -1:
+                    labels[neighbor_index] = cluster_id
+
+    label_tensor = torch.as_tensor(labels, dtype=torch.int64, device="cpu")
+    clustered = label_tensor >= 0
+    if not bool(clustered.any().item()):
         return None
-    largest = max(counts, key=counts.get)
-
-    keep = labels == largest
+    cluster_ids, cluster_sizes = torch.unique(
+        label_tensor[clustered], return_counts=True
+    )
+    largest = int(cluster_ids[cluster_sizes.argmax()].item())
+    keep = (label_tensor == largest).numpy()
     mask = np.zeros(arr.shape, dtype=bool)
     mask[ys[keep], xs[keep]] = True
     return mask
@@ -122,7 +223,7 @@ def split_molecule_crop(
     - ``others``: the remaining foreground (text labels, fragments, noise) on
       a white background, ``None`` when there is nothing to separate.
     - ``main_mask``: the largest-cluster mask over ``img``; ``None`` when
-      clustering could not run (no sklearn, no foreground, over the point
+      clustering could not run (no Torch, no foreground, over the point
       cap) or no non-noise cluster formed.
     """
     gray = np.asarray(img.convert("L"), dtype=np.uint8)

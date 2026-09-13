@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
+import pymupdf
 from fastapi.testclient import TestClient
 
 from mbforge.models.readiness import (
@@ -108,7 +108,7 @@ def test_demo_pdf_is_sanitized_and_registered(
 
     assert pdf_path.is_file()
     assert doc_id  # a real doc_id was generated
-    with fitz.open(pdf_path) as document:
+    with pymupdf.open(pdf_path) as document:
         text = "\n".join(page.get_text() for page in document)
     assert "Synthetic sample document" in text
     assert "caffeine C8H10N4O2" in text

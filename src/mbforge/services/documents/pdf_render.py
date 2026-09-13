@@ -10,21 +10,21 @@ import base64
 
 
 def open_pdf(pdf_path: str):
-    """Open a PDF with PyMuPDF (import deferred — fitz is heavy)."""
-    import fitz  # PyMuPDF
+    """Open a PDF with PyMuPDF (import deferred — pymupdf is heavy)."""
+    import pymupdf  # PyMuPDF
 
-    return fitz.open(pdf_path)
+    return pymupdf.open(pdf_path)
 
 
 def page_matrix(dpi: float):
-    """Return the fitz zoom matrix for *dpi* (72 dpi = 1x)."""
-    import fitz
+    """Return the pymupdf zoom matrix for *dpi* (72 dpi = 1x)."""
+    import pymupdf
 
-    return fitz.Matrix(dpi / 72, dpi / 72)
+    return pymupdf.Matrix(dpi / 72, dpi / 72)
 
 
 def render_page_pixmap(page, dpi: float, *, alpha: bool = False):
-    """Rasterize a loaded fitz page at *dpi*."""
+    """Rasterize a loaded pymupdf page at *dpi*."""
     return page.get_pixmap(matrix=page_matrix(dpi), alpha=alpha)
 
 

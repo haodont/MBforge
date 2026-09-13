@@ -254,9 +254,7 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
             ("task-checkpoint", str(root / "doc.pdf"), doc_id, "processing"),
         )
 
-    response = client.post(
-        "/api/v1/pipeline/queue", json={"library_root": str(root)}
-    )
+    response = client.post("/api/v1/pipeline/queue", json={"library_root": str(root)})
 
     assert response.status_code == 200
     assert response.json()["tasks"][0]["stage_statuses"] == {

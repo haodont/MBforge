@@ -20,7 +20,7 @@ def extract_pdf_text(doc: Document) -> str:
 
     Returns the concatenated text from all pages.  Also populates
     ``page_count`` and per-page text/span caches on ``doc`` as a side
-    effect (single fitz open).  Returns an empty string for non-PDF
+    effect (single pymupdf open).  Returns an empty string for non-PDF
     files or on any read error.
     """
     if doc._text is not None:
@@ -33,9 +33,9 @@ def extract_pdf_text(doc: Document) -> str:
         doc._text = ""
         return doc._text
     try:
-        import fitz
+        import pymupdf
 
-        with fitz.open(str(source)) as pdf:
+        with pymupdf.open(str(source)) as pdf:
             doc._page_count = pdf.page_count
             page_texts: list[str] = []
             page_spans: list[list[dict]] = []

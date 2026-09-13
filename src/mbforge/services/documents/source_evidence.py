@@ -171,7 +171,11 @@ def update_molecule(
         cursor = conn.execute(
             "UPDATE source_evidence SET raw_text = ? "
             "WHERE evidence_id = ? AND doc_id = ? AND kind = 'molecule'",
-            (json.dumps(metadata, ensure_ascii=False, sort_keys=True), evidence_id, doc_id),
+            (
+                json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                evidence_id,
+                doc_id,
+            ),
         )
         if cursor.rowcount != 1:
             raise NotFoundError("source evidence not found", detail=evidence_id)

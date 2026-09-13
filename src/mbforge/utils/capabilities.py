@@ -25,7 +25,6 @@ _OPTIONAL_MODULES: tuple[tuple[str, str], ...] = (
     ("ultralytics", "ultralytics"),
     ("timm", "timm"),
     ("scipy", "scipy"),
-    ("sklearn", "scikit-learn"),
     ("modelscope", "modelscope"),
     ("molparser", "molparser"),
     ("cairosvg", "cairosvg"),

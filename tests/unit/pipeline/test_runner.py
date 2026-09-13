@@ -568,9 +568,15 @@ def test_resume_after_complete_fork_advances_past_detection(
     library_root = tmp_path / "library"
     library_root.mkdir(parents=True, exist_ok=True)
 
-    with patch(
-        "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
-        return_value=[],
+    with (
+        patch(
+            "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
+            return_value=[],
+        ),
+        patch(
+            "mbforge.pipeline.extract_text._ocr_pages",
+            return_value=["ocr page 1", "ocr page 2"],
+        ),
     ):
         result = _run_all_stages_bounded(
             str(sample_pdf),
@@ -591,6 +597,10 @@ def test_pipeline_persists_markdown(sample_pdf: Path, tmp_path: Path) -> None:
         patch(
             "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
             return_value=[],
+        ),
+        patch(
+            "mbforge.pipeline.extract_text._ocr_pages",
+            return_value=["ocr page 1", "ocr page 2"],
         ),
     ):
         result = _run_all_stages(

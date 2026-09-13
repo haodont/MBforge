@@ -220,12 +220,12 @@ def _write_demo_pdf(library_root: str) -> tuple[Path, str]:
     Returns ``(pdf_path, doc_id)`` so the caller can enqueue the
     registered document through the standard ingest path.
     """
-    import fitz
+    import pymupdf
 
     layout = LibraryLayout(library_root)
     layout.incoming_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = layout.incoming_dir / "mbforge-readiness-demo.pdf"
-    doc = fitz.open()
+    doc = pymupdf.open()
     try:
         for i in range(2):
             page = doc.new_page(width=612, height=792)

@@ -98,11 +98,11 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 def page_frames_from_pdf(pdf_path: str | Path) -> list[PageFrame]:
     """Read visual page frames once at a producer boundary."""
-    import fitz
+    import pymupdf
 
     from .evidence_artifacts import PageFrame
 
-    document = fitz.open(str(pdf_path))
+    document = pymupdf.open(str(pdf_path))
     try:
         return [
             PageFrame(

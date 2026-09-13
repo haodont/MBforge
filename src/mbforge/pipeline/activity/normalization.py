@@ -367,9 +367,7 @@ def normalize_reference_label(value: object) -> ReferenceLabel:
     cleaned = re.sub(r"^[#\s>*•·-]+", "", raw).strip()
     cleaned = re.sub(r"\s+", " ", cleaned).rstrip(".。 ")
 
-    example_match = re.fullmatch(
-        r"(?i)example\s*#?\s*(E?\d+[A-Za-z]?)", cleaned
-    )
+    example_match = re.fullmatch(r"(?i)example\s*#?\s*(E?\d+[A-Za-z]?)", cleaned)
     if example_match:
         return ReferenceLabel(raw, example_match.group(1), "example")
 
@@ -387,7 +385,9 @@ def normalize_reference_label(value: object) -> ReferenceLabel:
 
     token_match = re.fullmatch(r"(?i)([A-D])", cleaned)
     if token_match:
-        return ReferenceLabel(raw, token_match.group(1).upper(), "letter_ambiguous", True)
+        return ReferenceLabel(
+            raw, token_match.group(1).upper(), "letter_ambiguous", True
+        )
 
     return ReferenceLabel(raw, None, "unresolved", True)
 

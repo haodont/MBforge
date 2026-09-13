@@ -30,11 +30,14 @@ from typing import Any
 from mbforge.utils.logger import get_logger
 
 from .base import OCRBackend, OCRResult
+from .ocr_local import LocalPaddleOCRBackend
 from .paddleocr import PaddleOCRBackend
 
 logger = get_logger(__name__)
 
-DEFAULT_PRIORITY: tuple[str, ...] = ("paddleocr",)
+# Cloud first, optional local PaddleOCR fallback second. The local backend
+# participates only when a ``paddleocr_local_host`` is configured (opt-in).
+DEFAULT_PRIORITY: tuple[str, ...] = ("paddleocr", "paddleocr_local")
 
 
 class OCRUnavailableError(RuntimeError):
@@ -76,10 +79,21 @@ def build_backends(ocr_config: dict | Any | None) -> list[OCRBackend]:
         "api_key": cfg.get("paddleocr_api_key", ""),
         "host": cfg.get("paddleocr_host", ""),
         "model": cfg.get("paddleocr_model", "PaddleOCR-VL-1.6"),
+        "doc_orientation_classify": bool(
+            cfg.get("paddleocr_doc_orientation_classify", False)
+        ),
+        "doc_unwarping": bool(cfg.get("paddleocr_doc_unwarping", False)),
+        "chart_recognition": bool(cfg.get("paddleocr_chart_recognition", False)),
+    }
+    local_cfg = {
+        "api_key": cfg.get("paddleocr_local_api_key", ""),
+        "host": cfg.get("paddleocr_local_host", ""),
+        "model": cfg.get("paddleocr_local_model", ""),
     }
 
     candidates = {
         "paddleocr": lambda: PaddleOCRBackend(paddle_cfg),
+        "paddleocr_local": lambda: LocalPaddleOCRBackend(local_cfg),
     }
     backends: list[OCRBackend] = []
     for name in _priority_from_config(cfg):

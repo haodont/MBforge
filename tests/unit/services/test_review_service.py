@@ -307,6 +307,7 @@ def test_clear_all_keeps_promoted_artifacts(tmp_path) -> None:
         )
         clear_all(conn)
 
-        assert conn.execute(
-            "SELECT 1 FROM molecules WHERE mol_id = 'mol-1'"
-        ).fetchone() is not None
+        assert (
+            conn.execute("SELECT 1 FROM molecules WHERE mol_id = 'mol-1'").fetchone()
+            is not None
+        )

@@ -130,6 +130,7 @@ class DetectionStage:
         lower-level extractor therefore runs its independent full-page path.
         """
         from ..detection.extraction import extract_molecules_from_pdf
+
         try:
             image_results = extract_molecules_from_pdf(
                 str(ctx.pdf_path),

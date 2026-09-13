@@ -1,4 +1,4 @@
-"""Unit tests for PDF text extraction and OCR fallback."""
+"""Unit tests for the OCR-only PDF text extraction contract."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import fitz
+import pymupdf
 import pytest
 
 from mbforge.backends.ocr.base import OCRResult
@@ -22,7 +22,7 @@ from mbforge.pipeline.extract_text import (
 def _make_pdf_with_pages(tmp_path: Path, page_texts: list[str]) -> Path:
     """Create a PDF where page i contains page_texts[i] at a fixed position."""
     pdf_path = tmp_path / "non_consecutive.pdf"
-    doc = fitz.open()
+    doc = pymupdf.open()
     for text in page_texts:
         page = doc.new_page(width=612, height=792)
         page.insert_text((72, 72), text, fontsize=12)
@@ -41,7 +41,7 @@ def test_ocr_pages_non_consecutive_indices_no_index_error(
     """
     page_texts = ["page zero", "page one", "page two", "page three", "page four"]
     pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-    doc: Any = fitz.open(str(pdf_path))
+    doc: Any = pymupdf.open(str(pdf_path))
 
     # Ask for pages 0, 2, 4 (non-consecutive absolute page numbers).
     requested_indices = [0, 2, 4]
@@ -73,7 +73,7 @@ def test_ocr_pages_result_positions_align_with_input(
     """Result list order must match the order of ``page_indices`` exactly."""
     page_texts = ["A", "B", "C", "D", "E"]
     pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-    doc: Any = fitz.open(str(pdf_path))
+    doc: Any = pymupdf.open(str(pdf_path))
 
     requested_indices = [4, 1, 3]
 
@@ -100,7 +100,7 @@ def test_ocr_pages_does_not_retry_empty_page_results(
     """Page-level retries stay disabled because the backend owns retries."""
     page_texts = ["A", "B", "C"]
     pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-    doc: Any = fitz.open(str(pdf_path))
+    doc: Any = pymupdf.open(str(pdf_path))
 
     requested_indices = [0, 1, 2]
     calls: list[int] = []
@@ -128,34 +128,33 @@ def test_ocr_pages_does_not_retry_empty_page_results(
     assert len(calls) == 3
 
 
-def test_extract_pdf_text_preserves_mixed_native_and_ocr_page_order(
+def test_extract_pdf_text_preserves_ocr_page_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The combined document must follow source page order across OCR pages."""
+    """Full OCR results are assembled in the original PDF page order."""
     pdf_path = tmp_path / "mixed.pdf"
-    doc = fitz.open()
-    for text in (
-        "native first page with enough text" * 3,
-        "",
-        "native last page with enough text" * 3,
-    ):
-        page = doc.new_page(width=612, height=792)
-        if text:
-            page.insert_text((72, 72), text, fontsize=12)
+    doc = pymupdf.open()
+    for _ in range(3):
+        doc.new_page(width=612, height=792)
     doc.save(str(pdf_path))
     doc.close()
 
     monkeypatch.setattr(
         "mbforge.pipeline.extract_text._ocr_pages",
-        lambda *_args, **_kwargs: ["ocr middle page"],
+        lambda *_args, **_kwargs: [
+            "ocr first page",
+            "ocr middle page",
+            "ocr last page",
+        ],
     )
     extracted = extract_pdf_text(str(pdf_path))
 
     assert (
-        extracted.raw_text.index("native first")
+        extracted.raw_text.index("ocr first")
         < extracted.raw_text.index("ocr middle")
-        < extracted.raw_text.index("native last")
+        < extracted.raw_text.index("ocr last")
     )
+    assert extracted.parser == "ocr"
 
 
 def test_ocr_pages_uses_chain_backends_per_page(
@@ -163,7 +162,7 @@ def test_ocr_pages_uses_chain_backends_per_page(
 ) -> None:
     """Each scanned page is OCR'd through the chain's configured backends."""
     pdf_path = _make_pdf_with_pages(tmp_path, ["", ""])
-    doc: Any = fitz.open(str(pdf_path))
+    doc: Any = pymupdf.open(str(pdf_path))
     chain_calls: list[list[str]] = []
 
     class _Paddle:
@@ -237,11 +236,10 @@ def _fake_ocr_pages(calls: list[list[int]]) -> Any:
     return fake
 
 
-def test_extract_document_text_cached_mixed_ocrs_only_short_pages(
+def test_extract_document_text_uses_full_ocr_for_cached_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Cached extraction must still apply the per-page OCR rule: only the
-    page with <50 native chars goes through the OCR chain."""
+    """A Document cache is not a pipeline evidence source under OCR-only."""
     page_texts = [
         "native first page with enough text" * 3,
         "",
@@ -257,121 +255,28 @@ def test_extract_document_text_cached_mixed_ocrs_only_short_pages(
 
     extracted = extract_document_text(doc, str(pdf_path), ocr_config={})
 
-    assert calls == [[1]]
-    assert [p.text for p in extracted.pages] == [
-        page_texts[0],
-        "ocr page 2",
-        page_texts[2],
-    ]
-    assert extracted.parser == "pymupdf+ocr"
-    assert (
-        extracted.raw_text.index("native first")
-        < extracted.raw_text.index("ocr page 2")
-        < extracted.raw_text.index("native last")
-    )
-    assert extracted.ocr_stats["pages_requested"] == 1
-    assert extracted.ocr_stats["pages_succeeded"] == 1
-    assert extracted.ocr_stats["backend_counts"] == {"fake-cloud": 1}
-
-
-def test_extract_document_text_cached_all_scanned_ocrs_every_page(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A fully scanned cached document must not bypass OCR (regression for
-    the old whole-document 'has any text?' gate)."""
-    pdf_path = _make_pdf_with_pages(tmp_path, ["", "", ""])
-    doc = _cached_document(tmp_path, "scanned-cached", ["", "", ""])
-
-    calls: list[list[int]] = []
-    monkeypatch.setattr(
-        "mbforge.pipeline.extract_text._ocr_pages", _fake_ocr_pages(calls)
-    )
-
-    extracted = extract_document_text(doc, str(pdf_path), ocr_config={})
-
     assert calls == [[0, 1, 2]]
-    assert extracted.parser == "pymupdf+ocr"
+    assert [p.text for p in extracted.pages] == [
+        "ocr page 1",
+        "ocr page 2",
+        "ocr page 3",
+    ]
+    assert extracted.parser == "ocr"
     assert extracted.ocr_stats["pages_requested"] == 3
     assert extracted.ocr_stats["pages_succeeded"] == 3
-
-
-def test_extract_document_text_skips_ocr_for_full_text_cached_doc(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """No OCR when every cached page already has enough native text."""
-    page_texts = [
-        "native first page with enough text" * 3,
-        "native second page with enough text" * 3,
-    ]
-    pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-    doc = _cached_document(tmp_path, "full-text", page_texts)
-
-    def fail_if_called(*_args: Any, **_kwargs: Any) -> list[str]:
-        raise AssertionError("OCR must not run on a full-text document")
-
-    monkeypatch.setattr("mbforge.pipeline.extract_text._ocr_pages", fail_if_called)
-
-    extracted = extract_document_text(doc, str(pdf_path), ocr_config={})
-
-    assert extracted.parser == "pymupdf"
-    assert extracted.ocr_stats == {}
-    assert [p.text for p in extracted.pages] == page_texts
-
-
-def test_extract_document_text_live_reads_legacy_doc_then_ocrs_short_pages(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Legacy documents without a cache get one live read, then the same
-    per-page OCR rule applies."""
-    from mbforge.core.entities.document import Document
-    from mbforge.storage.layout import LibraryLayout
-
-    page_texts = [
-        "native first page with enough text" * 3,
-        "",
-        "native last page with enough text" * 3,
-    ]
-    pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-
-    library_root = tmp_path / "legacy-library"
-    layout = LibraryLayout(library_root)
-    storage_dir = layout.storage_dir("legacy-doc")
-    storage_dir.mkdir(parents=True)
-    stored_pdf = storage_dir / "source.pdf"
-    stored_pdf.write_bytes(pdf_path.read_bytes())
-
-    doc = Document(
-        doc_id="legacy-doc",
-        library_root=library_root,
-        file_name="source.pdf",
-    )
-
-    calls: list[list[int]] = []
-    monkeypatch.setattr(
-        "mbforge.pipeline.extract_text._ocr_pages", _fake_ocr_pages(calls)
-    )
-
-    extracted = extract_document_text(doc, str(stored_pdf), ocr_config={})
-
-    assert calls == [[1]]
-    assert [p.text for p in extracted.pages] == [
-        page_texts[0],
-        "ocr page 2",
-        page_texts[2],
-    ]
-    assert extracted.parser == "pymupdf+ocr"
+    assert extracted.ocr_stats["backend_counts"] == {"fake-cloud": 3}
 
 
 def test_extract_document_text_delegates_to_full_extraction_without_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No Document record -> fall back to extract_pdf_text (full path)."""
+    """The optional Document argument does not alter the full OCR path."""
     from mbforge.pipeline.extract_text import ExtractedDocument
 
     calls: list[tuple[Any, Any]] = []
 
     def fake_extract_pdf_text(pdf_path: str, **kwargs: Any) -> ExtractedDocument:
-        calls.append((pdf_path, kwargs.get("ocr_fallback"), kwargs.get("ocr_config")))
+        calls.append((pdf_path, kwargs.get("ocr_config")))
         return ExtractedDocument(raw_text="full fallback", page_count=1)
 
     monkeypatch.setattr(
@@ -382,7 +287,7 @@ def test_extract_document_text_delegates_to_full_extraction_without_document(
         None, str(tmp_path / "missing.pdf"), ocr_config={"paddleocr_api_key": "k"}
     )
 
-    assert calls == [(str(tmp_path / "missing.pdf"), True, {"paddleocr_api_key": "k"})]
+    assert calls == [(str(tmp_path / "missing.pdf"), {"paddleocr_api_key": "k"})]
     assert extracted.raw_text == "full fallback"
 
 

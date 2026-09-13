@@ -262,7 +262,10 @@ def _raw_reads(result) -> list:
         scores = result.scores
         if txts is None or boxes is None or scores is None:
             return []
-        return [[list(b), str(t), float(c)] for b, t, c in zip(boxes, txts, scores, strict=False)]
+        return [
+            [list(b), str(t), float(c)]
+            for b, t, c in zip(boxes, txts, scores, strict=False)
+        ]
 
     # Container form: rebuild a normalized reads list from whatever nests the
     # read entries (bare list, or (reads, elapse) tuple).

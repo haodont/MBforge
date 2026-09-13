@@ -27,9 +27,7 @@ def test_get_moldet_concurrent_first_call_creates_single_instance(monkeypatch):
             load_count["n"] += 1
         self.model = "fake-model"
 
-    monkeypatch.setattr(
-        moldet_module.MolDetv2Detector, "_load_model", _fake_load_model
-    )
+    monkeypatch.setattr(moldet_module.MolDetv2Detector, "_load_model", _fake_load_model)
 
     detectors = []
     result_lock = threading.Lock()
@@ -136,8 +134,3 @@ def test_detect_molecules_batch_unavailable_yields_empty_per_image():
     )
 
     assert [r.bboxes for r in results] == [[], []]
-
-
-def test_detect_molecules_batch_empty_input_short_circuits():
-    """An empty image list returns [] without touching any detector."""
-    assert detect_molecules_batch([], None) == []

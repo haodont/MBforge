@@ -13,10 +13,6 @@ asyncio_mode = "auto"
 # wheel 是 CPU 编译版（+cpu），本机有 NVIDIA GPU，故从 download.pytorch.org
 # 的 cu128 索引安装 CUDA 编译版（需驱动 ≥570）。国内/内网用户仍可用
 # UV_DEFAULT_INDEX 覆盖 PyPI 主源。
-override-dependencies = [
-    "numpy>=1.26.4,<2.0.0",
-]
-
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
@@ -42,14 +38,14 @@ authors = [
 # extras，由 dev 组在 `uv sync` 时一并拉入，保证开发/测试环境与旧行为一致）：
 #   - 默认 core：Web 服务、Agent、配置、文档解析、分子核心（rdkit 在应用导入
 #     路径上被顶层 import，故保留在 core）。
-#   - [local-models]：MolParser-Mobile 识别栈（transformers/timm/scipy/sklearn）
+#   - [local-models]：MolParser-Mobile 识别栈（transformers/timm/scipy + Torch）
 #     与模型下载（modelscope，缺 SDK 时走直连下载）。
 #   - [gpu]：PyTorch（pytorch-cu128 索引，CUDA 12.8 构建）+ 分子图像检测。
 dependencies = [
     # 现有子包依赖
     "requests>=2.32.0",
     "certifi>=2026.5.20",
-    "numpy>=1.26.4,<2.0.0",
+    "numpy>=2.0,<2.8",
     "pillow>=10.4.0",
     "rdkit>=2024.3.0",
     # Utils
@@ -83,7 +79,6 @@ local-models = [
     "transformers>=4.55.0",
     "timm>=1.0.9",
     "scipy>=1.17.1",
-    "scikit-learn>=1.9.0",
     "modelscope>=1.37.1",
     # MolParser-Mobile 识别后端（E-SMILES 生成与后处理；PyPI 无此包，走官方 git）
     "molparser @ git+https://github.com/dptech-corp/MolParser.git@74a6892ac603a27d56e68f963645b708695d1175",

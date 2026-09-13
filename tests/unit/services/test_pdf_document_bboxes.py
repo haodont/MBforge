@@ -150,9 +150,9 @@ def test_overlay_serves_blocks_and_molecules_from_one_read(tmp_path: Path) -> No
                         source="image",
                         page=0,
                         bbox=(100.0, 200.0, 200.0, 300.0),
-                            image_path="crops/etoh.png",
-                            confidence=0.81,
-                            conf_moldet=0.9,
+                        image_path="crops/etoh.png",
+                        confidence=0.81,
+                        conf_moldet=0.9,
                     )
                 ],
             )

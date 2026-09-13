@@ -47,9 +47,7 @@ def test_recognize_returns_esmiles_smiles_coref(
 def test_recognize_maps_molparser_failure_to_503(app_client: TestClient) -> None:
     with patch(
         "mbforge.routers.molecule.molparser.recognize_molecule",
-        return_value=RecognizedMolecule(
-            esmiles="", smiles="", coref=[]
-        ),
+        return_value=RecognizedMolecule(esmiles="", smiles="", coref=[]),
     ):
         resp = app_client.post(
             "/api/v1/molparser/recognize",

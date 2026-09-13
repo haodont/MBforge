@@ -143,6 +143,10 @@ def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:
             "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
             return_value=[],
         ),
+        patch(
+            "mbforge.pipeline.extract_text._ocr_pages",
+            return_value=["ocr page 1", "ocr page 2"],
+        ),
         patch("mbforge.pipeline.markdown.esmiles_insert.insert_esmiles_blocks"),
     ):
         run_pipeline(
@@ -197,12 +201,12 @@ def test_extract_text_checkpoint_aborts_native_loop(sample_pdf: Path) -> None:
 
 def test_ocr_checkpoint_not_swallowed_by_fallback(tmp_path: Path) -> None:
     """A cancel raised inside the OCR retry path must propagate, not degrade."""
-    import fitz
+    import pymupdf
 
     from mbforge.pipeline.extract_text import extract_pdf_text
 
     blank_pdf = tmp_path / "blank.pdf"
-    doc = fitz.open()
+    doc = pymupdf.open()
     doc.new_page(width=612, height=792)  # no text -> OCR fallback path
     doc.save(str(blank_pdf))
     doc.close()

@@ -156,17 +156,13 @@ async def _worker_loop(library_root: str) -> None:
     worker = _worker_id()
     logger.info("Queue worker started for %s [%s]", library_root, worker)
 
-    # Register as queue-leader when we acquire the lock
-    from ...utils.config import load_global_config
+    # Register as queue-leader when we acquire the lock.  The worker may be
+    # launched for a library root that differs from the process-wide default
+    # (for example, a request-scoped library or an isolated test library), so
+    # its process identity must follow the root owned by this worker.
     from ..process import ProcessRegistry, read_lock_holder
 
-    registry: ProcessRegistry | None = None
-    try:
-        cfg = load_global_config()
-        if cfg.library_root:
-            registry = ProcessRegistry.get(cfg.library_root)
-    except Exception:
-        pass  # Best-effort; don't fail worker startup
+    registry = ProcessRegistry.get(library_root)
 
     last_holder_pid: int | None = None
     first_follower_warn = True

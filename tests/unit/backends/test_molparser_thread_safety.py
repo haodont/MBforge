@@ -118,3 +118,50 @@ def test_load_concurrent_first_call_creates_single_model(monkeypatch, _restore_s
 
     assert len({id(m) for m in models}) == 1
     assert construct_count["n"] == 1
+
+
+def test_load_auto_ensures_missing_model_path(monkeypatch, _restore_state):
+    """Missing weights auto-fetch via ResourceManager.ensure before loading.
+
+    Outcome: first-use load() with no local weights pulls them (ModelScope,
+    HF fallback) and resolves to a path, ending ready — not unavailable.
+    """
+    ensure_calls: list[str] = []
+
+    def _fake_init(self, model_path, *, device, max_length=256):
+        self.model_path = model_path
+        self.device = device
+
+    monkeypatch.setattr(
+        "molparser.models.runtime.MolParserRecognizer",
+        type(
+            "FakeRecognizer",
+            (),
+            {
+                "__init__": _fake_init,
+                "recognize": lambda self, imgs: ["C" for _ in imgs],
+            },
+        ),
+    )
+    monkeypatch.setattr(molparser_module, "is_gpu_available", lambda: False)
+
+    paths = iter([None, "/fake/path"])
+
+    def _fake_path():
+        return next(paths)
+
+    monkeypatch.setattr(
+        "mbforge.infra.resource_manager.ResourceManager.get_molparser_path",
+        staticmethod(_fake_path),
+    )
+    monkeypatch.setattr(
+        "mbforge.infra.resource_manager.ResourceManager.ensure",
+        classmethod(
+            lambda cls, resource_id, callback=None: ensure_calls.append(resource_id)
+        ),
+    )
+
+    load()
+
+    assert ensure_calls == ["molparser"]
+    assert molparser_module._AVAILABLE is True

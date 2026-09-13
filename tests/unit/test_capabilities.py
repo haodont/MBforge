@@ -20,7 +20,6 @@ _EXPECTED_LABELS = {
     "ultralytics",
     "timm",
     "scipy",
-    "scikit-learn",
     "modelscope",
     "molparser",
     "cairosvg",

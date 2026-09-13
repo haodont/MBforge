@@ -131,7 +131,9 @@ def test_by_location_applies_persistable_candidate_filter(tmp_path: Path) -> Non
         "doc-1",
         [
             _candidate(),  # persistable: appears
-            _candidate(canonical="CCC", status="rejected", bbox=(100.0, 70.0, 120.0, 90.0)),  # dropped
+            _candidate(
+                canonical="CCC", status="rejected", bbox=(100.0, 70.0, 120.0, 90.0)
+            ),  # dropped
             _candidate(
                 canonical="CCN",
                 bbox=(130.0, 70.0, 150.0, 90.0),
@@ -161,7 +163,9 @@ def test_by_location_requires_containment(tmp_path: Path) -> None:
     assert molecules_by_location(root, "doc-1", 2, QUERY) == []
 
 
-def test_by_location_ignores_legacy_sql_evidence_without_artifacts(tmp_path: Path) -> None:
+def test_by_location_ignores_legacy_sql_evidence_without_artifacts(
+    tmp_path: Path,
+) -> None:
     root = str(tmp_path)
     db = DatabaseManager.get(root)
     db.initialize()

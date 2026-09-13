@@ -9,8 +9,9 @@ crops into MBForge's three-layer representation:
 
 The model is loaded lazily on first request; ``predict`` and ``predict_batch``
 expose synchronous entry points routers can call without blocking the event
-loop. No download is triggered here — missing weights just mark the backend
-unavailable (download via Settings / ``ResourceManager.ensure("molparser")``).
+loop. When weights are missing, ``load`` auto-fetches them on first use via
+``ResourceManager.ensure("molparser")`` (ModelScope-first, HuggingFace
+fallback), mirroring the moldet self-ensure path.
 """
 
 from __future__ import annotations
@@ -63,10 +64,22 @@ def load(device: str | None = None) -> None:
 
             path = ResourceManager.get_molparser_path()
             if path is None:
+                # Auto-fetch weights on first use when missing, mirroring
+                # moldet's self-ensure. ensure() is idempotent and a fast
+                # no-op when the weights are already present.
+                logger.info(
+                    "MolParser-Mobile weights missing; auto-downloading "
+                    "(ModelScope UniParser/MolParser-Mobile, HF fallback)..."
+                )
+                ResourceManager.ensure("molparser")
+                path = ResourceManager.get_molparser_path()
+            if path is None:
                 _AVAILABLE = False
                 _ERROR = (
-                    "MolParser-Mobile model not found. Place model files in "
-                    "~/MBForge/models/MolParser-Mobile/ or download them from Settings."
+                    "MolParser-Mobile model not found after auto-download "
+                    "(check network / ModelScope). Place model files in "
+                    "~/MBForge/models/MolParser-Mobile/ or retry download "
+                    "from Settings."
                 )
                 logger.warning(_ERROR)
                 return

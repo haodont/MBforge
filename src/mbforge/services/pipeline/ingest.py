@@ -223,10 +223,12 @@ async def retry_batch(
     task_ids: list[str],
     resume_from_stage: str | None = None,
 ) -> BatchActionResult:
-    """Reset failed/cancelled tasks to ``pending`` and relaunch the worker.
+    """Reset retryable tasks to ``pending`` and relaunch the worker.
 
-    When *resume_from_stage* is given, the stage checkpoint column is reset so
-    the runner starts from that stage instead of the last checkpoint.
+    A normal retry targets failed or cancelled tasks.  A caller that explicitly
+    chooses *resume_from_stage* may also restart a completed task from that
+    checkpoint; this is the per-task "rerun from stage" operation exposed by
+    the queue UI.  In either case, active or claimed tasks are never relaunched.
     """
     from ...infra.ingest import queue as queue_dao
     from ...infra.ingest import worker
@@ -253,11 +255,19 @@ async def retry_batch(
     ]
 
     def _retry() -> list[dict[str, str]]:
+        tasks = {task["id"]: task for task in queue_dao.list_tasks(library_root)}
+        if resume_from_stage is None:
+            retry_ids = [
+                task_id
+                for task_id in retryable_ids
+                if tasks.get(task_id, {}).get("status") in {"failed", "cancelled"}
+                and not tasks.get(task_id, {}).get("claimed_by")
+            ]
+        else:
+            retry_ids = retryable_ids
+
         if resume_from_stage in {"extract", "detection"}:
-            tasks = {
-                task["id"]: task for task in queue_dao.list_tasks(library_root)
-            }
-            for task_id in retryable_ids:
+            for task_id in retry_ids:
                 task = tasks.get(task_id)
                 if (
                     task
@@ -271,7 +281,7 @@ async def retry_batch(
                     )
                     stage_checkpoint.reset_stage_for_retry(task_staging, "join")
         return queue_dao.retry_rows(
-            library_root, retryable_ids, resume_from_stage=resume_from_stage
+            library_root, retry_ids, resume_from_stage=resume_from_stage
         )
 
     relaunched = await asyncio.to_thread(_retry) if retryable_ids else []

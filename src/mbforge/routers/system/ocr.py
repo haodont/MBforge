@@ -22,10 +22,25 @@ class OcrProbeRequest(BaseModel):
     model: str = ""
 
 
+class OcrLocalProbeRequest(BaseModel):
+    """Probe payload for the local PaddleOCR GenAI endpoint."""
+
+    host: str = ""
+    model: str = ""
+
+
 @router.post("/test-paddleocr")
 async def test_paddleocr(body: OcrProbeRequest) -> dict:
     return await probe.probe_paddleocr(
         body.api_key.strip(),
+        body.host.strip(),
+        body.model.strip(),
+    )
+
+
+@router.post("/test-paddleocr-local")
+async def test_paddleocr_local(body: OcrLocalProbeRequest) -> dict:
+    return await probe.probe_paddleocr_local(
         body.host.strip(),
         body.model.strip(),
     )

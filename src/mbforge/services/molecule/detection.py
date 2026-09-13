@@ -20,7 +20,7 @@ def _render_pdf_page_sync(pdf_path: str, page_num: int, dpi: float) -> dict[str,
     """Render one PDF page to a PIL image and return its dims.
 
     Returns dict with keys: image (PIL.Image), img_w, img_h,
-    page_w_pts, page_h_pts. Closes the fitz doc before returning.
+    page_w_pts, page_h_pts. Closes the pymupdf doc before returning.
     """
     import numpy as np
     from PIL import Image
@@ -95,7 +95,7 @@ def extract_pdf_page(
     the router wraps it in ``asyncio.to_thread`` to keep it off the
     event loop.
     """
-    # 1. Render PDF page (sync fitz call)
+    # 1. Render PDF page (sync pymupdf call)
     page_info = _render_pdf_page_sync(pdf_path, page_num, dpi)
     image = page_info["image"]
     img_w = page_info["img_w"]

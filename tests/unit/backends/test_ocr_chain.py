@@ -11,7 +11,6 @@ from mbforge.backends.ocr.base import OCRResult
 from mbforge.backends.ocr.chain import (
     OCRUnavailableError,
     _priority_from_config,
-    _save_images,
 )
 
 
@@ -22,9 +21,16 @@ def test_build_backends_has_no_cloud_backend_without_keys() -> None:
 
 
 def test_priority_config_reorders_and_completes_default_chain() -> None:
-    """Configured providers come first; omitted providers retain fallback order."""
+    """Configured providers come first; omitted providers retain fallback order.
+
+    ``paddleocr_local`` is an opt-in default: it is nominally part of the chain
+    (so setting ``paddleocr_local_host`` enables it without editing ``priority``),
+    but ``build_backends`` drops it unless its host is configured — see
+    ``test_build_backends_has_no_cloud_backend_without_keys``.
+    """
     assert _priority_from_config({"priority": ["paddleocr", "unknown"]}) == [
         "paddleocr",
+        "paddleocr_local",
     ]
 
 
@@ -54,28 +60,6 @@ def test_extract_text_with_chain_reuses_supplied_backends(
     assert result.backend == "fake-cloud"
     assert result.chain_attempts == 1
     assert result.elapsed_ms >= 0
-
-
-def test_save_images_persists_result_images(tmp_path: Path) -> None:
-    """_save_images writes OCRResult images to the target directory."""
-    result = OCRResult(
-        text="text", images={"abc.jpg": b"jpg bytes", "def.png": b"png bytes"}
-    )
-    out_dir = tmp_path / "images"
-    _save_images(result, out_dir)
-
-    assert (out_dir / "abc.jpg").read_bytes() == b"jpg bytes"
-    assert (out_dir / "def.png").read_bytes() == b"png bytes"
-
-
-def test_save_images_flattens_backend_subdirs(tmp_path: Path) -> None:
-    """Backend keys like "imgs/abc.jpg" land flat in images_dir, no subdir."""
-    result = OCRResult(text="text", images={"imgs/abc.jpg": b"jpg bytes"})
-    out_dir = tmp_path / "images"
-    _save_images(result, out_dir)
-
-    assert (out_dir / "abc.jpg").read_bytes() == b"jpg bytes"
-    assert not (out_dir / "imgs").exists()
 
 
 def test_extract_text_with_chain_saves_images_when_backend_returns_them(

@@ -227,9 +227,7 @@ async def library_get_patent_facts(
     root = _resolve_library_root(
         {"library_root": library_root} if library_root else None
     )
-    content = await asyncio.to_thread(
-        library_service.read_patent_facts, root, doc_id
-    )
+    content = await asyncio.to_thread(library_service.read_patent_facts, root, doc_id)
     return Response(content=content, media_type="application/json")
 
 

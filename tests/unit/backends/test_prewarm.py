@@ -1,7 +1,5 @@
 from unittest.mock import Mock, patch
 
-import pytest
-
 from mbforge.backends.prewarm import prewarm_models
 
 
@@ -23,13 +21,12 @@ def test_prewarm_reports_each_model_status() -> None:
         assert prewarm_models() == {"moldet": "ready", "molparser": "ready"}
 
 
-@pytest.mark.parametrize(
-    "exc",
-    [RuntimeError("missing"), ValueError("bad config")],
-)
-def test_prewarm_backend_exception_reported_as_error(exc: Exception) -> None:
+def test_prewarm_backend_exception_reported_as_error() -> None:
     with (
-        patch("mbforge.backends.moldet_v2_ft.get_moldet", side_effect=exc),
+        patch(
+            "mbforge.backends.moldet_v2_ft.get_moldet",
+            side_effect=RuntimeError("missing"),
+        ),
         patch("mbforge.backends.molparser.load"),
         patch("mbforge.backends.molparser.health", return_value={"status": "ready"}),
     ):

@@ -372,7 +372,7 @@ def test_molecule_search_similarity_mode_returns_scores(
     assert results[0]["similarity"] >= results[1]["similarity"]
 
 
-def test_molecule_by_location_matches_evidence_and_converts_detection_page(
+def test_molecule_by_location_uses_detection_cache_and_converts_page(
     app_client: TestClient, tmp_library
 ) -> None:
     root = str(tmp_library)
@@ -419,7 +419,9 @@ def test_molecule_by_location_matches_evidence_and_converts_detection_page(
 
     assert response.status_code == 200
     matches = response.json()["matches"]
-    assert len(matches) == 2
+    # Legacy ``evidence`` is not a location-query fallback; the interactive
+    # detection-cache row is the only match in this fixture.
+    assert len(matches) == 1
     assert {match["page"] for match in matches} == {3}
     assert all(match["mol_id"] == "m1" for match in matches)
     assert all(match["name"] == "ethanol" for match in matches)

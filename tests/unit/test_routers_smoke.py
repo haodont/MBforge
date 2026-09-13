@@ -72,8 +72,8 @@ ROUTES: list[tuple[str, str, dict | None, tuple[int, ...]]] = [
     ("GET", "/api/v1/settings", None, (200,)),
     # resource
     ("POST", "/api/v1/resource/cache-dir-info", {}, (200, 422)),
-    # pdf
-    ("POST", "/api/v1/pdf/ocr-layout", {}, (200, 422)),
+    # pdf document overlay
+    ("POST", "/api/v1/pdf/document-overlay", {}, (200, 422)),
     # sar
     ("POST", "/api/v1/sar/build-matrix", {}, (200,)),
     # ocr
@@ -116,7 +116,10 @@ def test_router_endpoint_responds(
 
 def test_no_double_prefix_model_routes(client: TestClient) -> None:
     """Model routes must not appear under /api/v1/models/api/v1/..."""
-    paths = {getattr(r, "path", "") for r in client.app.routes}
+    # FastAPI 0.141+ keeps included routers as top-level ``_IncludedRouter``
+    # entries, so their concrete paths are exposed through the OpenAPI schema
+    # rather than directly on ``client.app.routes``.
+    paths = set(client.app.openapi()["paths"])
     bad = {p for p in paths if "/api/v1/models/api/v1" in p}
     assert not bad, f"double-prefix routes still registered: {bad}"
     assert "/api/v1/models/mol/render" in paths

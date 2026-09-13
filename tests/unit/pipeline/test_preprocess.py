@@ -86,11 +86,11 @@ def test_preprocess_preserves_gray_values() -> None:
     assert int((np.asarray(main) == 150).sum()) == 30
 
 
-def test_preprocess_without_sklearn_returns_unsplit_grayscale(
+def test_preprocess_without_torch_returns_unsplit_grayscale(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without sklearn the grayscale image is returned unsplit."""
-    monkeypatch.setattr(preprocess_module, "_SKLEARN_AVAILABLE", False)
+    """Without Torch the grayscale image is returned unsplit."""
+    monkeypatch.setattr(preprocess_module, "_TORCH_AVAILABLE", False)
     img = _img([(10, 10, 40, 40), (90, 90, 100, 100)])
 
     main, others = preprocess_mol_image(img)
@@ -115,8 +115,8 @@ def test_split_exposes_the_largest_cluster_mask() -> None:
 def test_split_returns_no_mask_when_clustering_cannot_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without sklearn there is no mask, so callers must not try to erase."""
-    monkeypatch.setattr(preprocess_module, "_SKLEARN_AVAILABLE", False)
+    """Without Torch there is no mask, so callers must not try to erase."""
+    monkeypatch.setattr(preprocess_module, "_TORCH_AVAILABLE", False)
 
     split = split_molecule_crop(_img([(10, 10, 40, 40)]))
 

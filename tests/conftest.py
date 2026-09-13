@@ -63,9 +63,9 @@ def sample_pdf(tmp_path: Path) -> Path:
     """Create a minimal 2-page text PDF for pipeline integration tests."""
     pdf_path = tmp_path / "sample.pdf"
     # Import inside fixture so tests that do not need PDFs avoid the import.
-    import fitz
+    import pymupdf
 
-    doc = fitz.open()
+    doc = pymupdf.open()
     for i in range(2):
         page = doc.new_page(width=612, height=792)
         page.insert_text(

@@ -26,6 +26,12 @@ vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty' },
 }))
 
+// App tests cover shell/bootstrap routing; the real Ketcher editor requires
+// a browser canvas context, which jsdom does not provide.
+vi.mock('@/components/molecule/MoleculeEditorDialog', () => ({
+  default: () => null,
+}))
+
 function renderApp() {
   const qc = createQueryClient()
   return render(
@@ -64,6 +70,6 @@ describe('App', () => {
     renderApp()
     // AppShell renders sidebar with navigation items.
     // The sidebar contains buttons that render i18n keys.
-    expect(await screen.findByText(/workspace/i)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'nav.workspace' })).toBeInTheDocument()
   })
 })

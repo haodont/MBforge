@@ -138,9 +138,7 @@ def _append_detection_metadata(
                 )
                 break
         else:
-            candidates.append(
-                {"name": result.name, "confidence": result.moldet_conf}
-            )
+            candidates.append({"name": result.name, "confidence": result.moldet_conf})
     metadata = result.properties
     if not isinstance(metadata, dict):
         return

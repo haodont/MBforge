@@ -13,6 +13,7 @@ from .chain import (
     list_configured_backends,
 )
 from .label_reader import LabelReader, get_label_reader, health, unload
+from .ocr_local import LocalPaddleOCRBackend
 from .paddleocr import PaddleOCRBackend
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "OCRResult",
     "DEFAULT_PRIORITY",
     "LabelReader",
+    "LocalPaddleOCRBackend",
     "PaddleOCRBackend",
     "build_backends",
     "extract_text_with_chain",

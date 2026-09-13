@@ -94,8 +94,8 @@ def test_extract_molecules_from_text_deduplicates_canonical_smiles() -> None:
 
 def _patch_pdf_dependencies(monkeypatch: pytest.MonkeyPatch) -> dict:
     """Set up sys.modules mocks so extract_molecules_from_pdf avoids heavy imports."""
-    fake_fitz = MagicMock()
-    fake_fitz.FileDataError = Exception
+    fake_pymupdf = MagicMock()
+    fake_pymupdf.FileDataError = Exception
 
     fake_molparser = MagicMock()
     fake_scribe = MagicMock()
@@ -103,7 +103,7 @@ def _patch_pdf_dependencies(monkeypatch: pytest.MonkeyPatch) -> dict:
     fake_scribe.esmiles = "CCO"
     fake_molparser.predict_batch.return_value = [fake_scribe]
 
-    monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
+    monkeypatch.setitem(sys.modules, "pymupdf", fake_pymupdf)
     fake_mol_bbox = MagicMock()
     fake_mol_bbox.category_id = 1
     fake_mol_bbox.bbox = [0.1, 0.1, 0.9, 0.9]
@@ -113,7 +113,7 @@ def _patch_pdf_dependencies(monkeypatch: pytest.MonkeyPatch) -> dict:
     fake_detect.bboxes = [fake_mol_bbox]
 
     return {
-        "fitz": fake_fitz,
+        "pymupdf": fake_pymupdf,
         "molparser": fake_molparser,
         "detect": fake_detect,
         "scribe": fake_scribe,
@@ -146,7 +146,7 @@ def test_extract_molecules_from_pdf_mocked_backends(
     fake_doc = MagicMock()
     fake_doc.__len__ = MagicMock(return_value=1)
     fake_doc.load_page.return_value = fake_page
-    mocks["fitz"].open.return_value = fake_doc
+    mocks["pymupdf"].open.return_value = fake_doc
 
     with (
         patch("mbforge.backends.molparser", new=mocks["molparser"]),
@@ -202,7 +202,7 @@ def test_extract_molecules_from_pdf_skips_pure_text_pages(
     fake_doc = MagicMock()
     fake_doc.__len__ = MagicMock(return_value=1)
     fake_doc.load_page.return_value = fake_page
-    mocks["fitz"].open.return_value = fake_doc
+    mocks["pymupdf"].open.return_value = fake_doc
 
     with (
         patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
@@ -358,7 +358,7 @@ def _setup_fake_page(
     fake_doc = MagicMock()
     fake_doc.__len__ = MagicMock(return_value=1)
     fake_doc.load_page.return_value = fake_page
-    mocks["fitz"].open.return_value = fake_doc
+    mocks["pymupdf"].open.return_value = fake_doc
     return fake_page, get_text_kinds
 
 

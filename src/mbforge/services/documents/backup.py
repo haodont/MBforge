@@ -29,7 +29,10 @@ def create_backup(
 
     db = DatabaseManager.get(str(layout.library_root))
     db.initialize()
-    with sqlite3.connect(str(backup_root / "library.db")) as destination, db.mol_conn() as source:
+    with (
+        sqlite3.connect(str(backup_root / "library.db")) as destination,
+        db.mol_conn() as source,
+    ):
         source.backup(destination)
 
     (backup_root / "manifest.json").write_text(

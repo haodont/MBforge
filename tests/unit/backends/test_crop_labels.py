@@ -7,7 +7,6 @@ from PIL import Image
 from mbforge.backends.ocr import crop_labels
 from mbforge.backends.ocr.crop_labels import (
     extract_label_reads,
-    extract_label_texts,
     filter_label_texts,
 )
 
@@ -60,38 +59,21 @@ def test_extract_label_reads_keeps_positions_and_isolation(monkeypatch) -> None:
     ]
 
 
-def test_extract_label_texts_uses_engine_and_filters(
+def test_extract_label_reads_returns_empty_on_engine_failure(
     monkeypatch,
 ) -> None:
-    """The singleton engine is called; raw reads are reduced to labels."""
+    """An OCR engine crash degrades to no reads instead of failing extraction.
 
-    class _FakeEngine:
-        def __call__(self, arr):
-            return [
-                ([[0, 0], [10, 0], [10, 8], [0, 8]], "4A", 0.95),
-                (
-                    [[5, 50], [40, 50], [40, 60], [5, 60]],
-                    "a long sentence that is not a label",
-                    0.99,
-                ),
-                ([[10, 20], [14, 20], [14, 24], [10, 24]], "8b", 0.3),
-            ], None
-
-    monkeypatch.setattr(crop_labels, "_ENGINE", _FakeEngine())
-    assert extract_label_texts(Image.new("L", (20, 20), 255)) == ["4A"]
-
-
-def test_extract_label_texts_returns_empty_on_engine_failure(
-    monkeypatch,
-) -> None:
-    """An OCR engine crash degrades to no labels instead of failing extraction."""
+    The read-level contract (not the one-line ``extract_label_texts`` wrapper)
+    owns the error boundary: labels are enrichment only and must never raise.
+    """
 
     class _Boom:
         def __call__(self, arr):
             raise RuntimeError("onnx backend exploded")
 
     monkeypatch.setattr(crop_labels, "_ENGINE", _Boom())
-    assert extract_label_texts(Image.new("L", (5, 5), 255)) == []
+    assert extract_label_reads(Image.new("L", (5, 5), 255)) == []
 
 
 def test_create_engine_onnx_returns_none_when_backend_missing(monkeypatch) -> None:

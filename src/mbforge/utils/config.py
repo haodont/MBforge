@@ -65,6 +65,32 @@ class OCRConfig(BaseModel):
     paddleocr_host: str = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
     paddleocr_model: str = "PaddleOCR-VL-1.6"
 
+    # Cloud post-processing toggles, passed verbatim into the v2 submit
+    # `optionalPayload` (official PaddleOCR example uses the same three keys).
+    # All default to False: orientation classify / unwarping rewrite the
+    # uploaded-image geometry, which would break the bbox→PDF-point mapping on
+    # which MoleCode crop anchoring relies (see `PaddleOCRBackend` docstring).
+    # Enable for badly rotated/warped scanned pages only when you accept that
+    # layout spans are no longer reliable for post-OCR molecule cropping.
+    paddleocr_doc_orientation_classify: bool = False
+    paddleocr_doc_unwarping: bool = False
+    paddleocr_chart_recognition: bool = False
+
+    paddleocr_local_api_key: str = ""
+    paddleocr_local_host: str = Field(
+        default="",
+        description=(
+            "Base URL of a local PaddleOCR GenAI server (OpenAI-compatible, e.g. "
+            "http://127.0.0.1:8118/v1). When set, a 'paddleocr_local' backend "
+            "joins the OCR chain as an opt-in fallback after cloud PaddleOCR; "
+            "leave empty to keep the cloud-only path."
+        ),
+    )
+    paddleocr_local_model: str = Field(
+        default="PaddleOCR-VL-1.6",
+        description="Model served by the local PaddleOCR GenAI endpoint.",
+    )
+
 
 class MoldetConfig(BaseModel):
     """Molecule detection (MolDetv2 + MolParser-Mobile) settings."""

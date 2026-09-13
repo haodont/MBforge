@@ -141,7 +141,10 @@ def test_retry_does_not_relaunch_a_still_claimed_cancelled_row(tmp_path: Path) -
     assert queue.retry_rows(root, ["cancelled-active"])[0]["id"] == "cancelled-active"
     assert _queue_row(db, "cancelled-active")["status"] == "pending"
 
-    assert queue.retry_rows(root, ["done-task"], resume_from_stage="detection")[0]["id"] == "done-task"
+    assert (
+        queue.retry_rows(root, ["done-task"], resume_from_stage="detection")[0]["id"]
+        == "done-task"
+    )
     done = _queue_row(db, "done-task")
     assert done["status"] == "pending"
     assert done["stage"] == "detection"
