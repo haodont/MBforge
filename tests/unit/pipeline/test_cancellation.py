@@ -21,7 +21,7 @@ from mbforge.pipeline.cancellation import (
     TaskCancelledError,
     default_registry,
 )
-from mbforge.pipeline.context import PipelineContext
+from mbforge.pipeline.run.context import PipelineContext
 from mbforge.pipeline.runner import (
     cancel_task,
     is_task_cancelled,
@@ -40,14 +40,17 @@ def _clean_registry():
         default_registry.unregister(leftover)
 
 
-def _seed_queue_task(library_root: Path, task_id: str) -> None:
+def _seed_queue_task(
+    library_root: Path, task_id: str, run_id: str | None = None
+) -> None:
     db = DatabaseManager.get(str(library_root))
     db.initialize()
     with db.kb_conn() as conn:
         conn.execute(
-            "INSERT INTO ingest_queue (id, file_path, doc_id, status, created_at) "
-            "VALUES (?, ?, ?, 'pending', datetime('now'))",
-            (task_id, "fake.pdf", "sample_doc"),
+            "INSERT INTO ingest_queue "
+            "(id, file_path, doc_id, run_id, status, created_at) "
+            "VALUES (?, ?, ?, ?, 'pending', datetime('now'))",
+            (task_id, "fake.pdf", "sample_doc", run_id or task_id),
         )
 
 
@@ -114,6 +117,7 @@ def test_cancel_before_start_raises_with_distinct_code(
             str(sample_pdf),
             str(library_root),
             doc_id="sample_doc",
+            stage="extract",
             task_id="cancel-me",
             on_progress=_capture,
         )
@@ -144,7 +148,7 @@ def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:
             return_value=[],
         ),
         patch(
-            "mbforge.pipeline.extract_text._ocr_pages",
+            "mbforge.pipeline.extract.text._ocr_pages",
             return_value=["ocr page 1", "ocr page 2"],
         ),
         patch("mbforge.pipeline.markdown.esmiles_insert.insert_esmiles_blocks"),
@@ -153,6 +157,7 @@ def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:
             str(sample_pdf),
             str(library_root),
             doc_id="sample_doc",
+            stage="extract",
             task_id="success-task",
         )
 
@@ -168,7 +173,7 @@ def test_registry_cleared_on_failure(sample_pdf: Path, tmp_path: Path) -> None:
     # so the failure must happen during extract.
     with (
         patch(
-            "mbforge.pipeline.extract_text.extract_pdf_text",
+            "mbforge.pipeline.extract.text.extract_pdf_text",
             side_effect=RuntimeError("disk full"),
         ),
         pytest.raises(RuntimeError, match="disk full"),
@@ -177,6 +182,7 @@ def test_registry_cleared_on_failure(sample_pdf: Path, tmp_path: Path) -> None:
             str(sample_pdf),
             str(library_root),
             doc_id="sample_doc",
+            stage="extract",
             task_id="fail-task",
         )
 
@@ -190,7 +196,7 @@ def test_registry_cleared_on_failure(sample_pdf: Path, tmp_path: Path) -> None:
 
 
 def test_extract_text_checkpoint_aborts_native_loop(sample_pdf: Path) -> None:
-    from mbforge.pipeline.extract_text import extract_pdf_text
+    from mbforge.pipeline.extract.text import extract_pdf_text
 
     def _raise() -> None:
         raise TaskCancelledError("t")
@@ -203,7 +209,7 @@ def test_ocr_checkpoint_not_swallowed_by_fallback(tmp_path: Path) -> None:
     """A cancel raised inside the OCR retry path must propagate, not degrade."""
     import pymupdf
 
-    from mbforge.pipeline.extract_text import extract_pdf_text
+    from mbforge.pipeline.extract.text import extract_pdf_text
 
     blank_pdf = tmp_path / "blank.pdf"
     doc = pymupdf.open()
@@ -234,7 +240,7 @@ def test_extract_stage_reraises_cancellation(tmp_path: Path, sample_pdf: Path) -
     )
     with (
         patch(
-            "mbforge.pipeline.extract_text.extract_pdf_text",
+            "mbforge.pipeline.extract.text.extract_pdf_text",
             side_effect=TaskCancelledError("t"),
         ),
         pytest.raises(TaskCancelledError),
@@ -257,7 +263,7 @@ def test_router_cancel_pending_future_unregisters(tmp_path: Path) -> None:
     _seed_queue_task(library_root, "pending-task")
 
     body = PipelineTaskBatchRequest(
-        library_root=str(library_root), task_ids=["pending-task"]
+        library_root=str(library_root), run_ids=["pending-task"]
     )
     # The task is not executing inside this process: no worker has claimed it.
     from mbforge.infra.ingest import worker
@@ -296,7 +302,7 @@ def test_router_cancel_running_future_leaves_release_to_runner(
         patch("mbforge.infra.ingest.worker.is_task_active", return_value=True),
     ):
         body = PipelineTaskBatchRequest(
-            library_root=str(library_root), task_ids=["running-task"]
+            library_root=str(library_root), run_ids=["running-task"]
         )
         asyncio.run(pipeline_router.pipeline_cancel_batch(body))
     # Marked cancelled, still registered until the runner's finally runs.

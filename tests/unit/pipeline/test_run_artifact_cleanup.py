@@ -14,16 +14,32 @@ from unittest.mock import patch
 
 import pytest
 
-from mbforge.pipeline.cancellation import TaskCancelledError
-from mbforge.pipeline.extract_text import ExtractedDocument, PageContent
-from mbforge.pipeline.run_artifacts import (
+from mbforge.pipeline.artifacts.staging import (
     cleanup_staging,
     staging_dir,
 )
+from mbforge.pipeline.cancellation import TaskCancelledError
+from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
 from mbforge.pipeline.runner import cancel_task, run_pipeline
 from mbforge.storage.layout import LibraryLayout
 
 _DOC_ID = "sample_doc"
+_RUN_ID = "20260909123456"
+
+
+def _dag_order() -> list[str]:
+    """Topological order of the stage DAG (matches the queue's node order)."""
+    from mbforge.pipeline.composition import stage_dependencies
+
+    deps = stage_dependencies()
+    order: list[str] = []
+    remaining = dict(deps)
+    while remaining:
+        ready = sorted(s for s, d in remaining.items() if all(x in order for x in d))
+        for stage in ready:
+            order.append(stage)
+            remaining.pop(stage)
+    return order
 
 
 def _fake_extract_pdf_text(
@@ -76,7 +92,7 @@ def _run(
 ):
     patches = [
         patch(
-            "mbforge.pipeline.extract_text.extract_pdf_text",
+            "mbforge.pipeline.extract.text.extract_pdf_text",
             side_effect=_fake_extract_pdf_text,
         ),
         patch(
@@ -87,7 +103,7 @@ def _run(
     if fail_patent_publish:
         patches.append(
             patch(
-                "mbforge.pipeline.run_artifacts.publish_run",
+                "mbforge.pipeline.artifacts.staging.publish_run",
                 side_effect=RuntimeError("disk full"),
             )
         )
@@ -97,26 +113,22 @@ def _run(
         for p in patches:
             stack.enter_context(p)
 
-        resume: str | None = None
         last_result = None
-        while True:
-            result = run_pipeline(
+        for stage in _dag_order():
+            last_result = run_pipeline(
                 str(sample_pdf),
                 str(library_root),
                 doc_id=_DOC_ID,
+                stage=stage,
+                run_id=_RUN_ID,
                 task_id=task_id,
                 on_progress=on_progress,
-                resume_from_stage=resume,
             )
-            last_result = result
-            if result.next_stage is None:
-                break
-            resume = result.current_stage
 
         # Simulate the worker's finalization: write merged report + promote.
-        from mbforge.pipeline.run_artifacts import promote_staging
-        from mbforge.pipeline.run_artifacts import staging_dir as _sd
-        from mbforge.pipeline.stage_checkpoint import write_merged_report
+        from mbforge.pipeline.artifacts.staging import promote_staging
+        from mbforge.pipeline.artifacts.staging import staging_dir as _sd
+        from mbforge.pipeline.run.checkpoint import write_merged_report
 
         staging = _sd(str(library_root), _DOC_ID)
         write_merged_report(staging, doc_id=_DOC_ID, library_root=str(library_root))

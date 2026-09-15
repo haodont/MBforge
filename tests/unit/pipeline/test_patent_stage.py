@@ -9,17 +9,21 @@ from pathlib import Path
 import pytest
 
 from mbforge.core.activity import ActivityMeasurement, MeasurementValue
-from mbforge.core.detection.types import DetectionSource, NormalizedMolecule
 from mbforge.core.evidence import SourceEvidence
-from mbforge.pipeline.context import PipelineContext
-from mbforge.pipeline.extract_text import ExtractedDocument, PageContent
-from mbforge.pipeline.patent_store import iter_published_doc_ids, load_patent_facts
-from mbforge.pipeline.persist.source_evidence import persist_source_evidence
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import DetectionSource
+from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.pipeline.run.context import PipelineContext
 from mbforge.pipeline.stages.patent_stage import (
     PatentStage,
     extract_assay_method_from_title,
     extract_entries_from_title,
 )
+from mbforge.services.documents.patent_facts import (
+    iter_published_doc_ids,
+    load_patent_facts,
+)
+from mbforge.storage.source_evidence import persist_source_evidence
 from mbforge.storage.sqlite.database import DatabaseManager
 
 
@@ -266,7 +270,7 @@ def test_patent_stage_associates_measurement_assay_and_detection_evidence(
         lambda _evidence, _doc_id: ([measurement], []),
     )
 
-    candidate = NormalizedMolecule(
+    candidate = Molecule(
         canonical_smiles="CCO",
         esmiles="CCO",
         name="",
@@ -328,7 +332,7 @@ def test_patent_stage_does_not_persist_structure_without_activity(
     )
     persist_source_evidence(tmp_path, [heading, molecule_evidence])
 
-    candidate = NormalizedMolecule(
+    candidate = Molecule(
         canonical_smiles="CCO",
         esmiles="CCO",
         name="",

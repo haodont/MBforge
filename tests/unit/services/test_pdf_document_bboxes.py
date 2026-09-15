@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mbforge.core.detection.types import DetectionSource, NormalizedMolecule
-from mbforge.pipeline.extract_text import ExtractedDocument, PageContent, TextSpan
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import DetectionSource
+from mbforge.pipeline.extract.text import ExtractedDocument, PageContent, TextSpan
 from mbforge.services.documents.pdf_layout import build_document_overlay
 from mbforge.storage.sqlite.database import DatabaseManager
 from tests.unit.v2_artifact_helpers import publish_v2_run
@@ -140,7 +141,7 @@ def test_overlay_serves_blocks_and_molecules_from_one_read(tmp_path: Path) -> No
         "run-1",
         extracted,
         [
-            NormalizedMolecule(
+            Molecule(
                 canonical_smiles="CCO",
                 esmiles="CCO<sep>",
                 name="EtOH",

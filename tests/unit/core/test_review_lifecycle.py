@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.markush.site_rules import MarkushSiteError
+from mbforge.core.markush import MarkushSiteError
 from mbforge.core.review import (
     ReviewConflictError,
     ReviewNotFoundError,

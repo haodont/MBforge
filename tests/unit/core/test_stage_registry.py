@@ -34,6 +34,7 @@ def test_registered_stage_needs_only_a_decorator(_clean_registry) -> None:
     assert ORDER == [
         "extract",
         "detection",
+        "join",
         "markdown",
         "temp_probe",
         "patent",

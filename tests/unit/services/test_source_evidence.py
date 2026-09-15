@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 
 from mbforge.core.evidence import SourceEvidence
-from mbforge.pipeline.evidence_artifacts import DocumentEvidenceArtifact, PageFrame
-from mbforge.pipeline.persist.source_evidence import persist_source_evidence
+from mbforge.pipeline.artifacts.evidence_models import (
+    DocumentEvidenceArtifact,
+    PageFrame,
+)
 from mbforge.services.documents.source_evidence import (
     at,
     find_text,
@@ -17,6 +19,7 @@ from mbforge.services.documents.source_evidence import (
     resolve,
     update_molecule,
 )
+from mbforge.storage.source_evidence import persist_source_evidence
 
 
 def test_source_evidence_queries_resolve_text_and_bbox_intersection(

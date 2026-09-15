@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mbforge.app import create_app
-from mbforge.pipeline.detection.normalization import DetectionSource, NormalizedMolecule
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import DetectionSource
 from mbforge.storage.markush_candidates import persist_review_candidates
 from mbforge.storage.sqlite.database import DatabaseManager
 
@@ -21,7 +22,7 @@ def client(tmp_path):
 
 def _seed(tmp_path) -> str:
     db = DatabaseManager.get(str(tmp_path))
-    molecule = NormalizedMolecule(
+    molecule = Molecule(
         canonical_smiles="*c1ccccc1",
         esmiles="*c1ccccc1",
         name="",

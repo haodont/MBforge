@@ -7,20 +7,9 @@ from pathlib import Path
 import pytest
 
 from mbforge.core.evidence import SourceEvidence
-from mbforge.pipeline.context import PipelineContext
-from mbforge.pipeline.detection.types import (
-    DetectionSource,
-    ExtractionResult,
-    NormalizedMolecule,
-)
-from mbforge.pipeline.evidence_artifacts import (
-    DocumentEvidenceArtifact,
-    PageFrame,
-)
-from mbforge.pipeline.extract_text import ExtractedDocument, PageContent, TextSpan
-from mbforge.pipeline.persist.source_evidence import persist_source_evidence
-from mbforge.pipeline.run_artifacts import publish_run
-from mbforge.pipeline.stage_artifacts import (
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import DetectionSource, ExtractionResult
+from mbforge.pipeline.artifacts import (
     build_detection_artifact,
     build_extract_artifact,
     hydrate_context_from_artifacts,
@@ -33,6 +22,14 @@ from mbforge.pipeline.stage_artifacts import (
     save_detection_branch,
     save_extract_branch,
 )
+from mbforge.pipeline.artifacts.evidence_models import (
+    DocumentEvidenceArtifact,
+    PageFrame,
+)
+from mbforge.pipeline.artifacts.staging import publish_run
+from mbforge.pipeline.extract.text import ExtractedDocument, PageContent, TextSpan
+from mbforge.pipeline.run.context import PipelineContext
+from mbforge.storage.source_evidence import persist_source_evidence
 
 DOC = "doc-artifacts"
 
@@ -60,7 +57,7 @@ def _extracted() -> ExtractedDocument:
     )
 
 
-def _candidate() -> NormalizedMolecule:
+def _candidate() -> Molecule:
     detection = DetectionSource(
         source="image",
         page=0,
@@ -69,7 +66,7 @@ def _candidate() -> NormalizedMolecule:
         confidence=0.9,
         conf_moldet=0.95,
     )
-    return NormalizedMolecule(
+    return Molecule(
         canonical_smiles="CCO",
         esmiles="CCO<sep>",
         name="EtOH",
@@ -81,7 +78,7 @@ def _candidate() -> NormalizedMolecule:
     )
 
 
-def _result(candidate: NormalizedMolecule | None = None) -> ExtractionResult:
+def _result(candidate: Molecule | None = None) -> ExtractionResult:
     candidate = candidate or _candidate()
     detection = candidate.detections[0]
     return ExtractionResult(

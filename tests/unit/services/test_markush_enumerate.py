@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from mbforge.core.markush.enumeration import (
+from mbforge.core.enumeration import (
     SiteSelection,
     preview,
     theoretical_count,

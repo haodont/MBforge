@@ -16,11 +16,12 @@ import json
 
 import pytest
 
-from mbforge.core.markush.provenance import (
+from mbforge.core.molecule import Molecule
+from mbforge.core.provenance import (
     compute_content_hash,
     compute_source_key,
 )
-from mbforge.pipeline.detection.normalization import DetectionSource, NormalizedMolecule
+from mbforge.core.types import DetectionSource
 from mbforge.storage.markush_candidates import persist_review_candidates
 from mbforge.storage.sqlite.database import DatabaseManager
 
@@ -38,8 +39,8 @@ def _candidate(
     label: str | None = None,
     bbox: tuple[float, float, float, float] = (10.0, 20.0, 110.0, 220.0),
     page: int = 1,
-) -> NormalizedMolecule:
-    molecule = NormalizedMolecule(
+) -> Molecule:
+    molecule = Molecule(
         canonical_smiles=smiles,
         esmiles=smiles,
         name="",
@@ -205,7 +206,7 @@ def test_reimport_new_label_creates_new_pending(database) -> None:
 
 def test_persist_writes_evidence_per_detection(database) -> None:
     """All detections of a candidate land in ``markush_evidence``."""
-    molecule = NormalizedMolecule(
+    molecule = Molecule(
         canonical_smiles="*c1ccccc1",
         esmiles="*c1ccccc1",
         name="",

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.pipeline.detection.normalization import DetectionSource, NormalizedMolecule
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import DetectionSource
 from mbforge.pipeline.persist.markush import (
     delete_markush_for_doc,
     persist_markush_fragments,
@@ -21,8 +22,8 @@ def database(tmp_path):
     return db
 
 
-def _candidate(smiles: str, *, status: str = "pending") -> NormalizedMolecule:
-    return NormalizedMolecule(
+def _candidate(smiles: str, *, status: str = "pending") -> Molecule:
+    return Molecule(
         canonical_smiles=smiles,
         esmiles=smiles,
         name="",
@@ -79,7 +80,7 @@ def test_persist_skips_mismatched_role_and_rejected(database) -> None:
 
 
 def test_persist_skips_candidate_without_detection(database) -> None:
-    fragment = NormalizedMolecule(canonical_smiles="*C", esmiles="*C", name="")
+    fragment = Molecule(canonical_smiles="*C", esmiles="*C", name="")
     fragment.properties["structure_role"] = "fragment"
     with database.mol_conn() as conn:
         persist_markush_fragments("doc-1", [fragment], conn=conn)

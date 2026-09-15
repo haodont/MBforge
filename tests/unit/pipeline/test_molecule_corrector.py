@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from mbforge.core.molecule import Molecule
 from mbforge.pipeline.detection.correction import (
     check_markush_consistency,
     correct_molecules_with_context,
@@ -9,7 +10,6 @@ from mbforge.pipeline.detection.correction import (
     verify_element_consistency,
     verify_name_substructure,
 )
-from mbforge.pipeline.detection.normalization import NormalizedMolecule
 
 
 def _make_molecule(
@@ -17,9 +17,9 @@ def _make_molecule(
     name: str = "",
     status: str = "pending",
     properties: dict | None = None,
-) -> NormalizedMolecule:
-    """Build a minimal NormalizedMolecule for testing."""
-    return NormalizedMolecule(
+) -> Molecule:
+    """Build a minimal shared Molecule for testing."""
+    return Molecule(
         canonical_smiles=smiles,
         esmiles=smiles,
         name=name,

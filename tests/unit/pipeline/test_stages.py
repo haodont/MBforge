@@ -8,17 +8,19 @@ from unittest.mock import patch
 import pytest
 
 from mbforge.core.evidence import SourceEvidence
-from mbforge.pipeline.context import PipelineContext
-from mbforge.pipeline.evidence_artifacts import DocumentEvidenceArtifact, PageFrame
-from mbforge.pipeline.persist.source_evidence import persist_source_evidence
+from mbforge.core.stage import PipelineErrorCode, StageExecutor, StageResult
+from mbforge.pipeline.artifacts.evidence_models import (
+    DocumentEvidenceArtifact,
+    PageFrame,
+)
+from mbforge.pipeline.run.context import PipelineContext
 from mbforge.pipeline.runner import STAGES, run_pipeline
-from mbforge.pipeline.stage_result import PipelineErrorCode, StageResult
 from mbforge.pipeline.stages import (
     DetectionStage,
     ExtractStage,
     MarkdownStage,
 )
-from mbforge.pipeline.stages.base import StageExecutor
+from mbforge.storage.source_evidence import persist_source_evidence
 
 
 class TestStageExecutors:
@@ -35,6 +37,7 @@ class TestStageExecutors:
         assert [type(stage).__name__ for stage in STAGES] == [
             "ExtractStage",
             "DetectionStage",
+            "JoinStage",
             "MarkdownStage",
             "PatentStage",
         ]
@@ -89,7 +92,7 @@ class TestStageNullChecks:
         assert result.error_code == PipelineErrorCode.MISSING_CONTEXT
 
     def test_markdown_stage_persists_canonical_markdown(self, tmp_path):
-        from mbforge.pipeline.extract_text import ExtractedDocument, PageContent
+        from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
 
         source = SourceEvidence.create(
             doc_id="t-markdown-persist",
@@ -148,10 +151,10 @@ class TestStageNullChecks:
                 return_value=[],
             ),
             patch(
-                "mbforge.pipeline.stage_artifacts.page_frames_from_pdf",
+                "mbforge.pipeline.artifacts.branch_io.page_frames_from_pdf",
                 return_value=[],
             ),
-            patch("mbforge.pipeline.stage_artifacts.save_detection_branch"),
+            patch("mbforge.pipeline.artifacts.branch_io.save_detection_branch"),
         ):
             result = DetectionStage().execute(ctx)
 
@@ -181,7 +184,7 @@ class TestExtractStage:
 
     def test_execute_success(self, tmp_path):
         """Mock extract_pdf_text to return a fake ExtractedDocument."""
-        from mbforge.pipeline.extract_text import ExtractedDocument, PageContent
+        from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
 
         fake_doc = ExtractedDocument(
             raw_text="hello",
@@ -198,11 +201,11 @@ class TestExtractStage:
 
         with (
             patch(
-                "mbforge.pipeline.extract_text.extract_document_text",
+                "mbforge.pipeline.extract.text.extract_document_text",
                 return_value=fake_doc,
             ),
             patch(
-                "mbforge.pipeline.stage_artifacts.page_frames_from_pdf",
+                "mbforge.pipeline.artifacts.branch_io.page_frames_from_pdf",
                 return_value=[PageFrame(page=1, width=100.0, height=100.0)],
             ),
         ):
@@ -224,7 +227,7 @@ class TestExtractStage:
         )
 
         with patch(
-            "mbforge.pipeline.extract_text.extract_document_text",
+            "mbforge.pipeline.extract.text.extract_document_text",
             side_effect=ValueError("corrupt pdf"),
         ):
             result = ExtractStage().execute(ctx)
@@ -246,7 +249,7 @@ class TestExtractStage:
         )
 
         with patch(
-            "mbforge.pipeline.extract_text.extract_document_text",
+            "mbforge.pipeline.extract.text.extract_document_text",
             side_effect=OCRUnavailableError(
                 "no configured cloud OCR backend available"
             ),

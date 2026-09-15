@@ -114,40 +114,91 @@ def test_reclaim_orphans_resets_stale_processing_rows(tmp_path: Path) -> None:
     assert "stale" in {row["id"] for row in claimed}
 
 
-def test_retry_does_not_relaunch_a_still_claimed_cancelled_row(tmp_path: Path) -> None:
-    """A claimed row waits, while terminal rows can be retried safely."""
+def _stage_status(db: DatabaseManager, stage: str) -> str:
+    with db.kb_conn() as conn:
+        row = conn.execute(
+            "SELECT status FROM ingest_queue "
+            "WHERE doc_id = 'dag-doc' AND run_id = 'run-1' AND stage = ?",
+            (stage,),
+        ).fetchone()
+    return row["status"]
+
+
+def _node_id(db: DatabaseManager, stage: str) -> str:
+    with db.kb_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM ingest_queue "
+            "WHERE doc_id = 'dag-doc' AND run_id = 'run-1' AND stage = ?",
+            (stage,),
+        ).fetchone()
+    return row["id"]
+
+
+def _seed_dag(tmp_path: Path) -> tuple[str, DatabaseManager]:
     from mbforge.infra.ingest import queue
 
     root = _library(tmp_path)
     db = DatabaseManager.get(root)
     db.initialize()
-    _seed(
-        db,
-        [
-            {
-                "id": "cancelled-active",
-                "status": "cancelled",
-                "claimed_by": "worker-a",
-                "heartbeat_ts": "2099-01-01 00:00:00",
-            },
-            {"id": "done-task", "status": "done"},
-        ],
-    )
+    queue.insert_dag(root, file_path="doc.pdf", doc_id="dag-doc", run_id="run-1")
+    return root, db
 
-    assert queue.retry_rows(root, ["cancelled-active"]) == []
-    assert _queue_row(db, "cancelled-active")["status"] == "cancelled"
 
-    worker._set_task_terminal(root, "cancelled-active", "cancelled", "stopped")
-    assert queue.retry_rows(root, ["cancelled-active"])[0]["id"] == "cancelled-active"
-    assert _queue_row(db, "cancelled-active")["status"] == "pending"
+def test_advance_dependents_promotes_join_only_once(tmp_path: Path) -> None:
+    """Join turns pending only after both branches are done, and only once."""
+    from mbforge.infra.ingest import queue
 
+    root, db = _seed_dag(tmp_path)
+
+    assert _stage_status(db, "extract") == "pending"
+    assert _stage_status(db, "detection") == "pending"
+    assert _stage_status(db, "join") == "blocked"
+
+    worker._claim_rows(root, "w", 8)
+
+    queue.set_node_status(root, _node_id(db, "extract"), "done")
     assert (
-        queue.retry_rows(root, ["done-task"], resume_from_stage="detection")[0]["id"]
-        == "done-task"
+        queue.advance_dependents(
+            root, doc_id="dag-doc", run_id="run-1", completed_stage="extract"
+        )
+        == []
     )
-    done = _queue_row(db, "done-task")
-    assert done["status"] == "pending"
-    assert done["stage"] == "detection"
+    assert _stage_status(db, "join") == "blocked"
+
+    queue.set_node_status(root, _node_id(db, "detection"), "done")
+    assert queue.advance_dependents(
+        root, doc_id="dag-doc", run_id="run-1", completed_stage="detection"
+    ) == ["join"]
+    assert _stage_status(db, "join") == "pending"
+
+    # Idempotent: a second completion of the same node never re-flips join.
+    assert (
+        queue.advance_dependents(
+            root, doc_id="dag-doc", run_id="run-1", completed_stage="detection"
+        )
+        == []
+    )
+
+
+def test_node_failure_cascades_and_reset_reopens_dependents(tmp_path: Path) -> None:
+    """A failed branch cascades downstream; retrying it re-blocks them."""
+    from mbforge.infra.ingest import queue
+
+    root, db = _seed_dag(tmp_path)
+    worker._claim_rows(root, "w", 8)
+    extract_id = _node_id(db, "extract")
+
+    queue.set_node_status(root, extract_id, "failed", "boom")
+    cascaded = queue.fail_cascade(
+        root, doc_id="dag-doc", run_id="run-1", failed_stage="extract", error="boom"
+    )
+    assert set(cascaded) == {"join", "markdown", "patent"}
+    for stage in ("join", "markdown", "patent"):
+        assert _stage_status(db, stage) == "failed"
+
+    assert queue.reset_node(root, extract_id) is True
+    assert _stage_status(db, "extract") == "pending"
+    assert _stage_status(db, "join") == "blocked"
 
 
 def test_startup_reclaims_terminal_claims(tmp_path: Path) -> None:
@@ -237,9 +288,10 @@ def test_worker_claims_and_executes_pending_row(tmp_path: Path, monkeypatch) -> 
         library_root: str,
         doc_id: str,
         task_id: str,
-        current_stage: str | None = None,
+        stage: str | None = None,
+        run_id: str | None = None,
     ) -> None:
-        del file_path, library_root, doc_id, current_stage
+        del file_path, library_root, doc_id, stage, run_id
         executed.append(task_id)
 
     monkeypatch.setattr(worker, "_run_pipeline_sync", _fake_run)

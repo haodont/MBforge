@@ -9,6 +9,7 @@ def test_patent_is_the_current_pipeline_endpoint() -> None:
     assert effective_stage_names() == [
         "extract",
         "detection",
+        "join",
         "markdown",
         "patent",
     ]

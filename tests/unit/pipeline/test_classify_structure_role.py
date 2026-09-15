@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.pipeline.detection.normalization import NormalizedMolecule
+from mbforge.core.molecule import Molecule
 from mbforge.pipeline.detection.structure_role import classify_structure_role
 
 
@@ -14,8 +14,8 @@ def _molecule(
     name: str = "",
     properties: dict[str, object] | None = None,
     status: str = "pending",
-) -> NormalizedMolecule:
-    return NormalizedMolecule(
+) -> Molecule:
+    return Molecule(
         canonical_smiles=smiles,
         esmiles=smiles,
         name=name,

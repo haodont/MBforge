@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from mbforge.core.markush.site_rules import MarkushSiteError
+from mbforge.core.markush import MarkushSiteError
 from mbforge.services.markush.sites import (
     create_mount,
     create_option,

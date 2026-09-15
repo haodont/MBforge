@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from mbforge.core.evidence import SourceEvidence
-from mbforge.pipeline.detection.extraction import make_candidate_id
-from mbforge.pipeline.detection.normalization import NormalizedMolecule
-from mbforge.pipeline.evidence_artifacts import (
+from mbforge.core.molecule import Molecule
+from mbforge.pipeline.artifacts.evidence_models import (
     CandidateArtifact,
     DocumentEvidenceArtifact,
     PageFrame,
 )
+from mbforge.pipeline.detection.extraction import candidate_id
 from mbforge.pipeline.markdown.esmiles_insert import insert_esmiles_blocks
 from mbforge.pipeline.persist.text_links import (
     _find_esmiles_in_text,
@@ -23,7 +23,7 @@ def test_register_molecules_from_text_skips_non_complete_roles(tmp_path: Path) -
 
     markdown = tmp_path / "document.md"
     markdown.write_text("# Doc", encoding="utf-8")
-    fragment = NormalizedMolecule(canonical_smiles="*C", esmiles="*C", name="R1")
+    fragment = Molecule(canonical_smiles="*C", esmiles="*C", name="R1")
     fragment.properties["structure_role"] = "fragment"
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
@@ -42,7 +42,7 @@ def test_register_molecules_from_text_skips_non_complete_roles(tmp_path: Path) -
 
 
 def test_enrich_molecule_contexts_from_markdown(tmp_path: Path) -> None:
-    molecule = NormalizedMolecule(canonical_smiles="CCO", esmiles="CCO", name="")
+    molecule = Molecule(canonical_smiles="CCO", esmiles="CCO", name="")
     markdown = tmp_path / "document.md"
     markdown.write_text(
         "# Formula I\n\n"
@@ -63,23 +63,23 @@ def test_enrich_attaches_distant_compound_context_for_review_routing(
         classify_structure_role,
     )
 
-    candidate_id = make_candidate_id("doc", "CCO", 8, (1.0, 2.0, 3.0, 4.0))
+    cid = candidate_id("doc", "CCO", 8, (1.0, 2.0, 3.0, 4.0))
     markdown = tmp_path / "document.md"
     markdown.write_text(
         "<!-- PAGE 8 -->\n"
         "```esmiles\n"
-        f"%% page=8\n%% candidate={candidate_id}\nCCO\n"
+        f"%% page=8\n%% candidate={cid}\nCCO\n"
         "```\n"
         "\n<!-- PAGE 21 -->\n"
         "实施例4：化合物4是1S,3R(4A)和1R,3S(4B)的混合物。"
         "4A与4B为拆分产物，构型暂定。\n",
         encoding="utf-8",
     )
-    molecule = NormalizedMolecule(
+    molecule = Molecule(
         canonical_smiles="CCO",
         esmiles="CCO",
         name="4A",
-        properties={"candidate_id": candidate_id},
+        properties={"candidate_id": cid},
     )
 
     enriched = enrich_molecule_contexts_from_markdown(str(markdown), [molecule])
@@ -92,21 +92,21 @@ def test_enrich_attaches_distant_compound_context_for_review_routing(
 def test_enrich_recovers_unique_nearby_compound_label_for_image_placeholder(
     tmp_path: Path,
 ) -> None:
-    candidate_id = make_candidate_id("doc", "CCO", 8, (1.0, 2.0, 3.0, 4.0))
+    cid = candidate_id("doc", "CCO", 8, (1.0, 2.0, 3.0, 4.0))
     markdown = tmp_path / "document.md"
     markdown.write_text(
         "<!-- PAGE 8 -->\n"
         "实施例 28：制备目标化合物。\n"
         "```esmiles\n"
-        f"%% page=8\n%% candidate={candidate_id}\nCCO\n"
+        f"%% page=8\n%% candidate={cid}\nCCO\n"
         "```\n",
         encoding="utf-8",
     )
-    molecule = NormalizedMolecule(
+    molecule = Molecule(
         canonical_smiles="CCO",
         esmiles="CCO",
         name="![](images/structure.jpg)",
-        properties={"candidate_id": candidate_id},
+        properties={"candidate_id": cid},
     )
 
     enriched = enrich_molecule_contexts_from_markdown(str(markdown), [molecule])
@@ -303,7 +303,7 @@ def test_find_esmiles_in_text_prefers_candidate_id_over_shared_prefix() -> None:
     smiles_a = "CCOC(=O)c1ccccc1"
     smiles_b = "CCOC(=O)c1cccnc1"
     assert smiles_a[:12] == smiles_b[:12]
-    id_b = make_candidate_id("", smiles_b, 2, (1.0, 2.0, 3.0, 4.0))
+    id_b = candidate_id("", smiles_b, 2, (1.0, 2.0, 3.0, 4.0))
     text = (
         "## First\n\n"
         f"```esmiles\n%% page=1\n{smiles_a}\n```\n\n"
@@ -345,7 +345,7 @@ def test_find_esmiles_in_text_prefix_does_not_cross_match() -> None:
 def test_enrich_molecule_contexts_matches_block_by_candidate_id(tmp_path: Path) -> None:
     smiles_a = "CCOC(=O)c1ccccc1"
     smiles_b = "CCOC(=O)c1cccnc1"
-    id_b = make_candidate_id("", smiles_b, 2, (1.0, 2.0, 3.0, 4.0))
+    id_b = candidate_id("", smiles_b, 2, (1.0, 2.0, 3.0, 4.0))
     markdown = tmp_path / "document.md"
     markdown.write_text(
         "## Benzoate section\n\n"
@@ -354,7 +354,7 @@ def test_enrich_molecule_contexts_matches_block_by_candidate_id(tmp_path: Path) 
         f"```esmiles\n%% candidate={id_b}\n{smiles_b}\n```\n",
         encoding="utf-8",
     )
-    molecule = NormalizedMolecule(canonical_smiles=smiles_b, esmiles=smiles_b, name="")
+    molecule = Molecule(canonical_smiles=smiles_b, esmiles=smiles_b, name="")
     molecule.properties["candidate_id"] = id_b
 
     enriched = enrich_molecule_contexts_from_markdown(str(markdown), [molecule])

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from mbforge.pipeline.detection.types import DetectionSource, NormalizedMolecule
-from mbforge.pipeline.extract_text import ExtractedDocument, PageContent, TextSpan
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import DetectionSource
+from mbforge.pipeline.extract.text import ExtractedDocument, PageContent, TextSpan
 from mbforge.services.documents.pdf_layout import (
     build_document_overlay,
     load_document_bboxes,
@@ -53,7 +54,7 @@ def _save_synthetic(tmp_path, doc_id: str = "doc-1") -> None:
 
 
 def _save_detections(
-    tmp_path, doc_id: str, candidates: list[NormalizedMolecule], stats: dict
+    tmp_path, doc_id: str, candidates: list[Molecule], stats: dict
 ) -> None:
     page_numbers = {
         detection.page + 1
@@ -139,7 +140,7 @@ def test_load_document_bboxes_reports_stage_coverage(tmp_path) -> None:
         tmp_path,
         "doc-1",
         [
-            NormalizedMolecule(
+            Molecule(
                 canonical_smiles="CCO",
                 esmiles="CCO",
                 name="EtOH",

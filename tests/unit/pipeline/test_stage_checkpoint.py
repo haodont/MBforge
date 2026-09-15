@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from mbforge.pipeline.composition import effective_stage_names
-from mbforge.pipeline.stage_checkpoint import (
+from mbforge.pipeline.run.checkpoint import (
     INCOMPATIBLE_CHECKPOINT,
     STAGE_ORDER,
     collect_all_summaries,
@@ -34,7 +34,8 @@ def test_next_stage_from_none() -> None:
 
 def test_next_stage_walks_order() -> None:
     assert next_stage("extract") == "detection"
-    assert next_stage("detection") == "markdown"
+    assert next_stage("detection") == "join"
+    assert next_stage("join") == "markdown"
     assert next_stage("markdown") == "patent"
     assert next_stage("patent") is None
 
@@ -160,6 +161,7 @@ def test_last_completed_stage_empty(tmp_path: Path) -> None:
 def test_last_completed_stage_partial(tmp_path: Path) -> None:
     save_stage_summary(tmp_path, "extract", status="success")
     save_stage_summary(tmp_path, "detection", status="success")
+    save_stage_summary(tmp_path, "join", status="success")
     save_stage_summary(tmp_path, "markdown", status="success")
     # patent missing → last completed is markdown
     assert last_completed_stage(tmp_path) == "markdown"
@@ -212,6 +214,13 @@ def _populate_all_stages(staging: Path) -> None:
         status="success",
         elapsed_ms=150,
         context={"molecule_count": 2},
+    )
+    save_stage_summary(
+        staging,
+        "join",
+        status="success",
+        elapsed_ms=0,
+        context={"source_evidence_count": 4},
     )
     save_stage_summary(
         staging,

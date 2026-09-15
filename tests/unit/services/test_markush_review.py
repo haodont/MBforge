@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import pytest
 
+from mbforge.core.molecule import Molecule
 from mbforge.core.review import (
     ReviewConflictError,
     ReviewNotFoundError,
     ReviewTransitionError,
 )
-from mbforge.pipeline.detection.normalization import DetectionSource, NormalizedMolecule
+from mbforge.core.types import DetectionSource
 from mbforge.services.markush.review import apply_decision
 from mbforge.storage.markush_candidates import persist_review_candidates
 from mbforge.storage.markush_transitions import (
@@ -29,7 +30,7 @@ def database(tmp_path):
 
 def _seed_one(database, *, smiles: str = "*c1ccccc1", label: str = "R1") -> str:
     """Insert one pending review candidate and return its id."""
-    molecule = NormalizedMolecule(
+    molecule = Molecule(
         canonical_smiles=smiles,
         esmiles=smiles,
         name="",

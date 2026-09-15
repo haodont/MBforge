@@ -10,7 +10,7 @@ import pytest
 
 from mbforge.services.molecule.recorrection import (
     RecorrectionResult,
-    _rebuild_normalized_molecule,
+    _rebuild_molecule,
     recorrect_molecules,
 )
 from mbforge.storage.sqlite.database import DatabaseManager
@@ -75,8 +75,8 @@ def sample_molecule(temp_library):
     return mol_id
 
 
-class TestRebuildNormalizedMolecule:
-    """Tests for rebuilding NormalizedMolecule from database rows."""
+class TestRebuildMolecule:
+    """Tests for rebuilding Molecule from database rows."""
 
     def test_rebuilds_basic_molecule(self, temp_library, sample_molecule):
         db = DatabaseManager.get(temp_library)
@@ -92,7 +92,7 @@ class TestRebuildNormalizedMolecule:
             "SELECT * FROM evidence WHERE mol_id = ?", (sample_molecule,), db="mol"
         )
 
-        nm = _rebuild_normalized_molecule(row, detections, evidence)
+        nm = _rebuild_molecule(row, detections, evidence)
 
         assert nm.canonical_smiles == "c1ccccc1"
         assert nm.name == "Formula I"
@@ -115,7 +115,7 @@ class TestRebuildNormalizedMolecule:
             "SELECT * FROM evidence WHERE mol_id = ?", (sample_molecule,), db="mol"
         )
 
-        nm = _rebuild_normalized_molecule(row, detections, evidence)
+        nm = _rebuild_molecule(row, detections, evidence)
 
         contexts = nm.properties.get("context_texts", [])
         assert "wherein R1 is methyl" in contexts

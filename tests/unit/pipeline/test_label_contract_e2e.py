@@ -3,7 +3,7 @@
 Reproduces the Phase-0 bug fixed by :mod:`mbforge.pipeline.detection.label_normalization`:
 
 - An ``ExtractionResult`` carrying a ``formula_label`` of ``"R₁"`` used to
-  land in :class:`NormalizedMolecule.properties` only as a list entry
+  land in :class:`Molecule.properties` only as a list entry
   under ``role_contexts``.
 - :func:`persist_markush_scaffolds` then read ``properties["formula_label"]``
   directly and stored ``""`` in the database.
@@ -18,8 +18,8 @@ to ``properties`` for downstream consumers.
 
 from __future__ import annotations
 
+from mbforge.core.types import ExtractionResult
 from mbforge.pipeline.detection.normalization import normalize_molecules
-from mbforge.pipeline.detection.types import ExtractionResult
 from mbforge.pipeline.persist.markush import persist_markush_scaffolds
 from mbforge.storage.sqlite.database import DatabaseManager
 

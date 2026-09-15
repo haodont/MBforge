@@ -120,8 +120,11 @@ def test_library_get_document_evidence_reads_requested_sql_page(
     app_client: TestClient, tmp_library: Path
 ) -> None:
     from mbforge.core.evidence import SourceEvidence
-    from mbforge.pipeline.evidence_artifacts import DocumentEvidenceArtifact, PageFrame
-    from mbforge.pipeline.persist.source_evidence import persist_source_evidence
+    from mbforge.pipeline.artifacts.evidence_models import (
+        DocumentEvidenceArtifact,
+        PageFrame,
+    )
+    from mbforge.storage.source_evidence import persist_source_evidence
 
     rows = [
         SourceEvidence.create(

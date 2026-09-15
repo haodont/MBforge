@@ -19,8 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.markush.coverage import check_markush_coverage
-from mbforge.core.markush.parser import parse_markush
+from mbforge.core.markush import check_markush_coverage, parse_markush
 
 # Synthetic Markush that mirrors Formula I's cyclohexane core with
 # three R-group attachment points. Each ``[*:N]`` is the explicit

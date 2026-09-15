@@ -11,7 +11,7 @@ import pytest
 
 from mbforge.backends.ocr.base import OCRResult
 from mbforge.backends.ocr.chain import OCRUnavailableError
-from mbforge.pipeline.extract_text import (
+from mbforge.pipeline.extract.text import (
     _extract_title,
     _ocr_pages,
     extract_document_text,
@@ -140,7 +140,7 @@ def test_extract_pdf_text_preserves_ocr_page_order(
     doc.close()
 
     monkeypatch.setattr(
-        "mbforge.pipeline.extract_text._ocr_pages",
+        "mbforge.pipeline.extract.text._ocr_pages",
         lambda *_args, **_kwargs: [
             "ocr first page",
             "ocr middle page",
@@ -191,7 +191,7 @@ def test_ocr_pages_uses_chain_backends_per_page(
 
 def _cached_document(library_root: Path, doc_id: str, page_texts: list[str]) -> Any:
     """Build a Document whose extraction cache mirrors page_texts."""
-    from mbforge.core.entities.document import Document
+    from mbforge.core.document import Document
 
     doc = Document(
         doc_id=doc_id,
@@ -250,7 +250,7 @@ def test_extract_document_text_uses_full_ocr_for_cached_document(
 
     calls: list[list[int]] = []
     monkeypatch.setattr(
-        "mbforge.pipeline.extract_text._ocr_pages", _fake_ocr_pages(calls)
+        "mbforge.pipeline.extract.text._ocr_pages", _fake_ocr_pages(calls)
     )
 
     extracted = extract_document_text(doc, str(pdf_path), ocr_config={})
@@ -271,7 +271,7 @@ def test_extract_document_text_delegates_to_full_extraction_without_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The optional Document argument does not alter the full OCR path."""
-    from mbforge.pipeline.extract_text import ExtractedDocument
+    from mbforge.pipeline.extract.text import ExtractedDocument
 
     calls: list[tuple[Any, Any]] = []
 
@@ -280,7 +280,7 @@ def test_extract_document_text_delegates_to_full_extraction_without_document(
         return ExtractedDocument(raw_text="full fallback", page_count=1)
 
     monkeypatch.setattr(
-        "mbforge.pipeline.extract_text.extract_pdf_text", fake_extract_pdf_text
+        "mbforge.pipeline.extract.text.extract_pdf_text", fake_extract_pdf_text
     )
 
     extracted = extract_document_text(

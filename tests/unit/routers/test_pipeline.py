@@ -87,16 +87,17 @@ def test_pipeline_events_stream_returns_log_rows(
     db = DatabaseManager.get(str(root))
     db.initialize()
 
-    task_id = "task-sse-1"
+    run_id = "run-sse-1"
     with db.kb_conn() as conn:
         conn.execute(
-            "INSERT INTO ingest_queue (id, file_path, status) VALUES (?, ?, ?)",
-            (task_id, str(root / "doc.pdf"), "pending"),
+            "INSERT INTO ingest_queue (id, file_path, doc_id, run_id, status) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("node-sse-1", str(root / "doc.pdf"), "doc-1", run_id, "pending"),
         )
         conn.execute(
             """
             INSERT INTO ingest_logs
-                (doc_id, stage, level, message, ts_ms, task_id, data)
+                (doc_id, stage, level, message, ts_ms, run_id, data)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -105,13 +106,13 @@ def test_pipeline_events_stream_returns_log_rows(
                 "info",
                 "Detected 2 molecules",
                 1234567890000,
-                task_id,
+                run_id,
                 json.dumps({"molecule_count": 2}),
             ),
         )
 
     response = client.get(
-        f"/api/v1/pipeline/events/{task_id}",
+        f"/api/v1/pipeline/events/{run_id}",
         params={"library_root": str(root)},
     )
     assert response.status_code == 200
@@ -232,8 +233,8 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Queue consumers receive the real fork statuses from the run checkpoint."""
-    from mbforge.pipeline.run_artifacts import staging_dir
-    from mbforge.pipeline.stage_checkpoint import (
+    from mbforge.pipeline.artifacts.staging import staging_dir
+    from mbforge.pipeline.run.checkpoint import (
         ensure_run_checkpoint,
         save_stage_summary,
     )
@@ -271,19 +272,20 @@ def test_pipeline_bulk_queue_actions_update_only_eligible_tasks(
     db = DatabaseManager.get(str(root))
     db.initialize()
     with db.kb_conn() as conn:
-        for task_id, status in (
-            ("pending-task", "pending"),
-            ("failed-task", "failed"),
-            ("done-task", "done"),
+        for node_id, run_id, status in (
+            ("pending-node", "run-pending", "pending"),
+            ("failed-node", "run-failed", "failed"),
+            ("done-node", "run-done", "done"),
         ):
             conn.execute(
-                "INSERT INTO ingest_queue (id, file_path, status) VALUES (?, ?, ?)",
-                (task_id, str(root / f"{task_id}.pdf"), status),
+                "INSERT INTO ingest_queue (id, file_path, doc_id, run_id, status) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (node_id, str(root / f"{node_id}.pdf"), node_id, run_id, status),
             )
 
     cancel = client.post(
         "/api/v1/pipeline/queue/batch/cancel",
-        json={"library_root": str(root), "task_ids": ["pending-task", "done-task"]},
+        json={"library_root": str(root), "run_ids": ["run-pending", "run-done"]},
     )
     assert cancel.status_code == 200
     assert cancel.json()["updated"] == 1
@@ -291,7 +293,7 @@ def test_pipeline_bulk_queue_actions_update_only_eligible_tasks(
 
     retry = client.post(
         "/api/v1/pipeline/queue/batch/retry",
-        json={"library_root": str(root), "task_ids": ["failed-task", "done-task"]},
+        json={"library_root": str(root), "run_ids": ["run-failed", "run-done"]},
     )
     assert retry.status_code == 200
     assert retry.json()["updated"] == 1

@@ -6,17 +6,18 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from mbforge.pipeline.detection.types import ExtractionResult, NormalizedMolecule
-from mbforge.pipeline.evidence_artifacts import PageFrame
-from mbforge.pipeline.extract_text import ExtractedDocument, PageContent
-from mbforge.pipeline.persist.source_evidence import persist_source_evidence
-from mbforge.pipeline.stage_artifacts import (
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import ExtractionResult
+from mbforge.pipeline.artifacts import (
     build_detection_artifact,
     build_extract_artifact,
     join_evidence_artifacts,
     save_detection_branch,
     save_extract_branch,
 )
+from mbforge.pipeline.artifacts.evidence_models import PageFrame
+from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.storage.source_evidence import persist_source_evidence
 
 
 def publish_v2_run(
@@ -24,7 +25,7 @@ def publish_v2_run(
     doc_id: str,
     run_id: str,
     extracted: ExtractedDocument,
-    candidates: list[NormalizedMolecule],
+    candidates: list[Molecule],
     molecule_stats: dict[str, Any] | None = None,
     *,
     width: float = 1000.0,

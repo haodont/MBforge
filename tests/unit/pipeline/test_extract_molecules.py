@@ -16,11 +16,11 @@ from mbforge.pipeline.detection.extraction import (
     MAX_SCRIBE_BATCH_SIZE,
     _clamp_scribe_batch_size,
     _nearby_page_text,
+    candidate_id,
     extract_molecules_from_pdf,
     extract_molecules_from_pdf_async,
     extract_molecules_from_text,
     extract_molecules_from_text_async,
-    make_candidate_id,
 )
 
 
@@ -278,17 +278,17 @@ def test_extract_molecules_from_text_async_offloads_to_thread(
     assert calls[0][0] is extract_molecules_from_text
 
 
-def test_make_candidate_id_deterministic_per_structure_and_position() -> None:
+def test_candidate_id_deterministic_per_structure_and_position() -> None:
     """IDs are stable for identical inputs and change with any component."""
-    base = make_candidate_id("doc-1", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
+    base = candidate_id("doc-1", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
 
-    assert base == make_candidate_id("doc-1", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
-    assert base == make_candidate_id("doc-1", "CCO", 3, [10.0, 20.0, 30.0, 40.0])
-    assert base != make_candidate_id("doc-2", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
-    assert base != make_candidate_id("doc-1", "CCOC", 3, (10.0, 20.0, 30.0, 40.0))
-    assert base != make_candidate_id("doc-1", "CCO", 4, (10.0, 20.0, 30.0, 40.0))
-    assert base != make_candidate_id("doc-1", "CCO", 3, None)
-    assert make_candidate_id("doc-1", "CCO", None, None)
+    assert base == candidate_id("doc-1", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
+    assert base == candidate_id("doc-1", "CCO", 3, [10.0, 20.0, 30.0, 40.0])
+    assert base != candidate_id("doc-2", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
+    assert base != candidate_id("doc-1", "CCOC", 3, (10.0, 20.0, 30.0, 40.0))
+    assert base != candidate_id("doc-1", "CCO", 4, (10.0, 20.0, 30.0, 40.0))
+    assert base != candidate_id("doc-1", "CCO", 3, None)
+    assert candidate_id("doc-1", "CCO", None, None)
 
 
 def _mol_bbox(bbox: list[float], score: float = 0.9) -> MagicMock:

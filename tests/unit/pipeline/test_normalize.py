@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from mbforge.core.types import ExtractionResult
 from mbforge.pipeline.detection.normalization import normalize_molecules
-from mbforge.pipeline.detection.types import ExtractionResult
 
 
 def test_normalize_deduplicates_equivalent_smiles() -> None:
@@ -21,7 +21,7 @@ def test_normalize_deduplicates_equivalent_smiles() -> None:
 
 
 def test_normalize_keeps_image_and_text_sources_separate() -> None:
-    """Two different molecules should produce two NormalizedMolecule records."""
+    """Two different molecules should produce two Molecule records."""
     candidates = [
         ExtractionResult(esmiles="CCO", source="text", status="pending"),
         ExtractionResult(
