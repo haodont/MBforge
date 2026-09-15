@@ -42,6 +42,9 @@ export interface SettingsState {
   ocr_paddleocr_api_key: string
   ocr_paddleocr_host: string
   ocr_paddleocr_model: string
+  ocr_glmocr_api_key: string
+  ocr_glmocr_base_url: string
+  ocr_glmocr_model: string
 
   // —— Model Service ——
   server_host: string
@@ -111,6 +114,9 @@ export const DEFAULT_SETTINGS: SettingsState = {
   ocr_paddleocr_api_key: '',
   ocr_paddleocr_host: '',
   ocr_paddleocr_model: 'PaddleOCR-VL-1.6',
+  ocr_glmocr_api_key: '',
+  ocr_glmocr_base_url: '',
+  ocr_glmocr_model: 'glm-ocr',
 
   server_host: '127.0.0.1',
   server_port: 18792,
@@ -194,6 +200,9 @@ export function flattenSettings(raw: AppSettings | null | undefined): SettingsSt
     ocr_paddleocr_api_key: ocr.paddleocr_api_key || DEFAULT_SETTINGS.ocr_paddleocr_api_key,
     ocr_paddleocr_host: ocr.paddleocr_host || DEFAULT_SETTINGS.ocr_paddleocr_host,
     ocr_paddleocr_model: ocr.paddleocr_model || DEFAULT_SETTINGS.ocr_paddleocr_model,
+    ocr_glmocr_api_key: ocr.glmocr_api_key || DEFAULT_SETTINGS.ocr_glmocr_api_key,
+    ocr_glmocr_base_url: ocr.glmocr_base_url || DEFAULT_SETTINGS.ocr_glmocr_base_url,
+    ocr_glmocr_model: ocr.glmocr_model || DEFAULT_SETTINGS.ocr_glmocr_model,
 
     server_host: ms.host || DEFAULT_SETTINGS.server_host,
     server_port: ms.port || DEFAULT_SETTINGS.server_port,
@@ -282,6 +291,9 @@ export function toBackendPayload(s: SettingsState): Record<string, unknown> {
       paddleocr_api_key: s.ocr_paddleocr_api_key,
       paddleocr_host: s.ocr_paddleocr_host,
       paddleocr_model: s.ocr_paddleocr_model,
+      glmocr_api_key: s.ocr_glmocr_api_key,
+      glmocr_base_url: s.ocr_glmocr_base_url,
+      glmocr_model: s.ocr_glmocr_model,
     },
     model_server: {
       host: s.server_host,

@@ -22,6 +22,7 @@ interface Props {
 
 const OCR_LABELS: Record<string, string> = {
   paddleocr: 'PaddleOCR',
+  glmocr: 'GLM-OCR',
 }
 
 export default function OcrConfigSection({
@@ -71,6 +72,31 @@ export default function OcrConfigSection({
                 onChange: v => { markDirty('ocr_paddleocr_model'); update('ocr_paddleocr_model', v) },
                 placeholder: 'PaddleOCR-VL-1.6',
                 dirty: dirtyFields.ocr_paddleocr_model,
+              },
+            ]}
+          />
+          <BackendKeyRow
+            label={t('ocr.config.glmocr')}
+            placeholder="bearer token"
+            value={settings.ocr_glmocr_api_key}
+            onChange={v => { markDirty('ocr_glmocr_api_key'); update('ocr_glmocr_api_key', v) }}
+            getKeyUrl="https://bigmodel.cn/usercenter/proj-mgmt/apikeys"
+            getKeyLabel={t('ocr.config.getKey')}
+            dirty={dirtyFields.ocr_glmocr_api_key}
+            extra={[
+              {
+                label: t('ocr.config.glmocrHost'),
+                value: settings.ocr_glmocr_base_url,
+                onChange: v => { markDirty('ocr_glmocr_base_url'); update('ocr_glmocr_base_url', v) },
+                placeholder: 'https://open.bigmodel.cn/api/paas/v4/layout_parsing',
+                dirty: dirtyFields.ocr_glmocr_base_url,
+              },
+              {
+                label: t('ocr.config.glmocrModel'),
+                value: settings.ocr_glmocr_model,
+                onChange: v => { markDirty('ocr_glmocr_model'); update('ocr_glmocr_model', v) },
+                placeholder: 'glm-ocr',
+                dirty: dirtyFields.ocr_glmocr_model,
               },
             ]}
           />

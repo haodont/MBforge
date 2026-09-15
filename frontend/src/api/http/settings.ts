@@ -29,6 +29,9 @@ export interface OcrConfig {
   paddleocr_api_key?: string | null
   paddleocr_host?: string | null
   paddleocr_model?: string | null
+  glmocr_api_key?: string | null
+  glmocr_base_url?: string | null
+  glmocr_model?: string | null
 }
 
 export interface ModelServerConfig {
