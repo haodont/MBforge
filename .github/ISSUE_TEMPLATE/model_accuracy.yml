@@ -1,0 +1,50 @@
+name: Model accuracy report
+description: 报告分子识别、OCR 或活性抽取结果不准确
+title: "[Accuracy]: "
+labels: ["accuracy", "triage"]
+body:
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 出错阶段
+      options: ["Molecule detection", "MolScribe / SMILES", "Coreference / label OCR", "PDF OCR", "Activity extraction", "Unknown"]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MBForge 版本
+      placeholder: Git tag 或 commit hash
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: 实际结果
+      description: 给出脱敏后的输出、页码和必要上下文。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果与依据
+      description: SMILES 请说明规范化方式；活性值请包含单位与原文依据。
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: 最小复现样本
+      description: 仅上传有权分享且已脱敏的 crop/页面；不能公开时说明原因。
+  - type: textarea
+    id: config
+    attributes:
+      label: 模型与配置
+      description: 检测器/模型版本、OCR provider、阈值及硬件信息。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 数据确认
+      options:
+        - label: 我有权分享所附样本，且已移除秘密与敏感数据。
+          required: true

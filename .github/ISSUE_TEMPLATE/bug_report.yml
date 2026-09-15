@@ -1,0 +1,70 @@
+name: Bug report
+description: 报告可复现的 MBForge 缺陷
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: 请移除 API Key、论文原文、真实库文件和其他敏感数据后再提交。
+  - type: input
+    id: version
+    attributes:
+      label: MBForge 版本
+      description: Git tag 或 commit hash。
+      placeholder: v0.3.0 / abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: 组件
+      options:
+        - Pipeline
+        - Frontend
+        - API / Router
+        - Database / Storage
+        - Agent
+        - OCR / Molecule model
+        - Installation / Build
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: 按顺序列出最小复现步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为与日志
+      description: 粘贴已脱敏的错误、截图或诊断信息。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: 操作系统、Python/Node 版本、GPU/驱动及相关配置。
+  - type: dropdown
+    id: regression
+    attributes:
+      label: 是否为回归
+      options: ["未知", "是，之前版本正常", "否，从未正常"]
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已搜索现有 Issue，未发现重复报告。
+          required: true
+        - label: 我已移除秘密和敏感研究数据。
+          required: true

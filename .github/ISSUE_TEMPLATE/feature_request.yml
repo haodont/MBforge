@@ -1,0 +1,36 @@
+name: Feature request
+description: 提议可验证的新能力或改进
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题与用户价值
+      description: 描述当前痛点、受影响用户和使用场景，不要只描述方案。
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 期望结果与验收条件
+      description: 列出可观察、可验证的完成条件。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 可选；说明方案、替代方案和取舍。
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围与依赖
+      description: 标明范围外事项、前置依赖、迁移或兼容性风险。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已搜索 TODO/INDEX.md 和现有 Issue。
+          required: true

@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-static:
+    name: Backend static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_NO_PROGRESS: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Verify dependency lock
+        run: uv lock --check
+      - name: Install static-check dependencies
+        run: uv sync --frozen --only-group dev --no-install-project
+      - name: Ruff lint
+        run: uv run --no-sync ruff check src/ tests/
+      - name: Ruff format
+        run: uv run --no-sync ruff format src/ tests/ --check
+
+  backend-tests:
+    name: Backend tests (${{ matrix.os }})
+    needs: backend-static
+    # Run on both Windows and Linux so we catch OS-specific regressions
+    # (path separators, fopen flags, subprocess behaviour). The matrix
+    # only varies the runner; everything else is identical.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      UV_NO_PROGRESS: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - name: Pytest
+        run: >-
+          uv run --no-sync pytest tests/ -q
+          --basetemp "${{ runner.temp }}\mbforge-pytest"
+
+  frontend:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          # Pin a stable Node LTS that satisfies the AGENTS.md lower bound
+          # (20.19+). 
+          node-version: "22.11.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: TypeScript
+        run: npm exec -- tsc --noEmit
+      - name: Vitest
+        run: npm run test
+      - name: Production build
+        run: npm run build
+
+  quality-gate:
+    name: Quality gate
+    if: always()
+    needs: [backend-static, backend-tests, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BACKEND_STATIC_RESULT: ${{ needs.backend-static.result }}
+      BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
+      FRONTEND_RESULT: ${{ needs.frontend.result }}
+    steps:
+      - name: Require every quality job to pass
+        run: |
+          if [ "$BACKEND_STATIC_RESULT" != "success" ] ||
+             [ "$BACKEND_TESTS_RESULT" != "success" ] ||
+             [ "$FRONTEND_RESULT" != "success" ]; then
+            echo "backend-static=$BACKEND_STATIC_RESULT"
+            echo "backend-tests=$BACKEND_TESTS_RESULT"
+            echo "frontend=$FRONTEND_RESULT"
+            exit 1
+          fi
