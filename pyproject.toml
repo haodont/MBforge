@@ -9,10 +9,7 @@ pythonpath = ["src"]
 asyncio_mode = "auto"
 
 [tool.uv]
-# 依赖源默认走官方 PyPI；torch/torchvision 例外——Windows 上 PyPI 默认
-# wheel 是 CPU 编译版（+cpu），本机有 NVIDIA GPU，故从 download.pytorch.org
-# 的 cu128 索引安装 CUDA 编译版（需驱动 ≥570）。国内/内网用户仍可用
-# UV_DEFAULT_INDEX 覆盖 PyPI 主源。
+
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"

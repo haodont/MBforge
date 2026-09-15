@@ -56,15 +56,24 @@ Heavy models are downloaded at runtime by `ResourceManager` (ModelScope) into
 ```bash
 uv sync
 npm --prefix frontend install
+npm --prefix agent install
 
-# Development mode (backend reload + Vite HMR)
+# Development mode (backend reload + Vite HMR + frontend Pi Agent)
 npm --prefix frontend run dev:all
 ```
 
 Open <http://127.0.0.1:5173>. `dev:all` starts the backend with source reload,
 starts Vite with HMR, waits in one terminal, and stops the paired process if
 either service exits with an error. Its default backend and frontend ports are
-`18792` and `5173`; both fail clearly if already in use.
+`18792`, `5173`, and `18800`; all fail clearly if already in use. The LLM
+runtime is the separate Node process under `agent/`; Python only exposes the
+FastAPI tool endpoints it needs.
+
+A standalone `npm --prefix frontend run dev` (Vite alone) also brings up the
+LLM agent automatically and serves its `/v1/chat` API through Vite's
+same-origin `/agent-api` proxy, so the Agent page works without running
+`dev:all`. When an agent is already listening on `18800` (for example under
+`dev:all`), the frontend keeps talking to it directly.
 
 To use isolated ports (for example, a second worktree), set all values before
 starting. The launcher passes the backend address to the Vite proxy, direct
