@@ -91,6 +91,18 @@ class OCRConfig(BaseModel):
         description="Model served by the local PaddleOCR GenAI endpoint.",
     )
 
+    # GLM-OCR cloud backend (Zhipu layout_parsing v4). Opt-in: participates in
+    # the chain only when glmocr_api_key is non-empty.
+    glmocr_api_key: str = ""
+    glmocr_base_url: str = Field(
+        default="https://open.bigmodel.cn/api/paas/v4/layout_parsing",
+        description="GLM-OCR layout_parsing endpoint (overridable for proxies).",
+    )
+    glmocr_model: str = Field(
+        default="glm-ocr",
+        description="GLM-OCR model identifier sent in the layout_parsing body.",
+    )
+
 
 class MoldetConfig(BaseModel):
     """Molecule detection (MolDetv2 + MolParser-Mobile) settings."""
@@ -143,10 +155,13 @@ class IngestConfig(BaseModel):
     stage_timeout_seconds: dict[str, int] = Field(default_factory=dict)
     max_retries: int = 1
     max_concurrency: int = Field(
-        default=1,
+        default=4,
         ge=1,
         le=8,
-        description="同时运行的 pipeline 任务数(每库)。GPU 阶段默认串行,可调增并行窗口。",
+        description=(
+            "同时运行的 pipeline 任务数(每库)。Extract ∥ Detection 作为两个独立队列节点"
+            "需要 >= 2 才能并行，故默认 4；GPU 阶段仍由 gpu_gate 串行保护。"
+        ),
     )
 
 

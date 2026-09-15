@@ -30,14 +30,16 @@ from typing import Any
 from mbforge.utils.logger import get_logger
 
 from .base import OCRBackend, OCRResult
+from .glmocr import GLMOCRBackend
 from .ocr_local import LocalPaddleOCRBackend
 from .paddleocr import PaddleOCRBackend
 
 logger = get_logger(__name__)
 
-# Cloud first, optional local PaddleOCR fallback second. The local backend
-# participates only when a ``paddleocr_local_host`` is configured (opt-in).
-DEFAULT_PRIORITY: tuple[str, ...] = ("paddleocr", "paddleocr_local")
+# Cloud first, optional local PaddleOCR fallback last. The local backend
+# participates only when a ``paddleocr_local_host`` is configured (opt-in);
+# GLM-OCR participates only when ``glmocr_api_key`` is set (opt-in).
+DEFAULT_PRIORITY: tuple[str, ...] = ("paddleocr", "glmocr", "paddleocr_local")
 
 
 class OCRUnavailableError(RuntimeError):
@@ -90,9 +92,15 @@ def build_backends(ocr_config: dict | Any | None) -> list[OCRBackend]:
         "host": cfg.get("paddleocr_local_host", ""),
         "model": cfg.get("paddleocr_local_model", ""),
     }
+    glm_cfg = {
+        "api_key": cfg.get("glmocr_api_key", ""),
+        "host": cfg.get("glmocr_base_url", ""),
+        "model": cfg.get("glmocr_model", "glm-ocr"),
+    }
 
     candidates = {
         "paddleocr": lambda: PaddleOCRBackend(paddle_cfg),
+        "glmocr": lambda: GLMOCRBackend(glm_cfg),
         "paddleocr_local": lambda: LocalPaddleOCRBackend(local_cfg),
     }
     backends: list[OCRBackend] = []

@@ -23,13 +23,14 @@ def test_build_backends_has_no_cloud_backend_without_keys() -> None:
 def test_priority_config_reorders_and_completes_default_chain() -> None:
     """Configured providers come first; omitted providers retain fallback order.
 
-    ``paddleocr_local`` is an opt-in default: it is nominally part of the chain
-    (so setting ``paddleocr_local_host`` enables it without editing ``priority``),
-    but ``build_backends`` drops it unless its host is configured — see
-    ``test_build_backends_has_no_cloud_backend_without_keys``.
+    ``paddleocr_local`` and ``glmocr`` are opt-in defaults: they are nominally
+    part of the chain (so setting their host/api_key enables them without
+    editing ``priority``), but ``build_backends`` drops them unless configured —
+    see ``test_build_backends_has_no_cloud_backend_without_keys``.
     """
     assert _priority_from_config({"priority": ["paddleocr", "unknown"]}) == [
         "paddleocr",
+        "glmocr",
         "paddleocr_local",
     ]
 
