@@ -6,14 +6,14 @@ import sqlite3
 import time
 from pathlib import Path
 
-from ...utils.logger import get_logger
-from ..detection.normalization import NormalizedMolecule
-from ..labels import (
+from mbforge.core.molecule import Molecule
+from mbforge.pipeline.labels import (
     _EXPLICIT_COMPOUND_LABEL_RE,
     _explicit_compound_labels,
     _label_token,
 )
-from ..markdown.markers import _ESMILES_BLOCK_RE, _HEADING_RE
+from mbforge.pipeline.markdown.markers import _ESMILES_BLOCK_RE, _HEADING_RE
+from mbforge.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -93,7 +93,7 @@ def _find_esmiles_in_text(
 
 
 def enrich_molecule_contexts_from_markdown(
-    md_path: str, molecules: list[NormalizedMolecule], *, window: int = 300
+    md_path: str, molecules: list[Molecule], *, window: int = 300
 ) -> int:
     md_text = Path(md_path).read_text(encoding="utf-8")
     blocks = list(_ESMILES_BLOCK_RE.finditer(md_text))
@@ -148,13 +148,13 @@ def enrich_molecule_contexts_from_markdown(
 
 def register_molecules_from_text(
     fine_md_path: str,
-    molecules: list[NormalizedMolecule],
+    molecules: list[Molecule],
     doc_id: str,
     library_root: str,
     *,
     conn: sqlite3.Connection | None = None,
 ) -> None:
-    from ...storage.sqlite.database import DatabaseManager
+    from mbforge.storage.sqlite.database import DatabaseManager
 
     md_text = Path(fine_md_path).read_text(encoding="utf-8")
 
@@ -270,7 +270,7 @@ def register_molecules_from_text(
 
 async def register_molecules_from_text_async(
     fine_md_path: str,
-    molecules: list[NormalizedMolecule],
+    molecules: list[Molecule],
     doc_id: str,
     library_root: str,
     *,

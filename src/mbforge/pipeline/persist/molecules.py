@@ -1,4 +1,4 @@
-"""Persist normalized molecule candidates to the database.
+"""Persist canonical molecule candidates to the database.
 
 For each candidate (a single canonical SMILES, possibly with multiple
 detections), the persist step:
@@ -22,15 +22,15 @@ import sqlite3
 from contextlib import nullcontext
 from typing import Any
 
-from ...storage.sqlite.database import DatabaseManager
-from ...utils.logger import get_logger
-from ..activity.matching import (
+from mbforge.core.molecule import Molecule
+from mbforge.pipeline.activity.matching import (
     ACTIVITY_PAGE_FALLBACK,
     ActivityMatch,
     match_activities,
 )
-from ..activity.normalization import canonical_value_for_legacy
-from ..detection.normalization import NormalizedMolecule
+from mbforge.pipeline.activity.normalization import canonical_value_for_legacy
+from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -100,7 +100,7 @@ def _clean_contexts(texts: Any, *, exclude: set[str] | None = None) -> list[str]
     return cleaned
 
 
-def _candidate_context_text(candidate: NormalizedMolecule) -> str:
+def _candidate_context_text(candidate: Molecule) -> str:
     properties = getattr(candidate, "properties", {})
     if not isinstance(properties, dict):
         return ""
@@ -119,7 +119,7 @@ def _candidate_context_text(candidate: NormalizedMolecule) -> str:
 def persist_molecule_candidates(
     library_root: str,
     doc_id: str,
-    candidates: list[NormalizedMolecule],
+    candidates: list[Molecule],
     conn: sqlite3.Connection | None = None,
     activity_records: list[Any] | None = None,
     activity_guard: Any | None = None,
@@ -130,7 +130,7 @@ def persist_molecule_candidates(
     Args:
         library_root: Project root directory.
         doc_id: Source document ID.
-        candidates: Normalized molecule candidates produced by
+        candidates: Molecule candidates produced by
             :mod:`mbforge.pipeline.detection.normalization`.
         conn: Optional open molecules DB connection. When provided, writes are
             performed on this connection and the caller is responsible for
@@ -364,10 +364,10 @@ def persist_molecule_candidates(
 
 def filter_persistable_candidates(
     doc_id: str,
-    candidates: list[NormalizedMolecule],
+    candidates: list[Molecule],
     *,
     warn: bool = True,
-) -> list[NormalizedMolecule]:
+) -> list[Molecule]:
     """Apply the persist loop's skip rules, preserving candidate order.
 
     Filtering before matching keeps the shared activity matcher from
@@ -380,7 +380,7 @@ def filter_persistable_candidates(
     there — skipped candidates are the normal case for a read, not a
     persistence anomaly worth logging.
     """
-    persistable: list[NormalizedMolecule] = []
+    persistable: list[Molecule] = []
     for c in candidates:
         if c.status == "rejected":
             continue
@@ -392,7 +392,9 @@ def filter_persistable_candidates(
             # This function is also used directly by a few integrations;
             # do not let an unclassified candidate bypass the Markush
             # boundary merely because PersistStage was skipped.
-            from ..detection.structure_role import classify_structure_role
+            from mbforge.pipeline.detection.structure_role import (
+                classify_structure_role,
+            )
 
             role = classify_structure_role(c)
         if role != "complete":

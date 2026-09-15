@@ -27,9 +27,9 @@ from contextlib import suppress
 from typing import Any
 
 from ...core.evidence import SourceEvidence
-from ...pipeline.detection.types import NormalizedMolecule
-from ...pipeline.extract_text import ExtractedDocument
-from ...pipeline.stage_artifacts import load_detections, load_extracted
+from ...core.molecule import Molecule
+from ...pipeline.artifacts.hydration import load_detections, load_extracted
+from ...pipeline.extract.text import ExtractedDocument
 from .source_evidence import list_evidence
 
 # Evidence kinds that render as layout blocks; OCR labels are page text too.
@@ -38,7 +38,7 @@ _TEXT_KINDS = frozenset({"text_span", "table_span", "ocr_label"})
 
 def load_document_bboxes(
     library_root: str, doc_id: str
-) -> tuple[ExtractedDocument | None, list[NormalizedMolecule] | None]:
+) -> tuple[ExtractedDocument | None, list[Molecule] | None]:
     """Artifact-side reader for the molecule reverse lookup (a click on a box).
 
     Unlike the overlay readers below this one restores the Detection branch;

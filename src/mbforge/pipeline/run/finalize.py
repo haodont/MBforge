@@ -13,9 +13,9 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
-from ...utils.logger import get_logger
-from ..stage_checkpoint import collect_all_summaries
-from .state import RunContext
+from mbforge.pipeline.run.checkpoint import collect_all_summaries
+from mbforge.pipeline.run.context import RunContext
+from mbforge.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from .events import PipelineEventSink
@@ -35,29 +35,29 @@ class Finalizer:
         self,
         sink: PipelineEventSink,
         completed_stage: str | None,
-        next_stage: str | None,
     ) -> None:
-        """Close out one invocation: clear temp, set duration, emit result event."""
+        """Close out one node invocation: clear temp, set duration, emit event.
+
+        Completion of the *document* is not decided here — the worker marks
+        the node done and publishes only once every node of the run is done.
+        """
         ctx = self.ctx
-        if next_stage is None:
-            # All stages complete across one or more invocations. NOTE: promotion
-            # is NOT done here — the worker writes the merged report first
-            # (reading checkpoint files from the staging dir), then promotes.
-            for temp_path in (ctx.rough_md_path,):
-                if temp_path is None:
-                    continue
-                with contextlib.suppress(Exception):
-                    temp_path.unlink(missing_ok=True)
+        # ``rough_md_path`` is a staging temp for the Markdown stage; drop it
+        # once the stage returns (the canonical artifact is already written).
+        for temp_path in (ctx.rough_md_path,):
+            if temp_path is None:
+                continue
+            with contextlib.suppress(Exception):
+                temp_path.unlink(missing_ok=True)
 
         ctx.duration_ms = self.run.elapsed_ms()
         timing_summary = " | ".join(
             f"{k}={v}ms" for k, v in self.run.stage_timings.items()
         )
         sink.emit(
-            "complete" if next_stage is None else "info",
+            "info",
             f"Stage {completed_stage} done in {ctx.duration_ms}ms"
-            + (f" [{timing_summary}]" if timing_summary else "")
-            + (f" — next: {next_stage}" if next_stage else " — pipeline complete"),
+            + (f" [{timing_summary}]" if timing_summary else ""),
             stage="pipeline",
         )
 
@@ -65,7 +65,7 @@ class Finalizer:
         """Remove this run's uncommitted artifacts only when nothing succeeded."""
         summaries = collect_all_summaries(self.run.staging_dir)
         if not any(item.get("status") == "success" for item in summaries.values()):
-            from ..run_artifacts import cleanup_staging
+            from mbforge.pipeline.artifacts.staging import cleanup_staging
 
             cleanup_staging(
                 self.run.staging_dir, self.run.library_root, self.ctx.doc_id

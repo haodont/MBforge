@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...core.entities.molecule import Molecule
+from ...core.molecule import Molecule
 from ...models.chem import (
     CanonicalizeResponse,
     FingerprintResponse,
@@ -104,13 +104,14 @@ def properties_sync(smiles: str) -> PropertiesResponse:
 
 
 def canonicalize_sync(smiles: str) -> CanonicalizeResponse:
-    try:
-        from rdkit import Chem
+    """Canonicalize a SMILES string (HTTP-facing helper)."""
+    from ...core.molecule import canonicalize_smiles
 
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
+    try:
+        result = canonicalize_smiles(smiles)
+        if result is None:
             return CanonicalizeResponse(success=False, error="invalid SMILES")
-        return CanonicalizeResponse(success=True, result=Chem.MolToSmiles(mol))
+        return CanonicalizeResponse(success=True, result=result)
     except Exception as e:
         return CanonicalizeResponse(success=False, error=str(e))
 
@@ -136,7 +137,7 @@ def draw_smiles_sync(smiles: str, width: int, height: int):
 
 def markush_parse_sync(smiles: str) -> dict:
     """Parse a Markush SMILES into the core + explicit attachment sites."""
-    from ...core.markush.parser import parse_markush, parse_response
+    from ...core.markush import parse_markush, parse_response
 
     parsed = parse_markush(smiles)
     return parse_response(parsed)
@@ -144,8 +145,7 @@ def markush_parse_sync(smiles: str) -> dict:
 
 def markush_check_sync(esmiles: str, query: str) -> dict:
     """Check whether *query* falls within a Markush pattern's scope."""
-    from ...core.markush.coverage import check_markush_coverage, check_response
-    from ...core.markush.parser import parse_markush
+    from ...core.markush import check_markush_coverage, check_response, parse_markush
 
     parsed = parse_markush(esmiles)
     match_level, site_results, details, ratio = check_markush_coverage(parsed, query)

@@ -1,6 +1,6 @@
 """On-disk registry of MBForge processes for a library root.
 
-Each running process writes a JSON record under ``{root}/.mbforge/procs/`` so
+Each running process writes a JSON record at ``{root}/.mbforge/proc-{pid}.json`` so
 that other processes can enumerate live instances, detect orphans, and report
 who holds the queue lock.
 """
@@ -82,7 +82,7 @@ class ProcessRegistry:
 
     def __init__(self, library_root: str) -> None:
         self._root = LibraryLayout(library_root).library_root
-        self._procs_dir = self._root / ".mbforge" / "procs"
+        self._registry_dir = self._root / ".mbforge"
         self._identity: ProcessIdentity | None = None
         self._atexit_registered = False
 
@@ -97,8 +97,8 @@ class ProcessRegistry:
 
     @property
     def registry_dir(self) -> Path:
-        self._procs_dir.mkdir(parents=True, exist_ok=True)
-        return self._procs_dir
+        self._registry_dir.mkdir(parents=True, exist_ok=True)
+        return self._registry_dir
 
     def register(self, role: str, port: int | None = None) -> ProcessIdentity:
         """Register this process and write its identity file.
@@ -146,11 +146,9 @@ class ProcessRegistry:
     def sweep_stale(self) -> list[ProcessIdentity]:
         """Delete records whose pid is no longer alive and return them."""
         stale: list[ProcessIdentity] = []
-        if not self._procs_dir.is_dir():
+        if not self._registry_dir.is_dir():
             return stale
-        for entry in self._procs_dir.iterdir():
-            if entry.suffix != ".json":
-                continue
+        for entry in self._procs_entries():
             try:
                 identity = self._read_entry(entry)
             except (OSError, ValueError):
@@ -164,11 +162,9 @@ class ProcessRegistry:
     def all_identities(self) -> list[ProcessIdentity]:
         """Return all currently registered identities (may include dead ones)."""
         result: list[ProcessIdentity] = []
-        if not self._procs_dir.is_dir():
+        if not self._registry_dir.is_dir():
             return result
-        for entry in self._procs_dir.iterdir():
-            if entry.suffix != ".json":
-                continue
+        for entry in self._procs_entries():
             try:
                 result.append(self._read_entry(entry))
             except (OSError, ValueError):
@@ -187,11 +183,21 @@ class ProcessRegistry:
 
     # -- Internal -----------------------------------------------------------
 
+    def _procs_entries(self) -> list[Path]:
+        """Return the ``proc-*.json`` identity records in the registry dir."""
+        if not self._registry_dir.is_dir():
+            return []
+        return [
+            entry
+            for entry in self._registry_dir.iterdir()
+            if entry.suffix == ".json" and entry.name.startswith("proc-")
+        ]
+
     def _identity_file(self, pid: int) -> Path:
-        return self._procs_dir / f"{pid}.json"
+        return self._registry_dir / f"proc-{pid}.json"
 
     def _write_identity(self, identity: ProcessIdentity) -> None:
-        self._procs_dir.mkdir(parents=True, exist_ok=True)
+        self._registry_dir.mkdir(parents=True, exist_ok=True)
         path = self._identity_file(identity.pid)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(asdict(identity)), encoding="utf-8")

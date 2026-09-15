@@ -36,7 +36,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ...utils.logger import get_logger
+from mbforge.utils.logger import get_logger
+
 from .normalization import normalize_reference_label
 
 logger = get_logger(__name__)

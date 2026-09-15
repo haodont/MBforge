@@ -30,7 +30,7 @@ from ...models.readiness import (
     OCRReadiness,
     ReadinessSummaryResponse,
 )
-from ...storage.layout import LibraryLayout, probe_library_root
+from ...storage.layout import probe_library_root
 from ...storage.sqlite.database import DatabaseManager
 from ...utils.config import AppConfig, load_global_config
 from ...utils.logger import get_logger
@@ -220,11 +220,10 @@ def _write_demo_pdf(library_root: str) -> tuple[Path, str]:
     Returns ``(pdf_path, doc_id)`` so the caller can enqueue the
     registered document through the standard ingest path.
     """
-    import pymupdf
+    import tempfile
 
-    layout = LibraryLayout(library_root)
-    layout.incoming_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = layout.incoming_dir / "mbforge-readiness-demo.pdf"
+    import pymupdf
+    pdf_path = Path(tempfile.gettempdir()) / "mbforge-readiness-demo.pdf"
     doc = pymupdf.open()
     try:
         for i in range(2):
@@ -277,9 +276,9 @@ async def demo_run() -> DemoRunResponse:
         file_path = str(pdf_path)
         from ..pipeline.ingest import enqueue as ingest_enqueue
 
-        task_id = await ingest_enqueue(root, doc_id)
+        run_id = await ingest_enqueue(root, doc_id)
         return DemoRunResponse(
-            ok=True, task_id=task_id, file_path=file_path, doc_id=doc_id
+            ok=True, run_id=run_id, file_path=file_path, doc_id=doc_id
         )
     except Exception as exc:  # noqa: BLE001 — report failure, never raise
         logger.warning("readiness: demo run failed: %s", exc)

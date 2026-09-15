@@ -8,12 +8,11 @@ import os
 import tempfile
 from pathlib import Path
 
-from ...core.stage import register
-from ...storage.layout import LibraryLayout
-from ...utils.logger import get_logger
-from ..context import PipelineContext
-from ..markdown.esmiles_insert import _HEADING_PATTERNS
-from ..stage_result import PipelineErrorCode, StageResult
+from mbforge.core.stage import PipelineErrorCode, StageResult, register
+from mbforge.pipeline.markdown.esmiles_insert import _HEADING_PATTERNS
+from mbforge.pipeline.run.context import PipelineContext
+from mbforge.storage.layout import LibraryLayout
+from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.stages.markdown")
 
@@ -62,7 +61,7 @@ def write_rough_markdown(
     Path(output_path).write_text("\n".join(lines), encoding="utf-8")
 
 
-@register(after="detection")
+@register(after="join")
 class MarkdownStage:
     name = "markdown"
 
@@ -76,7 +75,7 @@ class MarkdownStage:
             ctx.rough_md_path: Path
             ``storage/{doc_id}/document.md``
         """
-        from ..stage_artifacts import hydrate_context_from_artifacts
+        from mbforge.pipeline.artifacts.hydration import hydrate_context_from_artifacts
 
         try:
             hydrate_context_from_artifacts(ctx)
@@ -112,7 +111,7 @@ class MarkdownStage:
             ctx.extracted.pages, str(ctx.rough_md_path), images_dir=images_dir
         )
 
-        from ..markdown.esmiles_insert import insert_esmiles_blocks
+        from mbforge.pipeline.markdown.esmiles_insert import insert_esmiles_blocks
 
         document_md_path = layout.document_md(ctx.doc_id)
         insert_esmiles_blocks(

@@ -15,8 +15,8 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ...core.patent import compound_label_key
-from ...utils.logger import get_logger
+from mbforge.core.patent import compound_label_key
+from mbforge.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

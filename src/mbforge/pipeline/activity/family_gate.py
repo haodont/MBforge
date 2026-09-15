@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from ...utils.logger import get_logger
+from mbforge.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

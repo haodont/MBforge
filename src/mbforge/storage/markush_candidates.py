@@ -9,7 +9,7 @@ The re-import protection rule: same ``source_key`` + same
 ``source_key`` + different ``content_hash`` supersedes the prior row
 and inserts a new ``pending`` row; new ``source_key`` inserts a new
 ``pending`` row. Identity derivation lives in
-:mod:`mbforge.core.markush.provenance`.
+:mod:`mbforge.core.provenance`.
 
 The pipeline runs this service inside the same transaction it uses for
 the other Markush writes so a single document persist either fully
@@ -23,8 +23,8 @@ import sqlite3
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
-from ..core.entities.molecule import MarkushFragment, MarkushScaffold
-from ..core.markush.provenance import (
+from ..core.molecule import MarkushFragment, MarkushScaffold
+from ..core.provenance import (
     _RECOGNITION_VERSION,
     _candidate_properties,
     _join_context_text,
@@ -35,7 +35,7 @@ from ..utils.ids import short_id
 from ..utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from ..core.detection.types import NormalizedMolecule
+    from ..core.molecule import Molecule
 
 logger = get_logger("mbforge.storage.markush_candidates")
 
@@ -65,7 +65,7 @@ def _insert_candidate(
     source_key: str,
     doc_id: str,
     predicted_role: str,
-    molecule: NormalizedMolecule,
+    molecule: Molecule,
     label: str,
     content_hash: str,
 ) -> None:
@@ -122,7 +122,7 @@ def _append_evidence(
     *,
     candidate_id: str,
     doc_id: str,
-    molecule: NormalizedMolecule,
+    molecule: Molecule,
 ) -> None:
     """Append one ``markush_evidence`` row per detection."""
     context_text = _join_context_text(molecule)
@@ -185,7 +185,7 @@ def _record_decision(
 
 def persist_review_candidates(
     doc_id: str,
-    candidates: Iterable[NormalizedMolecule],
+    candidates: Iterable[Molecule],
     conn: sqlite3.Connection,
     recognition_version: int = _RECOGNITION_VERSION,
 ) -> int:

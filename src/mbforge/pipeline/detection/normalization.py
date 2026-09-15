@@ -1,14 +1,11 @@
 """Normalize and deduplicate extracted molecule candidates.
 
 Validates SMILES through RDKit, canonicalizes valid structures, and merges
-duplicate detections into ``NormalizedMolecule`` records consumed by the
+duplicate detections into ``Molecule`` records consumed by the
 persistence and Markush review stages.
 
-The :class:`DetectionSource` and :class:`NormalizedMolecule` dataclasses
-are defined in :mod:`mbforge.pipeline.molecule_types` (the shared contract
-between pipeline and core) and re-exported here so existing
-``from mbforge.pipeline.detection.normalization import NormalizedMolecule`` imports
-keep working unchanged.
+``Molecule`` is the shared molecule entity between the pipeline and core;
+``DetectionSource`` and ``ExtractionResult`` remain raw observation records.
 """
 
 from __future__ import annotations
@@ -17,12 +14,12 @@ from typing import Any, Literal
 
 from rdkit import Chem
 
-from ...utils.logger import get_logger
-from .types import (
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import (
     DetectionSource,
     ExtractionResult,
-    NormalizedMolecule,
 )
+from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.detection.normalization")
 
@@ -226,7 +223,7 @@ def select_molecule_name(
     dictionary or input ordering beyond first-detection order.
 
     Returns a selection record ``{"name", "rule", "confidence"}`` suitable
-    for storing on ``NormalizedMolecule.properties``, or ``None`` when there
+    for storing on ``Molecule.properties``, or ``None`` when there
     are no candidates.
     """
     if not candidates:
@@ -264,7 +261,7 @@ def select_molecule_name(
     }
 
 
-def _merge_detection(existing: NormalizedMolecule, r: ExtractionResult) -> None:
+def _merge_detection(existing: Molecule, r: ExtractionResult) -> None:
     """Append a detection to an existing molecule and keep it sorted."""
     existing.detections.append(_detection_from_result(r))
     existing.detections.sort(key=lambda d: d.confidence, reverse=True)
@@ -277,7 +274,7 @@ def normalize_molecules(
     results: list[ExtractionResult],
     *,
     allowed_elements: set[str] | None = None,
-) -> list[NormalizedMolecule]:
+) -> list[Molecule]:
     """Validate SMILES, canonicalize, and deduplicate candidates.
 
     Valid molecules are keyed by Layer-1 canonical SMILES for normal molecules,
@@ -292,8 +289,8 @@ def normalize_molecules(
             set (e.g. including ``"Fe"``, ``"Pt"``) to accept organometallic
             or inorganic structures.
     """
-    by_canonical: dict[tuple[str, ...], NormalizedMolecule] = {}
-    by_invalid: dict[tuple[str, ...], NormalizedMolecule] = {}
+    by_canonical: dict[tuple[str, ...], Molecule] = {}
+    by_invalid: dict[tuple[str, ...], Molecule] = {}
 
     # Pre-filter only for clearly unusable fragments. We do NOT reject SMILES
     # containing ``*`` here — ``*`` is a valid Markush wildcard atom (used by
@@ -323,7 +320,7 @@ def normalize_molecules(
                 properties: dict[str, Any] = {}
                 _append_context(properties, r.context_text)
                 _append_detection_metadata(properties, r)
-                by_invalid[identity] = NormalizedMolecule(
+                by_invalid[identity] = Molecule(
                     canonical_smiles=raw,
                     esmiles=stored_esmiles,
                     name=r.name,
@@ -349,7 +346,7 @@ def normalize_molecules(
                 properties: dict[str, Any] = {}
                 _append_context(properties, r.context_text)
                 _append_detection_metadata(properties, r)
-                by_invalid[identity] = NormalizedMolecule(
+                by_invalid[identity] = Molecule(
                     canonical_smiles=raw,
                     esmiles=stored_esmiles,
                     name=r.name,
@@ -387,7 +384,7 @@ def normalize_molecules(
                 properties = {}
                 _append_context(properties, r.context_text)
                 _append_detection_metadata(properties, r)
-                by_invalid[identity] = NormalizedMolecule(
+                by_invalid[identity] = Molecule(
                     canonical_smiles=raw,
                     esmiles=stored_esmiles,
                     name=r.name,
@@ -409,7 +406,7 @@ def normalize_molecules(
                 properties = {}
                 _append_context(properties, r.context_text)
                 _append_detection_metadata(properties, r)
-                by_invalid[identity] = NormalizedMolecule(
+                by_invalid[identity] = Molecule(
                     canonical_smiles=raw,
                     esmiles=stored_esmiles,
                     name=r.name,
@@ -433,7 +430,7 @@ def normalize_molecules(
             properties = {}
             _append_context(properties, r.context_text)
             _append_detection_metadata(properties, r)
-            by_canonical[identity] = NormalizedMolecule(
+            by_canonical[identity] = Molecule(
                 canonical_smiles=canonical,
                 esmiles=stored_esmiles,
                 name=r.name,

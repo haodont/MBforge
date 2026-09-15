@@ -15,7 +15,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
-from mbforge.core.evidence import _stable_id
+from mbforge.utils.ids import stable_id
 
 #: What role the entry plays in the document narrative.
 ROLE_EXAMPLE = "example"  # 实施例
@@ -42,13 +42,13 @@ _COMPOUND_PREFIX_RE = re.compile(
 _COMPOUND_BARE_RE = re.compile(rf"^(?P<token>{_COMPOUND_TOKEN})$")
 
 
-def make_entry_id(doc_id: str, section_id: str, label_key: str) -> str:
+def entry_id(doc_id: str, section_id: str, label_key: str) -> str:
     """Deterministic entry ID: doc + type + section + normalized label.
 
     Same (document, section, label) always yields the same ID, so a
     re-run does not duplicate entries (spec §3.5 rule 3).
     """
-    return _stable_id("entry", doc_id, section_id, label_key)
+    return stable_id("entry", doc_id, section_id, label_key)
 
 
 def compound_label_key(value: object) -> str | None:

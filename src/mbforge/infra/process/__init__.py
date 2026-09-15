@@ -1,7 +1,8 @@
 """Process governance sub-package.
 
-Re-exports lock primitives so existing ``services/worker.py`` callers can
-import from either location without breaking.
+Public surface for the background task gateway (``tasks``), the GPU inference
+gate (``gpu_gate``), and the process governance primitives (locks, identity,
+discovery, reaping, ordered shutdown).
 """
 
 from .discovery import (
@@ -12,7 +13,6 @@ from .discovery import (
     is_mbforge_process,
     port_listeners,
 )
-from .executors import drain_executors, gpu_gate, ocr_executor, pipeline_executor
 from .filelock import (
     LockHolder,
     LockMeta,
@@ -25,6 +25,7 @@ from .filelock import (
 from .identity import ProcessIdentity, ProcessRegistry, pid_alive
 from .reaper import OrphanCandidate, ReapResult, find_orphans, reap
 from .shutdown import orchestrate_shutdown
+from .tasks import TaskHandle, TaskManager, TaskPool, gpu_gate, tasks
 
 __all__ = [
     "LockHolder",
@@ -35,20 +36,21 @@ __all__ = [
     "ProcessIdentity",
     "ProcessRegistry",
     "ReapResult",
+    "TaskHandle",
+    "TaskManager",
+    "TaskPool",
     "ancestor_pids",
-    "drain_executors",
     "enumerate_processes",
     "find_orphans",
     "gpu_gate",
     "is_mbforge_process",
-    "ocr_executor",
     "orchestrate_shutdown",
     "pid_alive",
-    "pipeline_executor",
     "port_listeners",
     "queue_lock_path",
     "read_lock_holder",
     "reap",
+    "tasks",
     "try_lock_existing",
     "try_lock_file",
     "unlock_file",

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from mbforge.core.evidence import _stable_id
+from mbforge.utils.ids import stable_id
 
 #: Linking lifecycle values (strings — round-trip through JSON).
 LINK_PENDING = "pending"
@@ -21,12 +21,12 @@ LINK_LINKED = "linked"
 LINK_FAILED = "failed"
 
 
-def make_assay_method_id(doc_id: str, section_id: str) -> str:
+def assay_method_id(doc_id: str, section_id: str) -> str:
     """Deterministic assay-method ID: doc + type + owning section."""
-    return _stable_id("assay", doc_id, section_id)
+    return stable_id("assay", doc_id, section_id)
 
 
-def make_measurement_id(
+def measurement_id(
     doc_id: str, page: int | None, metric: str, raw_value: str, row_label: str
 ) -> str:
     """Deterministic measurement ID from doc + evidence position + value.
@@ -34,7 +34,7 @@ def make_measurement_id(
     Includes the raw value text so two different numbers in the same
     cell/row never collide; re-runs reproduce the same ID (spec §3.5.3).
     """
-    return _stable_id(
+    return stable_id(
         "measurement", doc_id, str(page or ""), metric, raw_value, row_label
     )
 

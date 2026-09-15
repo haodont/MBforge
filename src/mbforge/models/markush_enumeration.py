@@ -1,6 +1,6 @@
 """Pydantic models for the Markush enumeration API.
 
-Wire-format mirror of the types in :mod:`mbforge.core.markush.enumeration`.
+Wire-format mirror of the types in :mod:`mbforge.core.enumeration`.
 """
 
 from __future__ import annotations

@@ -60,5 +60,5 @@ async def doc_reingest(body: DocumentReingestRequest) -> DocumentReingestRespons
     if doc is None:
         raise NotFoundError("document not found", detail=f"doc_id={body.doc_id}")
     store.clear_pipeline_data(body.doc_id)
-    task_id = await ingest_enqueue(str(root), body.doc_id)
-    return DocumentReingestResponse(task_id=task_id)
+    run_id = await ingest_enqueue(str(root), body.doc_id)
+    return DocumentReingestResponse(run_id=run_id)

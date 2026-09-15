@@ -1,10 +1,9 @@
-"""SequentialStageRunner — resume/skip-aware one-stage execution loop.
+"""StageRunner — executes exactly one stage (one queue node).
 
-The runner executes **one** stage per invocation; the queue worker reads
-``PipelineResult.next_stage`` to decide whether to re-queue. This module
-encapsulates the old ``for stage_executor in active_stages: ... break`` loop:
-skip stages already completed (``resume_from_stage``), journalize the running /
-success / error stage summaries, and return the completed stage name.
+The execution DAG lives in the queue (``ingest_stage_deps``): each node is
+admitted independently by :mod:`mbforge.infra.ingest.worker` and calls the
+runner with a single stage name. This module runs that stage, journals its
+running/success/error summary, and returns the completed stage name.
 """
 
 from __future__ import annotations
@@ -12,10 +11,14 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from ...utils.logger import get_logger
-from ..cancellation import PIPELINE_CANCELLED, TaskCancelledError, default_registry
-from ..stage_checkpoint import STAGE_ORDER, save_stage_summary
-from .state import RunContext
+from mbforge.pipeline.cancellation import (
+    PIPELINE_CANCELLED,
+    TaskCancelledError,
+    default_registry,
+)
+from mbforge.pipeline.run.checkpoint import save_stage_summary
+from mbforge.pipeline.run.context import RunContext
+from mbforge.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from .events import PipelineEventSink
@@ -23,8 +26,8 @@ if TYPE_CHECKING:
 logger = get_logger("mbforge.pipeline.runner")
 
 
-class SequentialStageRunner:
-    """Drives one sequential stage for the current invocation."""
+class StageRunner:
+    """Drives the single stage named by the claimed queue node."""
 
     def __init__(
         self,
@@ -37,87 +40,78 @@ class SequentialStageRunner:
         assert self.ctx is not None
         self.sink = sink
         self.active_stages = active_stages
-        self.resume_from_stage = run.resume_from_stage
 
-    def run_one(self) -> str | None:
-        """Run exactly one pending stage; return the completed stage name."""
-        ctx = self.ctx
-        # A resumed invocation skips stages up to and including the last
-        # completed one recorded on the queue row.
-        skip_until = self.resume_from_stage
-        if skip_until is not None and skip_until not in STAGE_ORDER:
-            logger.warning(
-                "Invalid resume_from_stage=%r (not in %s), starting from beginning",
-                skip_until,
-                STAGE_ORDER,
-            )
-            skip_until = None
-
-        completed_stage: str | None = self.resume_from_stage
+    def _stage(self, name: str) -> Any:
         for stage_executor in self.active_stages:
-            # Stable stage name: must match STAGE_ORDER entries and the stage
-            # reported in the StageResult (checkpoint consistency).
-            stage_name = stage_executor.name
+            if stage_executor.name == name:
+                return stage_executor
+        raise ValueError(f"stage {name!r} is not in the effective composition")
 
-            if skip_until is not None:
-                if stage_name == skip_until or (
-                    stage_name in STAGE_ORDER[: STAGE_ORDER.index(skip_until) + 1]
-                ):
-                    logger.debug("Skipping completed stage: %s", stage_name)
-                    continue
-                skip_until = None  # past the skip zone, run from here
+    def run_stage(self, stage_name: str) -> str:
+        """Execute one stage; return the completed stage name.
 
-            if default_registry.is_cancelled(self.run.task_id):
-                self.sink.emit(
-                    "cancelled",
-                    "Pipeline cancelled by user",
-                    stage="pipeline",
-                    error_code=PIPELINE_CANCELLED,
-                )
-                raise TaskCancelledError(self.run.task_id)
+        Named ``run_stage`` (not ``run``) because ``self.run`` holds the
+        RunContext and would shadow the method.
+        """
+        stage_executor = self._stage(stage_name)
+        ctx = self.ctx
 
-            try:
-                save_stage_summary(self.run.staging_dir, stage_name, status="running")
-                started = time.perf_counter()
-                result = stage_executor.execute(ctx)
-                result.elapsed_ms = round((time.perf_counter() - started) * 1000)
-                checkpoint_name = result.stage
-                self.run.stage_timings[checkpoint_name] = result.elapsed_ms
+        if default_registry.is_cancelled(self.run.task_id):
+            self.sink.emit(
+                "cancelled",
+                "Pipeline cancelled by user",
+                stage="pipeline",
+                error_code=PIPELINE_CANCELLED,
+            )
+            raise TaskCancelledError(self.run.task_id)
 
-                self.sink.emit_stage_result(result)
+        recorded = False
+        try:
+            save_stage_summary(self.run.staging_dir, stage_name, status="running")
+            started = time.perf_counter()
+            result = stage_executor.execute(ctx)
+            result.elapsed_ms = round((time.perf_counter() - started) * 1000)
+            checkpoint_name = result.stage
+            self.run.stage_timings[checkpoint_name] = result.elapsed_ms
 
-                if result.status == "error" and not result.recoverable:
-                    save_stage_summary(
-                        self.run.staging_dir,
-                        checkpoint_name,
-                        status="error",
-                        elapsed_ms=result.elapsed_ms,
-                        message=result.message,
-                        context=result.context,
-                        error_code=result.error_code,
-                        run_id=self.run.run_id,
-                    )
-                    raise RuntimeError(f"{stage_name} failed: {result.message}")
+            self.sink.emit_stage_result(result)
 
+            if result.status == "error" and not result.recoverable:
                 save_stage_summary(
                     self.run.staging_dir,
                     checkpoint_name,
-                    status="success",
+                    status="error",
                     elapsed_ms=result.elapsed_ms,
                     message=result.message,
                     context=result.context,
+                    error_code=result.error_code,
                     run_id=self.run.run_id,
                 )
-                completed_stage = stage_name
-            except TaskCancelledError:
-                self.sink.emit(
-                    "cancelled",
-                    "Pipeline cancelled by user",
-                    stage=stage_name,
-                    error_code=PIPELINE_CANCELLED,
-                )
-                raise
-            except Exception as exc:
+                # The stage's own error summary (with its error_code) is the
+                # authoritative record; the handler below must not clobber it.
+                recorded = True
+                raise RuntimeError(f"{stage_name} failed: {result.message}")
+
+            save_stage_summary(
+                self.run.staging_dir,
+                checkpoint_name,
+                status="success",
+                elapsed_ms=result.elapsed_ms,
+                message=result.message,
+                context=result.context,
+                run_id=self.run.run_id,
+            )
+            return stage_name
+        except TaskCancelledError:
+            self.sink.emit(
+                "cancelled",
+                "Pipeline cancelled by user",
+                stage=stage_name,
+                error_code=PIPELINE_CANCELLED,
+            )
+            raise
+        except Exception as exc:
+            if not recorded:
                 save_stage_summary(
                     self.run.staging_dir,
                     stage_name,
@@ -125,14 +119,8 @@ class SequentialStageRunner:
                     message=str(exc),
                     run_id=self.run.run_id,
                 )
-                self.sink.emit(stage_name, f"Exception: {exc}", error=str(exc))
-                raise
-
-            # One stage per invocation — stop here and let the worker decide
-            # whether to re-queue or finalize.
-            break
-
-        return completed_stage
+            self.sink.emit(stage_name, f"Exception: {exc}", error=str(exc))
+            raise
 
 
-__all__ = ["SequentialStageRunner"]
+__all__ = ["StageRunner"]

@@ -13,8 +13,8 @@ from collections.abc import Iterable
 
 from rdkit import Chem, RDLogger
 
-from ...utils.logger import get_logger
-from .normalization import NormalizedMolecule
+from mbforge.core.molecule import Molecule
+from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.detection.structure_role")
 
@@ -156,7 +156,7 @@ _DUMMY_REASONS = {
 }
 
 
-def _context_values(molecule: NormalizedMolecule) -> list[str]:
+def _context_values(molecule: Molecule) -> list[str]:
     """Collect bounded, human-readable context used for role classification."""
     values: list[str] = []
     if molecule.name:
@@ -179,7 +179,7 @@ def _context_values(molecule: NormalizedMolecule) -> list[str]:
     return [value[:1000] for value in values if value.strip()]
 
 
-def _label_values(molecule: NormalizedMolecule) -> list[str]:
+def _label_values(molecule: Molecule) -> list[str]:
     """Collect candidate labels without scanning broad prose contexts."""
     values: list[str] = []
     if molecule.name:
@@ -269,7 +269,7 @@ def _dummy_counts(smiles: str) -> tuple[bool, int, int] | None:
     return dummy_count > 0, dummy_count, parsed.GetNumHeavyAtoms()
 
 
-def classify_structure_role(molecule: NormalizedMolecule) -> str:
+def classify_structure_role(molecule: Molecule) -> str:
     """Classify a candidate and store the result in its properties.
 
     Rejected candidates remain rejected; callers decide whether to persist them.

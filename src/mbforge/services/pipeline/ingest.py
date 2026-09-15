@@ -20,6 +20,7 @@ import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ...storage.sqlite.database import INGEST_TERMINAL_STATUSES
@@ -38,11 +39,11 @@ __all__ = [
     "enqueue_all_unresolved",
     "fetch_doc_logs",
     "fetch_logs_since",
-    "fetch_task_status",
+    "fetch_run_status",
     "list_tasks",
     "queue_snapshot",
     "retry_batch",
-    "stream_task_events",
+    "stream_run_events",
     "worker_status_payload",
 ]
 
@@ -63,7 +64,7 @@ async def enqueue(library_root: str, doc_id: str) -> str:
     ``pending`` row into ``ingest_queue``, and ensures the queue worker
     is running for *library_root*.
 
-    Returns the newly created ``task_id``.
+    Returns the newly created ``run_id``.
 
     Raises:
         ValidationError: if *doc_id* or *library_root* is empty.
@@ -93,13 +94,19 @@ async def enqueue(library_root: str, doc_id: str) -> str:
         )
 
     from ...infra.ingest import queue as queue_dao
+    from ...pipeline.run.ids import mint_run_id
 
-    task_id = await asyncio.to_thread(
-        queue_dao.insert_pending, library_root, file_path=file_path, doc_id=doc_id
-    )
+    def _register() -> str:
+        run_id = mint_run_id(library_root, doc_id)
+        queue_dao.insert_dag(
+            library_root, file_path=file_path, doc_id=doc_id, run_id=run_id
+        )
+        return run_id
+
+    run_id = await asyncio.to_thread(_register)
     ensure_worker(library_root)
-    logger.info("Enqueued doc %s as task %s", doc_id, task_id)
-    return task_id
+    logger.info("Enqueued doc %s as run %s", doc_id, run_id)
+    return run_id
 
 
 async def enqueue_all_unresolved(library_root: str) -> int:
@@ -110,6 +117,7 @@ async def enqueue_all_unresolved(library_root: str) -> int:
     new rows.
     """
     from ...infra.ingest import queue as queue_dao
+    from ...pipeline.run.ids import mint_run_id
     from ...storage.layout import LibraryLayout
     from ...utils.file_scanner import scan_library_files
 
@@ -121,8 +129,14 @@ async def enqueue_all_unresolved(library_root: str) -> int:
         count = 0
         for rel_path in pdf_files:
             full_path = str(layout.resolve_relative_path(rel_path))
-            if queue_dao.insert_pending_if_absent(library_root, full_path):
-                count += 1
+            doc_id = Path(full_path).stem
+            if queue_dao.doc_queued(library_root, doc_id):
+                continue
+            run_id = mint_run_id(library_root, doc_id)
+            queue_dao.insert_dag(
+                library_root, file_path=full_path, doc_id=doc_id, run_id=run_id
+            )
+            count += 1
         return count
 
     enqueued = await asyncio.to_thread(_enqueue_all)
@@ -141,8 +155,8 @@ def ensure_worker(library_root: str) -> None:
 async def list_tasks(library_root: str) -> list[dict]:
     """Return all ``ingest_queue`` rows, newest first."""
     from ...infra.ingest import queue as queue_dao
-    from ...pipeline.run_artifacts import staging_dir
-    from ...pipeline.stage_checkpoint import load_run_checkpoint
+    from ...pipeline.artifacts.staging import staging_dir
+    from ...pipeline.run.checkpoint import load_run_checkpoint
 
     def _list_with_stage_statuses() -> list[dict]:
         tasks = queue_dao.list_tasks(library_root)
@@ -174,18 +188,18 @@ def queue_snapshot(library_root: str) -> dict:
     return queue_dao.queue_snapshot(library_root)
 
 
-def fetch_task_status(library_root: str, task_id: str) -> str | None:
-    """Return the task's current queue status (or None when it is absent)."""
+def fetch_run_status(library_root: str, run_id: str) -> str | None:
+    """Return the run's aggregated queue status (or None when absent)."""
     from ...infra.ingest import queue as queue_dao
 
-    return queue_dao.fetch_task_status(library_root, task_id)
+    return queue_dao.fetch_run_status(library_root, run_id)
 
 
-def fetch_logs_since(library_root: str, task_id: str, last_seen_id: int) -> list:
-    """Fetch ingest log rows newer than ``last_seen_id`` (blocking)."""
+def fetch_logs_since(library_root: str, run_id: str, last_seen_id: int) -> list:
+    """Fetch ingest log rows for a run newer than ``last_seen_id`` (blocking)."""
     from ...infra.ingest import queue as queue_dao
 
-    return queue_dao.fetch_logs_since(library_root, task_id, last_seen_id)
+    return queue_dao.fetch_logs_since(library_root, run_id, last_seen_id)
 
 
 async def fetch_doc_logs(library_root: str, doc_id: str, limit: int) -> list[dict]:
@@ -197,111 +211,100 @@ async def fetch_doc_logs(library_root: str, doc_id: str, limit: int) -> list[dic
     )
 
 
-async def cancel_batch(library_root: str, task_ids: list[str]) -> BatchActionResult:
-    """Cancel pending/processing tasks and release their cancellation marks."""
+async def cancel_batch(library_root: str, run_ids: list[str]) -> BatchActionResult:
+    """Cancel the runs owning *run_ids* and release their cancellation marks.
+
+    A queue node belongs to a document run, so cancelling cancels the whole
+    run's remaining nodes rather than a single stage.
+    """
     from ...infra.ingest import queue as queue_dao
     from ...infra.ingest import worker
     from ...pipeline.runner import cancel_task, release_task
 
-    updated = await asyncio.to_thread(
-        queue_dao.set_status_cancelled, library_root, task_ids
-    )
-    # Signal the runner to abort running tasks. A task that is not currently
-    # executing in this process (still queued, orphaned, or between runs) can
-    # never hit the runner's terminal-state cleanup, so its cancellation
-    # registry entry is released here; a running task is released by the
-    # runner's own finally block instead.
-    for task_id in task_ids:
-        cancel_task(task_id)
-        if not worker.is_task_active(task_id):
-            release_task(task_id)
-    return BatchActionResult(updated=updated, skipped=len(task_ids) - updated)
+    def _cancel() -> int:
+        total = 0
+        for doc_id in queue_dao.doc_ids_for_runs(library_root, run_ids):
+            total += queue_dao.cancel_doc(library_root, doc_id)
+        return total
 
-
+    updated = await asyncio.to_thread(_cancel) if run_ids else 0
+    # Signal the worker to abort any active node of these runs. Node ids
+    # (not run ids) drive the in-process cancellation registry, so resolve
+    # the runs' node ids here.
+    node_ids = queue_dao.node_ids_for_runs(library_root, run_ids)
+    for node_id in node_ids:
+        cancel_task(node_id)
+        if not worker.is_task_active(node_id):
+            release_task(node_id)
+    return BatchActionResult(updated=updated, skipped=max(0, len(run_ids) - updated))
 async def retry_batch(
     library_root: str,
-    task_ids: list[str],
+    run_ids: list[str],
     resume_from_stage: str | None = None,
 ) -> BatchActionResult:
-    """Reset retryable tasks to ``pending`` and relaunch the worker.
+    """Re-open nodes for retry and relaunch the worker.
 
-    A normal retry targets failed or cancelled tasks.  A caller that explicitly
-    chooses *resume_from_stage* may also restart a completed task from that
-    checkpoint; this is the per-task "rerun from stage" operation exposed by
-    the queue UI.  In either case, active or claimed tasks are never relaunched.
+    A normal retry re-opens failed/cancelled nodes of the given runs (and
+    re-blocks their dependents).  When *resume_from_stage* names a stage,
+    the corresponding node of each run's document is reopened even if it
+    already succeeded — the queue UI's "rerun from stage" operation. Active
+    or claimed nodes are never relaunched.
     """
     from ...infra.ingest import queue as queue_dao
     from ...infra.ingest import worker
-    from ...pipeline import stage_checkpoint
-    from ...pipeline.run_artifacts import staging_dir
+    from ...pipeline.run import checkpoint as stage_checkpoint
     from ...pipeline.runner import release_task
 
-    # Validate resume_from_stage if provided.
     if (
         resume_from_stage is not None
         and resume_from_stage not in stage_checkpoint.STAGE_ORDER
     ):
         return BatchActionResult(
             updated=0,
-            skipped=len(task_ids),
+            skipped=len(run_ids),
             error=(
                 f"Invalid resume_from_stage='{resume_from_stage}'. "
                 f"Must be one of {stage_checkpoint.STAGE_ORDER}"
             ),
         )
 
+    node_ids = queue_dao.node_ids_for_runs(library_root, run_ids)
     retryable_ids = [
-        task_id for task_id in task_ids if not worker.is_task_active(task_id)
+        node_id for node_id in node_ids if not worker.is_task_active(node_id)
     ]
 
-    def _retry() -> list[dict[str, str]]:
-        tasks = {task["id"]: task for task in queue_dao.list_tasks(library_root)}
+    def _retry() -> int:
         if resume_from_stage is None:
-            retry_ids = [
-                task_id
-                for task_id in retryable_ids
-                if tasks.get(task_id, {}).get("status") in {"failed", "cancelled"}
-                and not tasks.get(task_id, {}).get("claimed_by")
-            ]
+            targets = retryable_ids
+            allow_done = False
         else:
-            retry_ids = retryable_ids
-
-        if resume_from_stage in {"extract", "detection"}:
-            for task_id in retry_ids:
-                task = tasks.get(task_id)
-                if (
-                    task
-                    and task.get("status") in {"done", "failed", "cancelled"}
-                    and not task.get("claimed_by")
-                    and task.get("doc_id")
-                ):
-                    task_staging = staging_dir(library_root, task["doc_id"])
-                    stage_checkpoint.reset_stage_for_retry(
-                        task_staging, resume_from_stage
-                    )
-                    stage_checkpoint.reset_stage_for_retry(task_staging, "join")
-        return queue_dao.retry_rows(
-            library_root, retry_ids, resume_from_stage=resume_from_stage
+            rows = queue_dao.list_tasks(library_root)
+            doc_ids = set(queue_dao.doc_ids_for_runs(library_root, run_ids))
+            targets = [
+                row["id"]
+                for row in rows
+                if row.get("doc_id") in doc_ids
+                and row.get("stage") == resume_from_stage
+            ]
+            allow_done = True
+        return sum(
+            1
+            for node_id in targets
+            if queue_dao.reset_node(library_root, node_id, allow_done=allow_done)
         )
 
-    relaunched = await asyncio.to_thread(_retry) if retryable_ids else []
-    for row in relaunched:
-        # Clear any stale cancellation mark before relaunching.
-        release_task(row["id"])
-    if relaunched:
+    updated = await asyncio.to_thread(_retry) if retryable_ids else 0
+    if updated:
+        for node_id in node_ids:
+            # Clear any stale cancellation mark before relaunching.
+            release_task(node_id)
         ensure_worker(library_root)
-    return BatchActionResult(
-        updated=len(relaunched), skipped=len(task_ids) - len(relaunched)
-    )
-
-
-async def delete_task(library_root: str, task_id: str) -> int:
-    """Remove a single task row from the queue. Returns rows deleted."""
+    return BatchActionResult(updated=updated, skipped=max(0, len(run_ids) - updated))
+async def delete_task(library_root: str, run_id: str) -> int:
+    """Remove every queue node of *run_id*. Returns rows deleted."""
     from ...infra.ingest import queue as queue_dao
 
-    return await asyncio.to_thread(queue_dao.delete_task, library_root, task_id)
-
-
+    return await asyncio.to_thread(queue_dao.delete_run, library_root, run_id)
 async def cleanup_done(library_root: str) -> int:
     """Delete all ``done`` tasks from the queue. Returns rows deleted."""
     from ...infra.ingest import queue as queue_dao
@@ -397,13 +400,13 @@ async def worker_status_payload(raw_library_root: str | None) -> dict[str, Any]:
     }
 
 
-async def stream_task_events(
+async def stream_run_events(
     library_root: str,
-    task_id: str,
+    run_id: str,
     *,
     is_disconnected: Callable[[], Awaitable[bool]],
 ) -> AsyncIterator[dict[str, str]]:
-    """Yield SSE frames for one pipeline task's ingest logs.
+    """Yield SSE frames for one pipeline run's ingest logs.
 
     Reads from the ``ingest_logs`` table and yields one frame per log row.
     The stream ends when the task is no longer active and no new rows have
@@ -423,11 +426,11 @@ async def stream_task_events(
             rows = await asyncio.to_thread(
                 fetch_logs_since,
                 root_str,
-                task_id,
+                run_id,
                 last_seen_id,
             )
         except Exception as exc:
-            logger.warning("Failed to read ingest logs for %s: %s", task_id, exc)
+            logger.warning("Failed to read ingest logs for %s: %s", run_id, exc)
             rows = []
 
         if rows:
@@ -447,13 +450,13 @@ async def stream_task_events(
                         payload["data"] = row["data"]
                 yield {"event": row["level"], "data": json.dumps(payload)}
         else:
-            status = await asyncio.to_thread(fetch_task_status, root_str, task_id)
+            status = await asyncio.to_thread(fetch_run_status, root_str, run_id)
             if status in INGEST_TERMINAL_STATUSES:
                 # DB terminal state is authoritative: close promptly even
                 # after a process restart wiped in-memory task state.
                 break
             empty_iterations += 1
-            if not worker.is_task_active(task_id) and empty_iterations > 5:
+            if not worker.is_run_active(run_id) and empty_iterations > 5:
                 # No runner is (or will be) emitting rows for this task:
                 # it is queued but unclaimed, orphaned, or its worker died.
                 break

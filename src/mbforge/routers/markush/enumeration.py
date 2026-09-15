@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ...core.markush.enumeration import (
+from ...core.enumeration import (
     SiteSelection,
 )
-from ...core.markush.enumeration import (
+from ...core.enumeration import (
     preview as core_preview,
 )
 from ...models.markush_enumeration import (

@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import functools
 import shutil
-import uuid
 from pathlib import Path
 
-from ...core.entities.document import Document
+from ...core.document import Document
 from ...storage.document_store import extract_pdf_text, load_document, save_document
 from ...storage.layout import LibraryLayout, sanitize_upload_filename
 from ...utils.errors import MBForgeError, NotFoundError
-from ...utils.files import ensure_dir
+from ...utils.files import ensure_dir, sha256_bytes, sha256_file
 from ...utils.logger import get_logger
 from .backup import create_backup
 
@@ -62,7 +61,16 @@ class LibraryStore:
             raise MBForgeError("Missing filename")
 
         safe_filename = sanitize_upload_filename(filename)
-        doc_id = str(uuid.uuid4())
+        # Content-addressed doc_id: identical bytes always map to one document.
+        doc_id = sha256_bytes(content)[:32]
+        existing = load_document(doc_id, self._root)
+        if existing is not None:
+            logger.info(
+                "Duplicate content; returning existing document %s (id=%s)",
+                existing.file_name,
+                doc_id,
+            )
+            return existing
         safe_title = title.strip() if title else Path(safe_filename).stem
         storage_subdir = self._layout.storage_dir(doc_id)
         dest = storage_subdir / safe_filename
@@ -110,7 +118,16 @@ class LibraryStore:
 
         If the copy fails the JSON is never written so the library stays clean.
         """
-        doc_id = str(uuid.uuid4())
+        # Content-addressed doc_id: identical bytes always map to one document.
+        doc_id = sha256_file(src)[:32]
+        existing = load_document(doc_id, self._root)
+        if existing is not None:
+            logger.info(
+                "Duplicate content; returning existing document %s (id=%s)",
+                existing.file_name,
+                doc_id,
+            )
+            return existing
         safe_title = title.strip() if title else src.stem
         storage_subdir = self._layout.storage_dir(doc_id)
         dest = storage_subdir / src.name
@@ -284,14 +301,14 @@ def ensure_writable_root(root: str) -> None:
 
 
 def create_upload_tmpfile(root: str) -> Path:
-    """Create a temp file under ``{library_root}/tmp/`` for streamed uploads."""
-    tmp_dir = Path(root) / "tmp"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    """Create an OS-level temp file for a streamed upload.
+
+    Uses the system temp directory instead of a ``{library_root}/tmp/``
+    folder so the library root stays free of transient scratch files.
+    """
     import tempfile
 
-    with tempfile.NamedTemporaryFile(
-        dir=tmp_dir, delete=False, suffix=".upload"
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".upload") as tmp:
         return Path(tmp.name)
 
 
@@ -341,7 +358,7 @@ def read_page_text(root: str, doc_id: str, page: int) -> str:
     Routed through ``load_page_json`` so page artifacts have a single
     reader; missing or unparseable pages raise ``NotFoundError``.
     """
-    from ...pipeline.ocr_artifacts import load_page_json
+    from ...pipeline.extract.ocr_artifacts import load_page_json
 
     data = load_page_json(doc_id, root, page)
     if data is None:

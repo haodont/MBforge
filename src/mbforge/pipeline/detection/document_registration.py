@@ -19,11 +19,13 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, tool
 
-from ...utils.logger import get_logger
-from ..cancellation import TaskCancelledError
-from .normalization import NormalizedMolecule, normalize_molecules
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import ExtractionResult
+from mbforge.pipeline.cancellation import TaskCancelledError
+from mbforge.utils.logger import get_logger
+
+from .normalization import normalize_molecules
 from .structure_role import classify_structure_role
-from .types import ExtractionResult
 
 logger = get_logger("mbforge.pipeline.detection.document_registration")
 
@@ -121,7 +123,7 @@ class MoleculeRegistrationSession:
             "page_num": page_num,
         }
 
-    def finalize(self) -> list[NormalizedMolecule]:
+    def finalize(self) -> list[Molecule]:
         """Return merged candidates for the existing persistence stages."""
         with self._lock:
             results = list(self._results)
@@ -208,7 +210,7 @@ async def collect_molecule_candidates_with_tool(
     *,
     max_chars: int = 16000,
     cancel_check: Callable[[], None] | None = None,
-) -> tuple[list[NormalizedMolecule], dict[str, int]]:
+) -> tuple[list[Molecule], dict[str, int]]:
     """Run one cloud LLM tool-call pass and return normalized candidates.
 
     This adapter intentionally stops after collecting tool calls.  The model

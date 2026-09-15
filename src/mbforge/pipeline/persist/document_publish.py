@@ -19,11 +19,11 @@ from __future__ import annotations
 import shutil
 from typing import Any
 
-from ...storage.layout import LibraryLayout
-from ...storage.sqlite.database import DatabaseManager
-from ...utils.files import ensure_dir, save_json
-from ...utils.logger import get_logger
-from ..context import PipelineContext
+from mbforge.pipeline.run.context import PipelineContext
+from mbforge.storage.layout import LibraryLayout
+from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.utils.files import ensure_dir, save_json
+from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.persist.document_publish")
 
@@ -143,7 +143,7 @@ def compensate_molecule_persistence(ctx: PipelineContext) -> None:
     The shared ``molecules`` table is intentionally left untouched because
     the same canonical SMILES may be referenced by other documents.
     """
-    from ..persist.molecules import delete_document_molecule_rows
+    from mbforge.pipeline.persist.molecules import delete_document_molecule_rows
 
     db = DatabaseManager.get(str(ctx.library_root))
     with db.transaction() as (_kb_conn, mol_conn):

@@ -10,7 +10,6 @@ requests and shape HTTP responses.
 from __future__ import annotations
 
 import asyncio
-import uuid
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
@@ -29,6 +28,7 @@ from ...models.pipeline import (
 )
 from ...services.pipeline import ingest
 from ...utils.errors import ValidationError
+from ...utils.ids import short_id
 from ...utils.logger import get_logger
 from .._path_utils import resolve_library_root
 
@@ -60,8 +60,8 @@ async def pipeline_enqueue(body: PipelineEnqueueRequest) -> PipelineEnqueueRespo
         return PipelineEnqueueResponse(enqueued=enqueued)
 
     doc_id = body.doc_id or ""
-    task_id = await ingest.enqueue(root_str, doc_id)
-    return PipelineEnqueueResponse(task_id=task_id)
+    run_id = await ingest.enqueue(root_str, doc_id)
+    return PipelineEnqueueResponse(run_id=run_id)
 
 
 @router.post("/process")
@@ -73,16 +73,16 @@ async def pipeline_process(body: PipelineProcessRequest) -> PipelineProcessRespo
     doc_id = body.doc_id or ""
     if not file_path:
         raise ValidationError("file_path is required")
-    task_id = str(uuid.uuid4())
+    task_id = short_id()
     from ...pipeline.runner import run_pipeline
 
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
-        lambda: run_pipeline(file_path, root_str, doc_id=doc_id, task_id=task_id),
+        lambda: run_pipeline(file_path, root_str, doc_id=doc_id, run_id=task_id),
     )
     return PipelineProcessResponse(
-        task_id=task_id,
+        run_id=task_id,
         doc_id=result.doc_id,
         page_count=result.page_count,
         parser=result.parser,
@@ -123,17 +123,17 @@ async def pipeline_queue_stats(
         return PipelineQueueStatsResponse()
 
 
-@router.get("/events/{task_id}")
+@router.get("/events/{run_id}")
 async def pipeline_events(
-    task_id: str,
+    run_id: str,
     request: Request,
     library_root: str = Query(..., description="Library root path"),
 ) -> EventSourceResponse:
-    """Server-sent events stream for a single pipeline task."""
+    """Server-sent events stream for a single pipeline run."""
     root = resolve_library_root(library_root)
     return EventSourceResponse(
-        ingest.stream_task_events(
-            str(root), task_id, is_disconnected=request.is_disconnected
+        ingest.stream_run_events(
+            str(root), run_id, is_disconnected=request.is_disconnected
         )
     )
 
@@ -143,7 +143,7 @@ async def pipeline_cancel_batch(
     body: PipelineTaskBatchRequest,
 ) -> PipelineTaskActionResponse:
     root = resolve_library_root(body.library_root)
-    result = await ingest.cancel_batch(str(root), body.task_ids)
+    result = await ingest.cancel_batch(str(root), body.run_ids)
     return PipelineTaskActionResponse(
         updated=result.updated,
         skipped=result.skipped,
@@ -156,7 +156,7 @@ async def pipeline_retry_batch(
 ) -> PipelineTaskActionResponse:
     root = resolve_library_root(body.library_root)
     result = await ingest.retry_batch(
-        str(root), body.task_ids, resume_from_stage=body.resume_from_stage
+        str(root), body.run_ids, resume_from_stage=body.resume_from_stage
     )
     return PipelineTaskActionResponse(
         updated=result.updated,
@@ -165,44 +165,48 @@ async def pipeline_retry_batch(
     )
 
 
-@router.post("/queue/{task_id}/cancel")
+@router.post("/queue/{run_id}/cancel")
 async def pipeline_cancel(
-    task_id: str, body: PipelineQueueRequest
+    run_id: str,
+    body: PipelineQueueRequest,
 ) -> PipelineTaskActionResponse:
     result = await pipeline_cancel_batch(
         PipelineTaskBatchRequest(
-            library_root=body.library_root or "", task_ids=[task_id]
+            library_root=body.library_root or "", run_ids=[run_id]
         )
     )
     return result
 
 
-@router.post("/queue/{task_id}/retry")
+@router.post("/queue/{run_id}/retry")
 async def pipeline_retry(
-    task_id: str, body: PipelineTaskBatchRequest
+    run_id: str,
+    body: PipelineTaskBatchRequest,
 ) -> PipelineTaskActionResponse:
     result = await pipeline_retry_batch(
         PipelineTaskBatchRequest(
             library_root=body.library_root or "",
-            task_ids=[task_id],
+            run_ids=[run_id],
             resume_from_stage=body.resume_from_stage,
         )
     )
     return result
 
 
-@router.post("/queue/{task_id}/delete")
+@router.post("/queue/{run_id}/delete")
 async def pipeline_delete_task(
-    task_id: str, body: PipelineQueueRequest
+    run_id: str,
+    body: PipelineQueueRequest,
 ) -> PipelineTaskActionResponse:
     root = resolve_library_root(body.library_root)
-    deleted = await ingest.delete_task(str(root), task_id)
+    deleted = await ingest.delete_task(str(root), run_id)
     return PipelineTaskActionResponse(updated=deleted)
 
 
-@router.post("/queue/{task_id}/priority")
+@router.post("/queue/{run_id}/priority")
 async def pipeline_set_priority(
-    task_id: str, body: PipelineQueueRequest
+    run_id: str,
+    body: PipelineQueueRequest,
 ) -> PipelineTaskActionResponse:
     """Set task priority stub."""
     return PipelineTaskActionResponse()

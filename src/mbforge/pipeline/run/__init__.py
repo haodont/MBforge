@@ -4,9 +4,8 @@ Split the monolithic ``run_pipeline`` into focused collaborators:
 
 - ``models``: the DTOs the runner exchanges with the queue worker.
 - ``events``: ``PipelineEventSink`` (observability / ingest_queue recording).
-- ``state``: ``RunContext`` (per-invocation orchestration state).
-- ``initial_fork``: ``InitialForkRunner`` (Extract ∥ Detection fork + join).
-- ``sequential``: ``SequentialStageRunner`` (resume/skip + one-stage loop).
+- ``context``: ``PipelineContext`` and ``RunContext`` (shared and per-invocation state).
+- ``sequential``: ``StageRunner`` (executes the one stage the queue claimed).
 - ``finalize``: ``Finalizer`` (run completion and failure/cancel cleanup).
 
 Public symbols stay importable from ``mbforge.pipeline.runner``.

@@ -28,19 +28,19 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from pathlib import Path
 from typing import Any
 
-from ...storage.layout import LibraryLayout
-from ...utils.logger import get_logger
-from ..activity.matching import match_activities
-from ..activity.normalization import canonical_value_for_legacy
+from mbforge.pipeline.activity.matching import match_activities
+from mbforge.pipeline.activity.normalization import canonical_value_for_legacy
+from mbforge.storage.layout import LibraryLayout
+from mbforge.utils.ids import deterministic_id
+from mbforge.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # Stable namespace for activity UUID5 (any fixed UUID works; keep constant).
-_ACTIVITY_NS = uuid.UUID("5b3c0f2a-7e2d-4d36-8d6e-1c5b8a0d4f6e")
+_ACTIVITY_NS = "5b3c0f2a-7e2d-4d36-8d6e-1c5b8a0d4f6e"
 
 
 def _activity_id(
@@ -70,7 +70,7 @@ def _activity_id(
             str(getattr(rec, "qualitative_raw", "") or ""),
         ]
     )
-    return str(uuid.uuid5(_ACTIVITY_NS, payload))
+    return deterministic_id(_ACTIVITY_NS, payload)
 
 
 def _build_mol_id_map(
@@ -135,7 +135,7 @@ def persist_activities(
         library_root: Project root directory.
         doc_id: Source document ID.
         activity_records: ActivityRecord list from the activity stage.
-        candidates: Optional list of NormalizedMolecule. When provided, the
+        candidates: Optional list of Molecule. When provided, the
             function resolves each activity to a ``mol_id`` using the same
             row-alignment rules as ``persist_molecule_candidates``. When
             ``None``, every record is skipped (orphan activities are not

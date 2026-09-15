@@ -2,7 +2,7 @@
 
 ``storage/{doc_id}/document.json`` is the sole source of truth for the
 document record; this module is the only writer/reader of that file. PDF
-text extraction fills the :class:`~mbforge.core.entities.document.Document`
+text extraction fills the :class:`~mbforge.core.document.Document`
 extraction caches.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..core.entities.document import Document
+from ..core.document import Document
 from .layout import LibraryLayout
 
 

@@ -14,10 +14,31 @@ CREATE TABLE IF NOT EXISTS ingest_queue (
     claimed_by TEXT,
     heartbeat_ts TEXT,
     stage TEXT,
+    run_id TEXT,
     retry_count INTEGER DEFAULT 0,
     error TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
+);
+-- Stage DAG edges: one row per (node -> prerequisite). A node in
+-- ``ingest_queue`` (status ``blocked``) becomes ``pending`` only once every
+-- prerequisite has succeeded (see infra/ingest/queue.advance_dependents).
+CREATE TABLE IF NOT EXISTS ingest_stage_deps (
+    doc_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    depends_on TEXT NOT NULL,
+    PRIMARY KEY (doc_id, run_id, stage, depends_on)
+);
+-- One row per (document, run): owns the attempt's run_id and the
+-- exactly-once publication guard (``finalized``) so concurrent final-node
+-- completions cannot promote the same run twice.
+CREATE TABLE IF NOT EXISTS ingest_runs (
+    doc_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    finalized INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (doc_id, run_id)
 );
 CREATE TABLE IF NOT EXISTS ingest_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,10 +48,39 @@ CREATE TABLE IF NOT EXISTS ingest_logs (
     message TEXT,
     ts_ms INTEGER,
     task_id TEXT,
+    run_id TEXT,
     data TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_il_run ON ingest_logs(doc_id, run_id);
 CREATE INDEX IF NOT EXISTS idx_iq_status ON ingest_queue(status);
+CREATE INDEX IF NOT EXISTS idx_iq_doc ON ingest_queue(doc_id, run_id);
+-- One queue node per (document, run, stage): lets a re-enqueue be idempotent
+-- via INSERT OR IGNORE.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_iq_doc_run_stage
+    ON ingest_queue(doc_id, run_id, stage)
+    WHERE doc_id IS NOT NULL AND run_id IS NOT NULL AND stage IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_isd_stage ON ingest_stage_deps(doc_id, run_id, stage);
 CREATE INDEX IF NOT EXISTS idx_il_doc ON ingest_logs(doc_id);
+-- User-defined collections (visible as library "Groups"). A parent delete
+-- cascades to its whole subtree; a collection delete also drops membership.
+-- Documents live on disk (JSON), so collection_documents only references
+-- doc_id by application contract, not a SQL foreign key.
+CREATE TABLE IF NOT EXISTS collections (
+    collection_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (parent_id) REFERENCES collections(collection_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collection_parent ON collections(parent_id);
+CREATE TABLE IF NOT EXISTS collection_documents (
+    collection_id TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    added_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (collection_id, doc_id),
+    FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collection_documents_doc ON collection_documents(doc_id);
 """
 
 _MOL_SCHEMA = """

@@ -11,12 +11,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...utils.logger import get_logger
-from ..stage_checkpoint import STAGE_ORDER
+from mbforge.pipeline.run.checkpoint import STAGE_ORDER
+from mbforge.utils.logger import get_logger
+
 from .models import PipelineEvent, ProgressCallback
 
 if TYPE_CHECKING:
-    from ...core.stage_result import StageResult
+    from mbforge.core.stage import StageResult
 
 logger = get_logger("mbforge.pipeline.runner")
 
@@ -43,9 +44,11 @@ class PipelineEventSink:
         task_id: str | None,
         library_root: str | Path,
         doc_id: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         self.on_progress = on_progress
         self.task_id = task_id
+        self.run_id = run_id
         self.library_root = str(library_root)
         self.doc_id = doc_id
 
@@ -56,11 +59,15 @@ class PipelineEventSink:
         if self.task_id is None:
             return
         try:
-            from ...storage.sqlite.database import DatabaseManager, record_ingest_event
+            from mbforge.storage.sqlite.database import (
+                DatabaseManager,
+                record_ingest_event,
+            )
 
             record_ingest_event(
                 DatabaseManager.get(self.library_root),
                 task_id=self.task_id,
+                run_id=self.run_id,
                 doc_id=self.doc_id or None,
                 stage=stage or "pipeline",
                 level=event,
@@ -72,7 +79,7 @@ class PipelineEventSink:
         except Exception as exc:  # noqa: BLE001 — observability must not abort work
             logger.warning("record_ingest_event failed: %s", exc)
             try:
-                from ...utils.logger import push_diagnostic
+                from mbforge.utils.logger import push_diagnostic
 
                 push_diagnostic(
                     {

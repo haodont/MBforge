@@ -35,13 +35,13 @@ import functools
 import os
 import socket
 import time
-import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from ...storage.sqlite.database import INGEST_TERMINAL_STATUSES
+from ...utils.ids import short_id
 from ...utils.logger import get_logger
 
 logger = get_logger("mbforge.queue_worker")
@@ -60,6 +60,7 @@ _TERMINAL_STATUSES = INGEST_TERMINAL_STATUSES
 # (event-loop thread only). Grouping by root lets a multi-library process
 # stop or fail one worker without forgetting another worker's active tasks.
 _active_task_ids: dict[str, set[str]] = {}
+_active_run_ids: set[str] = set()
 # per-root worker tasks (event-loop thread only).
 _workers: dict[str, asyncio.Task] = {}
 
@@ -75,7 +76,7 @@ def _normalize_stage_name(raw: str | None) -> str | None:
 
 def _worker_id() -> str:
     """Return a stable-ish worker identity for ``claimed_by``."""
-    return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+    return f"{socket.gethostname()}:{os.getpid()}:{short_id()}"
 
 
 def active_task_ids() -> frozenset[str]:
@@ -89,6 +90,10 @@ def active_task_ids() -> frozenset[str]:
 def is_task_active(task_id: str) -> bool:
     """Return True if ``task_id`` is executing inside this process right now."""
     return any(task_id in ids for ids in _active_task_ids.values())
+
+def is_run_active(run_id: str) -> bool:
+    """Return True if any node of ``run_id`` is executing here now."""
+    return run_id in _active_run_ids
 
 
 def _active_for(library_root: str) -> set[str]:
@@ -260,22 +265,21 @@ async def _drain_loop(library_root: str, worker: str) -> None:
 async def _execute_claimed(library_root: str, row: dict[str, Any], worker: str) -> None:
     """Run one claimed queue row in the shared thread pool."""
     task_id = row["id"]
+    run_id = row.get("run_id")
+    if run_id:
+        _active_run_ids.add(run_id)
     try:
-        loop = asyncio.get_running_loop()
-        from ..process import pipeline_executor
+        from ..process import TaskPool, tasks
 
-        # Normalize stage name from DB (pass-through, kept for future compatibility)
-        raw_stage = row.get("stage")
-        current_stage = _normalize_stage_name(raw_stage) if raw_stage else None
-
-        await loop.run_in_executor(
-            pipeline_executor(),
+        await tasks.run(
+            TaskPool.PIPELINE,
             _run_pipeline_sync,
             row["file_path"],
             library_root,
             row["doc_id"] or "",
             task_id,
-            current_stage,
+            row["stage"],
+            row["run_id"],
         )
         logger.debug("Queue task %s finished", task_id)
     finally:
@@ -286,6 +290,8 @@ async def _execute_claimed(library_root: str, row: dict[str, Any], worker: str) 
         release_task(task_id)
         active = _active_for(library_root)
         active.discard(task_id)
+        if run_id:
+            _active_run_ids.discard(run_id)
         if not active:
             _active_task_ids.pop(library_root, None)
 
@@ -295,85 +301,58 @@ def _run_pipeline_sync(
     library_root: str,
     doc_id: str,
     task_id: str,
-    current_stage: str | None = None,
+    stage: str,
+    run_id: str | None,
 ) -> None:
-    """Thin sync wrapper: run one pipeline stage, then re-queue or finalize.
+    """Execute one queue node, then advance the document's stage DAG.
 
-    The runner executes **one** stage per invocation.  After the stage
-    completes:
-
-    - If more stages remain → UPDATE the queue row back to ``pending``
-      with the next stage name so the drain loop re-claims it.
-    - If all stages are done → write the merged report and mark ``done``.
-
-    Exceptions raised before the runner could record anything (e.g.
-    stage validation or an early fall) are caught here and applied as
-    a safety-net terminal state.
+    Each row is a single DAG node. On success the node is marked ``done`` and
+    its newly-satisfied dependents are promoted from ``blocked`` to
+    ``pending``; once every node of the run is ``done`` the run is published
+    exactly once. On failure the node is marked ``failed`` and its transitive
+    dependents cascade to ``failed`` so the document reaches an explicit
+    terminal state.
     """
     from ...pipeline.runner import TaskCancelledError, run_pipeline
+    from . import queue as queue_dao
 
     try:
-        result = run_pipeline(
+        run_pipeline(
             file_path,
             library_root,
             doc_id=doc_id,
+            stage=stage,
+            run_id=run_id,
             task_id=task_id,
-            resume_from_stage=current_stage,
         )
-        if result.next_stage is not None:
-            # More stages remain — re-queue for the next one.
-            requeued = _requeue_for_next_stage(
-                library_root, task_id, result.current_stage, result.next_stage
-            )
-            if requeued:
-                logger.debug(
-                    "Task %s: stage %s done, re-queued for %s",
-                    task_id,
-                    result.current_stage,
-                    result.next_stage,
-                )
-        else:
-            # All stages complete — write merged report.
-            _write_final_report(library_root, doc_id, task_id)
-            logger.debug("Task %s: all stages complete", task_id)
     except TaskCancelledError as exc:
         logger.info("Pipeline cancelled for %s: %s", file_path, exc)
-        _set_task_terminal(library_root, task_id, "cancelled", str(exc))
+        queue_dao.set_node_status(library_root, task_id, "cancelled", str(exc))
+        return
     except Exception as exc:  # noqa: BLE001
-        logger.error("Pipeline failed for %s: %s", file_path, exc, exc_info=True)
-        _set_task_terminal(library_root, task_id, "failed", str(exc))
-
-
-def _requeue_for_next_stage(
-    library_root: str,
-    task_id: str,
-    completed_stage: str | None,
-    next_stage: str,
-) -> bool:
-    """Set the queue row back to ``pending`` for the next stage."""
-    from ...storage.sqlite.database import DatabaseManager
-
-    db = DatabaseManager.get(library_root)
-    try:
-        with db.kb_conn() as conn:
-            cursor = conn.execute(
-                "UPDATE ingest_queue SET status = 'pending', "
-                "stage = ?, heartbeat_ts = NULL, claimed_by = NULL, "
-                "updated_at = datetime('now') "
-                "WHERE id = ? AND status = 'processing'",
-                (completed_stage, task_id),
+        logger.error("Stage %s failed for %s: %s", stage, file_path, exc, exc_info=True)
+        queue_dao.set_node_status(library_root, task_id, "failed", str(exc))
+        if doc_id and run_id:
+            queue_dao.fail_cascade(
+                library_root,
+                doc_id=doc_id,
+                run_id=run_id,
+                failed_stage=stage,
+                error=str(exc),
             )
-            if cursor.rowcount != 1:
-                logger.info(
-                    "Task %s was no longer processing; skip re-queue for %s",
-                    task_id,
-                    next_stage,
-                )
-                return False
-            return True
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to re-queue %s for %s: %s", task_id, next_stage, exc)
-        raise RuntimeError(f"Failed to re-queue task {task_id}") from exc
+        return
+
+    queue_dao.set_node_status(library_root, task_id, "done")
+    if not (doc_id and run_id):
+        return
+    queue_dao.advance_dependents(
+        library_root, doc_id=doc_id, run_id=run_id, completed_stage=stage
+    )
+    if queue_dao.all_stages_done(
+        library_root, doc_id=doc_id, run_id=run_id
+    ) and queue_dao.claim_finalize(library_root, doc_id=doc_id, run_id=run_id):
+        _write_final_report(library_root, doc_id, task_id)
+        logger.debug("Task %s: all stages complete", task_id)
 
 
 def _write_final_report(library_root: str, doc_id: str, task_id: str) -> None:
@@ -382,8 +361,8 @@ def _write_final_report(library_root: str, doc_id: str, task_id: str) -> None:
     The report must be written *before* promotion because promote_staging
     deletes the staging directory (which holds the checkpoint files).
     """
-    from ...pipeline.run_artifacts import promote_staging, staging_dir
-    from ...pipeline.stage_checkpoint import write_merged_report
+    from ...pipeline.artifacts.staging import promote_staging, staging_dir
+    from ...pipeline.run.checkpoint import write_merged_report
 
     staging = staging_dir(library_root, doc_id)
     try:
@@ -423,7 +402,7 @@ def _claim_rows(library_root: str, worker: str, limit: int) -> list[dict[str, An
                 ORDER BY created_at ASC
                 LIMIT ?
             )
-            RETURNING id, file_path, doc_id, stage
+            RETURNING id, file_path, doc_id, stage, run_id
             """,
             (worker, limit),
         ).fetchall()

@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from ...core.entities.molecule import Molecule
+from ...core.molecule import Molecule
 from ...utils.logger import get_logger
 from .schema import (
     _ACTIVITIES_SCHEMA,
@@ -444,6 +444,7 @@ def record_ingest_event(
     db: DatabaseManager,
     *,
     task_id: str,
+    run_id: str | None = None,
     doc_id: str | None,
     stage: str,
     level: str,
@@ -471,8 +472,8 @@ def record_ingest_event(
             conn.execute(
                 """
                 INSERT INTO ingest_logs
-                    (doc_id, stage, level, message, ts_ms, task_id, data)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (doc_id, stage, level, message, ts_ms, task_id, run_id, data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     doc_id or "",
@@ -481,6 +482,7 @@ def record_ingest_event(
                     message,
                     int(time.time() * 1000),
                     task_id,
+                    run_id,
                     data_json,
                 ),
             )

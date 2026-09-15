@@ -4,7 +4,8 @@ import re
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 
-from ....utils.logger import get_logger
+from mbforge.utils.logger import get_logger
+
 from ..normalization import (
     extract_qualitative_legend,
     find_activity_metrics,

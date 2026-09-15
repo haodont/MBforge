@@ -117,9 +117,9 @@ _log_level: int = logging.INFO
 _ERROR_ONLY_LOGGER_PREFIXES = (
     "mbforge.pipeline.stages.extract",
     "mbforge.pipeline.stages.molecule_detection",
-    "mbforge.pipeline.extract_text",
+    "mbforge.pipeline.extract.text",
     "mbforge.pipeline.detection",
-    "mbforge.pipeline.stage_artifacts",
+    "mbforge.pipeline.artifacts",
     "mbforge.backends.ocr",
     "mbforge.backends.moldet_v2_ft",
 )

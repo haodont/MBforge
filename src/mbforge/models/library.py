@@ -40,13 +40,43 @@ class LibraryConfigureRequest(BaseModel):
     root: str = ""
 
 
+# ---- Collections (library "Groups") ----
+
+
+class LibraryListCollectionsRequest(BaseModel):
+    library_root: str | None = None
+
+
+class LibraryCreateCollectionRequest(BaseModel):
+    library_root: str | None = None
+    name: str = ""
+    parent_id: str | None = None
+
+
+class LibraryRenameCollectionRequest(BaseModel):
+    library_root: str | None = None
+    collection_id: str = ""
+    name: str = ""
+
+
+class LibraryDeleteCollectionRequest(BaseModel):
+    library_root: str | None = None
+    collection_id: str = ""
+
+
+class LibraryCollectionDocumentRequest(BaseModel):
+    library_root: str | None = None
+    collection_id: str = ""
+    doc_id: str = ""
+
+
 # ---- Response models ----
 
 
 class LibraryImportResponse(BaseModel):
     success: bool = True
     document: dict[str, Any]
-    task_id: str | None = None
+    run_id: str | None = None
 
 
 class LibraryDocumentsResponse(BaseModel):
@@ -77,3 +107,28 @@ class LibrarySuccessResponse(BaseModel):
 class LibraryMoleculeEvidenceUpdateResponse(BaseModel):
     success: bool = True
     evidence_id: str
+
+
+class CollectionInfo(BaseModel):
+    """Flat per-collection summary returned to the group tree."""
+
+    collection_id: str
+    name: str
+    parent_id: str | None
+    doc_count: int
+
+
+class CollectionNode(CollectionInfo):
+    """A collection node with its nested children (recursive tree)."""
+
+    children: list[CollectionNode] = []
+
+
+class LibraryCollectionsResponse(BaseModel):
+    collections: list[CollectionNode] = []
+
+
+class LibraryCreateCollectionResponse(BaseModel):
+    success: bool = True
+    collection: dict[str, Any] | None = None
+    error: str | None = None

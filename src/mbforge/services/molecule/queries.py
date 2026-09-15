@@ -10,19 +10,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 from rdkit import Chem
 
-from ...core.detection.types import NormalizedMolecule
-from ...core.entities.molecule import Molecule
+from ...core.molecule import Molecule, molecule_id
 from ...models.molecule import MoleculeListRequest, MoleculeListResponse
 from ...pipeline.persist.molecules import filter_persistable_candidates
 from ...storage.sqlite.database import DatabaseManager
 from ...utils.errors import NotFoundError, ValidationError
+from ...utils.ids import short_id
 from ...utils.logger import get_logger
 from ..documents.pdf_layout import load_document_bboxes
 
@@ -400,7 +399,7 @@ def _index_matches(
     doc_id: str,
     page: int,
     query_box: tuple[float, float, float, float],
-    persistable: list[NormalizedMolecule],
+    persistable: list[Molecule],
 ) -> list[dict[str, Any]]:
     """Primary-detection matches from the bbox index candidates.
 
@@ -595,7 +594,9 @@ def create_molecule(
     """Insert or replace a molecule and refresh its search index."""
     db = DatabaseManager.get(root)
     if not mol_id:
-        mol_id = str(uuid.uuid4())
+        # Deterministic structural id (canonical SMILES) so identical
+        # molecules dedup; random fallback when nothing parseable to key on.
+        mol_id = molecule_id(smiles) or short_id()
     with db.mol_conn() as conn:
         DatabaseManager.delete_molecule_from_mol_search(conn, mol_id)
         conn.execute(

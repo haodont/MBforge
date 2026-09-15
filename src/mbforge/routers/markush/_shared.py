@@ -14,7 +14,7 @@ router = APIRouter()  # placeholder; sub-routers reuse the type only
 
 def to_selections(items: list) -> list:
     """Map a Pydantic selection list to the internal ``SiteSelection`` objects."""
-    from ...core.markush.enumeration import SiteSelection
+    from ...core.enumeration import SiteSelection
 
     return [
         SiteSelection(

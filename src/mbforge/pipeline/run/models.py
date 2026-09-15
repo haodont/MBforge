@@ -27,9 +27,7 @@ class PipelineResult:
     duration_ms: int = 0
     stage_timings: dict[str, int] = field(default_factory=dict)
     current_stage: str | None = None
-    """The stage that just completed in this invocation."""
-    next_stage: str | None = None
-    """The stage the worker should re-queue for, or None when all done."""
+    """The stage (queue node) that just completed in this invocation."""
     run_id: str | None = None
     """Durable run identity reused across stage invocations and retries."""
 

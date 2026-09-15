@@ -3,7 +3,7 @@
 Ensures that when the application exits:
 1. Prewarm tasks are cancelled (if any)
 2. Queue workers are stopped and their rows released
-3. Pipeline executor threads are drained with a timeout
+3. Managed task pools (pipeline / sync / ocr) are drained with a timeout
 4. Backend models are unloaded
 5. Process registry is unregistered
 6. Loop exception handler is restored
@@ -53,18 +53,18 @@ async def orchestrate_shutdown(*, timeout: float = 30.0) -> None:
     #         the worker's finally block releases held rows)
     worker.stop_queue_workers()
 
-    # Step 3: drain pipeline executor with timeout
-    from .executors import drain_executors
+    # Step 3: drain every managed pool with timeout
+    from .tasks import tasks
 
     pending = await asyncio.wait_for(
-        asyncio.to_thread(drain_executors, timeout), timeout=timeout + 5
+        asyncio.to_thread(tasks.shutdown, timeout), timeout=timeout + 5
     )
     if pending > 0:
         from ...utils.logger import get_logger
 
         logger = get_logger("mbforge.shutdown")
         logger.warning(
-            "%d pipeline task(s) did not finish within %.1fs; they will be "
+            "%d worker thread(s) did not finish within %.1fs; they will be "
             "killed when the process exits",
             pending,
             timeout,

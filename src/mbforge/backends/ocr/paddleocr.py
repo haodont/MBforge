@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from mbforge.utils.json_utils import safe_json_loads
+from mbforge.utils.files import safe_json_loads
 from mbforge.utils.logger import get_logger
 
 from .base import CloudOCRConfig, LayoutSpan, OCRBackend, OCRResult

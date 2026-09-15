@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from ...core.molecule import molecule_id
 from ...core.review import (
     ReviewConflictError,
     ReviewNotFoundError,
@@ -30,8 +31,8 @@ from ...core.review import (
 )
 from ...storage.markush_transitions import _copy_evidence, _fetch_one
 from ...storage.review_audit import record_review_decision
+from ...utils.files import safe_json_loads
 from ...utils.ids import short_id
-from ...utils.json_utils import safe_json_loads
 from ...utils.logger import get_logger
 
 logger = get_logger("mbforge.services.markush.review")
@@ -151,7 +152,7 @@ def _transition(
 
 def _confirm_complete_to_molecules(conn: sqlite3.Connection, row: sqlite3.Row) -> str:
     """Write the destination ``molecules`` row and copy evidence chain."""
-    mol_id = short_id()
+    mol_id = molecule_id(row["smiles"] or "") or short_id()
     conn.execute(
         """
         INSERT INTO molecules

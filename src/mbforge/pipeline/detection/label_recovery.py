@@ -37,8 +37,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ...utils.logger import get_logger
-from ..markdown.markers import _PAGE_MARKER_RE
+from mbforge.pipeline.markdown.markers import _PAGE_MARKER_RE
+from mbforge.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

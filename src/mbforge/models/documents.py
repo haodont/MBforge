@@ -55,5 +55,5 @@ class DocumentReingestResponse(BaseModel):
     """Response body for re-ingesting a document."""
 
     success: bool = True
-    task_id: str | None = Field(default=None, description="Queued task ID.")
+    run_id: str | None = Field(default=None, description="Queued run ID.")
     message: str = "document queued for re-ingest"

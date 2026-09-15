@@ -6,7 +6,7 @@ Module map:
 - ``extraction`` — MolDetv2 detection + MolParser recognition over rendered
   PDF pages, plus native-text SMILES extraction.
 - ``recognition`` — single-crop unified recognition entry point.
-- ``types`` — shared detection record dataclasses (NormalizedMolecule etc.).
+
 - ``normalization`` — SMILES validation, canonicalization, deduplication.
 - ``structure_role`` — concrete molecule vs Markush part.
 - ``correction`` — context-based correction of likely misreads.

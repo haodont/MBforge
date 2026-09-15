@@ -80,7 +80,7 @@ class DemoRunResponse(BaseModel):
     """Result of enqueueing a generated demo PDF through the pipeline."""
 
     ok: bool = False
-    task_id: str | None = None
+    run_id: str | None = None
     file_path: str = ""
     doc_id: str | None = None
     error: str | None = None

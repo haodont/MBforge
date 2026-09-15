@@ -1,6 +1,7 @@
 """Pipeline stages — modular executors for document processing.
 
-Each stage is a self-contained class implementing the StageExecutor protocol:
+Each stage is a self-contained class implementing the ``StageExecutor``
+protocol defined in :mod:`mbforge.core.stage`:
 - Reads from PipelineContext
 - Performs one logical step
 - Writes results back to PipelineContext
@@ -19,14 +20,14 @@ Usage:
 # ruff: noqa: I001
 from .extract_stage import ExtractStage
 from .detection_stage import DetectionStage
+from .join_stage import JoinStage
 from .markdown_stage import MarkdownStage
 from .patent_stage import PatentStage
-from .base import StageExecutor
 
 __all__ = [
-    "StageExecutor",
     "ExtractStage",
     "MarkdownStage",
     "DetectionStage",
+    "JoinStage",
     "PatentStage",
 ]

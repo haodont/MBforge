@@ -26,7 +26,7 @@ from ..storage.review_audit import (
     insert_review_item,  # noqa: F401 — re-exported for pipeline callers
     record_review_decision,
 )
-from ..utils.json_utils import safe_json_loads
+from ..utils.files import safe_json_loads
 from ..utils.logger import get_logger
 from .markush.review import apply_decision
 

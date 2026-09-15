@@ -18,7 +18,7 @@ persistence layer can index, dedup, and review them deterministically:
 
 The classifier and persistence layer read these three fields directly;
 the legacy ``formula_label`` / ``label`` keys on
-``NormalizedMolecule.properties`` are still written for back-compat but
+``Molecule.properties`` is still written for back-compat but
 are no longer the source of truth.
 
 Why deterministic (no LLM): chemistry labels follow a tiny grammar; a
@@ -32,7 +32,7 @@ import unicodedata
 from dataclasses import dataclass
 from enum import Enum
 
-from ...core.patent import compound_label_key
+from mbforge.core.patent import compound_label_key
 
 
 class LabelKind(str, Enum):  # noqa: UP042 — matches existing Enum-string pattern in mbforge.models.agent

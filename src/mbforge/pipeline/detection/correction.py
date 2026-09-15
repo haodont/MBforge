@@ -5,7 +5,7 @@ using contextual signals (nearby text, chemical names).
 All corrections are audit-logged to ``properties["corrections"]`` and
 never silently discard the original SMILES.
 
-The rules are business operations on a :class:`NormalizedMolecule` record,
+The rules are business operations on a :class:`Molecule` record,
 so the module lives alongside the record type in :mod:`mbforge.pipeline`.
 """
 
@@ -17,9 +17,10 @@ from typing import Any
 
 from rdkit import Chem
 
-from ...utils.logger import get_logger
+from mbforge.core.molecule import Molecule
+from mbforge.utils.logger import get_logger
+
 from .label_normalization import LabelKind
-from .types import NormalizedMolecule
 
 logger = get_logger(__name__)
 
@@ -78,7 +79,7 @@ _RGROUP_LABEL_RE = re.compile(r"\bR\s*[0-9₀-₉]+\b", re.IGNORECASE)
 
 
 def _add_correction(
-    molecule: NormalizedMolecule,
+    molecule: Molecule,
     rule: str,
     original: str,
     corrected: str,
@@ -99,13 +100,13 @@ def _add_correction(
     )
 
 
-def _add_review_flag(molecule: NormalizedMolecule, flag: str, detail: str) -> None:
+def _add_review_flag(molecule: Molecule, flag: str, detail: str) -> None:
     """Add a review flag without changing status."""
     flags: list[dict[str, str]] = molecule.properties.setdefault("review_flags", [])
     flags.append({"flag": flag, "detail": detail})
 
 
-def _context_values(molecule: NormalizedMolecule) -> list[str]:
+def _context_values(molecule: Molecule) -> list[str]:
     """Collect all human-readable context for a molecule."""
     values: list[str] = []
     if molecule.name:
@@ -120,7 +121,7 @@ def _context_values(molecule: NormalizedMolecule) -> list[str]:
     return [value[:2000] for value in values if value.strip()]
 
 
-def correct_rgroup_misread(molecule: NormalizedMolecule) -> bool:
+def correct_rgroup_misread(molecule: Molecule) -> bool:
     """Flag molecules whose context suggests R-groups but SMILES is closed.
 
     MolParser can turn a Markush structure with R-group labels into a
@@ -180,7 +181,7 @@ def correct_rgroup_misread(molecule: NormalizedMolecule) -> bool:
     return True
 
 
-def verify_element_consistency(molecule: NormalizedMolecule) -> bool:
+def verify_element_consistency(molecule: Molecule) -> bool:
     """Flag molecules whose context mentions elements missing from SMILES.
 
     Returns True if any suspicious elements were flagged.
@@ -227,7 +228,7 @@ def verify_element_consistency(molecule: NormalizedMolecule) -> bool:
     return False
 
 
-def check_markush_consistency(molecule: NormalizedMolecule) -> bool:
+def check_markush_consistency(molecule: Molecule) -> bool:
     """Flag mismatches between Markush labels and SMILES structure.
 
     Returns True if a mismatch was flagged.
@@ -275,7 +276,7 @@ def check_markush_consistency(molecule: NormalizedMolecule) -> bool:
     return flagged
 
 
-def verify_name_substructure(molecule: NormalizedMolecule) -> bool:
+def verify_name_substructure(molecule: Molecule) -> bool:
     """Flag molecules whose detected name implies a substructure not in SMILES.
 
     Returns True if a mismatch was flagged.
@@ -330,8 +331,8 @@ def verify_name_substructure(molecule: NormalizedMolecule) -> bool:
 
 
 def correct_molecules_with_context(
-    molecules: list[NormalizedMolecule],
-) -> list[NormalizedMolecule]:
+    molecules: list[Molecule],
+) -> list[Molecule]:
     """Apply all context-based corrections to a list of normalized molecules.
 
     Args:

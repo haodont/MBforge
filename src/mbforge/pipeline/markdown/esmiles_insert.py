@@ -7,10 +7,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...core.detection.types import NormalizedMolecule
-from ...core.evidence import SourceEvidence
-from ...utils.logger import get_logger
-from ..detection.formula_normalization import normalize_patent_formulas
+from mbforge.core.evidence import SourceEvidence
+from mbforge.core.molecule import Molecule
+from mbforge.pipeline.detection.formula_normalization import normalize_patent_formulas
+from mbforge.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -83,7 +83,7 @@ def _render_image(item: SourceEvidence, doc_id: str) -> str:
 
 def _candidate_blocks(
     evidence: Sequence[SourceEvidence],
-    candidates: Sequence[NormalizedMolecule],
+    candidates: Sequence[Molecule],
 ) -> list[_PlacedBlock]:
     evidence_by_id = {item.evidence_id: item for item in evidence}
     placed: list[_PlacedBlock] = []
@@ -193,7 +193,7 @@ def _page_blocks(
 
 def _assemble_blocks(
     evidence: Sequence[SourceEvidence],
-    candidates: Sequence[NormalizedMolecule],
+    candidates: Sequence[Molecule],
     pages: Sequence[int],
     doc_id: str,
     title: str,
@@ -212,7 +212,7 @@ def insert_esmiles_blocks(
     evidence_or_artifact: Sequence[SourceEvidence] | object,
     output_path: str,
     *,
-    candidates: Sequence[NormalizedMolecule] | None = None,
+    candidates: Sequence[Molecule] | None = None,
     pages: Sequence[object] | None = None,
     doc_id: str | None = None,
     title: str | None = None,

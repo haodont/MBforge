@@ -19,8 +19,9 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from ...backends import molparser
-from ...backends.ocr.crop_labels import extract_label_reads
+from mbforge.backends import molparser
+from mbforge.backends.ocr.crop_labels import extract_label_reads
+
 from .image_preprocessing import preprocess_mol_image
 
 # Compound identifiers are printed bottom-right of the drawing (scheme

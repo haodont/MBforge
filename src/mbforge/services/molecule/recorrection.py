@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ...core.detection.types import DetectionSource, NormalizedMolecule
+from ...core.molecule import Molecule
+from ...core.types import DetectionSource
 from ...pipeline.detection.correction import correct_molecules_with_context
 from ...storage.sqlite.database import DatabaseManager
 from ...utils.logger import get_logger
@@ -40,12 +41,12 @@ def _parse_properties(properties_json: str | None) -> dict[str, Any]:
         return {}
 
 
-def _rebuild_normalized_molecule(
+def _rebuild_molecule(
     row: dict[str, Any],
     detections: list[dict[str, Any]],
     evidence_rows: list[dict[str, Any]],
-) -> NormalizedMolecule:
-    """Rebuild a NormalizedMolecule from database rows.
+) -> Molecule:
+    """Rebuild a Molecule from database rows.
 
     Args:
         row: Row from molecules table (sqlite3.Row or dict).
@@ -53,7 +54,7 @@ def _rebuild_normalized_molecule(
         evidence_rows: Rows from evidence table for this molecule.
 
     Returns:
-        A NormalizedMolecule ready for recorrection.
+        A Molecule ready for recorrection.
     """
     # Convert sqlite3.Row to dict for .get() access
     row_dict = dict(row) if hasattr(row, "keys") else row
@@ -91,7 +92,7 @@ def _rebuild_normalized_molecule(
             )
         )
 
-    # Map database review_status back to NormalizedMolecule status
+    # Map database review_status back to the shared Molecule status
     db_status = row_dict.get("review_status", "pending")
     if db_status == "approved":
         nm_status = "pending"  # approved molecules stay pending in corrector
@@ -100,7 +101,8 @@ def _rebuild_normalized_molecule(
     else:
         nm_status = "pending"
 
-    return NormalizedMolecule(
+    return Molecule(
+        mol_id=row_dict.get("mol_id", ""),
         canonical_smiles=row_dict.get("canonical_smiles") or row_dict.get("smiles", ""),
         esmiles=row_dict.get("esmiles") or row_dict.get("smiles", ""),
         name=row_dict.get("name", ""),
@@ -111,7 +113,7 @@ def _rebuild_normalized_molecule(
     )
 
 
-def _collect_corrections(molecule: NormalizedMolecule) -> list[dict[str, Any]]:
+def _collect_corrections(molecule: Molecule) -> list[dict[str, Any]]:
     """Collect all corrections and flags from a corrected molecule."""
     results: list[dict[str, Any]] = []
     properties = molecule.properties
@@ -178,8 +180,8 @@ def recorrect_molecules(
         logger.info("No molecules found for recorrection")
         return result
 
-    # Rebuild NormalizedMolecule objects
-    molecules_to_correct: list[NormalizedMolecule] = []
+    # Rebuild shared Molecule objects
+    molecules_to_correct: list[Molecule] = []
     mol_id_map: dict[str, str] = {}  # canonical_smiles -> mol_id
 
     mol_ids: list[str] = []
@@ -240,7 +242,7 @@ def recorrect_molecules(
                 seen_ids.add(ev_id)
                 deduped_evidence.append(ev)
 
-        nm = _rebuild_normalized_molecule(row, detections, deduped_evidence)
+        nm = _rebuild_molecule(row, detections, deduped_evidence)
         molecules_to_correct.append(nm)
 
     # Run corrections
@@ -271,7 +273,7 @@ def recorrect_molecules(
 
 def _apply_corrections_to_db(
     db: DatabaseManager,
-    molecules: list[NormalizedMolecule],
+    molecules: list[Molecule],
     mol_id_map: dict[str, str],
 ) -> None:
     """Apply corrections to the database.

@@ -81,6 +81,23 @@ async def stats() -> dict[str, Any]:
     return get_diagnostic_stats()
 
 
+@router.get("/tasks")
+async def task_stats() -> dict[str, Any]:
+    """Live capacity / running / queued for each managed background pool."""
+    from ...infra.process import tasks
+
+    return {
+        "pools": {
+            str(pool): {
+                "capacity": stat.capacity,
+                "running": stat.running,
+                "queued": stat.queued,
+            }
+            for pool, stat in tasks.stats().items()
+        }
+    }
+
+
 @router.post("/errors", status_code=status.HTTP_204_NO_CONTENT)
 async def report_client_error(batch: ClientErrorBatch) -> None:
     """Ingest a batch of front-end caught errors.

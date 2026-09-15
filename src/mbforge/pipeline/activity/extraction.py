@@ -6,9 +6,14 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from ...core.activity import ActivityMeasurement, MeasurementValue, make_measurement_id
-from ...core.evidence import SourceEvidence
-from ...utils.logger import get_logger
+from mbforge.core.activity import (
+    ActivityMeasurement,
+    MeasurementValue,
+    measurement_id,
+)
+from mbforge.core.evidence import SourceEvidence
+from mbforge.utils.logger import get_logger
+
 from .normalization import (
     normalize_activity_measurement,
     normalize_activity_metric,
@@ -212,18 +217,18 @@ def _measurement_from_record(
     metric = record.metric or record.activity_type
     raw_text = record.value_text or record.raw_text
     identity = record.row_label or ""
-    base_id = make_measurement_id(doc_id, record.page_num, metric, raw_text, identity)
+    base_id = measurement_id(doc_id, record.page_num, metric, raw_text, identity)
     duplicate = ids_seen.get(base_id, 0)
     ids_seen[base_id] = duplicate + 1
-    measurement_id = (
+    resolved_measurement_id = (
         base_id
         if duplicate == 0
-        else make_measurement_id(
+        else measurement_id(
             doc_id, record.page_num, metric, raw_text, f"{identity}#{duplicate}"
         )
     )
     return ActivityMeasurement(
-        measurement_id=measurement_id,
+        measurement_id=resolved_measurement_id,
         doc_id=doc_id,
         metric=metric,
         value=MeasurementValue(
@@ -379,7 +384,7 @@ def _parse_text_run(
         )
         reference_raw = reference_match.group(0) if reference_match else None
         reference = normalize_reference_label(reference_raw)
-        base_id = make_measurement_id(
+        base_id = measurement_id(
             doc_id,
             source.page,
             normalized.metric,
@@ -388,10 +393,10 @@ def _parse_text_run(
         )
         duplicate = ids_seen.get(base_id, 0)
         ids_seen[base_id] = duplicate + 1
-        measurement_id = (
+        resolved_measurement_id = (
             base_id
             if duplicate == 0
-            else make_measurement_id(
+            else measurement_id(
                 doc_id,
                 source.page,
                 normalized.metric,
@@ -400,7 +405,7 @@ def _parse_text_run(
             )
         )
         measurement = ActivityMeasurement(
-            measurement_id=measurement_id,
+            measurement_id=resolved_measurement_id,
             doc_id=doc_id,
             metric=normalized.metric,
             value=MeasurementValue(

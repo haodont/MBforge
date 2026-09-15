@@ -17,8 +17,8 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
-from ..utils.logger import get_logger
-from .stage_result import PipelineErrorCode
+from mbforge.core.stage import PipelineErrorCode
+from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.cancellation")
 

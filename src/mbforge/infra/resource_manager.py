@@ -440,7 +440,7 @@ def _read_resolved_paths() -> dict[str, str]:
     Returns an empty mapping if the resolved-paths file is missing or invalid.
     """
     try:
-        from mbforge.utils.json_utils import safe_json_loads
+        from mbforge.utils.files import safe_json_loads
         from mbforge.utils.paths import GLOBAL_APP_DIR
 
         text = (GLOBAL_APP_DIR / "resolved_paths.json").read_text(encoding="utf-8")

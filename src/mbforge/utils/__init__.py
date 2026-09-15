@@ -12,11 +12,13 @@ from .config import (
     save_global_config,
 )
 from .files import sha256_file, sha256_text
-from .runtime import generate_uuid
+from .ids import deterministic_id, short_id, stable_id
 from .text import split_text_chunks, truncate_text
 
 __all__ = [
-    "generate_uuid",
+    "short_id",
+    "deterministic_id",
+    "stable_id",
     "sha256_file",
     "sha256_text",
     "safe_filename",

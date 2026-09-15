@@ -6,18 +6,21 @@ retried independently.
 The branch reads the PDF directly and does not depend on Extract.
 
 Writes:
-    ctx.candidates: list[NormalizedMolecule]
+    ctx.candidates: list[Molecule]
     ctx.molecule_stats: dict
     DetectionArtifact for the initial branch
 """
 
 from typing import NotRequired, TypedDict
 
-from ...core.stage import register
-from ...utils.logger import get_logger
-from ..cancellation import TaskCancelledError, default_registry, make_cancel_check
-from ..context import PipelineContext
-from ..stage_result import PipelineErrorCode, StageResult
+from mbforge.core.stage import PipelineErrorCode, StageResult, register
+from mbforge.pipeline.cancellation import (
+    TaskCancelledError,
+    default_registry,
+    make_cancel_check,
+)
+from mbforge.pipeline.run.context import PipelineContext
+from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.stages.molecule_detection")
 
@@ -38,7 +41,7 @@ class DetectionResult(TypedDict):
     tool_stats: NotRequired[dict[str, int]]
 
 
-@register(after="extract")
+@register(after="extract", depends_on=())
 class DetectionStage:
     name = "detection"
 
@@ -92,7 +95,7 @@ class DetectionStage:
                 },
             )
 
-        from ..stage_artifacts import (
+        from mbforge.pipeline.artifacts.branch_io import (
             build_detection_artifact,
             page_frames_from_pdf,
             save_detection_branch,
@@ -129,7 +132,7 @@ class DetectionStage:
         Detection owns its PDF read and never consumes Extract output. The
         lower-level extractor therefore runs its independent full-page path.
         """
-        from ..detection.extraction import extract_molecules_from_pdf
+        from mbforge.pipeline.detection.extraction import extract_molecules_from_pdf
 
         try:
             image_results = extract_molecules_from_pdf(

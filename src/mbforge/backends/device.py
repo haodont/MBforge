@@ -1,8 +1,8 @@
 """Backend device capability queries.
 
 Device/GPU probing lives here (backends own model placement), not in
-utils — the old ``utils.runtime`` GPU helpers created a utils→backends
-dependency inversion (TODO/services-layer-plan.md ①/A4).
+utils — device/GPU helpers moved here from the utils package resolve the
+utils→backends dependency inversion (TODO/services-layer-plan.md ①/A4).
 """
 
 from __future__ import annotations

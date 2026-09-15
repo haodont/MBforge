@@ -2,11 +2,10 @@
 
 This module sits on top of the ``markush_sites`` / ``markush_options`` /
 ``markush_mounts`` database schema and exposes the operations the HTTP
-router and the review UI need. Validation rules and the error type live
-in :mod:`mbforge.core.markush.site_rules`.
+router and the review UI need. The error type comes from
+:mod:`mbforge.core.markush`.
 
-Invariants enforced by the operations below (see site_rules for the
-shared definitions):
+Invariants enforced by the operations below:
 
 - ``MarkushSite`` rows require an explicit ``atom_map_num``; implicit
   mapping by ``*`` position order is disallowed.
@@ -25,17 +24,36 @@ import sqlite3
 from collections.abc import Iterable
 from typing import Any
 
-from ...core.markush.site_rules import MarkushSiteError, _fragment_attachment_count
+from ...core.markush import MarkushSiteError
 from ...models.markush_sites import (
     MarkushMount,
     MarkushOption,
     MarkushSite,
 )
+from ...utils.files import safe_json_loads
 from ...utils.ids import short_id
-from ...utils.json_utils import safe_json_loads
 from ...utils.logger import get_logger
 
 logger = get_logger("mbforge.services.markush.sites")
+
+
+def _fragment_attachment_count(
+    conn: sqlite3.Connection, fragment_id: str
+) -> int | None:
+    """Return the attachment count of a stored fragment by ``*`` count in SMILES.
+
+    Returns ``None`` when the fragment does not exist; raises
+    :class:`MarkushSiteError` when the fragment's attachment count cannot
+    be parsed.
+    """
+    row = conn.execute(
+        "SELECT smiles FROM markush_fragments WHERE fragment_id = ?",
+        (fragment_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    smiles = row["smiles"] or ""
+    return smiles.count("*")
 
 
 def _row_to_site(row: sqlite3.Row) -> MarkushSite:

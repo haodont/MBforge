@@ -81,10 +81,8 @@ class SPAStaticFiles(StaticFiles):
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown."""
     logger.info("MBForge web application starting...")
-    from .infra.environment import check_environment
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, check_environment)
     previous_loop_exception_handler = loop.get_exception_handler()
 
     def handle_loop_exception(
@@ -331,7 +329,7 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.middleware("http")(_request_path_middleware)
 
     # Register all routers
-    from .routers import markush, review
+    from .routers import agent, markush, review
     from .routers.documents import (
         activity,
         documents,
@@ -388,6 +386,7 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.include_router(sar.router, prefix="/api/v1/sar", tags=["sar"])
     app.include_router(markush.router, prefix="/api/v1/markush", tags=["markush"])
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
+    app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent-tools"])
     app.include_router(ocr.router, prefix="/api/v1/ocr", tags=["ocr"])
     app.include_router(
         diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"]

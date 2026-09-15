@@ -15,10 +15,9 @@ import json
 import sqlite3
 from collections.abc import Iterable
 
-from ...core.entities.molecule import MarkushFragment, MarkushScaffold
-from ...utils.ids import short_id
-from ...utils.logger import get_logger
-from ..detection.normalization import NormalizedMolecule
+from mbforge.core.molecule import MarkushFragment, MarkushScaffold, Molecule
+from mbforge.utils.ids import stable_id
+from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.persist.markush")
 
@@ -33,11 +32,11 @@ def delete_markush_for_doc(doc_id: str, *, conn: sqlite3.Connection) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Entity construction from NormalizedMolecule
+# Entity construction from the shared Molecule
 # ---------------------------------------------------------------------------
 
 
-def _coref_label(molecule: NormalizedMolecule, key: str) -> str:
+def _coref_label(molecule: Molecule, key: str) -> str:
     """Pick the best label available on *molecule* for *key*.
 
     Preference order (highest first):
@@ -69,7 +68,7 @@ def _coref_label(molecule: NormalizedMolecule, key: str) -> str:
 
 def _build_scaffold(
     doc_id: str,
-    molecule: NormalizedMolecule,
+    molecule: Molecule,
 ) -> MarkushScaffold | None:
     """Build a :class:`MarkushScaffold` entity from a pipeline candidate.
 
@@ -86,7 +85,13 @@ def _build_scaffold(
         return None
     bbox = detection.bbox
     return MarkushScaffold(
-        scaffold_id=short_id(),
+        scaffold_id=stable_id(
+            "scaffold",
+            doc_id,
+            molecule.canonical_smiles or "",
+            str(detection.page or ""),
+            *(str(v) for v in bbox) if bbox else (),  # type: ignore[arg-type]
+        ),
         doc_id=doc_id,
         smiles=molecule.canonical_smiles,
         esmiles=molecule.esmiles,
@@ -105,7 +110,7 @@ def _build_scaffold(
 
 def _build_fragment(
     doc_id: str,
-    molecule: NormalizedMolecule,
+    molecule: Molecule,
 ) -> MarkushFragment | None:
     """Build a :class:`MarkushFragment` entity from a pipeline candidate.
 
@@ -121,7 +126,13 @@ def _build_fragment(
         return None
     bbox = detection.bbox
     return MarkushFragment(
-        fragment_id=short_id(),
+        fragment_id=stable_id(
+            "fragment",
+            doc_id,
+            molecule.canonical_smiles or "",
+            str(detection.page or ""),
+            *(str(v) for v in bbox) if bbox else (),  # type: ignore[arg-type]
+        ),
         doc_id=doc_id,
         smiles=molecule.canonical_smiles,
         esmiles=molecule.esmiles,
@@ -210,7 +221,7 @@ def _fragment_values(entity: MarkushFragment) -> tuple:
 
 def persist_markush_scaffolds(
     doc_id: str,
-    candidates: Iterable[NormalizedMolecule],
+    candidates: Iterable[Molecule],
     *,
     conn: sqlite3.Connection | None,
 ) -> None:
@@ -236,7 +247,7 @@ def persist_markush_scaffolds(
 
 def persist_markush_fragments(
     doc_id: str,
-    candidates: Iterable[NormalizedMolecule],
+    candidates: Iterable[Molecule],
     *,
     conn: sqlite3.Connection | None,
 ) -> None:

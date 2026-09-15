@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from collections.abc import Mapping
 from typing import Any
+
+from ..utils.ids import short_id
 
 
 def record_review_decision(
@@ -36,7 +37,7 @@ def record_review_decision(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            uuid.uuid4().hex[:16],
+            short_id(),
             entity_type,
             entity_id,
             action,
@@ -65,7 +66,7 @@ def insert_review_item(
     item_id: str | None = None,
 ) -> str:
     """Insert or replace a native review item with a stable caller id."""
-    resolved_id = item_id or uuid.uuid4().hex[:16]
+    resolved_id = item_id or short_id()
     conn.execute(
         """
         INSERT INTO review_items

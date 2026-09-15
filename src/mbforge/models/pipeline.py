@@ -27,7 +27,7 @@ class PipelineEnqueueResponse(BaseModel):
     """Response body for enqueueing a pipeline run."""
 
     success: bool = True
-    task_id: str | None = Field(default=None, description="Assigned task ID.")
+    run_id: str | None = Field(default=None, description="Assigned run ID.")
     enqueued: int | None = Field(
         default=None,
         description="Number of files enqueued for 'enqueue_unresolved' action.",
@@ -50,7 +50,7 @@ class PipelineProcessResponse(BaseModel):
     """Response body for synchronous pipeline processing."""
 
     success: bool = True
-    task_id: str
+    run_id: str
     doc_id: str
     page_count: int
     parser: str
@@ -72,7 +72,7 @@ class PipelineTaskBatchRequest(BaseModel):
     """Request body for applying one action to a set of queue tasks."""
 
     library_root: str = Field(..., description="Library root path")
-    task_ids: list[str] = Field(..., min_length=1, max_length=1000)
+    run_ids: list[str] = Field(..., min_length=1, max_length=1000)
     resume_from_stage: str | None = Field(
         default=None,
         description="Optional stage to resume from (extract/detection/markdown/patent). "

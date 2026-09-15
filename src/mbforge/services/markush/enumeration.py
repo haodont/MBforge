@@ -3,7 +3,7 @@
 Owns the ``markush_generation_runs`` / ``markush_generated_candidates``
 write path and the human decision promotion. The deterministic
 cross-product algorithm and authorization rules live in
-:mod:`mbforge.core.markush.enumeration`.
+:mod:`mbforge.core.enumeration`.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import json
 import sqlite3
 from typing import Any
 
-from ...core.markush.enumeration import (
+from ...core.enumeration import (
     GenerationResult,
     MarkushEnumerationError,
     SiteSelection,

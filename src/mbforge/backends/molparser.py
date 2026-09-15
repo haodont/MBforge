@@ -21,7 +21,7 @@ import threading
 import numpy as np
 from PIL import Image
 
-from ..core.detection.types import ExtractionResult
+from ..core.types import ExtractionResult
 from ..utils.logger import get_logger
 from .device import is_gpu_available
 

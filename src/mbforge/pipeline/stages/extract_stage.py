@@ -7,12 +7,15 @@ Producing an ExtractedDocument with per-page text, spans, and OCR metrics.
 
 from __future__ import annotations
 
-from ...core.stage import register
-from ...storage.layout import LibraryLayout
-from ...utils.logger import get_logger
-from ..cancellation import TaskCancelledError, default_registry, make_cancel_check
-from ..context import PipelineContext
-from ..stage_result import PipelineErrorCode, StageResult
+from mbforge.core.stage import PipelineErrorCode, StageResult, register
+from mbforge.pipeline.cancellation import (
+    TaskCancelledError,
+    default_registry,
+    make_cancel_check,
+)
+from mbforge.pipeline.run.context import PipelineContext
+from mbforge.storage.layout import LibraryLayout
+from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.stages.extract")
 
@@ -37,8 +40,8 @@ class ExtractStage:
                 recoverable=False,
             )
         try:
-            from ...storage.document_store import load_document
-            from ..extract_text import extract_document_text
+            from mbforge.pipeline.extract.text import extract_document_text
+            from mbforge.storage.document_store import load_document
 
             # Full-document OCR: the Document's native cache is never an
             # evidence source (see extract_document_text).
@@ -56,7 +59,7 @@ class ExtractStage:
                 cancel_check=make_cancel_check(default_registry, ctx.task_id),
             )
 
-            from ..stage_artifacts import (
+            from mbforge.pipeline.artifacts.branch_io import (
                 build_extract_artifact,
                 page_frames_from_pdf,
                 save_extract_branch,
@@ -96,7 +99,7 @@ class ExtractStage:
             raise
         except Exception as e:
             logger.error("Text extraction failed for %s: %s", ctx.doc_id, e)
-            from ...backends.ocr.chain import OCRUnavailableError
+            from mbforge.backends.ocr.chain import OCRUnavailableError
 
             error_code = (
                 PipelineErrorCode.OCR_UNAVAILABLE

@@ -13,7 +13,6 @@ Library-level:
 * ``.mbforge/``                   — internal metadata root; never user-edited.
 * ``.mbforge/library.db``         — unified business + molecule database.
 * ``notes/``                      — user-editable notes.
-* ``incoming/``                   — files waiting for pipeline ingestion.
 * ``storage/``                    — document artifact root.
 
 Document-level (under ``storage/{doc_id}/``):
@@ -171,11 +170,6 @@ class LibraryLayout:
     def storage_root(self) -> Path:
         """``{root}/storage/`` — canonical document artifact root."""
         return self._root / "storage"
-
-    @property
-    def incoming_dir(self) -> Path:
-        """``{root}/incoming/`` — files waiting for pipeline ingestion."""
-        return self._root / "incoming"
 
     @property
     def write_test_path(self) -> Path:

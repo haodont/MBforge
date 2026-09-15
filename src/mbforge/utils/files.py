@@ -28,6 +28,11 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def sha256_bytes(data: bytes) -> str:
+    """计算字节内容 SHA256."""
+    return hashlib.sha256(data).hexdigest()
+
+
 def md5_file(path: Path) -> str:
     """计算文件 MD5."""
     h = hashlib.md5()
@@ -71,6 +76,16 @@ def load_json(path: Path, default: Any = None) -> Any:
             return _json.load(f)
     except Exception:  # noqa: BLE001 — see docstring; this is a "tolerate corrupt config" helper, not a parser.
         return default
+
+
+def safe_json_loads[T](value: str | None, fallback: T) -> T:
+    """Parse ``value`` as JSON, returning ``fallback`` on empty or invalid input."""
+    if not value:
+        return fallback
+    try:
+        return _json.loads(value)  # type: ignore[no-any-return]
+    except (TypeError, _json.JSONDecodeError):
+        return fallback
 
 
 def decode_base64_to_tempfile(image_base64: str, ext: str = "png") -> str:

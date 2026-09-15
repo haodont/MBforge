@@ -13,39 +13,43 @@ Markdown-resident module map:
 
 from __future__ import annotations
 
-from ..detection.correction import correct_molecules_with_context
-from ..detection.extraction import (
+from mbforge.core.molecule import Molecule
+from mbforge.core.types import DetectionSource
+from mbforge.pipeline.detection.correction import correct_molecules_with_context
+from mbforge.pipeline.detection.extraction import (
+    candidate_id,
     extract_molecules_from_pdf,
     extract_molecules_from_text,
-    make_candidate_id,
 )
-from ..detection.formula_normalization import (
+from mbforge.pipeline.detection.formula_normalization import (
     clean_markdown_file,
     normalize_patent_formulas,
 )
-from ..detection.image_preprocessing import preprocess_mol_image
-from ..detection.label_normalization import LabelKind, normalize_coref_label
-from ..detection.label_recovery import recover_labels_from_ms
-from ..detection.normalization import (
-    DetectionSource,
-    NormalizedMolecule,
+from mbforge.pipeline.detection.image_preprocessing import preprocess_mol_image
+from mbforge.pipeline.detection.label_normalization import (
+    LabelKind,
+    normalize_coref_label,
+)
+from mbforge.pipeline.detection.label_recovery import recover_labels_from_ms
+from mbforge.pipeline.detection.normalization import (
     normalize_molecules,
     select_molecule_name,
 )
-from ..detection.structure_role import classify_structure_role
+from mbforge.pipeline.detection.structure_role import classify_structure_role
+
 from .esmiles_insert import insert_esmiles_blocks
 
 __all__ = [
     "DetectionSource",
     "LabelKind",
-    "NormalizedMolecule",
+    "Molecule",
     "classify_structure_role",
     "clean_markdown_file",
     "correct_molecules_with_context",
     "extract_molecules_from_pdf",
     "extract_molecules_from_text",
     "insert_esmiles_blocks",
-    "make_candidate_id",
+    "candidate_id",
     "normalize_coref_label",
     "normalize_molecules",
     "normalize_patent_formulas",

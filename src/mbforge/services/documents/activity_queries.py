@@ -11,7 +11,7 @@ import sqlite3
 from typing import Any
 
 from ...storage.sqlite.database import DatabaseManager
-from ...utils.json_utils import safe_json_loads
+from ...utils.files import safe_json_loads
 
 # Columns selected for the public API. Keep this list tight: callers
 # (notably the agent tools) serialize the result to JSON, so trimming

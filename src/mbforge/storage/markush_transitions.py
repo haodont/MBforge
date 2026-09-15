@@ -34,7 +34,7 @@ from ..models.markush import (
     MarkushDecisionItem,
     MarkushEvidenceItem,
 )
-from ..utils.json_utils import safe_json_loads
+from ..utils.files import safe_json_loads
 from .review_audit import record_review_decision
 
 

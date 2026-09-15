@@ -6,7 +6,6 @@ handle (AGENTS.md: routers must not import DatabaseManager).
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 from collections.abc import Callable
 
@@ -32,7 +31,6 @@ async def run_db_sync[T](
     db: DatabaseManager, operation: Callable[[sqlite3.Connection], T]
 ) -> T:
     """Run ``operation`` inside ``db.mol_conn()`` on the infra sync pool."""
-    from ...infra.process.executors import sync_executor
+    from ...infra.process import TaskPool, tasks
 
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(sync_executor(), _run_sync, db, operation)
+    return await tasks.run(TaskPool.SYNC, _run_sync, db, operation)

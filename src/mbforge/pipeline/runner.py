@@ -1,17 +1,17 @@
-"""Pipeline runner — orchestrates document processing via modular stages.
+"""Pipeline runner — executes one stage (queue node) per invocation.
 
-Refactored from a monolithic ``run_pipeline`` into a thin facade over
-``pipeline/run/*`` collaborators (see docs/plan-runner-split.md):
+Thin facade over ``pipeline/run/*`` collaborators:
 
 1. ``RunContext`` — per-invocation orchestration state and result assembly.
 2. ``PipelineEventSink`` — event/logging/``ingest_queue`` observability.
-3. ``InitialForkRunner`` — the fixed parallel Extract ∥ Detection fork + join.
-4. ``SequentialStageRunner`` — resume/skip-aware one-stage execution loop.
-5. ``Finalizer`` — run completion and failure/cancellation cleanup.
+3. ``StageRunner`` — executes the single stage named by the claimed node.
+4. ``Finalizer`` — per-node completion and failure/cancellation cleanup.
 
-Stage flow: Extract ∥ Detection → Markdown → Patent. The current pipeline ends
-after Patent; downstream linking and persistence remain separate work and are
-not invoked here.
+Stage flow: Extract ∥ Detection → Join → Markdown → Patent. The Extract and
+Detection nodes run concurrently because the queue admits both (see
+``ingest_stage_deps``), not because the runner forks threads. The current
+pipeline ends after Patent; downstream linking and persistence remain separate
+work and are not invoked here.
 
 Public symbols (``run_pipeline``, ``cancel_task``, ``is_task_cancelled``,
 ``release_task``, ``PipelineResult``, ``STAGES``, ``_effective_stages``) are
@@ -23,23 +23,22 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..core.stage import ORDER as STAGE_REGISTRY_ORDER
-from ..core.stage import REGISTRY as STAGE_REGISTRY
-from ..storage.layout import canonicalize_library_root
-from ..utils.config import load_global_config
-from ..utils.logger import get_logger
-from . import stage_checkpoint
+from mbforge.core.stage import ORDER as STAGE_REGISTRY_ORDER
+from mbforge.core.stage import REGISTRY as STAGE_REGISTRY
+from mbforge.core.stage import StageExecutor, dependencies
+from mbforge.storage.layout import canonicalize_library_root
+from mbforge.utils.config import load_global_config
+from mbforge.utils.logger import get_logger
+
 from . import stages as _stage_modules  # noqa: F401  (triggers stage registration)
+from .artifacts.hydration import hydrate_context_from_artifacts
 from .cancellation import PIPELINE_CANCELLED, TaskCancelledError, default_registry
 from .composition import effective_stage_names
+from .run.context import RunContext
 from .run.events import PipelineEventSink
 from .run.finalize import Finalizer
-from .run.initial_fork import InitialForkRunner
 from .run.models import PipelineResult, ProgressCallback
-from .run.sequential import SequentialStageRunner
-from .run.state import RunContext
-from .stage_artifacts import hydrate_context_from_artifacts
-from .stages.base import StageExecutor
+from .run.sequential import StageRunner
 
 logger = get_logger("mbforge.pipeline.runner")
 
@@ -108,37 +107,35 @@ def run_pipeline(
     library_root: str,
     doc_id: str = "",
     *,
+    stage: str | None = None,
+    run_id: str | None = None,
     task_id: str | None = None,
     on_progress: ProgressCallback | None = None,
-    resume_from_stage: str | None = None,
 ) -> PipelineResult:
-    """Run the next pending stage of the document processing pipeline.
-
-    Extract and Detection run as one fixed initial fork. Each later invocation
-    executes one sequential stage, writes a checkpoint summary, and returns.
-    The worker reads :attr:`PipelineResult.next_stage` to decide whether to
-    re-queue the task for the next stage or mark it done.
+    """Execute exactly one stage — the queue node the worker just claimed.
 
     Args:
         pdf_path: Path to the PDF file
         library_root: Library data directory
         doc_id: Document ID (auto-generated from filename if empty)
+        stage: Registered stage name of the claimed node. Required.
+        run_id: The ingestion attempt's run ID, shared by every node of that
+            attempt (minted once at enqueue). When omitted a fresh one is
+            minted — intended only for direct/test callers.
         task_id: Optional queue task ID for event and cancellation tracking
         on_progress: Optional pipeline event callback
-        resume_from_stage: The last *completed* stage name (from the queue
-            row's ``stage`` column).  When set, earlier stages are skipped
-            and only the next pending stage runs.  ``None`` starts from
-            the beginning.
 
     Returns:
-        PipelineResult with processing statistics plus ``current_stage``
-        and ``next_stage`` for the worker's re-queue decision.
+        PipelineResult with ``current_stage`` naming the executed node.
 
     Raises:
-        ValueError: If ``library_root`` is empty or missing.
+        ValueError: If ``library_root`` is empty, or ``stage`` is missing or
+            not a registered stage.
     """
     if not library_root:
         raise ValueError("run_pipeline requires a non-empty `library_root`")
+    if stage is None or stage not in STAGE_REGISTRY:
+        raise ValueError(f"run_pipeline requires a registered stage, got {stage!r}")
     root = canonicalize_library_root(library_root)
     if not doc_id:
         doc_id = Path(pdf_path).stem
@@ -149,27 +146,24 @@ def run_pipeline(
         doc_id,
         task_id=task_id,
         ocr_config=_current_ocr_config(),
-        resume_from_stage=resume_from_stage,
+        run_id=run_id,
+        stage=stage,
     )
-    sink = PipelineEventSink(on_progress, task_id, root, doc_id)
+    sink = PipelineEventSink(on_progress, task_id, root, doc_id, run_id=run_id)
 
     try:
         # Per-invocation effective stage list from the composition root.
         active_stages: list[Any] = _effective_stages()
         # Validate all effective stages satisfy the StageExecutor protocol.
-        for stage in active_stages:
-            if not isinstance(stage, StageExecutor):
+        for candidate in active_stages:
+            if not isinstance(candidate, StageExecutor):
                 raise TypeError(
-                    f"{type(stage).__name__} does not satisfy StageExecutor protocol"
+                    f"{type(candidate).__name__} does not satisfy StageExecutor protocol"
                 )
 
-        sink.emit(
-            "start",
-            f"Processing {Path(pdf_path).name}"
-            + (f" (resuming after {resume_from_stage})" if resume_from_stage else ""),
-        )
+        sink.emit("start", f"Running {stage} for {Path(pdf_path).name}")
 
-        # Cancellation is checked for every invocation before any stage runs.
+        # Cancellation is checked for every invocation before the stage runs.
         if is_task_cancelled(task_id):
             sink.emit(
                 "cancelled",
@@ -179,23 +173,15 @@ def run_pipeline(
             )
             raise TaskCancelledError(task_id)
 
-        initial_fork = InitialForkRunner(run, sink, active_stages)
-        if initial_fork.should_run():
-            # The only parallel section is the fixed initial fork. Keeping this
-            # explicit avoids turning the runner into a generic workflow engine.
-            return initial_fork.run_fork()
-
-        # Later invocations hydrate from the SQL-backed joined artifact; this
+        # Non-root stages read the artifacts/evidence produced upstream; this
         # also makes a missing source-evidence row a hard pipeline error.
-        hydrate_context_from_artifacts(run.ctx)
+        if dependencies(stage):
+            hydrate_context_from_artifacts(run.ctx)
 
-        completed_stage = SequentialStageRunner(run, sink, active_stages).run_one()
-        next_stage = stage_checkpoint.next_stage(completed_stage)
+        completed_stage = StageRunner(run, sink, active_stages).run_stage(stage)
 
-        Finalizer(run).complete(sink, completed_stage, next_stage)
-        return run.as_public_result(
-            completed_stage=completed_stage, next_stage=next_stage
-        )
+        Finalizer(run).complete(sink, completed_stage)
+        return run.as_public_result(completed_stage=completed_stage)
     except BaseException:
         # Failure or cancellation: clean ONLY this run's uncommitted artifacts
         # when no intermediate stage has succeeded yet. When a previous stage

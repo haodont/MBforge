@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any
 
+from mbforge.utils.ids import stable_id
+
 _SEP = "\x1f"
-
-
-def _stable_id(*parts: str) -> str:
-    """Keep the existing deterministic ID contract for domain objects."""
-    return hashlib.sha1(_SEP.join(parts).encode("utf-8")).hexdigest()[:16]
 
 
 def _normalise_bbox(
@@ -47,7 +43,7 @@ def _location_id(
         kind,
         *(f"{round(value, 2):.2f}" for value in bbox),
     )
-    return hashlib.sha256(_SEP.join(parts).encode("utf-8")).hexdigest()[:32]
+    return stable_id(*parts)
 
 
 def _validate_coref(coref: str) -> None:
@@ -160,4 +156,4 @@ class SourceEvidence:
         )
 
 
-__all__ = ["SourceEvidence", "_stable_id"]
+__all__ = ["SourceEvidence"]
