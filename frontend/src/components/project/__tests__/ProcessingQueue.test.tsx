@@ -63,11 +63,12 @@ function mockMutationHooks() {
   vi.mocked(useSetTaskPriority).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useSetTaskPriority>)
 }
 
-function mockQueue(tasks: { id: string; status: string; doc_id: string }[]) {
+function mockQueue(tasks: { id: string; status: string; doc_id: string; run_id?: string }[]) {
   const now = Date.now()
   vi.mocked(useIngestQueue).mockReturnValue({
     data: tasks.map(t => ({
       id: t.id,
+      run_id: t.run_id ?? t.id,
       doc_id: t.doc_id,
       file_path: `${t.doc_id}.pdf`,
       status: t.status,

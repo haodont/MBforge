@@ -66,11 +66,11 @@ export function useCancelTask() {
   return useMutation({
     mutationFn: ({
       libraryRoot,
-      taskId,
+      runId,
     }: {
       libraryRoot: string
-      taskId: string
-    }) => ingestCancel(libraryRoot, taskId),
+      runId: string
+    }) => ingestCancel(libraryRoot, runId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },
@@ -84,13 +84,13 @@ export function useRetryTask() {
   return useMutation({
     mutationFn: ({
       libraryRoot,
-      taskId,
+      runId,
       resumeFromStage,
     }: {
       libraryRoot: string
-      taskId: string
+      runId: string
       resumeFromStage?: string
-    }) => ingestRetry(libraryRoot, taskId, resumeFromStage),
+    }) => ingestRetry(libraryRoot, runId, resumeFromStage),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },
@@ -104,11 +104,11 @@ export function useDeleteTask() {
   return useMutation({
     mutationFn: ({
       libraryRoot,
-      taskId,
+      runId,
     }: {
       libraryRoot: string
-      taskId: string
-    }) => ingestDeleteTask(libraryRoot, taskId),
+      runId: string
+    }) => ingestDeleteTask(libraryRoot, runId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },
@@ -144,11 +144,11 @@ export function useCancelBatch() {
   return useMutation({
     mutationFn: ({
       libraryRoot,
-      taskIds,
+      runIds,
     }: {
       libraryRoot: string
-      taskIds: string[]
-    }) => ingestCancelBatch(libraryRoot, taskIds),
+      runIds: string[]
+    }) => ingestCancelBatch(libraryRoot, runIds),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },
@@ -162,11 +162,11 @@ export function useRetryBatch() {
   return useMutation({
     mutationFn: ({
       libraryRoot,
-      taskIds,
+      runIds,
     }: {
       libraryRoot: string
-      taskIds: string[]
-    }) => ingestRetryBatch(libraryRoot, taskIds),
+      runIds: string[]
+    }) => ingestRetryBatch(libraryRoot, runIds),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },
@@ -192,13 +192,13 @@ export function useSetTaskPriority() {
   return useMutation({
     mutationFn: ({
       libraryRoot,
-      taskId,
+      runId,
       priority,
     }: {
       libraryRoot: string
-      taskId: string
+      runId: string
       priority: number
-    }) => ingestSetPriority(libraryRoot, taskId, priority),
+    }) => ingestSetPriority(libraryRoot, runId, priority),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },

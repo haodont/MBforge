@@ -87,14 +87,14 @@ export default function ProcessingQueue() {
     void refetchStats()
   }, [refetchQueue, refetchStats])
 
-  // Track the "most interesting" processing task for SSE subscription.
-  const activeTaskId = useMemo(() => {
+  // Track the "most interesting" processing run for SSE subscription.
+  const activeRunId = useMemo(() => {
     const processing = queueTasks.find(t => t.status === 'processing')
-    return processing?.id ?? null
+    return processing?.run_id ?? null
   }, [queueTasks])
 
   // SSE bridge — pushes real-time stage changes into the query cache.
-  useIngestSSE({ libraryRoot, taskId: activeTaskId })
+  useIngestSSE({ libraryRoot, runId: activeRunId })
 
   // Live "now" timestamp for elapsed-time displays.
   const [now, setNow] = useState(() => Date.now())
@@ -181,7 +181,7 @@ export default function ProcessingQueue() {
       if (!libraryRoot) return
       setActionId(task.id)
       try {
-        await cancelMutation.mutateAsync({ libraryRoot, taskId: task.id })
+        await cancelMutation.mutateAsync({ libraryRoot, runId: task.run_id })
         showToast(t('queue.taskCancelled'), 'success')
       } catch (e) {
         logger.error('[ProcessingQueue] cancel failed:', e)
@@ -201,7 +201,7 @@ export default function ProcessingQueue() {
       try {
         const ok = await retryMutation.mutateAsync({
           libraryRoot,
-          taskId: task.id,
+          runId: task.run_id,
           resumeFromStage,
         })
         if (ok) {
@@ -228,7 +228,7 @@ export default function ProcessingQueue() {
     try {
       const result = await retryBatchMutation.mutateAsync({
         libraryRoot,
-        taskIds: failedTasks.map((task) => task.id),
+        runIds: deduplicateRunIds(failedTasks),
       })
       showToast(t('queue.bulkRetryDone', { retried: result.updated, skipped: result.skipped }), result.skipped > 0 ? 'warning' : 'success')
     } catch (error) {
@@ -248,7 +248,7 @@ export default function ProcessingQueue() {
     try {
       const result = await cancelBatchMutation.mutateAsync({
         libraryRoot,
-        taskIds: pendingTasks.map((task) => task.id),
+        runIds: deduplicateRunIds(pendingTasks),
       })
       showToast(t('queue.bulkCancelDone', { cancelled: result.updated, failed: result.skipped }), result.skipped > 0 ? 'warning' : 'success')
     } catch (error) {
@@ -281,7 +281,7 @@ export default function ProcessingQueue() {
         const nextPriority = task.priority > 0 ? 0 : 1
         await priorityMutation.mutateAsync({
           libraryRoot,
-          taskId: task.id,
+          runId: task.run_id,
           priority: nextPriority,
         })
         showToast(nextPriority > 0 ? t('queue.taskPinned') : t('queue.taskUnpinned'), 'success')
@@ -301,7 +301,7 @@ export default function ProcessingQueue() {
       setConfirm(null)
       setActionId(task.id)
       try {
-        const ok = await deleteMutation.mutateAsync({ libraryRoot, taskId: task.id })
+        const ok = await deleteMutation.mutateAsync({ libraryRoot, runId: task.run_id })
         if (ok) {
           showToast(t('queue.taskDeleted'), 'success')
         } else {
@@ -550,6 +550,11 @@ function deduplicateTasksByDocId(tasks: IngestTask[]): IngestTask[] {
     if (!current || isPreferredTask(task, current)) byDocId.set(task.doc_id, task)
   }
   return [...byDocId.values()]
+}
+
+/** Unique run ids across tasks — a run may span multiple stage rows. */
+function deduplicateRunIds(tasks: IngestTask[]): string[] {
+  return [...new Set(tasks.map((task) => task.run_id).filter((id): id is string => Boolean(id)))]
 }
 
 function isPreferredTask(candidate: IngestTask, current: IngestTask): boolean {

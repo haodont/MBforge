@@ -24,34 +24,34 @@ const PIPELINE_STAGES = new Set([
 
 interface UseIngestSSEOptions {
   libraryRoot: string
-  taskId: string | null
-  /** If true, do not subscribe (e.g. no task is active). */
+  runId: string | null
+  /** If true, do not subscribe (e.g. no run is active). */
   disabled?: boolean
 }
 
 /**
- * Subscribe to SSE events for a single pipeline task and merge
+ * Subscribe to SSE events for a single pipeline run and merge
  * stage updates into the React Query cache.
  *
  * Usage (inside ProcessingQueue or similar):
- *   useIngestSSE({ libraryRoot, taskId: activeTaskId })
+ *   useIngestSSE({ libraryRoot, runId: activeRunId })
  */
 export function useIngestSSE({
   libraryRoot,
-  taskId,
+  runId,
   disabled,
 }: UseIngestSSEOptions): void {
   const qc = useQueryClient()
   const cleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
-    if (disabled || !taskId) return
+    if (disabled || !runId) return
 
     // Clean up previous subscription before creating a new one.
     cleanupRef.current?.()
     cleanupRef.current = null
 
-    const sub = subscribeIngestEvents(libraryRoot, taskId, {
+    const sub = subscribeIngestEvents(libraryRoot, runId, {
       onEvent: (event) => {
         // Optimistically update the matching task in the cached queue.
         // The next 10-second refetch will correct anything we miss.
@@ -72,7 +72,7 @@ export function useIngestSSE({
                     : null
 
             return prev.map((t) => {
-              if (t.id !== taskId) return t
+              if (t.run_id !== runId) return t
               if (eventTimestamp !== null && eventTimestamp < t.updated_at * 1000) {
                 return t
               }
@@ -105,5 +105,5 @@ export function useIngestSSE({
       sub.close()
       cleanupRef.current = null
     }
-  }, [libraryRoot, taskId, disabled, qc])
+  }, [libraryRoot, runId, disabled, qc])
 }

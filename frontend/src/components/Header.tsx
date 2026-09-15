@@ -14,6 +14,7 @@ export default function Header({ currentPage }: HeaderProps) {
     knowledge: t('nav.knowledge'),
     docs: t('nav.docs'),
     settings: t('nav.settings'),
+    agent: t('nav.agent'),
   }
 
   const title = pageTitle[currentPage] || 'MBForge'
@@ -25,6 +26,7 @@ export default function Header({ currentPage }: HeaderProps) {
     knowledge: '/notes',
     docs: '/docs',
     settings: '/settings',
+    agent: '/agent',
   }
 
   return (

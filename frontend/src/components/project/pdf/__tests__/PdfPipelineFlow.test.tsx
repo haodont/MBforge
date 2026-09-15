@@ -10,6 +10,7 @@ vi.mock('react-i18next', () => ({
 function makeTask(overrides: Partial<IngestTask> = {}): IngestTask {
   return {
     id: 'task-1',
+    run_id: 'run-1',
     file_path: 'document.pdf',
     doc_id: 'doc-1',
     status: 'processing',

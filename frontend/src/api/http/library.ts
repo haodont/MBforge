@@ -133,22 +133,22 @@ export async function importDocument(
   file: File,
   title?: string,
   onProgress?: (percent: number) => void,
-): Promise<{ success: boolean; document?: DocumentInfo; task_id?: string }> {
+): Promise<{ success: boolean; document?: DocumentInfo; run_id?: string }> {
   const fd = new FormData()
   fd.append('file', file, file.name)
   if (title) fd.append('title', title)
 
   const resp = onProgress && typeof XMLHttpRequest !== 'undefined'
-    ? await new Promise<{ success: boolean; document?: DocumentInfo; task_id?: string; error?: string; detail?: string }>((resolve, reject) => {
+    ? await new Promise<{ success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string }>((resolve, reject) => {
         const request = new XMLHttpRequest()
         request.open('POST', apiUrl('/library/import'))
         request.upload.onprogress = (event) => {
           if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100))
         }
         request.onload = () => {
-          let body: { success: boolean; document?: DocumentInfo; task_id?: string; error?: string; detail?: string } | null
+          let body: { success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string } | null
           try {
-            body = JSON.parse(request.responseText) as { success: boolean; document?: DocumentInfo; task_id?: string; error?: string; detail?: string }
+            body = JSON.parse(request.responseText) as { success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string }
           } catch {
             body = null
           }
@@ -165,7 +165,7 @@ export async function importDocument(
         request.onerror = () => reject(new Error('Import request failed'))
         request.send(fd)
       })
-    : await httpFetch<{ success: boolean; document?: DocumentInfo; task_id?: string; error?: string; detail?: string }>(
+    : await httpFetch<{ success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string }>(
         '/library/import', { method: 'POST', body: fd },
       )
 

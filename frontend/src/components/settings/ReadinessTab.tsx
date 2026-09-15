@@ -92,12 +92,12 @@ export default function ReadinessTab({ libraryRoot }: Props) {
   }
 
   const pollDemoTask = useCallback(
-    (taskId: string) => {
+    (runId: string) => {
       const tick = async () => {
         try {
           const tasks = await ingestList(libraryRoot)
           if (!mounted.current) return
-          const task = tasks.find((x) => x.id === taskId)
+          const task = tasks.find((x) => x.run_id === runId)
           if (task) {
             if (task.status === 'done') {
               setDemo({ running: false, tone: 'ok', message: t('settings.readiness.demoDone') })
@@ -142,8 +142,8 @@ export default function ReadinessTab({ libraryRoot }: Props) {
         })
         return
       }
-      if (res.task_id) {
-        pollDemoTask(res.task_id)
+      if (res.run_id) {
+        pollDemoTask(res.run_id)
       } else {
         setDemo({ running: false, tone: 'ok', message: t('settings.readiness.demoDone') })
       }

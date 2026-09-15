@@ -25,6 +25,7 @@ const Knowledge = lazy(() => import('./components/Knowledge'))
 const ProcessingQueue = lazy(() => import('./components/project/ProcessingQueue'))
 const SettingsPage = lazy(() => import('./components/settings/SettingsPage'))
 const ReviewCenter = lazy(() => import('./components/review/ReviewCenter'))
+const AgentChat = lazy(() => import('./components/AgentChat'))
 
 /** Lightweight fallback shown while a route chunk is being fetched. */
 function RouteFallback() {
@@ -309,6 +310,14 @@ function AppRoutes() {
           element={
             <Suspense fallback={<RouteFallback />}>
               <AnimatedPage><ReviewCenter /></AnimatedPage>
+            </Suspense>
+          }
+        />
+        <Route
+          path="/agent"
+          element={
+            <Suspense fallback={<RouteFallback />}>
+              <AnimatedPage><AgentChat /></AnimatedPage>
             </Suspense>
           }
         />

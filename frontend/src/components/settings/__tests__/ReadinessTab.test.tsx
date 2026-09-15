@@ -184,7 +184,7 @@ describe('ReadinessTab', () => {
     )
     vi.mocked(readinessDemoRun).mockResolvedValue({
       ok: false,
-      task_id: null,
+      run_id: null,
       file_path: '',
       error: 'library not configured',
     })

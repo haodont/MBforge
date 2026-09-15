@@ -15,6 +15,7 @@ function makeTask(overrides: Partial<IngestTask> = {}): IngestTask {
   const now = Math.floor(Date.now() / 1000)
   return {
     id: 't1',
+    run_id: 'r1',
     doc_id: 'doc-1',
     file_path: '/tmp/test.pdf',
     status: 'pending',

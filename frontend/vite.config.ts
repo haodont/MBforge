@@ -1,7 +1,9 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { readFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import net from 'node:net'
 import processShim from './process-shim.json'
 
 // Read version from frontend/package.json and bake it into the build
@@ -22,6 +24,86 @@ function readPort(value: string | undefined, fallback: number, name: string): nu
   return port
 }
 
+/** Probe whether a TCP service is already listening on host:port. */
+function isPortListening(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket()
+    const settle = (value: boolean) => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolve(value)
+    }
+    socket.setTimeout(1500)
+    socket.once('connect', () => settle(true))
+    socket.once('timeout', () => settle(false))
+    socket.once('error', () => settle(false))
+    socket.connect(port, host)
+  })
+}
+
+/** Kill a spawn tree portably (taskkill under Windows orphans). */
+function killProcessTree(child: ReturnType<typeof spawn>): void {
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'])
+    } else {
+      child.kill('SIGTERM')
+    }
+  } catch {
+    /* best effort — never let teardown throw */
+  }
+}
+
+/**
+ * Dev convenience: when the frontend is started alone (`npm run dev`), also
+ * bring up the LLM agent service so chat works without running `dev:all`.
+ * Waits until the agent actually answers before returning, so the first chat
+ * request never races a still-building process. `dev:all` manages the agent
+ * itself and sets `MBFORGE_AGENT_AUTOSTART=0`.
+ */
+async function ensureAgentServer(
+  server: ViteDevServer,
+  host: string,
+  port: number,
+): Promise<void> {
+  if (process.env.MBFORGE_AGENT_AUTOSTART === '0') return
+  if (await isPortListening(host, port)) return
+
+  const agentDir = path.resolve(__dirname, '..', 'agent')
+  // eslint-disable-next-line no-console
+  console.log(`[mbforge] LLM agent not on ${host}:${port}; building & starting it…`)
+  const child = spawn(
+    `npm --prefix "${agentDir}" run build && npm --prefix "${agentDir}" start`,
+    { shell: true, stdio: 'inherit', env: { ...process.env, MBFORGE_AGENT_HOST: host, MBFORGE_AGENT_PORT: String(port) } },
+  )
+  child.once('error', (error) => {
+    // eslint-disable-next-line no-console
+    console.error(`[mbforge] Failed to start the LLM agent: ${error.message}`)
+  })
+  server.httpServer?.once('close', () => killProcessTree(child))
+
+  // A build/start failure makes the combined command exit. Bail out of
+  // polling so we report that instead of hanging and then timing out.
+  let exited = false
+  child.once('close', () => { exited = true })
+
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline && !exited) {
+    if (await isPortListening(host, port)) {
+      // eslint-disable-next-line no-console
+      console.log(`[mbforge] LLM agent ready on ${host}:${port}.`)
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  // eslint-disable-next-line no-console
+  console.error(
+    exited
+      ? '[mbforge] LLM agent exited before becoming ready — check the build/start messages above.'
+      : '[mbforge] Timed out waiting for the LLM agent to become ready.',
+  )
+}
+
 export default defineConfig(({ mode }) => {
   const environment = { ...loadEnv(mode, __dirname, ''), ...process.env }
   const backendHost = environment.MBFORGE_BACKEND_HOST ?? '127.0.0.1'
@@ -36,10 +118,30 @@ export default defineConfig(({ mode }) => {
     5173,
     'MBFORGE_FRONTEND_PORT',
   )
+  const agentHost = environment.MBFORGE_AGENT_HOST ?? '127.0.0.1'
+  const agentPort = readPort(
+    environment.MBFORGE_AGENT_PORT ?? '18800',
+    18800,
+    'MBFORGE_AGENT_PORT',
+  )
 
   return {
     plugins: [
     react(),
+    ...(mode === 'development'
+      ? [{
+          // Dev convenience: starting the frontend alone also starts the LLM
+          // agent service so chat works without running `dev:all`. Gated to
+          // the Vite dev server only — never during vitest ('test') or build
+          // ('production'), where it would otherwise spawn a network service.
+          name: 'mbforge-agent-autostart',
+          configureServer(server) {
+            // Awaiting here blocks Vite from listening until the agent is
+            // reachable, so the first chat request can't get ECONNREFUSED.
+            return ensureAgentServer(server, agentHost, agentPort)
+          },
+        }]
+      : []),
     {
       // Some pre-bundled deps (e.g. ketcher-standalone) ship with Node-style
       // `process.env.X` references that survive esbuild's `define` pass.
@@ -110,6 +212,14 @@ export default defineConfig(({ mode }) => {
       '/api': {
         target: `http://${backendHost}:${backendPort}`,
         changeOrigin: true,
+      },
+      // Same-origin path to the LLM agent service (port 18800). The
+      // frontend's `agent.ts` calls `/agent-api/...` in dev.
+      '/agent-api': {
+        target: `http://${agentHost}:${agentPort}`,
+        changeOrigin: true,
+        // /agent-api/v1/chat -> /v1/chat
+        rewrite: (path) => path.replace(/^\/agent-api/, ''),
       },
     },
     },

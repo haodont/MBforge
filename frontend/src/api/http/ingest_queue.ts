@@ -8,6 +8,7 @@ export type IngestStageStatus = 'pending' | 'running' | 'success' | 'error'
 
 export interface IngestTask {
   id: string
+  run_id: string
   file_path: string
   doc_id: string
   status: 'pending' | 'processing' | 'done' | 'failed' | 'cancelled'
@@ -89,7 +90,7 @@ export interface IngestEventHandlers {
 }
 
 /**
- * Subscribe to real-time pipeline events for a single task via SSE.
+ * Subscribe to real-time pipeline events for a single run via SSE.
  *
  * The SSE event name is the level (error/warning/info). The returned `close()`
  * must be called on unmount to release the EventSource. On `onerror` we do not
@@ -97,10 +98,10 @@ export interface IngestEventHandlers {
  */
 export function subscribeIngestEvents(
   libraryRoot: string,
-  taskId: string,
+  runId: string,
   handlers: IngestEventHandlers,
 ): { close: () => void } {
-  const url = apiUrl(`/api/v1/pipeline/events/${encodeURIComponent(taskId)}?library_root=${encodeURIComponent(libraryRoot)}`)
+  const url = apiUrl(`/api/v1/pipeline/events/${encodeURIComponent(runId)}?library_root=${encodeURIComponent(libraryRoot)}`)
   const es = new EventSource(url)
 
   const handleNamedEvent = (level: string, raw: MessageEvent) => {
@@ -202,10 +203,10 @@ export async function ingestGetLogs(
   )
 }
 
-export async function ingestCancel(libraryRoot: string, taskId: string): Promise<void> {
+export async function ingestCancel(libraryRoot: string, runId: string): Promise<void> {
   return invokeWithError(
     async () => {
-      await httpPost(`/api/v1/pipeline/queue/${taskId}/cancel`, { library_root: libraryRoot })
+      await httpPost(`/api/v1/pipeline/queue/${runId}/cancel`, { library_root: libraryRoot })
     },
     ErrorCode.ApiError,
   )
@@ -213,13 +214,13 @@ export async function ingestCancel(libraryRoot: string, taskId: string): Promise
 
 export async function ingestRetry(
   libraryRoot: string,
-  taskId: string,
+  runId: string,
   resumeFromStage?: string,
 ): Promise<boolean> {
   return invokeWithError(
-    () => httpPost<{ updated: number; error?: string | null }>(`/api/v1/pipeline/queue/${taskId}/retry`, {
+    () => httpPost<{ updated: number; error?: string | null }>(`/api/v1/pipeline/queue/${runId}/retry`, {
       library_root: libraryRoot,
-      task_ids: [taskId],
+      run_ids: [runId],
       resume_from_stage: resumeFromStage ?? null,
     })
       .then((response) => response.updated > 0),
@@ -242,12 +243,12 @@ export interface IngestBulkActionResult {
 
 export async function ingestCancelBatch(
   libraryRoot: string,
-  taskIds: string[],
+  runIds: string[],
 ): Promise<IngestBulkActionResult> {
   return invokeWithError(
     () => httpPost<IngestBulkActionResult>('/api/v1/pipeline/queue/batch/cancel', {
       library_root: libraryRoot,
-      task_ids: taskIds,
+      run_ids: runIds,
     }),
     ErrorCode.ApiError,
   )
@@ -255,18 +256,18 @@ export async function ingestCancelBatch(
 
 export async function ingestRetryBatch(
   libraryRoot: string,
-  taskIds: string[],
+  runIds: string[],
 ): Promise<IngestBulkActionResult> {
   return invokeWithError(
     () => httpPost<IngestBulkActionResult>('/api/v1/pipeline/queue/batch/retry', {
       library_root: libraryRoot,
-      task_ids: taskIds,
+      run_ids: runIds,
     }),
     ErrorCode.ApiError,
   )
 }
 
-/** 手动将 PDF 加入处理队列。返回任务 ID。
+/** 手动将 PDF 加入处理队列。返回 run ID。
  *
  * `force=true` 跳过同 hash 幂等检查 — 用于对已处理文件强制重新入队，
  * 新建任务而不复用现有 done 任务（保留历史记录）。
@@ -278,12 +279,12 @@ export async function ingestEnqueue(
   force?: boolean,
 ): Promise<string> {
   return invokeWithError(
-    () => httpPost<string>('/api/v1/pipeline/enqueue', {
+    () => httpPost<{ run_id?: string | null }>('/api/v1/pipeline/enqueue', {
       library_root: libraryRoot,
       file_path: filePath,
       doc_id: docId,
       force: force ?? false,
-    }),
+    }).then((r) => r.run_id ?? ''),
     ErrorCode.ApiError,
   )
 }
@@ -313,12 +314,12 @@ export function removeSelfTriggeredDoc(docId: string): void {
 
 export async function ingestSetPriority(
   libraryRoot: string,
-  taskId: string,
+  runId: string,
   priority: number,
 ): Promise<void> {
   return invokeWithError(
     async () => {
-      await httpPost(`/api/v1/pipeline/queue/${taskId}/priority`, {
+      await httpPost(`/api/v1/pipeline/queue/${runId}/priority`, {
         library_root: libraryRoot,
         priority,
       })
@@ -329,10 +330,10 @@ export async function ingestSetPriority(
 
 export async function ingestDeleteTask(
   libraryRoot: string,
-  taskId: string,
+  runId: string,
 ): Promise<boolean> {
   const resp = await invokeWithError(
-    () => httpPost<{ updated: number }>(`/api/v1/pipeline/queue/${taskId}/delete`, {
+    () => httpPost<{ updated: number }>(`/api/v1/pipeline/queue/${runId}/delete`, {
       library_root: libraryRoot,
     }),
     ErrorCode.ApiError,

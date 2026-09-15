@@ -60,7 +60,7 @@ export interface ProbeLlmResult {
 
 export interface DemoRunResult {
   ok: boolean
-  task_id: string | null
+  run_id: string | null
   file_path: string
   error: string | null
 }
