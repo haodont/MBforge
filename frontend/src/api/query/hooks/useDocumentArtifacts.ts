@@ -9,9 +9,7 @@ import {
 import { queryKeys } from '../keys'
 
 /**
- * A document's extracted markdown, shared between the standalone
- * MarkdownViewer and the workspace MarkdownPane so a doc opened in
- * both places only fetches once and stays fresh across views.
+ * A document's extracted markdown, read by the standalone MarkdownViewer.
  *
  * ``fetchDocumentMarkdown`` swallows HTTP errors into ``{ok:false,error}``,
  * so the query resolves successfully either way; consumers read ``data.ok``.

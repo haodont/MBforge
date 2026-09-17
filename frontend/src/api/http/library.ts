@@ -359,13 +359,6 @@ export function cropImageUrl(docId: string, relPath: string, libraryRoot: string
   )
 }
 
-export function imageUrl(docId: string, filename: string, libraryRoot: string): string {
-  return artifactUrl(
-    `/documents/${encodeURIComponent(docId)}/images/${encodeURIComponent(filename)}`,
-    libraryRoot
-  )
-}
-
 export async function fetchPageText(
   docId: string,
   page: number,

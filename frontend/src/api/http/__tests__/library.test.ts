@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cropImageUrl, imageUrl, importDocument } from '../library'
+import { cropImageUrl, importDocument } from '../library'
 
 describe('cropImageUrl', () => {
   it('joins rel_path and library_root with a single &', () => {
@@ -24,14 +24,6 @@ describe('cropImageUrl', () => {
   it('preserves backend namespace prefix when an api base is configured', () => {
     const url = cropImageUrl('doc1', 'crop.png', 'C:\\lib')
     expect(url.startsWith('/api/v1/library/documents/')).toBe(true)
-  })
-})
-
-describe('imageUrl', () => {
-  it('URL-encodes doc_id and filename for the images route', () => {
-    const url = imageUrl('patent/文档', 'figure 1.png', 'C:\\lib')
-    expect(url).toContain('/documents/patent%2F%E6%96%87%E6%A1%A3/images/figure%201.png')
-    expect(url).toContain('library_root=C%3A%5Clib')
   })
 })
 
