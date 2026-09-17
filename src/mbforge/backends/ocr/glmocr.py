@@ -38,7 +38,14 @@ import httpx
 
 from mbforge.utils.logger import get_logger
 
-from .base import CloudOCRConfig, LayoutSpan, OCRBackend, OCRResult
+from .base import (
+    CancelCheck,
+    CloudOCRConfig,
+    LayoutSpan,
+    OCRBackend,
+    OCRResult,
+    check_cancelled,
+)
 
 logger = get_logger(__name__)
 
@@ -72,9 +79,15 @@ class GLMOCRBackend(OCRBackend):
     def is_configured(self) -> bool:
         return self._cloud.is_configured()
 
-    def extract_text(self, image: bytes) -> OCRResult:
+    def extract_text(
+        self, image: bytes, *, cancel_check: CancelCheck | None = None
+    ) -> OCRResult:
         if not self._cloud.is_configured():
             return OCRResult(text="", error="GLM-OCR api_key not set")
+
+        # A single blocking POST with no poll loop: the only meaningful
+        # checkpoint is before spending a REQUEST_TIMEOUT on a cancelled task.
+        check_cancelled(cancel_check)
 
         body = {
             "model": self._cloud.model,

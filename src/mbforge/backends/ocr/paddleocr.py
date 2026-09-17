@@ -14,15 +14,21 @@ from __future__ import annotations
 import json
 import re
 import time
-from pathlib import Path
-from urllib.parse import urlparse
 
 import httpx
 
 from mbforge.utils.files import safe_json_loads
 from mbforge.utils.logger import get_logger
 
-from .base import CloudOCRConfig, LayoutSpan, OCRBackend, OCRResult
+from .base import (
+    CancelCheck,
+    CloudOCRConfig,
+    LayoutSpan,
+    OCRBackend,
+    OCRCancelledError,
+    OCRResult,
+    check_cancelled,
+)
 
 logger = get_logger(__name__)
 
@@ -73,9 +79,17 @@ class PaddleOCRBackend(OCRBackend):
     def is_configured(self) -> bool:
         return self._cloud.is_configured()
 
-    def extract_text(self, image: bytes) -> OCRResult:
+    def extract_text(
+        self, image: bytes, *, cancel_check: CancelCheck | None = None
+    ) -> OCRResult:
         if not self.is_configured():
             return OCRResult(text="", error="PaddleOCR api_key not set")
+
+        # The v2 job API polls for up to POLL_TIMEOUT, so a cancel that lands
+        # mid-job must be observable from inside the loop; without this the
+        # pipeline thread stays parked here after the user cancels.
+        def check() -> None:
+            check_cancelled(cancel_check)
 
         base = self._cloud.base_url
 
@@ -84,6 +98,7 @@ class PaddleOCRBackend(OCRBackend):
         retry_delay = 5.0  # seconds
 
         for attempt in range(max_retries):
+            check()
             try:
                 with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
                     # 1) Submit — upload image with model field, get job_id
@@ -96,12 +111,13 @@ class PaddleOCRBackend(OCRBackend):
                                 attempt + 1,
                                 max_retries,
                             )
+                            check()
                             time.sleep(retry_delay)
                             continue
                         return OCRResult(text="", error="PaddleOCR: no job_id returned")
 
                     # 2) Poll — wait for completion, get result URL
-                    result_data = self._poll(client, base, job_id)
+                    result_data = self._poll(client, base, job_id, check)
                     if result_data is None:
                         return OCRResult(
                             text="",
@@ -110,12 +126,12 @@ class PaddleOCRBackend(OCRBackend):
 
                     # 3) Parse result
                     text = self._extract_text(result_data)
-                    images = result_data.pop("_downloaded_images", {})
                     spans = _spans_from_result(result_data)
-                    return OCRResult(
-                        text=text, images=images, spans=spans, raw_output=result_data
-                    )
+                    return OCRResult(text=text, spans=spans, raw_output=result_data)
 
+            except OCRCancelledError:
+                # Never degrade a cancellation into a provider failure.
+                raise
             except Exception as exc:  # noqa: BLE001
                 status_code = (
                     exc.response.status_code
@@ -140,6 +156,7 @@ class PaddleOCRBackend(OCRBackend):
                         exc,
                         retry_delay,
                     )
+                    check()
                     time.sleep(retry_delay)
                     continue
                 logger.warning(
@@ -198,8 +215,13 @@ class PaddleOCRBackend(OCRBackend):
             )
         return job_id
 
-    def _poll(self, client: httpx.Client, base: str, job_id: str) -> dict | None:
+    def _poll(
+        self, client: httpx.Client, base: str, job_id: str, check: CancelCheck
+    ) -> dict | None:
         """Poll job status until done/failed or timeout.
+
+        ``check`` is polled once per iteration, so a cancellation is observed
+        within ``POLL_INTERVAL`` instead of at the end of ``POLL_TIMEOUT``.
 
         Returns the parsed result dict on success, None on timeout/failure.
         """
@@ -207,6 +229,7 @@ class PaddleOCRBackend(OCRBackend):
         deadline = time.monotonic() + POLL_TIMEOUT
 
         while time.monotonic() < deadline:
+            check()
             r = client.get(
                 status_url,
                 headers=self._cloud.auth_headers(),
@@ -221,7 +244,7 @@ class PaddleOCRBackend(OCRBackend):
                 result_url = data.get("resultUrl") or {}
                 json_url = result_url.get("jsonUrl")
                 if json_url:
-                    return self._fetch_result(client, json_url)
+                    return self._fetch_result(client, json_url, check)
                 logger.warning("PaddleOCR job %s done but no jsonUrl", job_id)
                 return None
 
@@ -231,19 +254,21 @@ class PaddleOCRBackend(OCRBackend):
                 return None
 
             # Still pending or running
+            check()
             time.sleep(POLL_INTERVAL)
 
         logger.warning("PaddleOCR job %s timed out after %.0fs", job_id, POLL_TIMEOUT)
         return None
 
-    def _fetch_result(self, client: httpx.Client, json_url: str) -> dict | None:
+    def _fetch_result(
+        self, client: httpx.Client, json_url: str, check: CancelCheck
+    ) -> dict | None:
         """Download and parse JSONL result from BOS URL."""
         r = client.get(json_url)  # BOS URL, no auth header needed
         r.raise_for_status()
 
         parts: list[str] = []
         raw_results: list[dict] = []
-        downloaded_images: dict[str, bytes] = {}
         for line in r.text.splitlines():
             if not line.strip():
                 continue
@@ -261,12 +286,6 @@ class PaddleOCRBackend(OCRBackend):
                 text = markdown.get("text", "")
                 if text:
                     parts.append(text)
-                # Only download molecule images from markdown.images, skip outputImages (layout debug)
-                self._download_images(
-                    client,
-                    markdown.get("images"),
-                    downloaded_images,
-                )
 
             # PP-OCRv5: ocrResults with rec_texts (fallback)
             for res in result.get("ocrResults", []):
@@ -277,33 +296,7 @@ class PaddleOCRBackend(OCRBackend):
         return {
             "text": "\n".join(parts),
             "raw_results": raw_results,
-            "_downloaded_images": downloaded_images,
         }
-
-    @staticmethod
-    def _download_images(
-        client: httpx.Client,
-        image_urls: object,
-        downloaded_images: dict[str, bytes],
-    ) -> None:
-        if not isinstance(image_urls, dict):
-            return
-        for name, url in image_urls.items():
-            if not isinstance(name, str) or not isinstance(url, str):
-                continue
-            if not url.startswith(("http://", "https://")):
-                continue
-            filename = name
-            if not Path(filename).suffix:
-                filename += Path(urlparse(url).path).suffix or ".bin"
-            try:
-                response = client.get(url)
-                response.raise_for_status()
-                downloaded_images[filename] = response.content
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "PaddleOCR image download failed for %s: %s", filename, exc
-                )
 
     @staticmethod
     def _extract_text(payload: dict) -> str:
@@ -345,11 +338,11 @@ def _spans_from_result(result_data: dict) -> list[LayoutSpan]:
             figures: set[tuple[float, float, float, float]] = set()
 
             def add_figure(
-                figures: set[tuple[float, float, float, float]],
+                registry: set[tuple[float, float, float, float]],
                 bbox_pt: tuple[float, float, float, float],
             ) -> None:
-                if bbox_pt not in figures:
-                    figures.add(bbox_pt)
+                if bbox_pt not in registry:
+                    registry.add(bbox_pt)
                     spans.append(LayoutSpan(text="", bbox=bbox_pt, block_type=1))
 
             for block in pruned.get("parsing_res_list") or []:

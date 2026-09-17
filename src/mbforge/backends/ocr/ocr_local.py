@@ -46,7 +46,7 @@ import httpx
 
 from mbforge.utils.logger import get_logger
 
-from .base import OCRBackend, OCRResult
+from .base import CancelCheck, OCRBackend, OCRResult, check_cancelled
 
 logger = get_logger(__name__)
 
@@ -82,9 +82,15 @@ class LocalPaddleOCRBackend(OCRBackend):
         # Opt-in: only participates in the chain when a local host is set.
         return bool(self._host)
 
-    def extract_text(self, image: bytes) -> OCRResult:
+    def extract_text(
+        self, image: bytes, *, cancel_check: CancelCheck | None = None
+    ) -> OCRResult:
         if not self._host:
             return OCRResult(text="", error="PaddleOCR local host not configured")
+
+        # A single blocking POST with no poll loop: the only meaningful
+        # checkpoint is before spending a REQUEST_TIMEOUT on a cancelled task.
+        check_cancelled(cancel_check)
 
         body = dict(_LAYOUT_BODY_BASE)
         body["file"] = "data:image/png;base64," + base64.b64encode(image).decode(

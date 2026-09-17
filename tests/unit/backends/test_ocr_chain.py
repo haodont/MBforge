@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from mbforge.backends.ocr import build_backends, extract_text_with_chain
-from mbforge.backends.ocr.base import OCRResult
+from mbforge.backends.ocr.base import OCRCancelledError, OCRResult
 from mbforge.backends.ocr.chain import (
     OCRUnavailableError,
     _priority_from_config,
@@ -49,7 +47,7 @@ def test_extract_text_with_chain_reuses_supplied_backends(
     class _Backend:
         name = "fake-cloud"
 
-        def extract_text(self, _image: bytes) -> OCRResult:
+        def extract_text(self, _image: bytes, *, cancel_check=None) -> OCRResult:
             return OCRResult(text="cloud text")
 
     monkeypatch.setattr(
@@ -63,22 +61,22 @@ def test_extract_text_with_chain_reuses_supplied_backends(
     assert result.elapsed_ms >= 0
 
 
-def test_extract_text_with_chain_saves_images_when_backend_returns_them(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The chain should persist images when save_images_dir is provided."""
+def test_extract_text_with_chain_does_not_fall_through_on_cancellation() -> None:
+    """A cancelled task must abort, not retry the next provider as a failure."""
 
-    class _ImageBackend:
-        name = "image_backend"
+    class _CancelledBackend:
+        name = "cancelled-cloud"
 
-        def extract_text(self, _image: bytes) -> OCRResult:
-            return OCRResult(text="backend text", images={"page_1.jpg": b"img"})
+        def extract_text(self, _image: bytes, *, cancel_check=None) -> OCRResult:
+            raise OCRCancelledError("Pipeline cancelled by user")
 
-    monkeypatch.setattr(
-        "mbforge.backends.ocr.chain.build_backends", lambda _cfg: [_ImageBackend()]
-    )
+    class _NextBackend:
+        name = "next-cloud"
 
-    out_dir = tmp_path / "saved"
-    result = extract_text_with_chain(b"png", {}, save_images_dir=out_dir)
-    assert result.text == "backend text"
-    assert (out_dir / "page_1.jpg").read_bytes() == b"img"
+        def extract_text(self, _image: bytes, *, cancel_check=None) -> OCRResult:
+            raise AssertionError("cancellation leaked into the next backend")
+
+    with pytest.raises(OCRCancelledError):
+        extract_text_with_chain(
+            b"png", {}, backends=[_CancelledBackend(), _NextBackend()]
+        )

@@ -11,7 +11,9 @@ import json
 from unittest.mock import MagicMock, Mock
 
 import httpx
+import pytest
 
+from mbforge.backends.ocr.base import OCRCancelledError
 from mbforge.backends.ocr.paddleocr import (
     PaddleOCRBackend,
     _px_bbox_to_pt,
@@ -103,6 +105,45 @@ def test_extract_text_does_not_retry_client_http_errors(
 
     assert result.text == ""
     assert client.post.call_count == 1
+
+
+def test_extract_text_aborts_polling_when_cancelled(monkeypatch) -> None:
+    """A cancel during polling stops the backend instead of waiting POLL_TIMEOUT.
+
+    The v2 job API polls for minutes; without a checkpoint inside the loop the
+    pipeline thread stays parked here after the user cancels.
+    """
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.__exit__.return_value = None
+    client.post.return_value = httpx.Response(
+        200,
+        json={"code": 0, "data": {"jobId": "job-1"}},
+        request=httpx.Request("POST", "https://example.test/jobs"),
+    )
+    client.get.return_value = httpx.Response(
+        200,
+        json={"data": {"state": "running"}},
+        request=httpx.Request("GET", "https://example.test/jobs/job-1"),
+    )
+    monkeypatch.setattr(
+        "mbforge.backends.ocr.paddleocr.httpx.Client",
+        Mock(return_value=client),
+    )
+
+    polls = {"n": 0}
+
+    def cancel_check() -> None:
+        polls["n"] += 1
+        if polls["n"] >= 2:  # first poll iteration passes, second is cancelled
+            raise RuntimeError("Pipeline cancelled by user")
+
+    with pytest.raises(OCRCancelledError):
+        PaddleOCRBackend({"api_key": "test-key"}).extract_text(
+            b"page", cancel_check=cancel_check
+        )
+
+    assert polls["n"] == 2
 
 
 def test_px_bbox_to_pt_flips_y_to_bottom_left() -> None:

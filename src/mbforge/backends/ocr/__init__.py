@@ -5,7 +5,7 @@ Default priority for PDF text extraction is set in `chain.DEFAULT_PRIORITY`:
     PaddleOCR
 """
 
-from .base import OCRBackend, OCRResult
+from .base import OCRBackend, OCRCancelledError, OCRResult
 from .chain import (
     DEFAULT_PRIORITY,
     build_backends,
@@ -18,6 +18,7 @@ from .paddleocr import PaddleOCRBackend
 
 __all__ = [
     "OCRBackend",
+    "OCRCancelledError",
     "OCRResult",
     "DEFAULT_PRIORITY",
     "LabelReader",

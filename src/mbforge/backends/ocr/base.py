@@ -1,15 +1,54 @@
 """Abstract OCR backend interface.
 
 All cloud OCR backends expose a single synchronous entry point
-`extract_text(image: bytes) -> str` so the fallback chain can call
+`extract_text(image: bytes) -> OCRResult` so the fallback chain can call
 them uniformly. Backends that are async (submit + poll)
 internally block until completion.
+
+Backends also accept an optional cooperative ``cancel_check`` and poll it
+between blocking requests (poll iterations, retries, image downloads). A
+request already in flight is never interrupted; the loop stops before the
+next one. The check is surfaced as :class:`OCRCancelledError` so the
+fallback chain cannot mistake a cancellation for a provider failure.
 """
 
 from __future__ import annotations
 
 import abc
+from collections.abc import Callable
 from dataclasses import dataclass, field
+
+#: A cooperative cancellation checkpoint: raises when the owning task was
+#: cancelled, otherwise returns immediately. Declared here rather than imported
+#: from ``mbforge.pipeline.cancellation`` because backends sit below the
+#: pipeline layer and must not depend on it.
+CancelCheck = Callable[[], None]
+
+
+class OCRCancelledError(RuntimeError):
+    """Raised by an OCR backend when its cooperative checkpoint fired.
+
+    The pipeline translates this into its own cancellation error at the
+    boundary; the chain re-raises it instead of falling through to the next
+    backend.
+    """
+
+
+def check_cancelled(cancel_check: CancelCheck | None) -> None:
+    """Poll ``cancel_check``, re-raising whatever it raises as a cancel.
+
+    A checkpoint signals cancellation by raising; the backend does not know
+    (and must not import) the pipeline's exception type, so any exception the
+    checkpoint produces is normalized to :class:`OCRCancelledError`.
+    """
+    if cancel_check is None:
+        return
+    try:
+        cancel_check()
+    except OCRCancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — checkpoint raises to signal cancel
+        raise OCRCancelledError(str(exc)) from exc
 
 
 @dataclass
@@ -36,10 +75,6 @@ class OCRResult:
     `text` is the extracted plain text (page-level). On failure,
     `text` is empty and `error` describes why.
 
-    `images` maps image filenames (e.g. ``abc123.jpg``) to bytes for
-    figures extracted from OCR result ZIPs. Backends that do not
-    produce images leave it empty.
-
     `spans` carries the layout blocks (text, table, and figure regions) when
     the backend can produce them; MoleCode insertion uses them to anchor
     molecule blocks near their figure instead of falling back to the
@@ -52,7 +87,6 @@ class OCRResult:
 
     text: str
     error: str | None = None
-    images: dict[str, bytes] = field(default_factory=dict)
     spans: list[LayoutSpan] = field(default_factory=list)
     raw_output: dict | None = None
     backend: str | None = None
@@ -117,11 +151,17 @@ class OCRBackend(abc.ABC):
         """Return True iff the backend has everything it needs to run."""
 
     @abc.abstractmethod
-    def extract_text(self, image: bytes) -> OCRResult:
+    def extract_text(
+        self, image: bytes, *, cancel_check: CancelCheck | None = None
+    ) -> OCRResult:
         """Run OCR on a single page image.
 
         `image` is PNG-encoded bytes (or whatever PyMuPDF produced).
         Implementations should raise on transport errors and return
         OCRResult(error=...) on logical failures (auth, quota, etc.)
         so the chain can fall through to the next backend.
+
+        ``cancel_check`` is polled between blocking requests; a backend that
+        observes it raises :class:`OCRCancelledError` instead of returning a
+        result, so the chain aborts rather than trying the next provider.
         """

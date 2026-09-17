@@ -24,12 +24,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 from mbforge.utils.logger import get_logger
 
-from .base import OCRBackend, OCRResult
+from .base import CancelCheck, OCRBackend, OCRCancelledError, OCRResult
 from .glmocr import GLMOCRBackend
 from .ocr_local import LocalPaddleOCRBackend
 from .paddleocr import PaddleOCRBackend
@@ -111,83 +110,19 @@ def build_backends(ocr_config: dict | Any | None) -> list[OCRBackend]:
     return backends
 
 
-def _save_images(result: OCRResult, save_images_dir: str | Path | None) -> None:
-    """Persist molecule images from an OCRResult to disk.
-
-    Only saves images from markdown.images (molecule crops), skipping
-    layout debug images like layout_det_res*.jpg from outputImages.
-    Long filenames are hashed to avoid Windows MAX_PATH limits.
-    """
-    if not save_images_dir or not result.images:
-        return
-    target_dir = Path(save_images_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    for filename, data in result.images.items():
-        # Skip layout debug images (from PaddleOCR outputImages)
-        if filename.startswith("layout_det_res"):
-            continue
-
-        # Backends emit relative names with subdirs (e.g. "imgs/abc.jpg"); the
-        # layout contract stores images flat under images_dir and markdown
-        # rewrites reference the basename, so keep only the basename.
-        relative = Path(Path(filename).name)
-
-        # Windows MAX_PATH limit (260 chars): hash long filenames to stay safe.
-        # Even if the full path is under 260, a very long filename can cause
-        # [Errno 22] Invalid argument on some Windows APIs.
-        _max_filename_len = 120  # Conservative limit for filename alone
-        if len(relative.name) > _max_filename_len:
-            import hashlib
-
-            stem = relative.stem[:40]  # Keep first 40 chars for readability
-            suffix = relative.suffix
-            hash_part = hashlib.md5(relative.name.encode()).hexdigest()[:8]
-            safe_name = f"{stem}_{hash_part}{suffix}"
-            relative = Path(safe_name)
-
-        target = target_dir / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        counter = 2
-        while target.exists():
-            target = target.with_name(f"{target.stem}_{counter}{target.suffix}")
-            counter += 1
-        target.write_bytes(data)
-
-
-def _save_raw_output(result: OCRResult, save_images_dir: str | Path | None) -> None:
-    """Save raw OCR backend response as JSON for debugging/analysis.
-
-    The raw_output contains the full API response (e.g., PaddleOCR's
-    layoutParsingResults with bounding boxes, confidence scores, etc.).
-    Saved alongside images in the same directory as ocr_result.json.
-    """
-    if not save_images_dir or not result.raw_output:
-        return
-    target_dir = Path(save_images_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    json_path = target_dir / "ocr_result.json"
-    try:
-        import json
-
-        json_path.write_text(
-            json.dumps(result.raw_output, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to save OCR raw output: %s", exc)
-
-
 def extract_text_with_chain(
     image: bytes,
     ocr_config: dict | Any | None,
-    save_images_dir: str | Path | None = None,
     *,
     backends: list[OCRBackend] | None = None,
+    cancel_check: CancelCheck | None = None,
 ) -> OCRResult:
     """Run OCR through the fallback chain. Returns the first non-empty result.
 
-    If ``save_images_dir`` is provided and the winning backend returned images,
-    they are written to that directory using the backend's filename keys.
+    ``cancel_check`` is forwarded to each backend's poll loop. A backend that
+    observes it raises ``OCRCancelledError``, which is re-raised here: a
+    cancelled task must never be degraded into "this provider failed" and
+    fall through to the next one.
     """
     chain = backends if backends is not None else build_backends(ocr_config)
     if not chain:
@@ -197,7 +132,9 @@ def extract_text_with_chain(
     started = time.perf_counter()
     for attempt, backend in enumerate(chain, start=1):
         try:
-            result = backend.extract_text(image)
+            result = backend.extract_text(image, cancel_check=cancel_check)
+        except OCRCancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001
             result = OCRResult(text="", error=str(exc))
         result.backend = backend.name
@@ -210,8 +147,6 @@ def extract_text_with_chain(
                 backend.name,
                 attempt,
             )
-            _save_images(result, save_images_dir)
-            _save_raw_output(result, save_images_dir)
             return result
         last_error = result.error or f"{backend.name} returned empty"
     logger.warning("OCR chain exhausted without text: %s", last_error)
