@@ -21,8 +21,8 @@ def load_page_json(doc_id: str, library_root: str, page_num: int) -> dict | None
 
     Returns:
         Parsed JSON dict with keys like ``text``, ``figure_bboxes``,
-        ``ocr_backend``, ``ocr_images``, etc. Returns ``None`` if the file
-        does not exist or cannot be parsed.
+        ``ocr_backend``, etc. Returns ``None`` if the file does not exist or
+        cannot be parsed.
     """
     pages_dir = Path(library_root) / "storage" / doc_id / "pages"
     json_path = pages_dir / f"page_{page_num:04d}.json"

@@ -85,7 +85,6 @@ def persist_document(ctx: PipelineContext) -> None:
                         list(bbox) for bbox in getattr(page, "figure_bboxes", [])
                     ],
                     "ocr_backend": getattr(page, "ocr_backend", None),
-                    "ocr_images": getattr(page, "ocr_images", []),
                     "ocr_elapsed_ms": getattr(page, "ocr_elapsed_ms", 0),
                     "ocr_error": getattr(page, "ocr_error", None),
                 },

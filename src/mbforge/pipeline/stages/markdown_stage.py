@@ -17,37 +17,12 @@ from mbforge.utils.logger import get_logger
 logger = get_logger("mbforge.pipeline.stages.markdown")
 
 
-def write_rough_markdown(
-    pages: list, output_path: str, images_dir: Path | None = None
-) -> None:
-    """Write pages to a rough markdown with basic heading detection.
-
-    If *images_dir* is provided and a page carries OCR-extracted image
-    filenames (``page.ocr_images``), backend relative references like
-    ``![](images/figure_001.jpg)`` or ``<img src="imgs/figure_001.jpg" />``
-    are rewritten to absolute local paths so that the rendered Markdown can
-    locate the files on disk.
-    """
+def write_rough_markdown(pages: list, output_path: str) -> None:
+    """Write pages to a rough markdown with basic heading detection."""
     lines: list[str] = []
     for _i, page in enumerate(pages):
         lines.append(f"<!-- PAGE {page.page_num} -->")
         text = page.text
-        # Fix OCR-backend relative image paths when we know where images live.
-        # img_name may be just a filename (e.g. "figure_001.jpg") or a
-        # relative path with subdirectory (e.g. "imgs/xxx.jpg" from PaddleOCR).
-        if images_dir and getattr(page, "ocr_images", None):
-            for img_name in page.ocr_images:
-                # If img_name contains '/', it's already a relative path like
-                # "imgs/xxx.jpg". Use the basename to avoid double directory.
-                safe_name = Path(img_name).name if "/" in img_name else img_name
-                abs_path = (images_dir / safe_name).as_posix()
-                # Markdown format: ![](imgs/filename.jpg) or ![](filename.jpg)
-                md_rel_ref = f"![]({img_name})"
-                text = text.replace(md_rel_ref, f"![]({abs_path})")
-
-                # HTML format: <img src="imgs/filename.jpg" ... />
-                html_rel_pattern = f'src="{img_name}"'
-                text = text.replace(html_rel_pattern, f'src="{abs_path}"')
 
         for para in text.split("\n"):
             stripped = para.strip()
@@ -106,10 +81,7 @@ class MarkdownStage:
         os.close(_fd)
         ctx.rough_md_path = Path(_temp_str)
         layout = LibraryLayout(ctx.library_root)
-        images_dir = layout.images_dir(ctx.doc_id)
-        write_rough_markdown(
-            ctx.extracted.pages, str(ctx.rough_md_path), images_dir=images_dir
-        )
+        write_rough_markdown(ctx.extracted.pages, str(ctx.rough_md_path))
 
         from mbforge.pipeline.markdown.esmiles_insert import insert_esmiles_blocks
 

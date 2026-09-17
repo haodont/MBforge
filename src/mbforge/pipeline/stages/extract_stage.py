@@ -14,7 +14,6 @@ from mbforge.pipeline.cancellation import (
     make_cancel_check,
 )
 from mbforge.pipeline.run.context import PipelineContext
-from mbforge.storage.layout import LibraryLayout
 from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.stages.extract")
@@ -46,16 +45,10 @@ class ExtractStage:
             # Full-document OCR: the Document's native cache is never an
             # evidence source (see extract_document_text).
             doc = load_document(ctx.doc_id, ctx.library_root)
-            save_images_dir = (
-                ctx.staging_dir / "images"
-                if ctx.staging_dir is not None
-                else LibraryLayout(ctx.library_root).images_dir(ctx.doc_id)
-            )
             ctx.extracted = extract_document_text(
                 doc,
                 str(ctx.pdf_path),
                 ocr_config=ctx.ocr_config,
-                save_images_dir=save_images_dir,
                 cancel_check=make_cancel_check(default_registry, ctx.task_id),
             )
 

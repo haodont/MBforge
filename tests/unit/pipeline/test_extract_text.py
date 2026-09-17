@@ -215,7 +215,6 @@ def _fake_ocr_pages(calls: list[list[int]]) -> Any:
         _pdf,
         page_indices: list[int],
         ocr_config: dict | None = None,
-        save_images_dir=None,
         cancel_check=None,
         metrics: dict[int, Any] | None = None,
     ) -> list[str]:

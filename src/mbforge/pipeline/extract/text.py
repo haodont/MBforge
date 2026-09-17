@@ -16,12 +16,11 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import pymupdf
 
-from mbforge.pipeline.cancellation import CancelCheck
+from mbforge.pipeline.cancellation import CancelCheck, TaskCancelledError
 from mbforge.utils.logger import get_logger
 
 logger = get_logger("mbforge.pipeline.extract.text")
@@ -55,7 +54,6 @@ class PageContent:
     ocr_attempts: int = 0
     ocr_elapsed_ms: int = 0
     ocr_error: str | None = None
-    ocr_images: list[str] = field(default_factory=list)  # filenames from OCR backend
 
 
 @dataclass
@@ -72,16 +70,14 @@ def extract_pdf_text(
     pdf_path: str,
     *,
     ocr_config: dict | None = None,
-    save_images_dir: str | Path | None = None,
     cancel_check: CancelCheck | None = None,
 ) -> ExtractedDocument:
     """Extract text from a PDF via the cloud OCR chain.
 
     Every page is rendered at 144 DPI and sent through the configured OCR
-    chain (PaddleOCR). ``save_images_dir`` is passed to the chain so images
-    extracted by the backend are persisted alongside the document artifacts.
-    ``cancel_check`` is a cooperative cancellation checkpoint polled per page
-    and before each OCR retry; it raises ``TaskCancelledError`` to abort.
+    chain (PaddleOCR). ``cancel_check`` is a cooperative cancellation
+    checkpoint polled per page and before each OCR retry; it raises
+    ``TaskCancelledError`` to abort.
 
     Any page that exits the retry loop with empty text aborts the whole
     document so a partial evidence set is never silently ingested (the
@@ -97,7 +93,6 @@ def extract_pdf_text(
             doc,
             list(range(page_count)),
             ocr_config,
-            save_images_dir=save_images_dir,
             cancel_check=cancel_check,
             metrics=ocr_metrics,
         )
@@ -114,7 +109,6 @@ def extract_document_text(
     pdf_path: str,
     *,
     ocr_config: dict | None = None,
-    save_images_dir: str | Path | None = None,
     cancel_check: CancelCheck | None = None,
 ) -> ExtractedDocument:
     """Extract text for a pipeline run (OCR-only).
@@ -127,7 +121,6 @@ def extract_document_text(
     return extract_pdf_text(
         pdf_path,
         ocr_config=ocr_config,
-        save_images_dir=save_images_dir,
         cancel_check=cancel_check,
     )
 
@@ -157,10 +150,6 @@ def _apply_ocr_results(
             pages[idx].ocr_attempts = metric.chain_attempts
             pages[idx].ocr_elapsed_ms = metric.elapsed_ms
             pages[idx].ocr_error = metric.error
-            # Record image filenames so Markdown stage can fix relative paths.
-            images = getattr(metric, "images", None)
-            if images:
-                pages[idx].ocr_images = list(images.keys())
             spans = getattr(metric, "spans", None)
             if spans:
                 # Separate figure bboxes from text spans
@@ -225,21 +214,26 @@ def _ocr_pages(
     doc,
     page_indices: list[int],
     ocr_config: dict | None = None,
-    save_images_dir: str | Path | None = None,
     cancel_check: CancelCheck | None = None,
     metrics: dict[int, Any] | None = None,
 ) -> list[str]:
     """OCR pages through the fallback chain with bounded concurrency.
 
     Results align positionally with ``page_indices``. ``cancel_check`` is
-    polled per page and before each retry; a ``TaskCancelledError`` is never
-    swallowed. A page that exits the retry loop with empty text aborts the
-    whole OCR run (the OCR-only contract never ingests a page it could not
+    polled per page, before each retry, and inside the OCR backends' own poll
+    loops, so a cancel that lands mid-request is observed at the backend's next
+    checkpoint rather than after its full timeout. A ``TaskCancelledError`` is
+    never swallowed. A page that exits the retry loop with empty text aborts
+    the whole OCR run (the OCR-only contract never ingests a page it could not
     read), so downstream evidence always covers every page.
     """
     check = cancel_check or (lambda: None)
     check()
-    from mbforge.backends.ocr import build_backends, extract_text_with_chain
+    from mbforge.backends.ocr import (
+        OCRCancelledError,
+        build_backends,
+        extract_text_with_chain,
+    )
     from mbforge.backends.ocr.chain import OCRUnavailableError
 
     backends = build_backends(ocr_config)
@@ -274,8 +268,8 @@ def _ocr_pages(
                 result = extract_text_with_chain(
                     image_bytes,
                     ocr_config,
-                    save_images_dir=save_images_dir,
                     backends=backends,
+                    cancel_check=check,
                 )
                 text = result.text or ""
                 succeeded = bool(text.strip())
@@ -284,6 +278,10 @@ def _ocr_pages(
                         metrics[page_idx] = result
                 if succeeded:
                     break
+            except OCRCancelledError as cancelled:
+                # The backend observed the cancel mid-request. Surface it as
+                # the pipeline's cooperative error instead of a failed page.
+                raise TaskCancelledError() from cancelled
             except Exception as ocr_exc:  # noqa: BLE001
                 text = ""
                 succeeded = False

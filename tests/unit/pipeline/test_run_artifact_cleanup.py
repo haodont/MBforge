@@ -46,14 +46,9 @@ def _fake_extract_pdf_text(
     pdf_path: str,
     ocr_fallback: bool = True,
     ocr_config: dict | None = None,
-    save_images_dir: Any = None,
     cancel_check: Any = None,
 ) -> ExtractedDocument:
-    """Stand-in for extract_pdf_text that drops one OCR figure image."""
-    if save_images_dir:
-        target = Path(save_images_dir)
-        target.mkdir(parents=True, exist_ok=True)
-        (target / "fig1.png").write_bytes(b"new-fig")
+    """Stand-in for extract_pdf_text."""
     return ExtractedDocument(
         raw_text="page one text\n\npage two text",
         page_count=2,
@@ -159,7 +154,6 @@ def test_cancel_cleans_staging(sample_pdf: Path, library_root: Path) -> None:
         )
 
     # Promoted evidence was never written (pipeline was cancelled).
-    assert not (resolver.images_dir(_DOC_ID) / "fig1.png").exists()
     assert not (resolver.crops_dir(_DOC_ID) / "crop1.png").exists()
 
 
@@ -169,18 +163,14 @@ def test_failed_reingest_keeps_old_evidence(
     """A failed re-ingest must not overwrite or remove the previous run's evidence."""
     resolver = LibraryLayout(library_root)
     old_crop = resolver.crops_dir(_DOC_ID) / "crop1.png"
-    old_fig = resolver.images_dir(_DOC_ID) / "fig1.png"
     old_crop.parent.mkdir(parents=True, exist_ok=True)
-    old_fig.parent.mkdir(parents=True, exist_ok=True)
     old_crop.write_bytes(b"old-crop")
-    old_fig.write_bytes(b"old-fig")
 
     with pytest.raises(RuntimeError, match="disk full"):
         _run(sample_pdf, library_root, fail_patent_publish=True)
 
     # The old evidence is untouched because promotion never happened.
     assert old_crop.read_bytes() == b"old-crop"
-    assert old_fig.read_bytes() == b"old-fig"
 
 
 def test_cleanup_refuses_unverified_directory(

@@ -262,44 +262,25 @@ class TestExtractStage:
         assert "OCR unavailable" in result.message
 
 
-def test_write_rough_markdown_replaces_ocr_image_paths(tmp_path: Path) -> None:
-    """OCR-backend relative image references must be rewritten to absolute paths."""
+def test_write_rough_markdown_keeps_page_text_verbatim(tmp_path: Path) -> None:
+    """The rough markdown copies page text as-is and marks each page boundary."""
     from mbforge.pipeline.stages.markdown_stage import write_rough_markdown
 
-    # Simulate a page whose OCR text contains OCR-backend image refs.
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    (images_dir / "figure_001.jpg").write_bytes(b"\xff\xd8")
-    (images_dir / "figure_002.png").write_bytes(b"\x89PNG")
-
     class FakePage:
-        def __init__(self, num: int, text: str, ocr_images: list[str]) -> None:
+        def __init__(self, num: int, text: str) -> None:
             self.page_num = num
             self.text = text
-            self.ocr_images = ocr_images
 
     pages = [
-        FakePage(
-            1,
-            "Some intro text\n![](images/figure_001.jpg)\nMore text here",
-            ["images/figure_001.jpg"],
-        ),
-        FakePage(2, "Plain text only", []),
-        FakePage(
-            3,
-            "![](images/figure_002.png)\nConclusion",
-            ["images/figure_002.png"],
-        ),
+        FakePage(1, "Some intro text\nMore text here"),
+        FakePage(2, "Plain text only"),
     ]
 
     output_md = tmp_path / "output.md"
-    write_rough_markdown(pages, str(output_md), images_dir=images_dir)
+    write_rough_markdown(pages, str(output_md))
 
     content = output_md.read_text(encoding="utf-8")
-    expected_abs_1 = f"![]({(images_dir / 'figure_001.jpg').as_posix()})"
-    expected_abs_2 = f"![]({(images_dir / 'figure_002.png').as_posix()})"
-
-    assert expected_abs_1 in content
-    assert expected_abs_2 in content
-    assert "![](images/figure_001.jpg)" not in content
-    assert "![](images/figure_002.png)" not in content
+    assert "<!-- PAGE 1 -->" in content
+    assert "<!-- PAGE 2 -->" in content
+    assert "Some intro text" in content
+    assert "Plain text only" in content

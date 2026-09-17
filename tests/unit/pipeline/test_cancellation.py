@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -226,6 +227,41 @@ def test_ocr_checkpoint_not_swallowed_by_fallback(tmp_path: Path) -> None:
 
     with pytest.raises(TaskCancelledError):
         extract_pdf_text(str(blank_pdf), ocr_config={}, cancel_check=_raise_in_ocr)
+
+
+def test_ocr_backend_cancellation_is_not_degraded_to_page_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancel observed inside an OCR backend aborts as cancellation.
+
+    The backend surfaces it as ``OCRCancelledError``; if the page loop treated
+    that like any other OCR error it would end as ``OCRUnavailableError`` and
+    the queue row would be recorded ``failed`` instead of ``cancelled``.
+    """
+    import pymupdf
+
+    from mbforge.backends.ocr import OCRCancelledError
+    from mbforge.pipeline.extract.text import extract_pdf_text
+
+    blank_pdf = tmp_path / "blank.pdf"
+    doc = pymupdf.open()
+    doc.new_page(width=612, height=792)
+    doc.save(str(blank_pdf))
+    doc.close()
+
+    def _cancel_mid_request(*_args: object, **_kwargs: object) -> None:
+        raise OCRCancelledError("Pipeline cancelled by user")
+
+    monkeypatch.setattr(
+        "mbforge.backends.ocr.extract_text_with_chain", _cancel_mid_request
+    )
+    monkeypatch.setattr(
+        "mbforge.backends.ocr.build_backends",
+        lambda _config: [SimpleNamespace(name="fake-cloud")],
+    )
+
+    with pytest.raises(TaskCancelledError):
+        extract_pdf_text(str(blank_pdf), ocr_config={})
 
 
 def test_extract_stage_reraises_cancellation(tmp_path: Path, sample_pdf: Path) -> None:
