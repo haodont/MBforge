@@ -287,7 +287,6 @@ def _page_to_dict(page: PageContent) -> dict[str, Any]:
         "ocr_attempts": page.ocr_attempts,
         "ocr_elapsed_ms": page.ocr_elapsed_ms,
         "ocr_error": page.ocr_error,
-        "ocr_images": list(page.ocr_images),
     }
 
 
@@ -312,7 +311,6 @@ def _page_from_dict(data: dict[str, Any]) -> PageContent:
         ocr_attempts=int(data.get("ocr_attempts", 0)),
         ocr_elapsed_ms=int(data.get("ocr_elapsed_ms", 0)),
         ocr_error=data.get("ocr_error"),
-        ocr_images=[str(name) for name in data.get("ocr_images", [])],
     )
 
 

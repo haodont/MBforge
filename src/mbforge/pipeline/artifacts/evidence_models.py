@@ -47,7 +47,6 @@ class ExtractPage(_EvidenceArtifactModel):
     ocr_attempts: int = 0
     ocr_elapsed_ms: int = 0
     ocr_error: str | None = None
-    ocr_images: list[str] = Field(default_factory=list)
 
 
 class DetectionPage(_EvidenceArtifactModel):

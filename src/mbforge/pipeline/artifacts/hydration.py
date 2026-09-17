@@ -31,7 +31,6 @@ from mbforge.utils.logger import get_logger
 if TYPE_CHECKING:
     from mbforge.pipeline.run.context import PipelineContext
 
-_IMAGE_SUFFIXES = {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 logger = get_logger("mbforge.pipeline.artifacts.hydration")
 
 
@@ -64,11 +63,6 @@ def _extracted_from_evidence(
                     for item in text_items
                 ],
                 figure_bboxes=[item.bbox for item in image_items],
-                ocr_images=[
-                    Path(item.coref).name
-                    for item in image_items
-                    if item.coref and Path(item.coref).suffix.lower() in _IMAGE_SUFFIXES
-                ],
                 ocr_dpi=raw_page.ocr_dpi if raw_page else 0,
                 ocr_backend=raw_page.ocr_backend if raw_page else None,
                 ocr_attempts=raw_page.ocr_attempts if raw_page else 0,

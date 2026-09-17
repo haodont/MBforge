@@ -45,7 +45,6 @@ def _extracted() -> ExtractedDocument:
         ocr_attempts=1,
         ocr_elapsed_ms=123,
         ocr_error=None,
-        ocr_images=["imgs/fig.jpg"],
     )
     return ExtractedDocument(
         raw_text="hello world",
@@ -222,6 +221,28 @@ def test_v2_join_prefers_molecule_bbox_over_overlapping_image_region(
     assert [item.kind for item in joined.evidence].count("molecule") == 1
     assert not any(item.kind == "image_region" for item in joined.evidence)
     assert any(item.kind == "text_span" for item in joined.evidence)
+
+
+def test_v2_join_records_every_figure_region_against_the_source_pdf(
+    tmp_path: Path,
+) -> None:
+    """Figure regions survive as layout rectangles without any image file."""
+    extracted_input = _extracted()
+    page = extracted_input.pages[0]
+    page.figure_bboxes = [(10.0, 20.0, 30.0, 40.0), (10.0, 60.0, 30.0, 80.0)]
+    extracted = build_extract_artifact(DOC, "run-1", extracted_input, _frames())
+    detection = build_detection_artifact(
+        DOC, "run-1", [], {}, _frames(), library_root=tmp_path
+    )
+
+    joined = join_evidence_artifacts(extracted, detection)
+
+    assert {
+        item.bbox: item.coref for item in joined.evidence if item.kind == "image_region"
+    } == {
+        (10.0, 20.0, 30.0, 40.0): f"storage/{DOC}/source.pdf",
+        (10.0, 60.0, 30.0, 80.0): f"storage/{DOC}/source.pdf",
+    }
 
 
 def test_v2_detection_round_trip_preserves_markush_layer_fields(tmp_path: Path) -> None:

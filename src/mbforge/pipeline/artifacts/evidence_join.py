@@ -22,7 +22,6 @@ from mbforge.pipeline.artifacts.evidence_models import (
     ExtractArtifact,
     PageFrame,
 )
-from mbforge.pipeline.extract.text import PageContent
 from mbforge.utils.logger import get_logger
 
 _KIND_RANK = {
@@ -65,11 +64,13 @@ def _result_coref(result: ExtractionResult) -> str:
     return path if path.startswith("storage/") else ""
 
 
-def _image_coref(doc_id: str, page: PageContent) -> str:
-    for image in page.ocr_images:
-        name = Path(str(image).replace("\\", "/")).name
-        if name:
-            return f"storage/{doc_id}/images/{name}"
+def _figure_coref(doc_id: str) -> str:
+    """Reference a figure region back to the source PDF.
+
+    Figure regions are recorded as layout rectangles only; the pipeline no
+    longer extracts or stores page images, so the source document is the
+    honest reference for them.
+    """
     return f"storage/{doc_id}/source.pdf"
 
 
@@ -191,38 +192,30 @@ def join_evidence_artifacts(
 
     for page in raw_document.pages:
         frame = frames[page.page_num]
+        # Figure regions arrive through ``figure_bboxes``; a raw artifact may
+        # also carry one as a text span. Both feed one bbox set so each region
+        # is emitted exactly once.
+        image_bboxes: list[tuple[float, float, float, float]] = list(page.figure_bboxes)
         for span in page.text_spans:
-            bbox = _bbox_in_frame(span.bbox, frame)
-            if span.block_type in {0, 2} and span.text.strip():
+            if span.block_type == 1:
+                image_bboxes.append(span.bbox)
+            elif span.block_type in {0, 2} and span.text.strip():
                 add(
                     SourceEvidence.create(
                         doc_id=extracted.doc_id,
                         page=page.page_num,
-                        bbox=bbox,
+                        bbox=_bbox_in_frame(span.bbox, frame),
                         raw_text=span.text,
                         kind="table_span" if span.block_type == 2 else "text_span",
                     )
                 )
-            elif span.block_type == 1:
-                add(
-                    SourceEvidence.create(
-                        doc_id=extracted.doc_id,
-                        page=page.page_num,
-                        bbox=bbox,
-                        coref=_image_coref(extracted.doc_id, page),
-                        kind="image_region",
-                    )
-                )
-        image_bboxes = [span.bbox for span in page.text_spans if span.block_type == 1]
-        image_bboxes.extend(page.figure_bboxes)
-        for raw_bbox in image_bboxes:
-            bbox = _bbox_in_frame(raw_bbox, frame)
+        for raw_bbox in dict.fromkeys(image_bboxes):
             add(
                 SourceEvidence.create(
                     doc_id=extracted.doc_id,
                     page=page.page_num,
-                    bbox=bbox,
-                    coref=_image_coref(extracted.doc_id, page),
+                    bbox=_bbox_in_frame(raw_bbox, frame),
+                    coref=_figure_coref(extracted.doc_id),
                     kind="image_region",
                 )
             )

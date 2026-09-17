@@ -29,7 +29,6 @@ _KIND_RANK = {
     "image_region": 3,
     "molecule": 4,
 }
-_IMAGE_SUFFIXES = {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 
 
 @dataclass(frozen=True)
@@ -72,12 +71,13 @@ def _render_text(raw_text: str) -> str:
     return "\n".join(lines)
 
 
-def _render_image(item: SourceEvidence, doc_id: str) -> str:
-    coref = item.coref.strip()
-    suffix = Path(coref).suffix.lower()
-    prefix = f"storage/{doc_id}/"
-    if coref.startswith(prefix) and suffix in _IMAGE_SUFFIXES:
-        return f"![Source image]({coref[len(prefix) :]})"
+def _render_image(item: SourceEvidence) -> str:
+    """Render a figure region as a marker.
+
+    Figure regions are layout rectangles only — the pipeline neither extracts
+    nor stores page images — so a region contributes a comment that keeps its
+    evidence id in place instead of linking a file that does not exist.
+    """
     return f"<!-- image evidence={item.evidence_id} -->"
 
 
@@ -145,7 +145,6 @@ def _candidate_blocks(
 
 def _page_blocks(
     evidence: Sequence[SourceEvidence],
-    doc_id: str,
     page: int,
     candidate_blocks: list[_PlacedBlock],
 ) -> list[_RenderedBlock]:
@@ -159,7 +158,7 @@ def _page_blocks(
         placed = _PlacedBlock(
             key=_reading_key(item),
             block=_RenderedBlock(
-                text=f"{_render_image(item, doc_id)}\n\n",
+                text=f"{_render_image(item)}\n\n",
                 evidence_ids=(item.evidence_id,),
             ),
         )
@@ -201,7 +200,7 @@ def _assemble_blocks(
     candidate_blocks = _candidate_blocks(evidence, candidates)
     blocks: list[_RenderedBlock] = []
     for page in sorted(pages):
-        blocks.extend(_page_blocks(evidence, doc_id, page, candidate_blocks))
+        blocks.extend(_page_blocks(evidence, page, candidate_blocks))
     body = "".join(block.text for block in blocks)
     if not re.search(r"^#{1,6}\s", body, re.MULTILINE):
         blocks.insert(0, _RenderedBlock(f"# {title}\n\n"))

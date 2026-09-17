@@ -33,7 +33,7 @@ logger = get_logger("mbforge.pipeline.artifacts.staging")
 ARTIFACT_CLEANUP_FAILED = "ARTIFACT_CLEANUP_FAILED"
 
 # Staging subdirectories that map to evidence dirs under ``storage/{doc_id}/``.
-STAGED_EVIDENCE_DIRS = ("images", "crops")
+STAGED_EVIDENCE_DIRS = ("crops",)
 
 
 def staging_dir(library_root: str | Path, doc_id: str) -> Path:
@@ -82,7 +82,6 @@ def promote_staging(
         return
     resolver = LibraryLayout(library_root)
     targets = {
-        "images": resolver.images_dir(doc_id),
         "crops": resolver.crops_dir(doc_id),
     }
     for name in STAGED_EVIDENCE_DIRS:

@@ -180,8 +180,8 @@ def test_markdown_assembles_evidence_by_geometry_and_writes_map(
     insert_esmiles_blocks(artifact, str(output_path))
 
     content = output_path.read_text(encoding="utf-8")
-    assert content.index("Paragraph text.") < content.index("figure.png")
-    assert content.index("figure.png") < content.index("```esmiles")
+    assert content.index("Paragraph text.") < content.index("image evidence=")
+    assert content.index("image evidence=") < content.index("```esmiles")
     assert "%% candidate=candidate-1" in content
     assert "%% label=4A" in content
 
@@ -259,7 +259,7 @@ def test_markdown_tie_breaks_images_before_molecules_and_filters_candidates(
     insert_esmiles_blocks(artifact, str(output_path))
 
     content = output_path.read_text(encoding="utf-8")
-    assert content.index("figure.png") < content.index("```esmiles")
+    assert content.index("image evidence=") < content.index("```esmiles")
     assert "%% candidate=accepted" in content
     assert "%% candidate=rejected" not in content
     assert "%% candidate=empty" not in content
