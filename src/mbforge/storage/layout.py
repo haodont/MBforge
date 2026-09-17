@@ -261,16 +261,6 @@ class LibraryLayout:
         """Return ``storage/{doc_id}/runs/current.json`` (published-run pointer)."""
         return self.runs_dir(doc_id) / "current.json"
 
-    def images_dir(self, doc_id: str) -> Path:
-        """Return ``storage/{doc_id}/images/`` (figures extracted by OCR)."""
-        return self._doc_file(doc_id, "images")
-
-    def image(self, doc_id: str, filename: str) -> Path:
-        """Resolve an image filename to a path under ``storage/{doc_id}/images/``."""
-        return self._safe_child(
-            self.images_dir(doc_id), filename, label="image filename"
-        )
-
     def crop(self, doc_id: str, relpath: str) -> Path:
         """Resolve a crop filename to a path under ``storage/{doc_id}/crops/``.
 

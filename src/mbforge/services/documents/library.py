@@ -224,7 +224,6 @@ class LibraryStore:
         dirs = [
             resolver.pages_dir(doc_id),
             resolver.crops_dir(doc_id),
-            resolver.images_dir(doc_id),
             resolver.storage_dir(doc_id) / "artifacts",
             resolver.storage_dir(doc_id) / ".staging",
         ]
@@ -323,17 +322,12 @@ def add_uploaded_file(
 
 
 def read_document_markdown(root: str, doc_id: str) -> str:
-    """Read ``document.md``, stripping image links when images are absent."""
+    """Read the canonical ``document.md`` for a document."""
     p = LibraryLayout(root).storage_dir(doc_id) / "document.md"
     if not p.is_file():
         logger.error(f"document.md not found for {doc_id}")
         return "document.md not found run pipeline first"
-    text = p.read_text(encoding="utf-8")
-    import re
-
-    if not LibraryLayout(root).images_dir(doc_id).is_dir():
-        text = re.sub(r"!\[[^\]]*\]\(images/[^)]+\)", "", text)
-    return text
+    return p.read_text(encoding="utf-8")
 
 
 def read_document_report(root: str, doc_id: str) -> bytes:
@@ -390,29 +384,3 @@ def resolve_crop_path(root: str, doc_id: str, rel_path: str) -> Path:
     if not target.is_file():
         raise NotFoundError(f"crop not found: {rel_path}")
     return target
-
-
-def resolve_image_path(root: str, doc_id: str, filename: str) -> Path:
-    """Resolve a figure image path, translating traversal errors."""
-    from ...storage.layout import PathTraversalError
-
-    try:
-        return LibraryLayout(root).image(doc_id, filename)
-    except PathTraversalError as exc:
-        from ...storage.layout import InvalidPathError
-
-        raise InvalidPathError(str(exc)) from exc
-
-
-def image_media_type(filename: str) -> str:
-    """Return a media type for common image extensions."""
-    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    if ext in ("jpeg", "jpg"):
-        return "image/jpeg"
-    if ext == "png":
-        return "image/png"
-    if ext == "gif":
-        return "image/gif"
-    if ext == "webp":
-        return "image/webp"
-    return "image/jpeg"

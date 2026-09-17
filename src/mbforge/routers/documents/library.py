@@ -304,26 +304,6 @@ async def library_get_crop(
     return FileResponse(str(target_path), media_type="image/png")
 
 
-@router.get("/documents/{doc_id}/images/{filename}")
-async def library_get_image(
-    doc_id: str, filename: str, library_root: str | None = None
-) -> FileResponse:
-    """Serve a figure image extracted from OCR output."""
-    root = _resolve_library_root(
-        {"library_root": library_root} if library_root else None
-    )
-    target = await asyncio.to_thread(
-        library_service.resolve_image_path, root, doc_id, filename
-    )
-    if not await asyncio.to_thread(target.is_file):
-        from ...utils.errors import NotFoundError
-
-        raise NotFoundError(f"image not found: {filename}")
-    return FileResponse(
-        str(target), media_type=library_service.image_media_type(filename)
-    )
-
-
 @router.get("/documents/{doc_id}/pages/{page}")
 async def library_get_page_text(
     doc_id: str, page: int, library_root: str | None = None

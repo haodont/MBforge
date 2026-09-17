@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 
@@ -85,37 +84,6 @@ def test_library_get_document_file(app_client: TestClient) -> None:
     assert resp.headers["content-length"] == str(len(pdf_bytes))
 
 
-def test_library_get_document_markdown_strips_dead_image_refs(
-    app_client: TestClient, tmp_library: Path
-) -> None:
-    pdf_bytes = b"%PDF-1.4 fake pdf"
-    resp = app_client.post(
-        "/api/v1/library/import",
-        files={"file": ("test.pdf", pdf_bytes, "application/pdf")},
-    )
-    doc_id = resp.json()["document"]["doc_id"]
-
-    document = tmp_library / "storage" / doc_id / "document.md"
-    document.parent.mkdir(parents=True, exist_ok=True)
-    document.write_text(
-        "# Title\n\n![fig](images/abc123.jpg)\n\nText\n",
-        encoding="utf-8",
-    )
-
-    resp = app_client.get(f"/api/v1/library/documents/{doc_id}/markdown")
-    assert resp.status_code == 200
-    assert "images/abc123.jpg" not in resp.text
-    assert "Text" in resp.text
-
-    # Create the images dir with the referenced file; refs should survive.
-    images_dir = tmp_library / "storage" / doc_id / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    (images_dir / "abc123.jpg").write_bytes(b"jpg")
-    resp = app_client.get(f"/api/v1/library/documents/{doc_id}/markdown")
-    assert resp.status_code == 200
-    assert "images/abc123.jpg" in resp.text
-
-
 def test_library_get_document_evidence_reads_requested_sql_page(
     app_client: TestClient, tmp_library: Path
 ) -> None:
@@ -162,49 +130,6 @@ def test_library_get_document_evidence_reads_requested_sql_page(
     assert resp.status_code == 200
     assert [item["raw_text"] for item in resp.json()] == ["IC50 < 10 nM"]
     assert resp.json()[0]["evidence_id"] == rows[0].evidence_id
-
-
-def test_library_get_document_image(app_client: TestClient, tmp_library: Path) -> None:
-    pdf_bytes = b"%PDF-1.4 fake pdf"
-    resp = app_client.post(
-        "/api/v1/library/import",
-        files={"file": ("test.pdf", pdf_bytes, "application/pdf")},
-    )
-    doc_id = resp.json()["document"]["doc_id"]
-
-    image = tmp_library / "storage" / doc_id / "images" / "test.jpg"
-    image.parent.mkdir(parents=True, exist_ok=True)
-    image.write_bytes(b"fake jpg bytes")
-
-    resp = app_client.get(f"/api/v1/library/documents/{doc_id}/images/test.jpg")
-    assert resp.status_code == 200
-    assert resp.content == b"fake jpg bytes"
-    assert resp.headers["content-type"] == "image/jpeg"
-
-
-async def test_library_get_document_image_path_traversal_returns_400(
-    app_client: TestClient, tmp_library: Path
-) -> None:
-    pdf_bytes = b"%PDF-1.4 fake pdf"
-    resp = app_client.post(
-        "/api/v1/library/import",
-        files={"file": ("test.pdf", pdf_bytes, "application/pdf")},
-    )
-    doc_id = resp.json()["document"]["doc_id"]
-
-    # HTTP path normalization collapses "../" before routing, so exercise the
-    # router function directly to verify it delegates to ArtifactResolver.
-    from mbforge.routers.documents.library import library_get_image
-    from mbforge.storage.layout import InvalidPathError
-
-    with pytest.raises(InvalidPathError) as exc_info:
-        await library_get_image(doc_id, "../etc/passwd", str(tmp_library))
-    assert exc_info.value.status_code == 400
-
-
-def test_library_get_document_image_missing_returns_404(app_client: TestClient) -> None:
-    resp = app_client.get("/api/v1/library/documents/nosuchdoc/images/none.jpg")
-    assert resp.status_code == 404
 
 
 def test_library_get_document_crop_accepts_absolute_rel_path(
