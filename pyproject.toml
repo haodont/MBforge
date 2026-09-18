@@ -4,14 +4,21 @@ version = "0.1.0"
 description = "开源版化学专利文档解析框架（本地优先，产出可溯源的分子/反应清单）"
 requires-python = ">=3.12"
 
-# 依赖清单说明（2026-09-17 建立）
+# 依赖清单说明（2026-09-17 建立，2026-09-18 修订）
 #
-# 从"借用 MBForge 的 venv"改为 ChemLayout 自有环境：
-#   - `RUNTIME-PYTORCH.md` §2 原定"不往 MBForge venv 装新包"，
-#     但 94,759 页规模下该政策会挡住 GPU 运行时安装，故退役。
-#   - MBForge 的 venv 里是 onnxruntime **1.29.0 CPU 版**
-#     （get_available_providers() 只有 Azure/CPU），这是版面识别用的 Hiro-Layout
-#     实测 742 ms/页的直接原因；Hiro 官方走 GPU（见其 pyproject 的 gpu extra）。
+# ⚠️ **本文件不再是运行环境的来源**。运行时统一用 MBForge 的 venv
+#    （`C:\Users\10954\Desktop\MBForge\.venv`），因为 ChemLayout 最终要合并回 MBForge。
+#    见 `RUNTIME-PYTORCH.md` §2.1。
+#
+# 保留本文件的价值：**声明本项目需要哪些包与版本底线**，供将来并入 MBForge 时核对。
+#
+# 变更记录：
+#   - 2026-09-17：曾从"借用 MBForge venv"改为 ChemLayout 自有 venv，
+#     原因是 MBForge venv 里是 onnxruntime **1.29.0 CPU 版**，而 ONNX-only 的
+#     Hiro-Layout 只有 GPU 才可用（CPU 742 ms/页 vs GPU 122 ms/页）。
+#   - 2026-09-18：改回 MBForge venv，并直接把那里的 onnxruntime 升级为
+#     **onnxruntime-gpu 1.30.0**（卸掉 CPU 版 —— 两者同导入名不能共存）。
+#     项目自有 `.venv` 因此不再需要（尚未删除）。
 #
 # ⚠️ `onnxruntime` 与 `onnxruntime-gpu` 是同一个导入名，不能共存。
 #    `[cuda,cudnn]` extra 会把 CUDA 12 / cuDNN 9 作为 pip 轮子（nvidia-* 包）拉下来，

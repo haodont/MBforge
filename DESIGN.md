@@ -572,9 +572,11 @@ OCR 按 0.4–0.75 s/页估 **10–20 h**。整条管线在"过夜跑完"区间�
     → 可行的免 OCR 路子：`image`/`molecule` 区域裁图落盘、`coref` 指向它。
     详见 `docs/HIRO-SMART-DOC-ANALYSIS.md` §4.4-D。
 
-12. **环境未自洽**：项目 `.venv` 目前**只有 Hiro 需要的一半**（`onnxruntime-gpu` 有，**torch/ultralytics 没有**）。
-    因此 `layout/detect_overlay.py --layout hiro` 在自有 venv 里跑不了（它会连带导入 `v3.py` → torch）。
-    补齐方式：把 `torch` + `ultralytics` 装进自有 venv；或让版面识别的"纯 Hiro"路径不依赖 `v3.py`。
+12. ~~**环境未自洽**~~ → **已解决（2026-09-18）**：环境统一到 **MBForge 的 venv**
+    （ChemLayout 最终要合并回 MBForge，不再维护独立环境），并把其中的
+    `onnxruntime 1.29.0` **CPU 版**换成 **`onnxruntime-gpu 1.30.0`**。
+    实测 `session.get_providers()` 返回 `CUDAExecutionProvider` 优先 —— Hiro 真在 GPU 上。
+    遗留：项目自有的 `ChemLayout\.venv`（2.07 GB）因此不再需要，**尚未删除**。
 
 ---
 

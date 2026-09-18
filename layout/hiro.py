@@ -181,7 +181,26 @@ def _preload_gpu_dlls() -> str | None:
 
     官方 Hiro-Smart-Doc 的 `layout/backends/onnx_backend.py::_preload_cuda_dlls`
     做的是同一件事。返回 None 表示成功，否则返回失败原因（供诊断）。
+
+    ⚠️⚠️ **另一个必须知道的坑：加载顺序**（2026-09-18 实测踩到并修）。
+    `preload_dlls()` 会把 `nvidia/cudnn/bin`（cuDNN 9 / **CUDA 13**）加进 DLL 搜索路径。
+    而 **torch 2.11.0+cu128 自带同名 DLL** `torch/lib/cudnn_cnn64_9.dll`（cuDNN 9 / **CUDA 12**）。
+    Windows 加载器按**名字**去重，于是：
+
+        preload_dlls() → import torch   ⇒ torch 拿到 CUDA 13 那份，OSError WinError 127
+        import torch   → preload_dlls() ⇒ 正常（两者各用自己那份）
+
+    所以本函数**先尽力 import torch**：torch 在 `preload_dlls()` 之前完成 import 后，
+    它会先把自己 `torch/lib` 里的 DLL 加载好，之后再 preload 就不会被抢。
+    不 import torch（纯 ONNX 用法）也完全没问题——那样进程里只有一个 cuDNN。
     """
+    # ← 关键：把 torch 的 DLL 先钉住，否则下面的 preload 会抢走同名 cuDNN。
+    #   尽力而为：没有 torch 的纯 ONNX 环境不该因此失败。
+    try:
+        import torch  # noqa: F401
+    except Exception:
+        pass
+
     try:
         import onnxruntime as ort
 

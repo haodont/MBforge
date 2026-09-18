@@ -29,23 +29,27 @@ ChemLayout 的**版面识别层**。对应 `../DESIGN.md` §0.1 / §3 / §4.2 / 
 
 ---
 
-## 2. 环境：两个 venv，别混用
+## 2. 环境：统一用 MBForge 的 venv
 
-| 用途 | venv | 关键包 |
-| --- | --- | --- |
-| **Hiro（生产路径）** | `..\.venv`（项目级，`uv sync`） | **onnxruntime-gpu 1.30.0**、pymupdf、numpy、pillow |
-| **V3 / MolDet** | `C:\Users\10954\Desktop\MBForge\.venv` | torch 2.11.0+cu128、transformers 5.17.0、ultralytics 8.4.150、**onnxruntime 1.29.0（CPU 版）** |
+| 项 | 值 |
+| --- | --- |
+| venv | `C:\Users\10954\Desktop\MBForge\.venv` |
+| 关键包 | **onnxruntime-gpu 1.30.0**（Hiro 的 CUDA EP）、torch 2.11.0+cu128、transformers 5.17.0、ultralytics 8.4.150、rapidocr 3.9.2 |
 
 ```powershell
-$PY_HIRO = "C:\Users\10954\Desktop\ChemLayout\.venv\Scripts\python.exe"   # Hiro 必须用这个
-$PY      = "C:\Users\10954\Desktop\MBForge\.venv\Scripts\python.exe"      # V3 / MolDet
+$PY = "C:\Users\10954\Desktop\MBForge\.venv\Scripts\python.exe"
 ```
 
-> ⚠️ **拿 MBForge venv 测 Hiro 会得到"慢 6 倍"的假数字**——那里是 CPU 版 onnxruntime。
+**2026-09-18 变更**：该 venv 原先是 `onnxruntime 1.29.0` **CPU 版**（`get_available_providers()`
+里连 `CUDAExecutionProvider` 都没有），Hiro 只能跑 CPU（742 ms/页）。
+现已换成 GPU 版，实测 `session.get_providers()` 返回 `['CUDAExecutionProvider', 'CPUExecutionProvider']`
+—— **CUDA 在前，真在 GPU**。详见 `../RUNTIME-PYTORCH.md` §2.1。
+
+> 项目自有的 `..\.venv`（2.07 GB）因此**不再需要**，尚未删除。
 >
-> ⚠️ **项目 `.venv` 目前缺 `torch` / `ultralytics`**，所以完整管线
-> （`detect_overlay.py --layout hiro`）**在自有 venv 里还跑不了**：它会连带导入 `v3.py`（需 torch），
-> 且 MolDet 本身也要 torch。详见 `../DESIGN.md` §9 风险 12。
+> ⚠️ **装完 `onnxruntime-gpu` 后必须注意加载顺序**：`preload_dlls()` 会抢走 torch 自带的
+> 同名 `cudnn_cnn64_9.dll`，导致 `import torch` 崩 `WinError 127`。
+> `hiro.py::_preload_gpu_dlls` 已先 `import torch` 兜住。详见 `../RUNTIME-PYTORCH.md` §3 陷阱 7。
 
 ### 2.1 环境陷阱（已踩，勿重蹈）
 
@@ -108,18 +112,18 @@ $PY      = "C:\Users\10954\Desktop\MBForge\.venv\Scripts\python.exe"      # V3 /
 Set-Location "C:\Users\10954\Desktop\ChemLayout\layout"
 
 # —— 生产路径：Hiro ∪ MolDet ——
-& $PY_HIRO detect_overlay.py --layout hiro --merge --samples ..\Sample `
+& $PY detect_overlay.py --layout hiro --merge --samples ..\Sample `
       --src-dpi 144 --dpi 144 --out out\hiro
 
 # —— 对照路径：V3 ∪ MolDet ——
 & $PY detect_overlay.py --layout v3 --merge --limit 4
 
 # 只看版面（不跑 MolDet）
-& $PY_HIRO detect_overlay.py --layout hiro --no-moldet --limit 4
+& $PY detect_overlay.py --layout hiro --no-moldet --limit 4
 
 # 标签表 / 单页可视化
-& $PY_HIRO hiro.py --list-labels
-& $PY_HIRO hiro.py --image ..\Sample\CN117180334A_FullTextImage_p0006.png --save-vis
+& $PY hiro.py --list-labels
+& $PY hiro.py --image ..\Sample\CN117180334A_FullTextImage_p0006.png --save-vis
 ```
 
 产物：`out\overlay_merged\*.overlay.jpg`（每页一张，左上有图例）+ `out\overlay_merged\detections.json` + `out\overlay_merged\evidence.json`。
@@ -608,11 +612,11 @@ ONNX 元数据 `license = "AGPL-3.0 License (https://ultralytics.com/license)"`�
 ```powershell
 Set-Location "C:\Users\10954\Desktop\ChemLayout\layout"
 
-& $PY_HIRO hiro.py --list-labels
-& $PY_HIRO hiro.py --image ..\Sample\CN117180334A_FullTextImage_p0006.png --save-vis
+& $PY hiro.py --list-labels
+& $PY hiro.py --image ..\Sample\CN117180334A_FullTextImage_p0006.png --save-vis
 
 # 走完整管线（Hiro ∪ MolDet ∪ 合并）
-& $PY_HIRO detect_overlay.py --layout hiro --merge --samples ..\Sample `
+& $PY detect_overlay.py --layout hiro --merge --samples ..\Sample `
       --src-dpi 144 --dpi 144 --out out\hiro
 ```
 
@@ -710,8 +714,9 @@ gpu = ["onnxruntime-gpu[cuda,cudnn]>=1.21"]   # CUDA12/cuDNN9 作为 pip 轮子
 > 详见 `../RUNTIME-PYTORCH.md` §3 陷阱 6。
 
 > 复现：`& $PY bench_hiro_gpu.py --limit 0 --rounds 3 --providers cuda`
-> 原始数据 `out/hiro_gpu_bench.json`。**注意必须用 ChemLayout 自有 venv**
-> （`..\.venv\Scripts\python.exe`），MBForge venv 里是 CPU 版 onnxruntime。
+> 原始数据 `out/hiro_gpu_bench.json`。**注意 2026-09-18 之前必须用 ChemLayout 自有 venv**
+> （`..\.venv\Scripts\python.exe`），因为 MBForge venv 里是 CPU 版 onnxruntime；
+> **现已统一** —— MBForge venv 升到 `onnxruntime-gpu 1.30.0`，直接用它即可（见 §2）。
 
 汇总数据：`out/layout_compare_256.json`。
 
@@ -860,10 +865,9 @@ Hiro 在同一页出 12 个 text 区域（外加页眉、行号），结构正�
 
 ## 13. 目录
 
-> 环境：**Hiro 相关脚本用项目自有 venv**（含 `onnxruntime-gpu`，见 `../RUNTIME-PYTORCH.md` §2.1）：
-> `C:\Users\10954\Desktop\ChemLayout\.venv\Scripts\python.exe`（`uv sync`）。
-> V3 / MolDet 相关脚本仍用 MBForge 的 venv。**两者别混用** —— MBForge venv 里是 CPU 版 onnxruntime，
-> 拿它测 Hiro 会得到慢 6 倍的数字。
+> 环境：**统一用 MBForge 的 venv**（`onnxruntime-gpu 1.30.0`，见 `../RUNTIME-PYTORCH.md` §2.1）：
+> `C:\Users\10954\Desktop\MBForge\.venv\Scripts\python.exe`。
+> （项目自有的 `..\.venv` 已不再需要，尚未删除。）
 
 ```
 layout/

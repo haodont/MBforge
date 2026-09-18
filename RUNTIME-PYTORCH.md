@@ -27,44 +27,52 @@ TextDetection(model_name="PP-OCRv5_server_det", engine="transformers")
 
 ## 2. 环境
 
-### 2.1 ChemLayout 自有环境（2026-09-17 起，**uv 管理**）
+### 2.1 统一环境：MBForge 的 venv（2026-09-18 起）
 
-**从"借用 MBForge 的 venv"改为自有环境。** 原因：MBForge 的 venv 里是
-`onnxruntime 1.29.0` **CPU 版**，而 ONNX-only 的 Hiro-Layout 只有 GPU 才可用 ——
-实测 CPU 742 ms/页 vs GPU 122 ms/页（**6.1 倍**，见 §4 / `layout/README.md` §12）。
-"不往 MBForge venv 装新包"这条约定会直接挡住 GPU 运行时的安装。
+**唯一环境**：`C:\Users\10954\Desktop\MBForge\.venv`。
+ChemLayout 最终要合并回 MBForge，所以不再维护独立环境。
 
 ```powershell
-$PY = "C:\Users\10954\Desktop\ChemLayout\.venv\Scripts\python.exe"
-cd "C:\Users\10954\Desktop\ChemLayout"
-uv sync            # 依赖声明见 pyproject.toml，锁定见 uv.lock
+$PY = "C:\Users\10954\Desktop\MBForge\.venv\Scripts\python.exe"
 ```
 
 | 组件 | 版本 | 用于 |
 | --- | --- | --- |
 | Python | 3.12.13 | — |
 | **onnxruntime-gpu** | **1.30.0** | **版面识别**：Hiro-Layout（**CUDA EP 已实测可用**） |
-| └ 其依赖的 CUDA 轮子 | `nvidia-cuda-runtime 13.4.92` / `nvidia-cudnn-cu13 9.26.0.51` | 见 §3 陷阱 6 |
+| └ 其依赖的 CUDA 轮子 | `nvidia-cublas 13.8.0.4` / `nvidia-cudnn-cu13 9.26.0.51` / `nvidia-cuda-runtime 13.4.92` | 见 §3 陷阱 6 |
+| torch | 2.11.0+cu128 | V3（对照基线）/ MolDet / RapidOCR |
+| transformers | 5.17.0 | PP-DocLayoutV3 |
+| ultralytics | 8.4.150 | MolDet |
+| rapidocr | 3.9.2 | 文本识别 |
+| rdkit | 2026.3.6 | 分子处理 |
 | PyMuPDF | 1.28.2 | 渲染 / 文本层 |
-| numpy / pillow | 2.5.3 / 12.3.0 | 图像与数值 |
-| huggingface_hub | 1.32.0 | 权重拉取（走 HF 镜像） |
-| transformers | 5.17.0 | 对照基线 PP-DocLayoutV3（**需 torch，暂未装**） |
 
-⚠️ **本清单暂不含 torch**（~2.5 GB），也不含 `ultralytics`（分子检测用）。
-Hiro 是 ONNX-only，测版面速度不需要它们；
-但 **`layout/detect_overlay.py --layout hiro` 在自有 venv 里跑不了** ——
-因为它会连带导入 `layout/v3.py`（需 torch），而完整管线还要跑 MolDet（ultralytics，同样需 torch）。
-要在自有 venv 里跑完整管线，需补 `torch` + `ultralytics` + `rdkit`。
+**变更记录（2026-09-18）**：该环境原先装的是 **`onnxruntime 1.29.0` CPU 版**
+（`get_available_providers()` 里连 `CUDAExecutionProvider` 都没有），
+这是 Hiro 实测 742 ms/页的直接原因。已按下列步骤换成 GPU 版：
 
-### 2.2 MBForge 的 venv（仍在用，逐步退役）
+```powershell
+uv pip uninstall --python $PY onnxruntime
+uv pip install  --python $PY "onnxruntime-gpu[cuda,cudnn]>=1.21"
+```
 
-`C:\Users\10954\Desktop\MBForge\.venv`：torch 2.11.0+cu128 / transformers 5.17.0 /
-ultralytics 8.4.150 / PyMuPDF 1.28.2 / rdkit 2026.3.6 / rapidocr 3.9.2 /
-**onnxruntime 1.29.0（CPU 版）**。
+> ⚠️ `onnxruntime` 与 `onnxruntime-gpu` 提供**同一个导入名**，不能共存，
+> 必须先把 CPU 版卸掉。`onnxruntime-gpu` 自带 CPU EP，所以 RapidOCR 的 onnx 后端不受影响。
 
-版面识别的对照基线（`layout/out/baseline_256`）与 V3 相关的脚本仍在这里跑。
+**验证（唯一可信的判据是 `session.get_providers()`）**：
 
-### 2.3 版本配对风险
+```
+onnxruntime-gpu 1.30.0
+preload_dlls(): OK
+session.get_providers(): ['CUDAExecutionProvider', 'CPUExecutionProvider']   ← CUDA 在前 = 真在 GPU
+```
+
+**遗留**：项目自有的 `ChemLayout\.venv`（2.07 GB）因此**不再需要**（当初建它是为了
+绕开 MBForge venv 的 CPU onnxruntime，现在那个理由消失了）。**尚未删除** —— 按"不擅自删既有资源"保留，
+确认后可直接删。
+
+### 2.2 版本配对风险
 
 `transformers>=5.10.0`（PaddleOCR 3.5 的 transformers 引擎门槛）与 MolDet 的 `torch>=2.0.0`
 下限不一致。MBForge venv 当前的组合（torch 2.11.0 + transformers 5.17.0）**已验证可用**，
@@ -82,6 +90,7 @@ ultralytics 8.4.150 / PyMuPDF 1.28.2 / rdkit 2026.3.6 / rapidocr 3.9.2 /
 | 4 | ModelScope 上 `PaddlePaddle/PP-DocLayoutV3` 是 `.pdiparams`（**transformers 加载不了**） | 必须用 `PaddlePaddle/PP-DocLayoutV3_safetensors` |
 | 5 | **`github.com` 本机直连不可达**（`Recv failure: Connection was reset`） | 走镜像（实测 `ghfast.top` / `ghproxy.net` 可用；见 `refs/README.md`） |
 | 6 | **`onnxruntime-gpu` 的 CUDA EP 会"装好了但静默回落 CPU"** | 必须调 `onnxruntime.preload_dlls()`，**且要在建 session 之前**；详见下 |
+| 7 | **装了 `onnxruntime-gpu` 后 `import torch` 会崩**（`WinError 127` / `cudnn_cnn64_9.dll`） | **`preload_dlls()` 必须在 `import torch` 之后**；详见下 |
 
 #### 陷阱 6 展开：CUDA EP 静默回落
 
@@ -110,6 +119,37 @@ Failed to create CUDAExecutionProvider.
 本机版本对得上（`onnxruntime-gpu 1.30.0` 要 CUDA 13 + cuDNN 9；装进来的是
 `nvidia-cuda-runtime 13.4.92` + `nvidia-cudnn-cu13 9.26.0.51`），纯粹是 DLL 路径问题。
 注意与 torch 的 **cu128（CUDA 12.8）不是同代**，但两者各自加载自己的 CUDA 轮子，实测不冲突。
+
+#### 陷阱 7 展开：`preload_dlls()` 会抢走 torch 的同名 cuDNN（2026-09-18 实测踩到）
+
+**症状**：装上 `onnxruntime-gpu` 后，**单跑 `import torch` 是好的**，但跑完整管线时崩：
+
+```
+OSError: [WinError 127] 找不到指定的程序。
+  Error loading "...\torch\lib\cudnn_cnn64_9.dll" or one of its dependencies.
+```
+
+**根因**：`preload_dlls()` 把 `nvidia/cudnn/bin`（cuDNN 9 / **CUDA 13**）加进 DLL 搜索路径，
+而 **torch 2.11.0+cu128 自带同名 DLL** `torch/lib/cudnn_cnn64_9.dll`（cuDNN 9 / **CUDA 12**）。
+Windows 加载器**按名字去重**，于是先注册的一方赢。实测三种顺序：
+
+| 顺序 | 结果 |
+| --- | --- |
+| `preload_dlls()` → `import torch` | ❌ **torch 崩**（拿到 CUDA 13 那份） |
+| `import torch` → `preload_dlls()` | ✅ 正常（各用自己那份），但会警告 CUDA 12 vs 13 不同代 |
+| 只 `import onnxruntime`（不 preload）→ `import torch` | ✅ 正常 |
+
+**为什么只在完整管线里暴露**：`detect_overlay.py` 先 `load_hiro()`（触发 `preload_dlls`），
+后 `load_moldet()`（才 `import torch`）——正好落在第一种顺序上。
+
+**处置（已实现）**：`layout/hiro.py::_preload_gpu_dlls` 现在**先尽力 `import torch`** 再 preload；
+没有 torch 的纯 ONNX 环境不受影响（`try/except` 兜住）。
+
+> ⚠️ **遗留提示**：`torch` 是 cu128（CUDA 12.8），`onnxruntime-gpu 1.30` 是 CUDA 13，
+> 每次 `preload_dlls()` 后 torch 都会打印一条不同代的警告。
+> 功能上实测无碍（各加载各自那套轮子）。若要彻底消除，
+> 可把 ORT 换成 CUDA 12 构建（如 `onnxruntime-gpu 1.22.x` + `nvidia-cudnn-cu12`），
+> 使两边 CUDA 同代 —— 但**当前配置已可用，不建议仅为消警告而动**。
 
 ---
 
