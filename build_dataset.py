@@ -118,9 +118,8 @@ def main():
 
     zoom = args.dpi / 72.0
     mat = pymupdf.Matrix(zoom, zoom)
-    # 单一样本目录。原先设计的 Sample-medium / Sample-tiny 两级目录**从未建成**，
-    # 实际语料统一在 ../Sample（由 layout/sample_from_pdf.py --pdf-dir 生成）。
-    # 层级信息保留在 dataset_manifest.json 的 pages[].tags 里，不再另开目录。
+    # 样本写到单一目录；层级（medium / tiny）记在 manifest 的 pages[].tags 里，
+    # 不为每级另开目录。
     outdir = out_root / "Sample"
     outdir.mkdir(parents=True, exist_ok=True)
 

@@ -41,11 +41,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-# ocr 消费的标签 = `layout/merge._TEXTY`，即 `layout/v3.py::KIND_MAP` 里映射为 "text_span" 的那些。
-# （两处必须保持一致；版面识别的 R5 已保证这些框之间无交集，故不会重复识别）
-TEXT_LABELS = {"text", "title", "formula", "paragraph_title", "content", "abstract",
-               "algorithm", "aside_text", "footnote", "vision_footnote",
-               "reference", "reference_content", "figure_title", "formula_number"}
+# 文本区域的判据：**按生产者给的 `kind`，不要按 `label`**。
+#
+# `label` 是检测器词表，V3 与 Hiro 各不相同。按 label 匹配时，Hiro 只有 `text` 能命中，
+# `sec` / `mnote` / `cap` / `figno` / `lineno` / `colno` / `ref` / `toc` / `bib`
+# 这 9 类文本全部落空 —— 实测 1900 个 `text_span` 只能取到 1635 个。
+# `kind` 由 `layout/v3.py::KIND_MAP` 统一产出，与用哪个检测器无关。
+# （与 `merge.py` 的 R3/R4 按 RegionType 匹配是同一原则。）
+TEXT_KIND = "text_span"
 
 
 _CJK_MIN = 0x2E80          # CJK 部首起；含中日韩文字与全角标点（：，。（）等）
@@ -71,9 +74,9 @@ def _needs_space(a: str, b: str) -> bool:
 def join_lines(texts):
     """按行拼接 raw_text，处理中英混排的换行。
 
-    踩过的坑：最初只对「两侧都是 ASCII 字母数字」补空格，结果英文在**标点处**换行时漏空格
-    —— 实测产出 `redness,swelling`、`M2),comparisons`、`;MacDonald` 这类粘连。
-    改为按 CJK 判定：只要两侧都不是 CJK 就补空格（除断词连字符与左括号/斜杠）。
+    判据是 CJK，而不是"两侧都是 ASCII 字母数字"：后者在英文**标点处**换行时会漏空格，
+    产出 `redness,swelling`、`M2),comparisons`、`;MacDonald` 这类粘连。
+    规则：只要两侧都不是 CJK 就补空格（除断词连字符与左括号/斜杠）。
     """
     out = ""
     for t in texts:
@@ -212,7 +215,7 @@ class TextOCR:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--detections", default=str(HERE.parent / "layout" / "out" /
-                                                "overlay_merged" / "detections.json"))
+                                                "hiro_256" / "detections.json"))
     ap.add_argument("--samples", default=str(HERE.parent / "Sample"))
     ap.add_argument("--version", default="PPOCRV6")
     ap.add_argument("--model-type", default="SMALL")
@@ -238,7 +241,7 @@ def main():
     jobs = []
     for p in layout_det["pages"]:
         boxes = [(r["region_id"], r["bbox_px"]) for r in p["regions"]
-                 if r["label"] in TEXT_LABELS]
+                 if r.get("kind") == TEXT_KIND]
         if boxes:
             jobs.append((p["page"], boxes))
     if args.limit:
@@ -312,15 +315,16 @@ def main():
     for pg in pages_out:
         stem = pg["page"]
         for r in next(x for x in layout_det["pages"] if x["page"] == stem)["regions"]:
-            if r["label"] not in TEXT_LABELS:
+            if r.get("kind") != TEXT_KIND:
                 continue
             txt = pg["region_text"].get(r["region_id"], "").strip()
             if not txt:
                 continue                                   # 无文本不产出（evidence 要求非空）
             ev.append({"doc_id": r["doc_id"], "page": r["page"], "evidence_id": "",
                        "bbox": list(r["bbox_pdf"]), "raw_text": txt, "coref": "",
-                       "kind": "text_span",
+                       "kind": TEXT_KIND,
                        "_m1": {"region_id": r["region_id"], "label": r["label"],
+                               "reading_order": r.get("reading_order"),
                                "score": r["score"], "bbox_px": r["bbox_px"]}})
     (outdir / "evidence_with_text.json").write_text(
         json.dumps({"conventions": {"bbox": "pdf_bottom_left"},

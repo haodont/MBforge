@@ -188,7 +188,7 @@ def main():
     ap.add_argument("--out", default=str(HERE / "out" / "overlay"))
     ap.add_argument("--dpi", type=int, default=144)
     ap.add_argument("--src-dpi", type=int, default=144,
-                    help="Sample/ 是 144 DPI（改自 384，那是已废弃的 samples/ 的 DPI）")
+                    help="输入图像的实际 DPI；Sample/ 是 144")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--layout", default="v3", choices=["v3", "hiro"],
                     help="版面检测器：v3 = PP-DocLayoutV3(transformers)，"

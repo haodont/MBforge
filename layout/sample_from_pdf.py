@@ -26,9 +26,9 @@ DEFAULT_OUT = HERE.parent / "Sample"
 def safe_name(s: str) -> str:
     """清掉换行与 Windows 非法文件名字符。
 
-    踩过的坑：从 PDF 文本里正则抠公布号，会把换行一起抠进来
-    （'CN\\n202410166244'），存盘时报 `cannot remove file ... Invalid argument`。
-    而且那串其实是优先权号不是公布号。故默认直接用 PDF 文件名做前缀。
+    不清理会让存盘直接失败（`cannot remove file ... Invalid argument`）。
+    前缀默认取 PDF 文件名，而不是从 PDF 文本里正则抠公布号 ——
+    那些串常带换行，且多是优先权号而非公布号。
     """
     for ch in '\r\n\t':
         s = s.replace(ch, "")

@@ -182,7 +182,7 @@ def _preload_gpu_dlls() -> str | None:
     官方 Hiro-Smart-Doc 的 `layout/backends/onnx_backend.py::_preload_cuda_dlls`
     做的是同一件事。返回 None 表示成功，否则返回失败原因（供诊断）。
 
-    ⚠️⚠️ **另一个必须知道的坑：加载顺序**（2026-09-18 实测踩到并修）。
+    ⚠️⚠️ **另一个必须知道的坑：加载顺序**。
     `preload_dlls()` 会把 `nvidia/cudnn/bin`（cuDNN 9 / **CUDA 13**）加进 DLL 搜索路径。
     而 **torch 2.11.0+cu128 自带同名 DLL** `torch/lib/cudnn_cnn64_9.dll`（cuDNN 9 / **CUDA 12**）。
     Windows 加载器按**名字**去重，于是：
