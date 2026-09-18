@@ -187,6 +187,10 @@ def px_poly_to_pdf(poly_px, page_height_pt: float, px_per_pt: float):
 # --------------------------------------------------------------------------------------
 
 class LayoutDetectorV3:
+    # 契约自描述：供 `pipeline.detect_page` 统一处理两个检测器
+    source_name = "layout_v3"
+    provides_reading_order = True   # V3 的输出顺序**自带**逻辑阅读序（实测两栏页 y 回跳）
+
     def __init__(self, model_dir: str | Path, device: str | None = None, dtype: str | None = None,
                  input_size: int | None = None):
         """input_size：覆盖预处理器默认的 800×800 方形拉伸。None 则用 config 默认值。"""
@@ -320,7 +324,12 @@ def _as_pairs(poly):
 # 组装 Region（M1 文档 §6）
 # --------------------------------------------------------------------------------------
 
-def build_regions(raw, doc_id: str, page_num: int, dpi: int):
+def build_regions(raw, doc_id: str, page_num: int, dpi: int, source: str = "layout_v3"):
+    """把检测器输出组装成 Region 列表。
+
+    `source` 由调用方传入检测器标识（`layout_v3` / `layout_hiro`）——
+    本函数是**两个检测器共用**的组装器（Hiro 也走这里，因为它多带 `kind` 字段）。
+    """
     px_per_pt = dpi / 72.0
     h_px, w_px = raw["page_px"]
     page_h_pt = h_px / px_per_pt
@@ -330,7 +339,7 @@ def build_regions(raw, doc_id: str, page_num: int, dpi: int):
     for seq, r in enumerate(raw["items"]):
         bbox_px = tuple(r["bbox_px"])
         region = {
-            # region_id 的 seq 在合并去重后需重编号，这里是 M1 原始序号
+            # region_id 的 seq 在合并去重后需重编号，这里是检测器的原始序号
             "region_id": f"{doc_id}-{page_num}-{r['type']}-{seq}",
             # ↓ MBForge SourceEvidence 对齐字段
             "doc_id": doc_id,
@@ -340,8 +349,8 @@ def build_regions(raw, doc_id: str, page_num: int, dpi: int):
             "label": r["label"],
             "cls_id": r["cls_id"],
             "score": r["score"],
-            "source": "layout_v3",
-            "reading_order": seq,          # 直接取输出下标（待验证是否为真实阅读顺序）
+            "source": source,
+            "reading_order": seq,   # V3 输出下标即逻辑阅读序（已实测：两栏页有 y 回跳）
             "bbox_px": [round(v, 2) for v in bbox_px],
             "bbox_pdf": [round(v, 2) for v in
                          px_box_to_pdf(bbox_px, page_h_pt, px_per_pt)],

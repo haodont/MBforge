@@ -124,7 +124,9 @@ def draw_page_merged(img, regions, font, page_title, mstats):
             for c in r["children"]:
                 cx0, cy0, cx1, cy1 = c["bbox_px"]
                 d.rectangle([cx0, cy0, cx1, cy1], outline=MOL_COLOR, width=3)
-                d.text((cx0 + 3, cy1 + 2), f"mol {c['score']:.2f}",
+                cs = c.get("reading_order")
+                d.text((cx0 + 3, cy1 + 2),
+                       (f"#{cs} " if cs is not None else "") + f"mol {c['score']:.2f}",
                        fill=MOL_COLOR, font=font)
                 n_kids += 1
             continue
@@ -132,7 +134,8 @@ def draw_page_merged(img, regions, font, page_title, mstats):
         # 分子（独立的 / 由 image 让位来的）
         if r["type"] == "molecule":
             d.rectangle([x0, y0, x1, y1], outline=MOL_COLOR, width=3)
-            tag = f"molecule {r['score']:.2f}"
+            seq = r.get("reading_order")
+            tag = (f"#{seq} " if seq is not None else "") + f"molecule {r['score']:.2f}"
             if r["source"] == "merged":
                 tag += " [yielded]"
             d.text((x0 + 3, y1 + 2), tag, fill=MOL_COLOR, font=font)
@@ -141,8 +144,23 @@ def draw_page_merged(img, regions, font, page_title, mstats):
         color, w, name = STYLE.get(r["type"], ((255, 0, 0), 2, r["type"]))
         d.rectangle([x0, y0, x1, y1], outline=color, width=w)
         ns = len(meta.get("spans", []))
-        tag = f"{name} {r['score']:.2f}" + (f" +{ns}span" if ns else "")
+        # 序号 = reading_order，用来**用眼验证阅读顺序**（框上数字应自上而下、先左栏后右栏）
+        seq = r.get("reading_order")
+        tag = (f"#{seq} " if seq is not None else "") + f"{name} {r['score']:.2f}" \
+              + (f" +{ns}span" if ns else "")
         d.text((x0 + 3, max(0, y0 - 17)), tag, fill=color, font=font)
+
+    # 阅读顺序连通线：按 reading_order 把相邻区域中心连起来，顺带暴露"回跳"
+    ordered = [r for r in regions if r.get("reading_order") is not None]
+    ordered.sort(key=lambda r: r["reading_order"])
+    if len(ordered) > 1:
+        pts = [((r["bbox_px"][0] + r["bbox_px"][2]) / 2,
+                (r["bbox_px"][1] + r["bbox_px"][3]) / 2) for r in ordered]
+        for a, b in zip(pts, pts[1:]):
+            d.line([a, b], fill=(160, 160, 160), width=1)
+        for i, pt in enumerate(pts):
+            d.ellipse([pt[0] - 3, pt[1] - 3, pt[0] + 3, pt[1] + 3],
+                      fill=(255, 60, 60) if i else (60, 60, 255))
 
     legend = [
         (f"merged regions {len(regions)}", (0, 0, 0)),

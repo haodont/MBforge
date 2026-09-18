@@ -85,7 +85,15 @@ def detect_page(image, v3, mol_model=None, *, doc_id: str, page_num: int = 1,
         n_area_dropped = before - len(items)
 
     regions, page = build_regions(
-        {"items": items, "page_px": page_px}, doc_id, page_num, dpi)
+        {"items": items, "page_px": page_px}, doc_id, page_num, dpi,
+        source=getattr(v3, "source_name", "layout_v3"))
+
+    # 检测器不自带阅读顺序时（Hiro），用官方的 column_sort 启发式补上。
+    # V3 自带模型级逻辑阅读序（provides_reading_order=True），**保持原样不动**——
+    # 这是 V3 相对外部方案的真实优势，重排只会破坏它（也会改动 baseline_256）。
+    if not getattr(v3, "provides_reading_order", True):
+        from reading_order import assign as assign_reading_order
+        regions = assign_reading_order(regions, page)
     mols, mol_ms = [], 0.0
     if mol_model is not None:
         t = time.perf_counter()

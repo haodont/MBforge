@@ -93,6 +93,9 @@ $PY = "C:\Users\10954\Desktop\MBForge\.venv\Scripts\python.exe"
 | **`pipeline.py`** | 可复用接口：模型加载（`load_hiro`/`load_v3`/`load_moldet`）、页面准备、检测、合并、扁平 evidence；不写文件或绘图 |
 | `test_pipeline.py` | 真实单页 API 冒烟检查；可选对比重构前后 JSON 和叠加图 |
 | `merge.py` | 合并规则 R1–R5。独立模块，可 import 复用 |
+| `reading_order.py` | **阅读顺序**：逐行移植官方 Hiro-Smart-Doc 的 `column_sort`（§12.10） |
+| `test_reading_order.py` | 与官方实现做等价性断言 + 真实页面效果统计（§12.10） |
+| `show_reading_order.py` | 把 JSON 渲染成带 `#序号` 的图，供**用眼**验证顺序 |
 | `hiro.py` | **Hiro-Layout 适配**（ONNX）；`--list-labels` 并列打印 ONNX 元数据与官方 `labels.json` |
 | `v3.py` | 仅 V3（**对照基线**）；含冒烟检查（`--verify`）与标签表（`--list-labels`） |
 | `moldet.py` | **MolDetv2-YOLO26 分子检测**；图片/通配符/PDF 输入，输出 JSON + 标注图 |
@@ -861,6 +864,86 @@ Hiro 在同一页出 12 个 text 区域（外加页眉、行号），结构正�
    并且它暴露了本模块当前的**实际阻塞项**：`evidence.json` 的 `raw_text`/`coref` 均为空，
    **不是合法的 MBForge `SourceEvidence`**——需按分析文档 §4.4-D 补裁剪图 `coref`。
 
+### 12.10 阅读顺序（`reading_order.py`）· **2026-09-18**
+
+**问题**：Hiro **不输出阅读顺序** —— 区域列表顺序就是模型前向的输出顺序。
+实测 256 页有 **1425 次 y 回跳、99.2% 的页面**出现回跳，等于无序。
+
+**做法**：**逐行移植**官方 Hiro-Smart-Doc 的 `column_sort` + `determine_columns`
+（`refs/Hiro-Smart-Doc/hiro_smart_doc/model_runners/layout.py:84-169`）。
+核心是**跨栏框的"回灌"**：遇到横跨多栏的标题行时，把此刻积在右侧栏的框全部灌回左栏，
+使标题排在它上方正文之后。阈值全部是官方魔法数字，原样保留。
+
+#### 等价性验证（`test_reading_order.py` 的 A 部分）
+
+把官方 `LayoutRunner` 用 `object.__new__` 绕过 `__init__` 当 oracle
+（`determine_columns` / `column_sort` 不依赖实例状态，不需要加载权重），逐输入比对：
+
+| 用例 | 结果 |
+| --- | --- |
+| 手工构造（1/2/3 栏、跨栏标题、框数不足） | **7/7 一致** |
+| 随机模糊（固定种子 3000 组） | **3000/3000 一致** |
+| 真实页面（256 页 × 3 产物） | **768/768 一致** |
+
+`refs/` 不在版本库里，缺它时脚本会跳过 A 部分并明确提示。
+
+#### 效果（256 页，144 DPI）
+
+| 顺序 | y 回跳总数 | 栏切换 | 切换下限 | 栏序超额页 |
+| --- | ---: | ---: | ---: | ---: |
+| Hiro 原始序 | 1425 | 571 | 92 | 31.6% |
+| **Hiro + column_sort** | **86** | **314** | 92 | **22.3%** |
+| V3 原生序（对照） | 99 | 354 | 73 | 27.3% |
+
+两个指标上 **Hiro 都追平并略优于 V3 自带的模型级顺序**。
+
+> 「栏切换」比 y 回跳更贴切：回跳分不清"正确地换到下一栏"（应当发生）与"错误地来回横跳"。
+> 正确的栏序（先读完第 1 栏再读第 2 栏…）只需切换 `栏数-1` 次，切换越多 = 栏被反复回访。
+
+#### ⚠️ 已知局限：约 22% 页面仍有栏内交错
+
+根因是**栏数判定**，不是排序本身。实测 `US20220401435A1_p0047`：
+
+该页实为 **2 栏**（左 x 0.12–0.49 / 右 x 0.50–0.87），但 `determine_columns` 判成 **3 栏** ——
+右栏的框按 `x0` 落在 0.50–0.66 与 >0.66 两侧，被拆进第 2、3 栏，把第 3 栏的高度撑过了阈值。
+于是左栏的框（`x1 ≈ 0.48`）走"跨前两栏"分支时执行 `col_1.extend(col_2)`，
+**把此前积在 `col_2` 里的右栏框一起吸进左栏**，顺序就此交错（该页实测 30 个区域）。
+
+`line1_splitting=0.33` / `line2_splitting=0.60` 是官方魔法数字，官方注释也承认
+"may need to be tuned"。**调优留作后续**，不在本次范围。
+
+#### 用眼验证
+
+`show_reading_order.py` 直接把已有 JSON 渲染成带 `#序号` 的图（框中心按序号连线，
+第 0 个是蓝点），**不重跑推理**：
+
+```powershell
+& $PY show_reading_order.py --run hiro_256 --pages <stem> [<stem> ...]
+& $PY show_reading_order.py --run hiro_256_raworder --pages <stem>   # 对照旧顺序
+```
+
+产物落在 `out/<run>/reading_order/`。读法：序号应自上而下递增，
+**同一栏读完了才跳到下一栏**，连线应是平滑的 Z 字而非来回横跳。
+
+#### 接入方式
+
+检测器用**类属性**自描述（`v3.py` / `hiro.py`）：
+
+| 类属性 | V3 | Hiro |
+| --- | --- | --- |
+| `provides_reading_order` | `True`（输出顺序自带逻辑阅读序） | `False`（需后处理） |
+| `source_name` | `layout_v3` | `layout_hiro` |
+
+`pipeline.detect_page` 据此决定是否调 `reading_order.assign()`；
+`merge.py` 末尾**本就**按 `reading_order` 字段重排，所以下游自动有序。
+
+> **V3 不重排** —— 那会破坏它的模型级顺序，也会改动 `baseline_256`。
+> 顺带修掉一个 bug：此前 Hiro 跑出来的 region 被标成 `source: "layout_v3"`
+> （因为两条路径共用 `v3.build_regions`），现已按检测器正确标注。
+
+> 观察（**未采纳**）：对 V3 的输出再跑一遍 `column_sort` 也能把栏切换从 354 降到 188。
+> 但"更接近栏序"不等于"更接近正确阅读序"，是否值得动 V3 由后续决定。
+
 ---
 
 ## 13. 目录
@@ -876,9 +959,10 @@ layout/
 │   ├── v3/                        # PP-DocLayoutV3（对照基线，ModelScope，127.10 MiB）
 │   └── moldet/                    # MolDetv2-YOLO26（.pt + .onnx，5.21 MB）
 ├── out/
+│   ├── hiro_256/                  # 256 页 Hiro ∪ MolDet（§12.4，**已含 reading_order**）
+│   ├── hiro_256_raworder/         # 加阅读顺序**之前**的同一次运行（对照用）
 │   ├── baseline_256/              # 256 页 V3 ∪ MolDet 基线（§12.4）
 │   ├── v3_verify/                 # merge.py 改动后的 V3 回归（与 baseline 完全一致）
-│   ├── hiro_256/                  # 256 页 Hiro ∪ MolDet（§12.4）
 │   ├── hiro_gpu_bench.json        # Hiro GPU 基准原始数据（§12.4.1）
 │   ├── layout_compare_256.json    # 两方案对比汇总
 │   ├── layout_quality.json        # 双向质量评测原始数据（§12.5）
@@ -891,6 +975,9 @@ layout/
 ├── detect_overlay.py              # 主入口：版面识别 + 合并 + 渲染（--layout hiro|v3）
 ├── pipeline.py                    # 可复用接口（load_hiro / load_v3 / load_moldet / detect_page / merge_page）
 ├── merge.py                       # 合并规则 R1–R5
+├── reading_order.py               # 阅读顺序：移植官方 column_sort（§12.10）
+├── test_reading_order.py          # 与官方实现的等价性断言 + 效果统计
+├── show_reading_order.py          # 渲染带 #序号的图，供用眼验证
 ├── hiro.py                        # Hiro-Layout ONNX 适配（§12）
 ├── v3.py                          # PP-DocLayoutV3 适配（对照基线）+ 冒烟检查 + 标签表
 ├── moldet.py                      # MolDetv2-YOLO26 分子检测（图片/PDF → JSON + 标注图）

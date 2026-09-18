@@ -220,6 +220,10 @@ class HiroLayoutDetector:
     item 含 `cls_id / label / type / score / bbox_px / polygon_px`。
     """
 
+    # 契约自描述：供 `pipeline.detect_page` 统一处理两个检测器
+    source_name = "layout_hiro"
+    provides_reading_order = False   # Hiro 不输出顺序 → 需 column_sort 后处理
+
     def __init__(self, model_dir: str | Path = DEFAULT_MODEL_DIR,
                  *, onnx_file: str = DEFAULT_ONNX, input_size: int | None = DEFAULT_IMGSZ,
                  providers=None, num_threads: int | None = None):
@@ -463,6 +467,10 @@ def _nms(boxes, scores, iou_thresh: float):
 # --------------------------------------------------------------------------------------
 
 def build_regions(raw, doc_id: str, page_num: int, dpi: int):
+    """⚠️ **生产路径不走这里**：`pipeline.detect_page` 用的是 `v3.build_regions`
+    （那份多一个 `kind` 字段，供 evidence 使用）。本函数只服务于 hiro.py 的命令行调试，
+    且**缺 `kind`**，属待清理的重复实现。
+    """
     from v3 import px_box_to_pdf
 
     px_per_pt = dpi / 72.0

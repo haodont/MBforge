@@ -91,6 +91,7 @@ session.get_providers(): ['CUDAExecutionProvider', 'CPUExecutionProvider']   ←
 | 5 | **`github.com` 本机直连不可达**（`Recv failure: Connection was reset`） | 走镜像（实测 `ghfast.top` / `ghproxy.net` 可用；见 `refs/README.md`） |
 | 6 | **`onnxruntime-gpu` 的 CUDA EP 会"装好了但静默回落 CPU"** | 必须调 `onnxruntime.preload_dlls()`，**且要在建 session 之前**；详见下 |
 | 7 | **装了 `onnxruntime-gpu` 后 `import torch` 会崩**（`WinError 127` / `cudnn_cnn64_9.dll`） | **`preload_dlls()` 必须在 `import torch` 之后**；详见下 |
+| 8 | **改了模块但运行结果还是旧的** | 本目录用**裸模块名**互相导入（`from v3 import ...`），`__pycache__` 里的旧字节码可能被继续加载。改完先 `Get-ChildItem -Recurse -Directory -Filter __pycache__ \| Remove-Item -Recurse -Force` |
 
 #### 陷阱 6 展开：CUDA EP 静默回落
 
