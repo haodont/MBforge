@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>化学反应图解析（RxnDP）技术路线全景对比 · ChemLayout 选型参考</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M16 6l8 4.6v9.2L16 24.4 8 19.8v-9.2L16 6z' fill='none' stroke='%23fff' stroke-width='1.6'/%3E%3Ccircle cx='16' cy='15' r='2.2' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://miaoda.feishu.cn/fonts/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap">
+<style>
+  :root{
+    --bg:#f5f6f8; --ink:#1b2430; --muted:#5b6673; --line:#e2e6ec;
+    --card:#ffffff; --teal:#0f766e; --teal-soft:#e6f2f0; --amber:#b45309;
+    --red:#b91c1c; --gray:#6b7280; --dark:#101a2b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);font-family:"Noto Sans SC",-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* header */
+  header{background:var(--dark);color:#e8edf4;padding:52px 0 40px}
+  .kicker{font-size:13px;letter-spacing:.14em;color:#7fd1c8;font-weight:700}
+  h1{font-size:clamp(26px,4vw,38px);font-weight:900;line-height:1.25;margin:10px 0 12px;color:#fff}
+  .sub{font-size:15px;color:#aeb8c7;max-width:760px}
+  .stats{display:flex;gap:14px;flex-wrap:wrap;margin-top:26px}
+  .stat{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 16px}
+  .stat b{display:block;font-size:22px;color:#fff;font-weight:900}
+  .stat span{font-size:12px;color:#9aa6b8}
+
+  /* sections */
+  section{margin:44px 0}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:18px}
+  .sec-no{font-size:13px;font-weight:900;color:var(--teal);letter-spacing:.1em}
+  h2{font-size:22px;font-weight:900}
+  .sec-note{font-size:13px;color:var(--muted);margin-top:2px}
+
+  /* timeline */
+  .tl{display:grid;grid-template-columns:78px 26px 1fr;gap:0;font-size:14px}
+  .tl-row{display:contents}
+  .tl-time{padding:14px 0;text-align:right;font-weight:700;color:var(--teal);font-size:13px}
+  .tl-mid{display:flex;justify-content:center;position:relative}
+  .tl-mid::before{content:"";position:absolute;top:0;bottom:0;width:2px;background:var(--line)}
+  .tl-dot{width:12px;height:12px;border-radius:50%;background:var(--teal);border:3px solid #fff;box-shadow:0 0 0 2px var(--teal);z-index:1;margin-top:18px;justify-self:center}
+  .tl-dot.warn{background:var(--amber);box-shadow:0 0 0 2px var(--amber)}
+  .tl-dot.soon{background:var(--red);box-shadow:0 0 0 2px var(--red)}
+  .tl-dot.gray{background:var(--gray);box-shadow:0 0 0 2px var(--gray)}
+  .tl-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+  .tl-card b{font-size:14.5px}
+  .tl-title{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+  .tl-card .tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:20px;margin-left:8px;vertical-align:1px}
+  .tag.ok{background:var(--teal-soft);color:var(--teal)}
+  .tag.warn{background:#fdf3e3;color:var(--amber)}
+  .tag.soon{background:#fdeaea;color:var(--red)}
+  .tag.gray{background:#eef0f3;color:var(--gray)}
+  .tl-card p{font-size:13px;color:var(--muted);margin-top:4px}
+
+  /* comparison table */
+  .tbl-scroll{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+  table{width:100%;min-width:980px;border-collapse:collapse;table-layout:fixed;font-size:13px}
+  thead th{background:var(--dark);color:#dfe6f0;text-align:left;padding:10px 12px;font-weight:700;font-size:12.5px;letter-spacing:.02em}
+  tbody td{padding:10px 12px;border-top:1px solid var(--line);vertical-align:top;color:#2a3442}
+  tbody tr:nth-child(even){background:#f9fafb}
+  td b{font-size:13.5px}
+  .cell-sub{font-size:12px;color:var(--muted);display:block;margin-top:2px}
+  .st{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:20px;white-space:nowrap}
+  .st.ok{background:var(--teal-soft);color:var(--teal)}
+  .st.warn{background:#fdf3e3;color:var(--amber)}
+  .st.soon{background:#fdeaea;color:var(--red)}
+  .st.gray{background:#eef0f3;color:var(--gray)}
+
+  /* route cards */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+  .rc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;border-top:3px solid var(--teal)}
+  .rc.closed{border-top-color:var(--red)}
+  .rc.api{border-top-color:var(--gray)}
+  .rc h3{font-size:15.5px;font-weight:900;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .rc .who{font-size:12.5px;color:var(--muted);margin:2px 0 8px}
+  .rc p{font-size:13.5px;color:#37414f}
+  .rc .kv{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .kv i{font-style:normal;font-size:11.5px;background:#f0f2f5;color:var(--muted);border-radius:6px;padding:3px 8px}
+
+  /* two-col */
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+  .box h3{font-size:16px;font-weight:900;margin-bottom:10px}
+  .box ul{list-style:none}
+  .box li{font-size:13.5px;color:#37414f;padding:7px 0;border-bottom:1px dashed var(--line)}
+  .box li:last-child{border-bottom:none}
+  .box li b{color:var(--ink);display:block}
+  .box li .n{font-size:12px;color:var(--muted);display:block}
+
+  /* conclusion */
+  .concl{background:linear-gradient(135deg,#0f3d3a 0%,#101a2b 78%);border-radius:14px;color:#e8edf4;padding:26px 28px}
+  .concl h2{color:#fff;font-size:20px}
+  .concl .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0;font-size:14px}
+  .concl .chip{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:6px 12px;font-weight:700}
+  .concl .arrow{color:#7fd1c8;font-weight:900}
+  .concl p{font-size:13.5px;color:#c3cdda;max-width:920px}
+  .concl p b{color:#fff}
+
+  footer{border-top:1px solid var(--line);padding:24px 0 40px;font-size:12px;color:var(--muted)}
+  footer .src{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:8px}
+  footer a{color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+
+  @media(max-width:760px){
+    .tl{grid-template-columns:64px 20px 1fr}
+    .two{grid-template-columns:1fr}
+    h2{font-size:19px}
+    .rc{min-width:0}
+    .tl-card p{font-size:14px}
+    .tag{font-size:12px}
+    .stat span{font-size:13px}
+    .kv i{font-size:12.5px}
+    footer a{padding:6px 4px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">CHEMLAYOUT · 技术调研</div>
+    <h1>化学反应图解析（RxnDP）<br>技术路线全景对比</h1>
+    <p class="sub">从 2009 年的规则管线到 2026 年的视觉提示 + 强化学习，梳理反应式解析的全部技术路线、实现方式、数据集与开源状态，并给出面向化学专利提取（ChemLayout M8 模块）的选型结论。</p>
+    <div class="stats">
+      <div class="stat"><b>8</b><span>条技术路线</span></div>
+      <div class="stat"><b>2009→2026</b><span>演进跨度</span></div>
+      <div class="stat"><b>2 条</b><span>开源可用主线</span></div>
+      <div class="stat"><b>5 类</b><span>数据集 / 基准</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ===== 时间轴 ===== -->
+  <section>
+    <div class="sec-head"><span class="sec-no">01</span><h2>演进时间轴</h2><span class="sec-note">每条路线的登场节点与关键里程碑</span></div>
+    <div class="tl">
+      <div class="tl-row"><div class="tl-time">2009</div><div class="tl-mid"><span class="tl-dot gray"></span></div><div class="tl-card"><div class="tl-title"><b>OSRA 开源</b><span class="tag gray">规则管线</span></div><p>首个开源光学结构识别工具，规则式：二值化、像素聚类、直线检测识别箭头与分子。</p></div></div>
+      <div class="tl-row"><div class="tl-time">2021–23</div><div class="tl-mid"><span class="tl-dot gray"></span></div><div class="tl-card"><div class="tl-title"><b>ReactionDataExtractor 1.0 / 2.0</b><span class="tag gray">规则 + 符号</span></div><p>分子检测器 + 箭头检测器 + OCR + 符号规则组装；2.0 引入神经网络，F1 75–96%。</p></div></div>
+      <div class="tl-row"><div class="tl-time">2023</div><div class="tl-mid"><span class="tl-dot"></span></div><div class="tl-card"><div class="tl-title"><b>RxnScribe（端到端序列生成）</b><span class="tag ok">开源 MIT</span></div><p>Pix2Seq 编码器—解码器，BROS 策略把「框 + 角色」压进一个序列；RxnDP 1,378 图，soft-match F1 80.0%。</p></div></div>
+      <div class="tl-row"><div class="tl-time">2025</div><div class="tl-mid"><span class="tl-dot"></span></div><div class="tl-card"><div class="tl-title"><b>RxnIM（首个专用 MLLM）</b><span class="tag ok">开源</span></div><p>三阶段训练：合成图检测预训练 → 组分/条件提取 → 统一指令微调；Pistachio 驱动的合成数据。</p></div></div>
+      <div class="tl-row"><div class="tl-time">2026</div><div class="tl-mid"><span class="tl-dot soon"></span></div><div class="tl-card"><div class="tl-title"><b>RxnCaption / RxnID（当前 SOTA 方向）</b><span class="tag soon">未发布</span></div><p>BIVP 视觉提示把解析变成看图说话；IdtVP 标识符提示 + Re3-DAPO 可验证 RL 直接优化反应级指标。</p></div></div>
+      <div class="tl-row"><div class="tl-time">全程</div><div class="tl-mid"><span class="tl-dot warn"></span></div><div class="tl-card"><div class="tl-title"><b>专利文本侧反应抽取（补充维度）</b><span class="tag warn">并行</span></div><p>SureChEMBL（100 万+ 美国专利反应）、ChEMU 2020、段落级 IOB2 标注、LLM 抽取 + 原子映射——大量反应信息本就在正文文字里。</p></div></div>
+    </div>
+  </section>
+
+  <!-- ===== 对比表 ===== -->
+  <section>
+    <div class="sec-head"><span class="sec-no">02</span><h2>核心对比</h2><span class="sec-note">8 条路线在同一组维度上的并列对比</span></div>
+    <div class="tbl-scroll">
+      <table>
+        <colgroup><col style="width:14%"><col style="width:14%"><col style="width:20%"><col style="width:18%"><col style="width:15%"><col style="width:10%"><col style="width:9%"></colgroup>
+        <thead><tr><th>路线</th><th>代表工作 · 时间</th><th>核心思想</th><th>实现方式</th><th>数据集 / 性能</th><th>开源状态</th><th>M8 建议</th></tr></thead>
+        <tbody>
+          <tr><td><b>规则 / 符号管线</b></td><td>OSRA 2009<br>RDE 1.0/2.0 2021–23</td><td>检测器 + OCR + 符号规则逐级组装</td><td>箭头直线检测、分子像素聚类、规则推理</td><td>开放期刊方案，F1 75–96%</td><td><span class="st gray">部分开源</span></td><td>不选</td></tr>
+          <tr><td><b>端到端序列生成</b></td><td>RxnScribe 2023</td><td>把「检测 + 角色」压成序列生成</td><td>Pix2Seq：ViT 编码 + 自回归解码，BROS</td><td>RxnDP 1,378 图，soft F1 80.0%</td><td><span class="st ok">MIT 开源</span></td><td>打底</td></tr>
+          <tr><td><b>LVLM 微调</b></td><td>RxnIM 2025</td><td>让多模态大模型直接输出结构</td><td>三阶段训练 + 大规模合成数据（Pistachio）</td><td>合成图（单行/多行/分支/环）</td><td><span class="st ok">开源</span></td><td>对照升级</td></tr>
+          <tr><td><b>视觉提示 + 字幕</b></td><td>RxnCaption CVPR 2026</td><td>坐标回归剥离 LVLM，改看图说话</td><td>MolYOLO 预画框 + 索引（BIVP）</td><td>RxnCaption-11k：10,112+400 图，24,716 反应</td><td><span class="st soon">未发布</span></td><td>发布后评估</td></tr>
+          <tr><td><b>标识符提示 + RL</b></td><td>RxnID 2026</td><td>用图中编号激活化学知识 + 可验证奖励</td><td>IdtVP 视觉提示 + Re3-DAPO 强化学习</td><td>历史文献 200 图（1950s–90s）</td><td><span class="st soon">未发布</span></td><td>关注</td></tr>
+          <tr><td><b>通用 MLLM 零样本</b></td><td>GPT-4o / Claude / Gemini</td><td>直接提问，零训练</td><td>提示词工程（如 MERMaid 组合管线）</td><td>灵活但不可控、坐标不可靠</td><td><span class="st gray">闭源 API</span></td><td>本地不用</td></tr>
+          <tr><td><b>文档级组合式</b></td><td>OpenChemIE / MolMole / MERMaid</td><td>多模型协作，页面或文档级端到端</td><td>OCSR + 反应解析 + 版面编排组合</td><td>OpenChemIE 开源；ViReact 页面级</td><td><span class="st ok">部分开源</span></td><td>参考实现</td></tr>
+          <tr><td><b>专利文本侧抽取</b></td><td>SureChEMBL / ChEMU / LLM</td><td>从正文段落抽反应与条件</td><td>文本挖掘、IOB2 段落标注、IUPAC→SMILES、原子映射</td><td>SureChEMBL 100 万+ 反应；ChEMU 约 2 万片段</td><td><span class="st warn">数据/工具开放</span></td><td>Phase 3 补通道</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== 路线详述 ===== -->
+  <section>
+    <div class="sec-head"><span class="sec-no">03</span><h2>各路线实现细节</h2><span class="sec-note">每条路线的关键做法与局限</span></div>
+    <div class="cards">
+      <div class="rc"><h3>规则 / 符号管线</h3><div class="who">OSRA → ChemSchematicResolver → ReactionDataExtractor</div><p>输入图先灰度化、去噪、二值化；箭头靠直线检测加「钩子侧像素更多」判据，分子靠像素聚类找「键多、尺寸合适」的团块，再叠加 OCR 与符号规则组装反应。每步可靠但错误逐级累积，换画风就不灵。</p><div class="kv"><i>可解释</i><i>误差累积</i><i>泛化弱</i></div></div>
+      <div class="rc"><h3>端到端序列生成</h3><div class="who">RxnScribe（JCIM 2023 · MIT）</div><p>把整个任务压成「下一个 token 预测」：ViT 编码图像，自回归解码器逐 token 输出，每个分子 = 量化后的 4 个坐标 bin + 角色 token（reactant / product / reagent / arrow）+ 反应编号，推理时反量化拼回结构。仅 1,378 张真实图训练即达 soft F1 80.0%，开箱可用。</p><div class="kv"><i>开箱可用</i><i>坐标离散化</i><i>复杂图弱</i></div></div>
+      <div class="rc"><h3>LVLM 微调</h3><div class="who">RxnIM（Chem Sci 2025 · 开源）</div><p>第一个为反应图解析训练的 MLLM。先用数据生成器从 Pistachio 反应库渲染大规模合成反应图（单行/多行/分支/环形四种排版），再三阶段训练：合成图检测预训练 → 组分识别与条件提取 → 统一指令微调。输出仍是 BROS 式 JSON，但合成分布和真实文献有偏移。</p><div class="kv"><i>合成数据规模化</i><i>域偏移</i><i>7B 级算力</i></div></div>
+      <div class="rc closed"><h3>视觉提示 + 字幕生成</h3><div class="who">RxnCaption（CVPR 2026 · 未发布）</div><p>核心洞察：LVLM 不擅长预测绝对坐标。先用 SOTA 检测器 MolYOLO 框出每个分子并画上索引（BIVP），再把带标注的图发给 LVLM 让它描述「框 1 是反应物，箭头指向框 2，条件是 A/B」——坐标已画在图上，模型只做语义推理。配合 11k 真实数据成为当前 SOTA。</p><div class="kv"><i>SOTA</i><i>依赖外部检测器</i><i>未开源</i></div></div>
+      <div class="rc closed"><h3>标识符提示 + 可验证 RL</h3><div class="who">RxnID（2026 · 未发布）</div><p>用反应图里天然存在的化合物编号（1a、2b）作为视觉提示（IdtVP）激活 VLM 预训练时的化学知识，零样本即强；再用可验证奖励的强化学习（Re3-DAPO）直接优化反应级 soft-match 指标，比纯监督微调更稳。专门验证了 1950–90 年代扫描文献。</p><div class="kv"><i>零样本强</i><i>RL 优化指标</i><i>未开源</i></div></div>
+      <div class="rc api"><h3>通用 MLLM 零样本</h3><div class="who">GPT-4o / Claude / Gemini（商用 API）</div><p>把反应图直接丢给通用多模态大模型提问。MERMaid 等工业管线采用「RxnScribe 识别分子 + GPT-4o 抽其他参数」的混合。灵活、零训练，但输出不可控、坐标不可靠，且专利数据不能外传，本地保密场景不适用。</p><div class="kv"><i>零训练</i><i>不可控</i><i>数据外传风险</i></div></div>
+      <div class="rc"><h3>文档级组合式</h3><div class="who">OpenChemIE（开源）/ MolMole / MERMaid</div><p>OpenChemIE 用多个 AI 模型协作完成 OCSR 与反应解析；MolMole 的 ViReact 直接从整页文档图像端到端提取反应（RxnScribe 架构 + 后处理），跳过「先检测反应区域」；MERMaid 做图分割 + RxnScribe 分子 + 大模型参数抽取。可作为整体架构参考。</p><div class="kv"><i>文档级端到端</i><i>组合灵活</i><i>实现复杂</i></div></div>
+      <div class="rc"><h3>专利文本侧抽取</h3><div class="who">SureChEMBL / ChEMU / LLM 管线</div><p>与图像解析互补的维度：SureChEMBL 从美国专利文本挖掘出 100 万+ 反应；ChEMU 2020 提供约 2 万条专利反应标注；近年工作用段落级 IOB2 标注定位反应段落，再经 LLM 抽取实体、IUPAC→SMILES 转换与原子映射验证。条件、收率、投料量大量在正文里。</p><div class="kv"><i>补全条件/收率</i><i>与图像解析互补</i><i>依赖文本质量</i></div></div>
+    </div>
+  </section>
+
+  <!-- ===== 评测与数据集 ===== -->
+  <section>
+    <div class="sec-head"><span class="sec-no">04</span><h2>评测口径与数据集</h2><span class="sec-note">比较数字前先对齐协议</span></div>
+    <div class="two">
+      <div class="box"><h3>评测协议</h3><ul>
+        <li><b>soft-match F1</b><span class="n">主流口径：判断预测反应是否为真阳性时忽略文本内容、把条件并入反应物、分子框按 IoU 匹配——容忍 OCR 文本错误，主要考结构拓扑</span></li>
+        <li><b>exact-match</b><span class="n">更严：文本、角色、坐标全部精确一致才算命中</span></li>
+        <li><b>RxnBench</b><span class="n">单图 QA（1,525 题 / 305 方案）+ 全文档 QA（108 篇），考感知与跨模态推理</span></li>
+        <li><b>ReactBench</b><span class="n">ChemReaction 1,618 道 QA，四维：空间定位 / 拓扑抽取 / 通路追踪 / 结构拓扑推理</span></li>
+      </ul></div>
+      <div class="box"><h3>数据集</h3><ul>
+        <li><b>RxnDP（RxnScribe）</b><span class="n">1,378 张真实论文反应图，规模小但真实</span></li>
+        <li><b>RxnIM 合成集</b><span class="n">Pistachio 驱动渲染，大规模但存在域偏移</span></li>
+        <li><b>RxnCaption-11k</b><span class="n">10,112 训练 + 400 验证、24,716 个反应、四类布局均衡，当前标杆</span></li>
+        <li><b>RxnID 历史集</b><span class="n">1950s–90s 扫描文献 200 图，单行/多行/树/环四类拓扑</span></li>
+        <li><b>专利文本语料</b><span class="n">SureChEMBL 100 万+ 反应；ChEMU 约 2 万片段（IOB2 标注）</span></li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===== 选型结论 ===== -->
+  <section>
+    <div class="concl">
+      <h2>ChemLayout M8 选型结论</h2>
+      <div class="flow">
+        <span class="chip">RxnScribe 打底</span><span class="arrow">→</span>
+        <span class="chip">RxnIM 对照升级</span><span class="arrow">→</span>
+        <span class="chip">文本侧抽取补条件/收率</span><span class="arrow">→</span>
+        <span class="chip">RxnCaption / RxnID 发布后评估</span>
+      </div>
+      <p>主架构为 <b>M2 检测反应区域 → M8 裁剪块解析</b>，与「检测 + 解析」思路同构，检测器已自备（MolDetv2-FT）。开源约束下：<b>RxnScribe（MIT）打底</b>，对中等复杂度专利反应图够用且可商用；<b>RxnIM 作对照</b>（开源权重、效果更强，但 7B 级算力与合成域偏移需权衡）；<b>专利文本侧抽取作为 Phase 3 补充通道</b>，从正文段落补全条件、收率、投料量并与图像结果合并；RxnCaption / RxnID 未发布，若落地即优先评估；自建 BIVP 复现（本地开源 VLM + 自标注）是开源可达的 SOTA 路线，需要训练投入，放到 Phase 3。ViMore、GPT-4o 等闭源方案不纳入依赖。</p>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <b>主要参考来源</b>
+    <div class="src">
+      <a href="https://arxiv.org/abs/2305.11845">RxnScribe (arXiv 2305.11845)</a>
+      <a href="https://arxiv.org/pdf/2503.08156v1">RxnIM (arXiv 2503.08156)</a>
+      <a href="https://arxiv.org/html/2511.02384v1">RxnCaption (arXiv 2511.02384)</a>
+      <a href="https://arxiv.org/html/2603.15011v1">RxnID (arXiv 2603.15011)</a>
+      <a href="https://pubs.acs.org/doi/10.1021/acs.jcim.3c00422">ReactionDataExtractor 2.0</a>
+      <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC2889020/">OSRA</a>
+      <a href="https://arxiv.org/html/2505.03777v2">MolMole / ViReact</a>
+      <a href="https://chemrxiv.org/doi/pdf/10.26434/chemrxiv-2025-8z6h2">MERMaid</a>
+      <a href="https://arxiv.org/html/2512.23565v2">RxnBench</a>
+      <a href="https://arxiv.org/html/2604.15994">ReactBench</a>
+      <a href="https://arxiv.org/html/2605.17214v1">ChemVA / OCRD-Bench</a>
+      <a href="https://arxiv.org/pdf/2407.15124v2">专利长文档反应抽取</a>
+      <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11590295/">LLM 专利反应数据集</a>
+      <a href="https://academic.oup.com/nar/article/44/D1/D1220/2503067">SureChEMBL</a>
+    </div>
+    <p style="margin-top:10px">本页为 ChemLayout 技术调研产物，数据与结论来自上述公开论文与文档；开源/授权状态以各仓库 LICENSE 与模型卡为准。</p>
+  </div>
+</footer>
+
+</body>
+</html>

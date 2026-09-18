@@ -1,0 +1,44 @@
+# ChemLayout .gitignore
+#
+# 策略：只提交**代码与文档**。大文件与可再生成的产物一律不入库。
+# 需要语料时按 layout/sample_from_pdf.py 重跑抽样；需要权重时按 layout/fetch_weights.py 拉取。
+
+# ---------------------------------------------------------------- 环境与缓存
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ---------------------------------------------------------------- 大文件
+# 样本语料（84.7 MB，256 页 @144 DPI）
+#   重建：python layout/sample_from_pdf.py --pdf-dir <专利目录> --target 256 --dpi 144 --out-dir Sample
+Sample/
+
+# 模型权重（408 MB）
+#   重建：python layout/fetch_weights.py --model hiro|v3
+#         MolDet 权重从 ModelScope 拉（见 layout/moldet_README.md）
+layout/weights/
+
+# ---------------------------------------------------------------- 可再生成的产物
+# 检测结果、叠加图、基准原始数据等（475.7 MB）
+layout/out/
+
+# 文本识别的行级明细与 evidence（7 MB）
+ocr/out/
+
+# MolDet 的推理产物与架构报告（脚本可重新生成）
+layout/moldet_output/
+layout/moldet_docs/
+
+# ---------------------------------------------------------------- 第三方参考源码
+# refs/ 下是**只读的外部项目克隆**，不入库。
+# refs/README.md 记录了可复现的拉取命令（含本机 github 不可达时的镜像方案）。
+refs/Hiro-Smart-Doc/
+
+# ---------------------------------------------------------------- 杂项
+# Command Code 的本地配置与自动学习的 taste：属工具状态，且 taste 会频繁变动，
+# 入库会让 diff 很吵。要纳管就把下面两行删掉。
+.commandcode/
+
+build_dataset.log
+*.log

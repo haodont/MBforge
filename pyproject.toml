@@ -1,0 +1,46 @@
+[project]
+name = "chemlayout"
+version = "0.1.0"
+description = "开源版化学专利文档解析框架（本地优先，产出可溯源的分子/反应清单）"
+requires-python = ">=3.12"
+
+# 依赖清单说明（2026-09-17 建立）
+#
+# 从"借用 MBForge 的 venv"改为 ChemLayout 自有环境：
+#   - `RUNTIME-PYTORCH.md` §2 原定"不往 MBForge venv 装新包"，
+#     但 94,759 页规模下该政策会挡住 GPU 运行时安装，故退役。
+#   - MBForge 的 venv 里是 onnxruntime **1.29.0 CPU 版**
+#     （get_available_providers() 只有 Azure/CPU），这是版面识别用的 Hiro-Layout
+#     实测 742 ms/页的直接原因；Hiro 官方走 GPU（见其 pyproject 的 gpu extra）。
+#
+# ⚠️ `onnxruntime` 与 `onnxruntime-gpu` 是同一个导入名，不能共存。
+#    `[cuda,cudnn]` extra 会把 CUDA 12 / cuDNN 9 作为 pip 轮子（nvidia-* 包）拉下来，
+#    由 `onnxruntime.preload_dlls()` 在运行期加载，无需系统级 CUDA 安装。
+#    本机 torch 是 2.11.0+cu128（CUDA 12.8），与之同代。
+dependencies = [
+    # —— 版面识别：Hiro-Layout 是 ONNX-only，且必须走 CUDA EP ——
+    "onnxruntime-gpu[cuda,cudnn]>=1.21",
+
+    # —— 渲染 / 文本层 ——
+    "pymupdf>=1.24",
+
+    # —— 图像与数值基础 ——
+    "pillow>=10",
+    "numpy>=1.26",
+
+    # —— 权重拉取（layout/fetch_weights.py 用 snapshot_download）——
+    #    本机 huggingface.co 不可达，需 HF_ENDPOINT=hf-mirror.com +
+    #    HF_HUB_DISABLE_XET=1，详见 RUNTIME-PYTORCH.md §3。
+    "huggingface_hub>=0.33",
+
+    # —— 对照基线 PP-DocLayoutV3 走 transformers/PyTorch（生产路径是 Hiro，不需要它）——
+    #    注意：本清单暂不含 torch（~2.5 GB）与 ultralytics。
+    #    Hiro 是 ONNX-only，测版面速度不需要 torch；但**完整管线跑不了** ——
+    #    `layout/detect_overlay.py --layout hiro` 会连带导入 v3.py，且 MolDet 本身要 torch。
+    #    补齐时机：文本识别选型时一并决定（见 RUNTIME-PYTORCH.md §2.1 与 DESIGN.md §9 风险 12）。
+    "transformers>=5.10",
+]
+
+[tool.uv]
+# 本项目是脚本集合，不作为包安装
+package = false

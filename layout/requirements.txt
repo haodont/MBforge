@@ -1,0 +1,28 @@
+# layout 版面识别（Hiro-Layout + MolDetv2-YOLO26）— 运行依赖
+#
+# 环境：项目根的项目级虚拟环境 C:\Users\10954\Desktop\ChemLayout\.venv
+#       PyTorch + onnxruntime-gpu 混合栈，见 ../RUNTIME-PYTORCH.md §2
+#
+# 安装：
+#   ..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# 注：正式依赖以 ../pyproject.toml + uv 为准（`uv sync`）；本文件是等价的 pip 备忘。
+
+# —— 版面区域检测：Hiro-Layout 是 ONNX-only，且需要 CUDA EP ——
+onnxruntime-gpu>=1.21
+
+# —— 分子检测：MolDetv2-YOLO26 走 ultralytics（PyTorch）——
+ultralytics>=8.3.0
+
+# —— 对照方案：PP-DocLayoutV3 走 transformers（PyTorch）——
+transformers>=5.10.0      # 需包含 pp_doclayout_v3 模型定义（2026-01-29 合入）
+safetensors>=0.4
+
+# —— 公共 ——
+torch>=2.0.0
+torchvision>=0.15.0
+opencv-python>=4.6.0
+numpy>=1.23
+pillow>=9.0
+PyMuPDF>=1.23
+huggingface_hub>=0.20     # 仅用于 fetch_weights.py 拉权重
