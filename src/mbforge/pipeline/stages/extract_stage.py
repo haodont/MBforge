@@ -39,18 +39,35 @@ class ExtractStage:
                 recoverable=False,
             )
         try:
-            from mbforge.pipeline.extract.text import extract_document_text
-            from mbforge.storage.document_store import load_document
-
-            # Full-document OCR: the Document's native cache is never an
-            # evidence source (see extract_document_text).
-            doc = load_document(ctx.doc_id, ctx.library_root)
-            ctx.extracted = extract_document_text(
-                doc,
-                str(ctx.pdf_path),
-                ocr_config=ctx.ocr_config,
-                cancel_check=make_cancel_check(default_registry, ctx.task_id),
+            from mbforge.pipeline.extract.text import (
+                extract_document_text,
+                extract_layout_text,
             )
+            from mbforge.storage.document_store import load_document
+            from mbforge.utils.config import load_global_config
+
+            cancel_check = make_cancel_check(default_registry, ctx.task_id)
+            layout_config = load_global_config().layout
+
+            if (layout_config.source or "").strip().lower() == "hiro":
+                # Local layout path: page text comes from layout-guided
+                # recognition, and each page carries typed regions for the join.
+                ctx.extracted = extract_layout_text(
+                    str(ctx.pdf_path),
+                    doc_id=ctx.doc_id,
+                    layout_config=layout_config.model_dump(),
+                    cancel_check=cancel_check,
+                )
+            else:
+                # Full-document OCR: the Document's native cache is never an
+                # evidence source (see extract_document_text).
+                doc = load_document(ctx.doc_id, ctx.library_root)
+                ctx.extracted = extract_document_text(
+                    doc,
+                    str(ctx.pdf_path),
+                    ocr_config=ctx.ocr_config,
+                    cancel_check=cancel_check,
+                )
 
             from mbforge.pipeline.artifacts.branch_io import (
                 build_extract_artifact,
@@ -93,17 +110,17 @@ class ExtractStage:
         except Exception as e:
             logger.error("Text extraction failed for %s: %s", ctx.doc_id, e)
             from mbforge.backends.ocr.chain import OCRUnavailableError
+            from mbforge.pipeline.layout.parse import LayoutUnavailableError
 
-            error_code = (
-                PipelineErrorCode.OCR_UNAVAILABLE
-                if isinstance(e, OCRUnavailableError)
-                else PipelineErrorCode.PDF_PARSE_ERROR
-            )
-            message_prefix = (
-                "OCR unavailable"
-                if isinstance(e, OCRUnavailableError)
-                else "Text extraction failed"
-            )
+            if isinstance(e, LayoutUnavailableError):
+                error_code = PipelineErrorCode.LAYOUT_UNAVAILABLE
+                message_prefix = "Layout detection unavailable"
+            elif isinstance(e, OCRUnavailableError):
+                error_code = PipelineErrorCode.OCR_UNAVAILABLE
+                message_prefix = "OCR unavailable"
+            else:
+                error_code = PipelineErrorCode.PDF_PARSE_ERROR
+                message_prefix = "Text extraction failed"
             return StageResult(
                 stage="extract",
                 status="error",

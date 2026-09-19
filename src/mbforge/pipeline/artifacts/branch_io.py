@@ -109,14 +109,20 @@ def build_extract_artifact(
                 },
             )
         )
+    meta: dict[str, Any] = {
+        "parser": extracted.parser,
+        "title": extracted.title,
+        "ocr_stats": extracted.ocr_stats,
+    }
+    if extracted.kind_vocab:
+        # Declares the region labels this producer minted, so the join stage can
+        # register them (``evidence_kind.register_kind_vocab``).
+        meta["kind_vocab"] = dict(extracted.kind_vocab)
+
     return ExtractArtifact(
         doc_id=doc_id,
         run_id=run_id,
-        meta={
-            "parser": extracted.parser,
-            "title": extracted.title,
-            "ocr_stats": extracted.ocr_stats,
-        },
+        meta=meta,
         pages=extract_pages,
     )
 
@@ -283,6 +289,7 @@ def _page_to_dict(page: PageContent) -> dict[str, Any]:
             for s in page.text_spans
         ],
         "figure_bboxes": [list(bbox) for bbox in page.figure_bboxes],
+        "regions": [dict(region) for region in page.regions],
         "ocr_backend": page.ocr_backend,
         "ocr_attempts": page.ocr_attempts,
         "ocr_elapsed_ms": page.ocr_elapsed_ms,
@@ -307,6 +314,11 @@ def _page_from_dict(data: dict[str, Any]) -> PageContent:
         figure_bboxes=[
             tuple(float(v) for v in bbox) for bbox in data.get("figure_bboxes", [])
         ],
+        regions=[
+            dict(region)
+            for region in data.get("regions", [])
+            if isinstance(region, dict)
+        ],
         ocr_backend=data.get("ocr_backend"),
         ocr_attempts=int(data.get("ocr_attempts", 0)),
         ocr_elapsed_ms=int(data.get("ocr_elapsed_ms", 0)),
@@ -324,6 +336,10 @@ def _extracted_from_artifact(artifact: ExtractArtifact) -> ExtractedDocument:
         title=meta.get("title"),
         pages=pages,
         ocr_stats=dict(meta.get("ocr_stats", {})),
+        kind_vocab={
+            str(label): str(category)
+            for label, category in dict(meta.get("kind_vocab", {})).items()
+        },
     )
 
 

@@ -32,6 +32,30 @@ _OCR_MAX_CONCURRENCY = 1
 _OCR_MAX_ATTEMPTS = 1
 _OCR_RENDER_ZOOM = 2.0  # 144 DPI — matches _OCR_RENDER_PX_PER_PT in PaddleOCR.
 
+#: RegionType → the pipeline's ``block_type`` convention (0=text, 1=image/figure,
+#: 2=table). Only used to derive the legacy ``text_spans`` / ``figure_bboxes``
+#: views from layout regions; the typed region list keeps the exact label.
+_REGION_TYPE_BLOCK_TYPE: dict[str, int] = {
+    "text": 0,
+    "title": 0,
+    "formula": 0,
+    "header": 0,
+    "footer": 0,
+    "page_number": 0,
+    "table": 2,
+    "image": 1,
+    "chart": 1,
+    "reaction": 1,
+    "seal": 1,
+    "noise": 1,
+    "molecule": 1,
+}
+
+
+def _block_type_for(region_type: str) -> int:
+    """Map a layout RegionType onto the pipeline ``block_type`` convention."""
+    return _REGION_TYPE_BLOCK_TYPE.get(region_type, 0)
+
 
 @dataclass
 class TextSpan:
@@ -50,6 +74,12 @@ class PageContent:
     text_spans: list[TextSpan] = field(default_factory=list)
     figure_bboxes: list[tuple[float, float, float, float]] = field(default_factory=list)
     """Figure/image region bboxes from OCR layout (x0, y0, x1, y1 in bottom-left coords)."""
+    regions: list[dict[str, Any]] = field(default_factory=list)
+    """Typed layout regions when the local detector produced the page layout.
+
+    Each entry carries the producer's own ``kind`` label, ``bbox`` (PDF points,
+    bottom-left) and any recognized ``text``. Empty on the cloud-OCR path.
+    """
     ocr_backend: str | None = None
     ocr_attempts: int = 0
     ocr_elapsed_ms: int = 0
@@ -64,6 +94,13 @@ class ExtractedDocument:
     title: str | None = None
     pages: list[PageContent] = field(default_factory=list)
     ocr_stats: dict[str, Any] = field(default_factory=dict)
+    kind_vocab: dict[str, str] = field(default_factory=dict)
+    """``{label: category}`` for the region kinds this producer emitted.
+
+    Declared by an external layout producer so the join stage can register the
+    labels it will see (``register_kind_vocab``). Empty when the page layout
+    came from the cloud OCR's three-value ``block_type``.
+    """
 
 
 def extract_pdf_text(
@@ -123,6 +160,125 @@ def extract_document_text(
         ocr_config=ocr_config,
         cancel_check=cancel_check,
     )
+
+
+def extract_layout_text(
+    pdf_path: str,
+    *,
+    doc_id: str,
+    layout_config: dict | None = None,
+    cancel_check: CancelCheck | None = None,
+) -> ExtractedDocument:
+    """Extract page layout and text with the local Hiro-Layout pipeline.
+
+    Differs from the OCR-only path in two ways:
+
+    - page text comes from the **layout-guided** local recognition over the
+      detector's own ``text`` regions, not from the cloud OCR chain;
+    - every page also carries the typed **region list** (detector ``kind``
+      labels), which the evidence join turns into ``SourceEvidence`` rows.
+
+    ``text_spans`` / ``figure_bboxes`` are derived from the same regions so the
+    markdown stage keeps its layout anchors; the join treats the regions as the
+    authoritative layout for such a page and does not mint them twice.
+
+    Raises:
+        RuntimeError: when the detector is unavailable — a layout-driven run
+            must not silently degrade into an evidenceless document.
+    """
+    from mbforge.backends.hiro_layout import get_hiro
+    from mbforge.pipeline.layout.labels import kind_vocab
+    from mbforge.pipeline.layout.parse import (
+        DEFAULT_CONF,
+        LayoutUnavailableError,
+        parse_pdf_layout,
+    )
+
+    detector = get_hiro()
+    if not detector.is_available():
+        raise LayoutUnavailableError(
+            "Hiro-Layout model is not available; cannot produce a local layout "
+            f"(weights: {detector.model_path})"
+        )
+
+    config = layout_config or {}
+    layout_pages = parse_pdf_layout(
+        pdf_path,
+        doc_id=doc_id,
+        conf=float(config.get("conf_threshold", DEFAULT_CONF)),
+        read_text=bool(config.get("read_text", True)),
+        max_pages=config.get("max_pages_per_doc"),
+        cancel_check=cancel_check,
+        detector=detector,
+    )
+
+    pages: list[PageContent] = []
+    region_counts: list[int] = []
+    for layout_page in layout_pages:
+        regions = [_artifact_region(region) for region in layout_page.regions]
+        text_spans = [
+            TextSpan(
+                text=str(region.get("text") or ""),
+                bbox=tuple(float(v) for v in region["bbox"]),
+                block_type=_block_type_for(str(region["type"])),
+            )
+            for region in regions
+            if _block_type_for(str(region["type"])) in (0, 2)
+        ]
+        figure_bboxes = [
+            tuple(float(v) for v in region["bbox"])
+            for region in regions
+            if _block_type_for(str(region["type"])) == 1
+        ]
+        page_text = "\n".join(
+            str(region.get("text") or "").strip()
+            for region in regions
+            if str(region.get("text") or "").strip()
+        )
+        pages.append(
+            PageContent(
+                page_num=layout_page.page_num,
+                text=page_text,
+                ocr_dpi=int(round(layout_page.dpi)),
+                text_spans=text_spans,
+                figure_bboxes=figure_bboxes,
+                regions=regions,
+                ocr_backend=f"layout:{detector.backend}",
+            )
+        )
+        region_counts.append(len(regions))
+
+    full_text = "\n\n".join(page.text for page in pages if page.text.strip())
+    return ExtractedDocument(
+        raw_text=full_text,
+        page_count=len(pages),
+        parser="layout",
+        title=_extract_title(pages[0].text if pages else ""),
+        pages=pages,
+        ocr_stats={
+            "pages_requested": len(pages),
+            "pages_succeeded": sum(1 for page in pages if page.text.strip()),
+            "pages_failed": sum(1 for page in pages if not page.text.strip()),
+            "backend_counts": {detector.backend: len(pages)},
+            "regions": region_counts,
+            "elapsed_ms": 0,
+        },
+        kind_vocab=kind_vocab(),
+    )
+
+
+def _artifact_region(region: dict[str, Any]) -> dict[str, Any]:
+    """Project a layout region onto the branch artifact's region shape."""
+    return {
+        "region_id": str(region.get("region_id", "")),
+        "kind": str(region.get("label", "")),
+        "type": str(region.get("type", "")),
+        "bbox": [round(float(v), 2) for v in region.get("bbox_pdf", [])],
+        "score": round(float(region.get("score", 0.0)), 4),
+        "reading_order": int(region.get("reading_order", 0)),
+        "source": str(region.get("source", "")),
+        "text": str(region.get("text") or ""),
+    }
 
 
 def build_from_document(doc) -> ExtractedDocument | None:

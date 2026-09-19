@@ -43,6 +43,11 @@ class ExtractPage(_EvidenceArtifactModel):
     ocr_dpi: int = 0
     text_spans: list[dict[str, JsonValue]] = Field(default_factory=list)
     figure_bboxes: list[list[float]] = Field(default_factory=list)
+    # Typed layout regions from the local detector, carrying the producer's own
+    # ``kind`` label (``chem`` / ``figcx`` / ``eqn`` …) alongside the geometric
+    # bbox and any recognized text. Empty for the cloud-OCR layout path, which
+    # only yields the three-value ``block_type``.
+    regions: list[dict[str, JsonValue]] = Field(default_factory=list)
     ocr_backend: str | None = None
     ocr_attempts: int = 0
     ocr_elapsed_ms: int = 0

@@ -414,6 +414,110 @@ def test_v2_join_order_is_independent_of_branch_input_order(tmp_path: Path) -> N
     )
 
 
+def _layout_extracted() -> ExtractedDocument:
+    """An Extract branch authored by the local layout producer."""
+    from mbforge.pipeline.layout.labels import kind_vocab
+
+    text_bbox = (1.0, 2.0, 3.0, 4.0)
+    chem_bbox = (10.0, 20.0, 30.0, 40.0)
+    page = PageContent(
+        page_num=1,
+        text="Compound 1",
+        regions=[
+            {
+                "region_id": "r0",
+                "kind": "text",
+                "type": "text",
+                "bbox": list(text_bbox),
+                "score": 0.9,
+                "reading_order": 0,
+                "source": "merged",
+                "text": "Compound 1",
+            },
+            {
+                "region_id": "r1",
+                "kind": "chem",
+                "type": "image",
+                "bbox": list(chem_bbox),
+                "score": 0.8,
+                "reading_order": 1,
+                "source": "layout_hiro",
+                "text": "",
+            },
+        ],
+        # The producer also derives these legacy views; they must not be minted
+        # a second time by the join.
+        text_spans=[TextSpan("Compound 1", text_bbox, 0)],
+        figure_bboxes=[chem_bbox],
+    )
+    return ExtractedDocument(
+        raw_text="Compound 1",
+        page_count=1,
+        parser="layout",
+        pages=[page],
+        ocr_stats={},
+        kind_vocab=kind_vocab(),
+    )
+
+
+def test_join_mints_layout_regions_under_the_detector_kind(tmp_path: Path) -> None:
+    """Typed regions become evidence under their own label, exactly once."""
+    extracted = build_extract_artifact(DOC, "run-1", _layout_extracted(), _frames())
+    detection = build_detection_artifact(
+        DOC, "run-1", [], {}, _frames(), library_root=tmp_path
+    )
+
+    joined = join_evidence_artifacts(extracted, detection)
+
+    assert {item.kind: item.bbox for item in joined.evidence} == {
+        "text": (1.0, 2.0, 3.0, 4.0),
+        "chem": (10.0, 20.0, 30.0, 40.0),
+    }
+    # A region with no recognized text still needs a legal content reference.
+    chem = next(item for item in joined.evidence if item.kind == "chem")
+    assert chem.raw_text == ""
+    assert chem.coref == f"storage/{DOC}/source.pdf"
+
+
+def test_join_orders_layout_regions_by_reading_order(tmp_path: Path) -> None:
+    """Column order beats the raster order for layout-authored evidence."""
+    extracted_input = _layout_extracted()
+    left = (10.0, 5.0, 40.0, 15.0)  # left column — later in raster order
+    right = (50.0, 10.0, 90.0, 20.0)  # right column — earlier in raster order
+    extracted_input.pages[0].regions = [
+        {
+            "region_id": "right",
+            "kind": "text",
+            "type": "text",
+            "bbox": list(right),
+            "score": 0.9,
+            "reading_order": 1,
+            "source": "merged",
+            "text": "right",
+        },
+        {
+            "region_id": "left",
+            "kind": "text",
+            "type": "text",
+            "bbox": list(left),
+            "score": 0.9,
+            "reading_order": 0,
+            "source": "merged",
+            "text": "left",
+        },
+    ]
+    extracted_input.pages[0].text_spans = []
+    extracted_input.pages[0].figure_bboxes = []
+    extracted = build_extract_artifact(DOC, "run-1", extracted_input, _frames())
+    detection = build_detection_artifact(
+        DOC, "run-1", [], {}, _frames(), library_root=tmp_path
+    )
+
+    joined = join_evidence_artifacts(extracted, detection)
+
+    assert [item.bbox for item in joined.evidence] == [left, right]
+
+
 def test_load_extracted_reads_joined_pages(tmp_path: Path) -> None:
     _archive_crop(tmp_path)
     _publish_joined_evidence(tmp_path)

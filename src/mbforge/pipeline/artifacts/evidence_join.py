@@ -109,10 +109,70 @@ def _validate_join_inputs(
         _bbox_in_frame(result.bbox_pdf, frame)
 
 
-def _evidence_sort_key(item: SourceEvidence) -> tuple[Any, ...]:
+def _location_key(page: int, bbox: Iterable[float]) -> tuple[int, tuple[str, ...]]:
+    """Location key formatted exactly as :func:`core.evidence._location_id` does."""
+    return (page, tuple(f"{round(float(value), 2):.2f}" for value in bbox))
+
+
+def _reading_order_hint(document: Any) -> dict[tuple[int, tuple[str, ...]], int]:
+    """Map a layout region's location to its column-aware reading order.
+
+    Only the local layout producer emits ``reading_order``; pages from the
+    cloud-OCR layout contribute nothing and keep the raster order.
+    """
+    hint: dict[tuple[int, tuple[str, ...]], int] = {}
+    for page in document.pages:
+        for region in page.regions:
+            bbox = region.get("bbox")
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                continue
+            try:
+                hint[_location_key(page.page_num, bbox)] = int(
+                    region.get("reading_order", 0)
+                )
+            except (TypeError, ValueError):
+                continue
+    return hint
+
+
+def _region_evidence(
+    region: dict[str, Any], doc_id: str, page: int, frame: PageFrame
+) -> SourceEvidence:
+    """Turn one typed layout region into source evidence.
+
+    ``kind`` is the detector's own label (``chem`` / ``figcx`` / ``mnote`` …),
+    kept verbatim. Content is the recognized text when there is any; otherwise
+    the region points back at the source PDF — the pipeline no longer stores
+    page images, so the document itself is the honest reference.
+    """
+    raw_text = str(region.get("text") or "").strip()
+    return SourceEvidence.create(
+        doc_id=doc_id,
+        page=page,
+        bbox=_bbox_in_frame(region.get("bbox") or (), frame),
+        raw_text=raw_text,
+        coref="" if raw_text else _figure_coref(doc_id),
+        kind=str(region.get("kind") or "text_span"),
+    )
+
+
+def _evidence_sort_key(
+    item: SourceEvidence,
+    order_hint: dict[tuple[int, tuple[str, ...]], int] | None = None,
+) -> tuple[Any, ...]:
+    """Sort key for the joined evidence list.
+
+    A row whose location carries a layout ``reading_order`` sorts by it (inside
+    its page, ahead of everything unordered), which is what makes a two-column
+    patent read correctly. The trailing raster keys remain as tie-breakers; the
+    hint is unique per row, so they never decide between two ordered rows.
+    """
     bbox = item.bbox
+    hint = order_hint.get(_location_key(item.page, bbox)) if order_hint else None
     return (
         item.page,
+        0 if hint is not None else 1,
+        hint if hint is not None else 0,
         -bbox[3],
         bbox[0],
         -bbox[1],
@@ -218,10 +278,13 @@ def join_evidence_artifacts(
     can map labels to categories without knowing the detector.
     """
     register_kind_vocab(detection.meta)
+    # The layout producer declares its own region vocabulary the same way.
+    register_kind_vocab(extracted.meta)
 
     _validate_join_inputs(extracted, detection)
     frames = _frame_map(_extract_frames(extracted))
     raw_document = _extracted_from_artifact(extracted)
+    order_hint = _reading_order_hint(raw_document)
 
     by_id: dict[str, SourceEvidence] = {}
 
@@ -256,6 +319,21 @@ def join_evidence_artifacts(
 
     for page in raw_document.pages:
         frame = frames[page.page_num]
+
+        if page.regions:
+            # A page carrying typed regions was authored by the local layout
+            # producer: those regions are the authoritative layout (they keep
+            # the detector's own ``kind``), and the derived
+            # text_spans/figure_bboxes are only a legacy view for the markdown
+            # stage. Minting both would duplicate every row.
+            for region in page.regions:
+                add(
+                    _region_evidence(
+                        region, extracted.doc_id, page.page_num, frame
+                    )
+                )
+            continue
+
         # Figure regions arrive through ``figure_bboxes``; a raw artifact may
         # also carry one as a text span. Both feed one bbox set so each region
         # is emitted exactly once.
@@ -316,7 +394,7 @@ def join_evidence_artifacts(
         )
 
     evidence = _join_evidence_dedupe(list(by_id.values()))
-    evidence.sort(key=_evidence_sort_key)
+    evidence.sort(key=lambda item: _evidence_sort_key(item, order_hint))
     return DocumentEvidenceArtifact(
         doc_id=extracted.doc_id,
         run_id=extracted.run_id,
