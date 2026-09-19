@@ -2,13 +2,17 @@
 
 Both overlays come from a single SQL read of the ``source_evidence`` index —
 the only runtime evidence store — so the endpoint never reloads an Extract or
-Detection branch and never re-normalizes a candidate. The row ``kind`` decides
-which overlay consumes it:
+Detection branch and never re-normalizes a candidate. The row's **category**
+decides which overlay consumes it:
 
-- ``text_span`` / ``ocr_label`` → ``text`` blocks
-- ``table_span`` → ``table`` blocks
-- ``image_region`` → ``image`` blocks
+- text category → ``text`` blocks
+- table category → ``table`` blocks
+- image category → ``image`` blocks
 - ``molecule`` → molecule-overlay entries, grouped by page
+
+The row ``kind`` is the **producer's own label** (a layout class name such as
+``chem`` or ``mnote``, or ``molecule``).  ``evidence_kind.category_of`` maps it to
+the category above, so a new detector's vocabulary needs teaching in one place.
 
 Coordinate contract: Extract evidence is converted to **bottom-left origin
 points** (y grows upward) before the Join writes SQLite, and the molecule-
@@ -27,13 +31,15 @@ from contextlib import suppress
 from typing import Any
 
 from ...core.evidence import SourceEvidence
+from ...core.evidence_kind import IMAGE, MOLECULE, TABLE, TEXT_CATEGORIES, category_of
 from ...core.molecule import Molecule
-from ...pipeline.artifacts.hydration import load_detections, load_extracted
+from ...pipeline.artifacts.hydration import (
+    load_detections,
+    load_extracted,
+    register_detection_kind_vocab,
+)
 from ...pipeline.extract.text import ExtractedDocument
 from .source_evidence import list_evidence
-
-# Evidence kinds that render as layout blocks; OCR labels are page text too.
-_TEXT_KINDS = frozenset({"text_span", "table_span", "ocr_label"})
 
 
 def load_document_bboxes(
@@ -52,26 +58,32 @@ def load_document_bboxes(
 def build_document_overlay(library_root: str, doc_id: str, path: str) -> dict[str, Any]:
     """Both page overlays of one document, from one ``source_evidence`` read.
 
-    A single pass over the evidence rows fills both payloads — the row ``kind``
-    decides the consumer — so opening a document costs one request and one
-    indexed SELECT. ``pages`` is keyed by 1-based visual page (as JSON
-    strings); ``source`` reports whether the molecule side had any row.
+    A single pass over the evidence rows fills both payloads — the row's
+    category decides the consumer — so opening a document costs one indexed
+    SELECT. ``pages`` is keyed by 1-based visual page (as JSON strings);
+    ``source`` reports whether the molecule side had any row.
+
+    One branch ``meta`` read comes first: a producer names its regions freely and
+    SQL stores only that label, so the declared ``kind_vocab`` must be registered
+    before labels can be mapped to categories. It is cached per document.
     """
+    register_detection_kind_vocab(library_root, doc_id)
     text_by_page: dict[int, list[dict[str, Any]]] = {}
     image_by_page: dict[int, list[dict[str, Any]]] = {}
     pages: dict[str, list[dict[str, Any]]] = {}
     count = 0
     for item in list_evidence(library_root, doc_id):
-        if item.kind == "molecule":
+        category = category_of(item.kind)
+        if category == MOLECULE:
             pages.setdefault(str(item.page), []).append(_molecule_entry(item))
             count += 1
-        elif item.kind == "image_region":
+        elif category == IMAGE:
             image_by_page.setdefault(item.page, []).append(_block(item, "image", None))
-        elif item.kind in _TEXT_KINDS:
+        elif category in TEXT_CATEGORIES:
             text_by_page.setdefault(item.page, []).append(
                 _block(
                     item,
-                    "table" if item.kind == "table_span" else "text",
+                    "table" if category == TABLE else "text",
                     (item.raw_text or "").strip() or None,
                 )
             )

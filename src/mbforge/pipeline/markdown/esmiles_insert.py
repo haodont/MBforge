@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mbforge.core.evidence import SourceEvidence
+from mbforge.core.evidence_kind import is_text, kind_rank
 from mbforge.core.molecule import Molecule
 from mbforge.pipeline.detection.formula_normalization import normalize_patent_formulas
 from mbforge.utils.logger import get_logger
@@ -21,14 +22,6 @@ _HEADING_PATTERNS = re.compile(
     r"\d+\.\s+|FIGURES?|TABLES?)$",
     re.IGNORECASE,
 )
-_TEXT_KINDS = {"text_span", "table_span", "ocr_label"}
-_KIND_RANK = {
-    "text_span": 0,
-    "table_span": 1,
-    "ocr_label": 2,
-    "image_region": 3,
-    "molecule": 4,
-}
 
 
 @dataclass(frozen=True)
@@ -53,7 +46,7 @@ def _reading_key(
         x0,
         -y0,
         x1,
-        _KIND_RANK[item.kind],
+        kind_rank(item.kind),
         tie_breaker or item.evidence_id,
     )
 
@@ -149,7 +142,7 @@ def _page_blocks(
     candidate_blocks: list[_PlacedBlock],
 ) -> list[_RenderedBlock]:
     page_evidence = [item for item in evidence if item.page == page]
-    text_items = [item for item in page_evidence if item.kind in _TEXT_KINDS]
+    text_items = [item for item in page_evidence if is_text(item.kind)]
     slots: dict[int, list[_PlacedBlock]] = {}
 
     for item in page_evidence:

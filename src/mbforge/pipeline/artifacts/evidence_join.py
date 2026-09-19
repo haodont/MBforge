@@ -22,17 +22,29 @@ from mbforge.pipeline.artifacts.evidence_models import (
     ExtractArtifact,
     PageFrame,
 )
+from mbforge.core.evidence_kind import (
+    IMAGE,
+    MOLECULE,
+    TABLE,
+    TEXT,
+    category_of,
+    kind_rank,
+    register_kind_vocab,
+    register_kinds,
+)
 from mbforge.utils.logger import get_logger
 
-_KIND_RANK = {
-    "text_span": 0,
-    "table_span": 1,
-    "ocr_label": 2,
-    "image_region": 3,
-    "molecule": 4,
-}
-
 logger = get_logger("mbforge.pipeline.artifacts.evidence_join")
+
+# Kinds this stage mints, registered where they are minted.
+register_kinds(
+    {
+        "text_span": TEXT,
+        "table_span": TABLE,
+        "image_region": IMAGE,
+        "molecule": MOLECULE,
+    }
+)
 
 
 def _extract_frames(artifact: ExtractArtifact) -> list[PageFrame]:
@@ -105,7 +117,7 @@ def _evidence_sort_key(item: SourceEvidence) -> tuple[Any, ...]:
         bbox[0],
         -bbox[1],
         bbox[2],
-        _KIND_RANK.get(item.kind, 99),
+        kind_rank(item.kind),
         item.evidence_id,
     )
 
@@ -113,57 +125,81 @@ def _evidence_sort_key(item: SourceEvidence) -> tuple[Any, ...]:
 def _join_evidence_dedupe(
     items: Sequence[SourceEvidence],
 ) -> list[SourceEvidence]:
-    """Apply the existing molecule-over-image geometric precedence.
+    """Arbitrate evidence so one location yields one row.
 
-    Molecule evidence is emitted first and wins against overlapping image
-    regions. Text evidence is retained because its raw text is an independent
-    fact used by OCR/layout readers. Exact IDs are merged before this pass;
-    this function only handles the separate geometric precedence rule.
+    Two rules:
+
+    1. **One row per location** ``(doc_id, page, bbox)``.  ``evidence_id`` is the
+       location, and it is the table's PRIMARY KEY, so two claims on the same box
+       must collapse to a single row before the insert.  The surviving row keeps
+       the winner's ``kind``.
+    2. **Molecule over figure** for overlapping (but not identical) boxes.  Text is
+       never discarded here — its raw text is an independent fact used by
+       OCR/layout readers.
+
+    Comparison is by **category**, not by raw label: producers name their regions
+    freely (``chem`` / ``figcx`` / …), so two figure regions from one model can
+    carry different labels while playing the same role.
     """
     from mbforge.pipeline.detection.bbox_filter import bbox_area, bbox_iou
 
     def sort_key(item: SourceEvidence) -> tuple[Any, ...]:
+        # Molecule first, then larger box, then the higher-ranked category.  The
+        # last two keys only ever decide between boxes at the same location, i.e.
+        # identical areas, so the winner is deterministic rather than arbitrary.
         return (
             item.page,
-            0 if item.kind == "molecule" else 1,
+            0 if category_of(item.kind) == MOLECULE else 1,
             -bbox_area(item.bbox),
+            -kind_rank(item.kind),
             item.evidence_id,
         )
 
+    geometric = {MOLECULE, IMAGE}
     kept: list[SourceEvidence] = []
+    seen_locations: set[tuple[str, int, tuple[float, float, float, float]]] = set()
     for item in sorted(items, key=sort_key):
+        location = (item.doc_id, item.page, item.bbox)
+        if location in seen_locations:
+            continue
         discard = False
+        item_category = category_of(item.kind)
         for existing in kept:
             if existing.page != item.page:
                 continue
-            if existing.kind not in {"molecule", "image_region"} or item.kind not in {
-                "molecule",
-                "image_region",
-            }:
+            existing_category = category_of(existing.kind)
+            if existing_category not in geometric or item_category not in geometric:
                 continue
             iou = bbox_iou(existing.bbox, item.bbox)
-            same_region_kind = existing.kind == item.kind and existing.kind in {
-                "molecule",
-                "image_region",
-            }
+            same_region_kind = existing_category == item_category
             if same_region_kind and iou <= 0.5:
                 continue
             if not same_region_kind and iou <= 0.0:
                 continue
-            if existing.kind == "molecule" and item.kind == "image_region":
+            if existing_category == MOLECULE and item_category == IMAGE:
                 discard = True
                 break
-            if existing.kind == item.kind == "molecule":
+            if existing_category == item_category == MOLECULE:
                 # Molecule boxes are sorted largest-first, so the first box
                 # wins and lower-area duplicate detections are discarded.
                 discard = True
                 break
-            if existing.kind == item.kind == "image_region":
+            if existing_category == item_category == IMAGE:
                 discard = True
                 break
         if not discard:
             kept.append(item)
+            seen_locations.add(location)
     return kept
+
+
+def _location_precedence(item: SourceEvidence) -> tuple[int, str]:
+    """Ordering used when two claims share one location.  Higher wins.
+
+    Category first (molecule > figure > table > text), then the label itself so
+    the outcome is deterministic when two labels share a category.
+    """
+    return (kind_rank(item.kind), item.kind)
 
 
 def join_evidence_artifacts(
@@ -173,9 +209,16 @@ def join_evidence_artifacts(
 
     This is the only place that turns a raw page bbox into a
     :class:`SourceEvidence`. Consequently the ID is computed after rotation
-    and the visual page coordinate system are fixed. Equal IDs are merged in
-    this same pass; a differing payload is a hard conflict.
+    and the visual page coordinate system are fixed. Rows sharing a location are
+    arbitrated in this same pass — the location is the evidence ID, so only one
+    row per location may survive.
+
+    The producer declares its ``kind`` vocabulary in ``detection.meta.kind_vocab``
+    (``{"chem": "image", ...}``); it is registered here so every downstream stage
+    can map labels to categories without knowing the detector.
     """
+    register_kind_vocab(detection.meta)
+
     _validate_join_inputs(extracted, detection)
     frames = _frame_map(_extract_frames(extracted))
     raw_document = _extracted_from_artifact(extracted)
@@ -183,12 +226,33 @@ def join_evidence_artifacts(
     by_id: dict[str, SourceEvidence] = {}
 
     def add(item: SourceEvidence) -> None:
+        """Record one claim, keeping a single row per location.
+
+        ``evidence_id`` is the location, and it is the table's primary key, so two
+        claims on the same box cannot both be stored. The stronger one keeps its
+        ``kind``; neither side's content is thrown away — a text span and a figure
+        at the same rect fold into one row carrying both ``raw_text`` and
+        ``coref``.
+        """
         previous = by_id.get(item.evidence_id)
-        if previous is not None:
-            if previous.to_dict() != item.to_dict():
-                raise ValueError(f"conflicting evidence payload for {item.evidence_id}")
+        if previous is None:
+            by_id[item.evidence_id] = item
             return
-        by_id[item.evidence_id] = item
+        if previous.to_dict() == item.to_dict():
+            return
+        winner, loser = (
+            (item, previous)
+            if _location_precedence(item) > _location_precedence(previous)
+            else (previous, item)
+        )
+        by_id[item.evidence_id] = SourceEvidence.create(
+            doc_id=winner.doc_id,
+            page=winner.page,
+            bbox=winner.bbox,
+            raw_text=winner.raw_text or loser.raw_text,
+            coref=winner.coref or loser.coref,
+            kind=winner.kind,
+        )
 
     for page in raw_document.pages:
         frame = frames[page.page_num]

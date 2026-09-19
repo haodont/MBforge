@@ -34,13 +34,17 @@ def _location_id(
     doc_id: str,
     page: int,
     bbox: tuple[float, float, float, float],
-    kind: str,
 ) -> str:
+    """Stable ID of a page region.
+
+    Identity is the **location only** — doc, page, bbox.  ``kind`` deliberately
+    stays out of it: a producer's label is an attribute of the region, so
+    re-classifying one does not mint a new evidence row.
+    """
     parts = (
         "evidence-v1",
         doc_id,
         str(page),
-        kind,
         *(f"{round(value, 2):.2f}" for value in bbox),
     )
     return stable_id(*parts)
@@ -97,7 +101,6 @@ class SourceEvidence:
                     self.doc_id,
                     self.page,
                     normalised,
-                    self.kind,
                 ),
             )
 
@@ -135,7 +138,6 @@ class SourceEvidence:
                 doc_id,
                 page,
                 normalised,
-                kind,
             ),
         )
 

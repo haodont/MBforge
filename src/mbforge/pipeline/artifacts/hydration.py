@@ -7,6 +7,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mbforge.core.evidence import SourceEvidence
+from mbforge.core.evidence_kind import (
+    IMAGE,
+    TABLE,
+    category_of,
+    is_text,
+    register_kind_vocab,
+)
 from mbforge.core.molecule import Molecule
 from mbforge.pipeline.artifacts.branch_io import (
     _DETECTION_FILE,
@@ -38,7 +45,6 @@ def _extracted_from_evidence(
     raw_artifact: Any, evidence: Sequence[SourceEvidence] | None = None
 ) -> ExtractedDocument:
     """Rebuild ExtractedDocument metadata from raw branch + SQL facts."""
-    text_kinds = {"text_span", "table_span", "ocr_label"}
     if evidence is None:
         evidence = list(getattr(raw_artifact, "evidence", []))
     raw_document = _extracted_from_artifact(raw_artifact)
@@ -47,8 +53,10 @@ def _extracted_from_evidence(
     pages: list[PageContent] = []
     for frame in frame_pages:
         page_items = [item for item in evidence if item.page == frame.page]
-        text_items = [item for item in page_items if item.kind in text_kinds]
-        image_items = [item for item in page_items if item.kind == "image_region"]
+        text_items = [item for item in page_items if is_text(item.kind)]
+        image_items = [
+            item for item in page_items if category_of(item.kind) == IMAGE
+        ]
         raw_page = raw_pages.get(frame.page)
         pages.append(
             PageContent(
@@ -58,7 +66,7 @@ def _extracted_from_evidence(
                     TextSpan(
                         text=item.raw_text,
                         bbox=item.bbox,
-                        block_type=2 if item.kind == "table_span" else 0,
+                        block_type=2 if category_of(item.kind) == TABLE else 0,
                     )
                     for item in text_items
                 ],
@@ -108,6 +116,37 @@ def _latest_branch_run_id(
         return None
     run_id = data.get("run_id")
     return run_id if isinstance(run_id, str) and run_id else None
+
+
+def load_branch_meta(
+    library_root: str | Path, doc_id: str, filename: str
+) -> dict[str, Any]:
+    """Read only the ``meta`` block of a branch artifact."""
+    data = read_json_object(branch_path(library_root, doc_id, filename))
+    if data is None:
+        return {}
+    meta = data.get("meta")
+    return dict(meta) if isinstance(meta, dict) else {}
+
+
+#: Documents whose declared kind vocabulary has already been registered.  A
+#: producer's vocabulary only changes when the document is re-ingested, so
+#: caching per (library_root, doc_id) is safe for a process lifetime.
+_KIND_VOCAB_REGISTERED: set[tuple[str, str]] = set()
+
+
+def register_detection_kind_vocab(library_root: str | Path, doc_id: str) -> None:
+    """Register the ``kind`` vocabulary the producer declared for one document.
+
+    A producer names its regions freely and stores only that label in SQL, so a
+    reader that maps labels to categories needs the declaration.  One branch
+    ``meta`` read, cached per process.
+    """
+    key = (str(library_root), doc_id)
+    if key in _KIND_VOCAB_REGISTERED:
+        return
+    register_kind_vocab(load_branch_meta(library_root, doc_id, _DETECTION_FILE))
+    _KIND_VOCAB_REGISTERED.add(key)
 
 
 def load_detections(

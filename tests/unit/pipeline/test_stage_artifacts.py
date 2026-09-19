@@ -60,7 +60,7 @@ def _candidate() -> Molecule:
     detection = DetectionSource(
         source="image",
         page=0,
-        bbox=(1.0, 2.0, 3.0, 4.0),
+        bbox=(50.0, 60.0, 70.0, 80.0),
         image_path="crops/a.png",
         confidence=0.9,
         conf_moldet=0.95,
@@ -164,10 +164,12 @@ def test_v2_producers_write_independent_minimal_branches_and_join(
 
     joined = join_evidence_artifacts(extracted, detection)
     assert isinstance(joined, DocumentEvidenceArtifact)
+    # Ordered top-to-bottom by ``_evidence_sort_key``: the molecule sits highest
+    # on the page, the figure next, the text span lowest.
     assert [item.kind for item in joined.evidence] == [
+        "molecule",
         "image_region",
         "text_span",
-        "molecule",
     ]
     molecule = next(item for item in joined.evidence if item.kind == "molecule")
     assert json.loads(molecule.raw_text) == {
@@ -221,6 +223,32 @@ def test_v2_join_prefers_molecule_bbox_over_overlapping_image_region(
     assert [item.kind for item in joined.evidence].count("molecule") == 1
     assert not any(item.kind == "image_region" for item in joined.evidence)
     assert any(item.kind == "text_span" for item in joined.evidence)
+
+
+def test_join_keeps_one_row_per_location(tmp_path: Path) -> None:
+    """A location *is* the evidence ID, so two kinds on one bbox collapse to one.
+
+    The stronger claim keeps its ``kind``; the loser's content is folded in rather
+    than dropped.
+    """
+    _archive_crop(tmp_path)
+    frames = _frames()
+    extracted = build_extract_artifact(DOC, "run-1", _extracted(), frames)
+    candidate = _candidate()
+    candidate.detections[0] = replace(
+        candidate.detections[0], bbox=(1.0, 2.0, 3.0, 4.0)  # the text span's rect
+    )
+    detection = build_detection_artifact(
+        DOC, "run-1", [_result(candidate)], {}, frames, library_root=tmp_path
+    )
+
+    joined = join_evidence_artifacts(extracted, detection)
+
+    locations = [(item.page, item.bbox) for item in joined.evidence]
+    assert len(locations) == len(set(locations)), "one row per location"
+    assert not any(item.kind == "text_span" for item in joined.evidence)
+    molecule = next(item for item in joined.evidence if item.kind == "molecule")
+    assert molecule.raw_text, "the winner keeps content"
 
 
 def test_v2_join_records_every_figure_region_against_the_source_pdf(
