@@ -89,6 +89,33 @@ RESOURCE_CATALOG: dict[str, ResourceInfo] = {
             "vocab.txt",
         ],
     ),
+    "hiro_layout": ResourceInfo(
+        id="hiro_layout",
+        name="Hiro-Layout",
+        type=ResourceType.MODEL,
+        description=(
+            "Hiro-Layout (RT-DETR-X) 版面区域检测器，ONNX。产出 text/table/figure/"
+            "chem/rxn 等区域框，补上 MBForge 缺失的独立版面识别。"
+            "⚠️ ONNX 内嵌元数据写作 AGPL-3.0（ultralytics 导出器样板字段），"
+            "模型卡与 LICENSE 宣称 Apache-2.0，商用前需 PatSnap 书面澄清。"
+        ),
+        size_mb=251,
+        license="apache-2.0",
+        # ModelScope 上无此模型（实测 404），只能走 HuggingFace 通道。
+        ms_repo="",
+        hf_repo="PatSnap/Hiro-Layout",
+        download_type="snapshot",
+        local_name="Hiro-Layout",
+        # 精确清单优先于 allow_patterns（见 model_downloader）。
+        files=[
+            "layout_model/RT-DETR_25.onnx",
+            "config.json",
+            "labels.json",
+            "LICENSE",
+        ],
+        allow_patterns=["*.onnx", "*.json", "LICENSE"],
+        source_url="https://huggingface.co/PatSnap/Hiro-Layout",
+    ),
     # ──── Python 包（清华源）────
     "rdkit": ResourceInfo(
         id="rdkit",
@@ -150,7 +177,11 @@ def _get_model_cache_dir() -> Path:
 
 
 def _has_weights(path: Path) -> bool:
-    """检查目录中是否包含模型权重文件."""
+    """检查目录中是否包含模型权重文件.
+
+    `.onnx` 也在内：Hiro-Layout 的权重只有 ONNX 一种形态，漏掉会让它的
+    缓存目录永远被判为缺失，从而每次 ``ensure()`` 都重新下载。
+    """
     if not path.exists():
         return False
     return (
@@ -158,6 +189,7 @@ def _has_weights(path: Path) -> bool:
         or any(path.rglob("*.safetensors"))
         or any(path.rglob("*.pt"))
         or any(path.rglob("*.pth"))
+        or any(path.rglob("*.onnx"))
     )
 
 
@@ -524,7 +556,10 @@ class ResourceManager:
         if info.type == ResourceType.MODEL:
             # 双通道下载：国内优先 ModelScope，失败（网络/文件缺失/校验失败）
             # 时回退 HuggingFace（HF_ENDPOINT 由 ensure_hf_mirror 指向镜像）。
-            success = _download_model_from_modelscope(info, _tracking_callback)
+            # 未配置 ms_repo 的模型（如 Hiro-Layout，ModelScope 上不存在）跳过
+            # 第一通道，省掉一次注定 404 的往返。
+            if info.ms_repo:
+                success = _download_model_from_modelscope(info, _tracking_callback)
             if not success and info.hf_repo:
                 logger.info(
                     "ModelScope download failed for %s; falling back to "

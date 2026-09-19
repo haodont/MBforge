@@ -92,10 +92,21 @@ gpu = [
     # Crop-label OCR 主引擎：RapidOCR v3 的 TORCH 引擎（CUDA），单读基准 ~128ms，
     # 显著快于 CPU onnx（~495ms）。依赖 torch，故归入本条 extra。
     "rapidocr>=3",
+    # Hiro-Layout 版面检测（ONNX / onnxruntime）。CUDA EP 需要在建 session 前
+    # 从 nvidia-* 轮子预加载 cublasLt/cudnn DLL（见 backends/hiro_layout.py），
+    # 否则会静默回落到 CPU。
+    #
+    # ⚠️ 与 `onnx` extra 互斥：`onnxruntime-gpu` 与 `onnxruntime`（CPU 版，由
+    #    `rapidocr-onnxruntime` 传递引入）提供同名模块 `onnxruntime`，装在一起
+    #    会互相覆盖。生产装 `gpu`，无 GPU / CI 装 `onnx`，不要同时装。
+    "onnxruntime-gpu>=1.21",
 ]
 # 纯 CPU 兜底：crop-label OCR 的 onnxruntime 后端。生产主用 torch（gpu extra），
 # 无 GPU / CI 环境可显式 `--extra onnx` 装此包作为降级路径；torch 引擎本身不
 # 依赖 onnxruntime（惰性），故可整体跳过。
+#
+# ⚠️ 与 `gpu` extra 的 `onnxruntime-gpu` 互斥（同名 `onnxruntime` 模块），
+#    二者不可同时安装；装此 extra 时 Hiro-Layout 只能走 CPU。
 onnx = [
     "rapidocr-onnxruntime>=1.4.4",
 ]

@@ -26,6 +26,9 @@ _MODEL_NAME_TO_RESOURCE_ID = {
     "UniParser/MolParser-Mobile": "molparser",
     "MolParser": "molparser",
     "molparser": "molparser",
+    "PatSnap/Hiro-Layout": "hiro_layout",
+    "Hiro-Layout": "hiro_layout",
+    "hiro_layout": "hiro_layout",
 }
 
 

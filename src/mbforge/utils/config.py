@@ -145,6 +145,31 @@ class MoldetConfig(BaseModel):
     max_pages_per_doc: int | None = None
 
 
+class LayoutConfig(BaseModel):
+    """Page layout region detection settings for the Extract branch.
+
+    ``source`` picks where the page layout comes from:
+
+    - ``"ocr"`` (default): the cloud OCR backend's own layout, the historical
+      path — ``text`` / ``image`` / ``table`` only.
+    - ``"hiro"``: the local Hiro-Layout region detector, which yields the
+      detector's own labels (``chem`` / ``figcx`` / ``eqn`` …) plus a
+      column-aware reading order, and can read region text locally.
+
+    Leave it on ``"ocr"`` unless the Hiro-Layout weights are available: the
+    local path needs ``onnxruntime-gpu`` and the model download.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    source: str = "ocr"
+    conf_threshold: float = 0.4
+    #: Run the layout-guided local text OCR to fill region ``raw_text``. Without
+    #: it, text regions have no content and cannot become evidence.
+    read_text: bool = True
+    max_pages_per_doc: int | None = None
+
+
 class IngestConfig(BaseModel):
     """Document ingestion queue / pipeline behavior settings."""
 
@@ -225,6 +250,7 @@ class AppConfig(BaseModel):
     )
     pdf_parse: PdfParseConfig = Field(default_factory=PdfParseConfig)
     moldet: MoldetConfig = Field(default_factory=MoldetConfig)
+    layout: LayoutConfig = Field(default_factory=LayoutConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
 
