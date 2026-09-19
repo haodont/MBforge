@@ -96,7 +96,7 @@ HIRO_LABEL_ZH = {
 #   eqn(数学公式) → formula：对应 M5 的输入。
 #   rxn(反应式)   → reaction：DESIGN §3.2 的一等类型。
 #   graph(图表)   → chart。
-#   noise(噪声)   → noise：Hiro 独有，不产出 evidence（KIND_MAP 里为 None）。
+#   noise(噪声)   → noise：单独的 RegionType，类别为 image。
 HIRO_LABEL_TO_REGION_TYPE = {
     "title": "title",
     "sec": "text",

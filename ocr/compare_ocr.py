@@ -39,7 +39,7 @@ CONFIGS = {
     "v6_tiny": ("PPOCRV6", "TINY"),
 }
 
-# 文本识别的输入框类型（与 layout/v3.py::KIND_MAP 里的 text_span 对齐）
+# 文本识别的输入框类型（与 layout/v3.py 的 RegionType 对齐）
 IN_TYPES = ("text", "title")
 EXCERPT_PAGES = ["MRGPRX2抑制剂及其使用方法_400", "MRGPRX2抑制剂及其使用方法_405",
                  "US202619539414A_FullTextImage_50"]

@@ -215,7 +215,7 @@ def main():
     ap.add_argument("--device", default=None)
     args = ap.parse_args()
 
-    from v3 import KIND_RANK
+    from v3 import REGION_TYPE_CATEGORY
 
     pages = sorted(Path(args.samples).glob("*.png"))
     if args.limit:
@@ -260,7 +260,9 @@ def main():
              else f"（= ONNX imgsz 元数据）nms_iou={args.nms_iou}")
           + " | 两者共用同一张输入图")
     print(f"[mol] weights={mol_path.name} | imgsz={mol_imgsz}")
-    print(f"[load] 版面 {v3_load:.2f}s | MolDet {mol_load:.2f}s\n")
+    print(f"[load] 版面 {type(v3).__name__}（source={getattr(v3, 'source_name', '?')}，"
+          f"自带阅读顺序={getattr(v3, 'provides_reading_order', '?')}）"
+          f"{v3_load:.2f}s | MolDet {mol_load:.2f}s\n")
 
     hdr = (f"{'page':<30}{'lay':>5}{'txt':>5}{'tbl':>5}{'img':>5}{'mol':>5}"
            f"{'merged':>8}{'lay_ms':>8}{'Molms':>8}")
@@ -376,24 +378,32 @@ def main():
 
     # ---------------- SourceEvidence 对齐导出 ----------------
     from collections import Counter
+    from v3 import REGION_TYPE_CATEGORY
+
+    # 产物声明自己的 kind 词表（label → 类别），MBForge 读它把 label 映射到类别。
+    # 直接从实际产出的区域汇总，所见即所得。
+    kind_vocab = {}
+    for row in all_rows:
+        for region in row["regions"]:
+            for r in (region, *region["children"]):
+                kind_vocab[r["label"]] = REGION_TYPE_CATEGORY[r["type"]]
+
     kind_hist = Counter(e["kind"] for e in evidence)
     (outdir / "evidence.json").write_text(
         json.dumps({
             "doc_ids": sorted({e["doc_id"] for e in evidence}),
             "conventions": {"bbox": "pdf_bottom_left"},
-            "kind_vocab": {k: v for k, v in
-                           sorted(KIND_RANK.items(), key=lambda kv: kv[1])},
+            "kind_vocab": kind_vocab,
             "n_evidence": len(evidence),
             "kind_counts": dict(kind_hist.most_common()),
-            "note": ("M1 只提取 bbox：evidence_id 留空由 MBForge 生成；"
-                     "raw_text/coref 均为空，待识别模块落地后补齐。"
-                     "molecule ↔ image_region 未在 M1 仲裁，交 MBForge "
-                     "_join_evidence_dedupe。"),
+            "note": ("每个区域一条 evidence、bbox 为最小单元；evidence_id 留空由 "
+                     "MBForge 按 (doc_id, page, bbox) 生成；"
+                     "raw_text/coref 待识别模块补齐。"),
             "evidence": evidence,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[out] {outdir}\\evidence.json  ({len(evidence)} 条)")
     print(f"      kind 分布: {dict(kind_hist.most_common())}")
-    print(f"      已排除（不产出 evidence）: header / footer / page_number / seal")
+    print(f"      kind_vocab: {len(kind_vocab)} 个 label")
 
 
 if __name__ == "__main__":

@@ -32,8 +32,8 @@ _INLINE_CHILD = {"formula", "formula_number", "figure_title",
                  "footnote", "vision_footnote", "reference", "reference_content"}
 # R2 的父块词表：只有这些"正文块"才允许吞并内联子块
 _R2_PARENT_LABELS = {"text", "content", "paragraph_title"}
-# R5 的适用范围 = **下游会当作文本消费的全部 label**，即 `v3.KIND_MAP` 里
-# 映射为 "text_span" 的那些。
+# R5 的适用范围 = **下游会当作文本消费的全部 label**，即 `v3.REGION_TYPE_CATEGORY`
+# 里类别为 `text` 的那些 RegionType 所对应的 label。
 #
 # ⚠️ 这组集合必须覆盖**全部会被下游当作文本的 label**：实测第 400 页存在两个
 # **bbox 完全相同、label 不同** 的区域（`figure_title` 与 `text`，都是
@@ -129,9 +129,12 @@ def px_box_to_pdf(box, page_height_pt: float, px_per_pt: float):
 
 # ------------------------------------------------------------------ 合并
 
-def merge(v3_regions, molecules, doc_id: str, page_num: int,
+def merge(det_regions, molecules, doc_id: str, page_num: int,
           page_height_pt: float, px_per_pt: float, params: dict | None = None):
-    """返回 (regions, stats)。regions 为合并后的统一 Region 列表，已重编号且按阅读序排列。"""
+    """返回 (regions, stats)。regions 为合并后的统一 Region 列表，已重编号且按阅读序排列。
+
+    `det_regions` 是**任一面检测器**（V3 或 Hiro）的原始区域列表——本函数两个检测器共用。
+    """
     p = {**DEFAULTS, **(params or {})}
     texty_labels = p["texty_labels"] or _TEXTY
     inline_child = p["inline_child_labels"] or _INLINE_CHILD
@@ -140,15 +143,10 @@ def merge(v3_regions, molecules, doc_id: str, page_num: int,
              "r3_yielded": 0, "r4_containers": 0, "r4_children": 0,
              "molecules_standalone": 0}
 
-    # 深拷贝，避免改动调用方数据
-    regs = []
-    for r in v3_regions:
-        regs.append({
-            **r,
-            "source": "layout_v3",
-            "children": [],
-            "meta": {},
-        })
+    # 深拷贝，避免改动调用方数据。
+    # ⚠️ `source` 必须沿用输入（`layout_v3` / `layout_hiro`），不能在这里写死 ——
+    # 写死会让 Hiro 产出的区域全部被标成 V3。
+    regs = [{**r, "children": [], "meta": {}} for r in det_regions]
 
     # ---------- R1：同类重复框去重 ----------
     drop = set()

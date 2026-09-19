@@ -84,57 +84,40 @@ DEFAULT_MODEL_DIR = Path(__file__).resolve().parent / "weights" / "v3"
 # --------------------------------------------------------------------------------------
 # MBForge SourceEvidence 对齐
 #
-# `mbforge/core/evidence.py` 的 kind 词表只有 5 个（_KIND_RANK）：
-#     text_span(0) / table_span(1) / ocr_label(2) / image_region(3) / molecule(4)
-# 与之对齐见 mbforge/pipeline/artifacts/evidence_join.py。
-#
-# None = 不产出 evidence（版式噪声，词表里没有位置，产出会污染证据链）
+# `kind` 直通检测器的原始 label（Hiro 的 25 类、V3 的 21 类），信息一点不丢；
+# 下游按**类别**判断，见 `mbforge/core/evidence_kind.py`。
+# 本模块只声明 `RegionType → 类别`，用于产出产物里的 `kind_vocab`。
 # --------------------------------------------------------------------------------------
-KIND_MAP = {
-    # 直接对应
-    "text": "text_span",
-    "table": "table_span",
-    "image": "image_region",
-    "chart": "image_region",
+REGION_TYPE_CATEGORY = {
+    "text": "text",
+    "title": "text",
+    "formula": "text",
+    "header": "text",
+    "footer": "text",
+    "page_number": "text",
+    "table": "table",
+    "image": "image",
+    "chart": "image",
+    "reaction": "image",
+    "seal": "image",
+    "noise": "image",
     "molecule": "molecule",
-    # 归入文本
-    "title": "text_span",
-    "formula": "text_span",
-    # Hiro-Layout 产出的类型（V3 不会产出这两个；DESIGN.md §3.2 的 REACTION 为一等类型）
-    "reaction": "image_region",   # 反应式是"图"形态，交 M8 解析；MBForge 词表无 reaction 槽位
-    "noise": None,                # Hiro 的噪声类，不产出 evidence
-    # 不产出 evidence
-    "header": None,
-    "footer": None,
-    "page_number": None,
-    "seal": None,
-}
-
-# 镜像 MBForge `evidence_join._KIND_RANK`，仅用于文档/排序说明
-KIND_RANK = {
-    "text_span": 0,
-    "table_span": 1,
-    "ocr_label": 2,
-    "image_region": 3,
-    "molecule": 4,
 }
 
 
-def to_evidence(region: dict, doc_id: str, page: int) -> dict | None:
+def to_evidence(region: dict, doc_id: str, page: int) -> dict:
     """把 Region 投影成 MBForge `SourceEvidence.to_dict()` 的形状。
 
+    - `kind` = **`region["label"]`**，即检测器的原始类别名（`text` / `chem` / `figcx` …）。
+      每个区域都产出，不按类型筛选 —— `kind` 的词表是开放的，见
+      `mbforge/core/evidence_kind.py`。
     - `bbox` 用 **`bbox_pdf`**（PDF pt，左下原点）——evidence_join 的 conventions
       三个坐标系全是 `pdf_bottom_left`，与此完全一致，无需转换。
-    - `evidence_id` **留空**：MBForge 用 `stable_id("evidence-v1", doc_id, page, kind, *bbox)`
-      生成，M1 不自己造 ID（以 MBForge 为准）。
-    - `raw_text` / `coref` 当前都为空——**这不是合法的 SourceEvidence**
-      （evidence.py 要求二者至少一个非空）。M1 现阶段只提取 bbox，
-      待识别模块落地后由下游补 `raw_text`（或补裁剪块补 `coref`）。
-    - kind 为 None 的类型（header/footer/page_number/seal）返回 None，不产出。
+    - **bbox 是最小证据单元**：一条 evidence 对应一个区域框，不对应某一行文本。
+    - `evidence_id` **留空**：MBForge 自己按 `(doc_id, page, bbox)` 生成。
+    - `raw_text` / `coref` 当前都为空 —— 待识别模块补（文本识别给 `raw_text`，
+      裁图落盘给 `coref`）。
     """
-    kind = KIND_MAP.get(region["type"])
-    if kind is None:
-        return None
     return {
         "doc_id": doc_id,
         "page": page,
@@ -142,11 +125,12 @@ def to_evidence(region: dict, doc_id: str, page: int) -> dict | None:
         "bbox": list(region["bbox_pdf"]),        # pdf_bottom_left，与 MBForge 一致
         "raw_text": "",                          # 待识别模块补
         "coref": "",                             # 待裁剪块补
-        "kind": kind,
-        # ↓ M1 附加的可选字段，MBForge 的 from_dict 会忽略，用于溯源与调试
+        "kind": region["label"],
+        # ↓ 附加的可选字段，MBForge 的 from_dict 会忽略，用于溯源与调试
         "_m1": {
             "region_id": region["region_id"],
-            "label": region["label"],
+            "type": region["type"],
+            "category": REGION_TYPE_CATEGORY.get(region["type"]),
             "score": region["score"],
             "source": region["source"],
             "bbox_px": region["bbox_px"],
@@ -344,7 +328,7 @@ def build_regions(raw, doc_id: str, page_num: int, dpi: int, source: str = "layo
             # ↓ MBForge SourceEvidence 对齐字段
             "doc_id": doc_id,
             "page": page_num,
-            "kind": KIND_MAP.get(r["type"]),      # None = 不产出 evidence
+            "kind": r["label"],                   # 检测器原始类别名，词表开放
             "type": r["type"],
             "label": r["label"],
             "cls_id": r["cls_id"],

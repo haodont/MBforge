@@ -41,14 +41,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-# 文本区域的判据：**按生产者给的 `kind`，不要按 `label`**。
-#
-# `label` 是检测器词表，V3 与 Hiro 各不相同。按 label 匹配时，Hiro 只有 `text` 能命中，
-# `sec` / `mnote` / `cap` / `figno` / `lineno` / `colno` / `ref` / `toc` / `bib`
-# 这 9 类文本全部落空 —— 实测 1900 个 `text_span` 只能取到 1635 个。
-# `kind` 由 `layout/v3.py::KIND_MAP` 统一产出，与用哪个检测器无关。
-# （与 `merge.py` 的 R3/R4 按 RegionType 匹配是同一原则。）
-TEXT_KIND = "text_span"
+# 文本区域的判据：按 **RegionType**，不要按 label。
+# `label` 是检测器词表，V3 与 Hiro 各不相同 —— Hiro 的 sec / mnote / cap / figno /
+# lineno / colno / ref / toc / bib 都不在 V3 词表里，按 label 匹配会整类漏掉。
+# `type` 是版面识别层的统一类型，与用哪个检测器无关。
+TEXT_TYPES = {"text", "title", "formula"}
 
 
 _CJK_MIN = 0x2E80          # CJK 部首起；含中日韩文字与全角标点（：，。（）等）
@@ -241,7 +238,7 @@ def main():
     jobs = []
     for p in layout_det["pages"]:
         boxes = [(r["region_id"], r["bbox_px"]) for r in p["regions"]
-                 if r.get("kind") == TEXT_KIND]
+                 if r["type"] in TEXT_TYPES]
         if boxes:
             jobs.append((p["page"], boxes))
     if args.limit:
@@ -315,14 +312,14 @@ def main():
     for pg in pages_out:
         stem = pg["page"]
         for r in next(x for x in layout_det["pages"] if x["page"] == stem)["regions"]:
-            if r.get("kind") != TEXT_KIND:
+            if r["type"] not in TEXT_TYPES:
                 continue
             txt = pg["region_text"].get(r["region_id"], "").strip()
             if not txt:
                 continue                                   # 无文本不产出（evidence 要求非空）
             ev.append({"doc_id": r["doc_id"], "page": r["page"], "evidence_id": "",
                        "bbox": list(r["bbox_pdf"]), "raw_text": txt, "coref": "",
-                       "kind": TEXT_KIND,
+                       "kind": r["label"],
                        "_m1": {"region_id": r["region_id"], "label": r["label"],
                                "reading_order": r.get("reading_order"),
                                "score": r["score"], "bbox_px": r["bbox_px"]}})
