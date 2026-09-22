@@ -98,14 +98,18 @@ def category_of_label(label: str) -> str:
 def kind_vocab() -> dict[str, str]:
     """``{label: category}`` for an artifact's ``meta.kind_vocab``.
 
-    Every label the detector can emit is declared here. The join stage
-    registers this vocabulary, so ``category_of(kind)`` succeeds downstream —
-    an undeclared label would raise ``UnknownKind`` and fail the join.
+    Every label the layout producer can emit is declared here: the detector's
+    own labels plus ``molecule`` (MolDet-derived regions, including R3 yields and
+    R4 container children). The join stage registers this vocabulary, so
+    ``category_of(kind)`` succeeds downstream — an undeclared label would raise
+    ``UnknownKind`` and fail the join.
     """
-    return {
+    vocab = {
         label: category_of_region_type(region_type)
         for label, region_type in HIRO_LABEL_TO_REGION_TYPE.items()
     }
+    vocab["molecule"] = MOLECULE
+    return vocab
 
 
 __all__ = [

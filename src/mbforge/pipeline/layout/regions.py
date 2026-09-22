@@ -113,6 +113,68 @@ def region_category(region: dict[str, Any]) -> str:
     return category_of_label(str(region.get("label", "")))
 
 
+def molecule_regions(
+    molecules: Sequence[Any],
+    *,
+    doc_id: str,
+    page: int,
+    page_size_px: tuple[float, float],
+    dpi: float = DEFAULT_RENDER_DPI,
+    source: str = "molecule_det",
+) -> list[dict[str, Any]]:
+    """Assemble MolDet molecule boxes into regions of the layout shape.
+
+    MolDet emits **normalized [0, 1]** boxes (``MoleculeBbox.bbox``, top-left
+    origin); they are scaled to the rendered page pixels here and converted to
+    PDF points with the same helper the Hiro regions use, so both models land in
+    one coordinate space and can be merged directly.
+
+    Args:
+        molecules: Objects exposing ``bbox`` (normalized ``x0,y0,x1,y1``) and
+            ``score``, or dicts with the same keys.
+    """
+    width_px, height_px = (float(value) for value in page_size_px)
+    scale = px_per_pt(dpi)
+    page_height_pt = height_px / scale
+
+    regions: list[dict[str, Any]] = []
+    for seq, molecule in enumerate(molecules):
+        normalized = (
+            molecule["bbox"]
+            if isinstance(molecule, dict)
+            else getattr(molecule, "bbox", ())
+        )
+        score = (
+            molecule.get("score", 0.0)
+            if isinstance(molecule, dict)
+            else getattr(molecule, "score", 0.0)
+        )
+        if len(normalized) != 4:
+            continue
+        x0, y0, x1, y1 = (float(value) for value in normalized)
+        bbox_px = (x0 * width_px, y0 * height_px, x1 * width_px, y1 * height_px)
+        regions.append(
+            {
+                "region_id": f"{doc_id}-{page}-molecule-{seq}",
+                "doc_id": doc_id,
+                "page": page,
+                "kind": "molecule",
+                "type": "molecule",
+                "label": "molecule",
+                "cls_id": -1,
+                "score": float(score),
+                "source": source,
+                "reading_order": seq,
+                "bbox_px": [round(value, 2) for value in bbox_px],
+                "bbox_pdf": [
+                    round(value, 2)
+                    for value in px_box_to_pdf(bbox_px, page_height_pt, scale)
+                ],
+            }
+        )
+    return regions
+
+
 def is_text_region(region: dict[str, Any]) -> bool:
     """Whether this region carries running text (i.e. should be OCR'd)."""
     from .labels import TEXT_REGION_TYPES
@@ -124,6 +186,7 @@ __all__ = [
     "DEFAULT_RENDER_DPI",
     "build_regions",
     "is_text_region",
+    "molecule_regions",
     "px_box_to_pdf",
     "px_per_pt",
     "region_category",

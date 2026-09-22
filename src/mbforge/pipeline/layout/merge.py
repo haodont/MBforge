@@ -1,16 +1,23 @@
-"""Intra-detector region de-duplication (R1 / R2 / R5).
+"""Region merging for the layout producer (R1 / R2 / R5 intra, R3 / R4 cross).
 
-Three rules, applied in order:
+Applied in order:
 
   R1  same-label duplicate boxes      — keep the higher-scoring box     (IoU > 0.7)
   R2  inline child suppression        — a text-stream sub-block is demoted to a span
   R5  text-box overlap merging        — any two text boxes that intersect are unioned
+  R3  cross-model 1:1 yield           — an image/chart region coinciding with one
+                                        molecule box becomes that molecule  (IoU > 0.7)
+  R4  cross-model 1:N container       — an image/chart region containing several
+                                        molecule boxes keeps them as ``children``
 
-The source project's R3/R4 (**cross-model** arbitration between a layout region
-and a molecule box) are deliberately **not** ported: in MBForge that arbitration
-belongs to ``pipeline.artifacts.evidence_join._join_evidence_dedupe``, which
-already implements it by *category* (molecule always wins over image) and is
-more aggressive than R3/R4. Re-implementing it here would duplicate the rule.
+R3/R4 run here because the layout producer owns **both** detectors: Hiro regions
+and MolDet molecule boxes are produced from the same 144 DPI render, so the
+cross-model arbitration is a layout concern. ``cross_module=False`` leaves it to
+``pipeline.artifacts.evidence_join._join_evidence_dedupe`` instead.
+
+R4 is R3's necessary complement: a figure holding several molecules must stay a
+container. Collapsing it to one molecule turns "a 16-molecule synthesis route"
+into "one molecule".
 
 ⚠️ R2/R5 match by **label**, so their wordlists are detector-specific. The
 defaults below are Hiro's; a different detector must override them through
@@ -56,11 +63,22 @@ HIRO_INLINE_CHILD_LABELS: frozenset[str] = frozenset(
 #: R2 parent labels: only these "body" blocks may swallow inline children.
 HIRO_R2_PARENT_LABELS: frozenset[str] = frozenset({"text", "sec", "title"})
 
+#: Molecule region type/label. The ``kind`` must change with the ``type``: the
+#: join arbitrates molecule against image by *category*, and the category is
+#: derived from ``kind``, so a region re-typed to molecule must carry its label.
+_MOLECULE_TYPE = "molecule"
+_MOLECULE_KIND = "molecule"
+
+#: Region types that may contain molecules (cross-model R3/R4 containers).
+_CONTAINER_TYPES: frozenset[str] = frozenset({"image", "chart"})
+
 #: Merge tuning. All thresholds are the source project's measured values.
 DEFAULTS: dict[str, Any] = {
     "iou_dup": 0.7,  # R1 same-label duplicate threshold
-    "contain_ratio": 0.8,  # containment coverage threshold (R2)
+    "contain_ratio": 0.8,  # containment coverage threshold (R2/R4)
     "child_area_ratio": 0.01,  # R2: child area / parent area upper bound
+    "iou_yield": 0.7,  # R3: region ↔ molecule 1:1 yield threshold
+    "cross_module": True,  # False = skip R3/R4, leave it to the join
     "texty_labels": None,  # None = HIRO_TEXTY_LABELS
     "inline_child_labels": None,  # None = HIRO_INLINE_CHILD_LABELS
     "r2_parent_labels": None,  # None = HIRO_R2_PARENT_LABELS
@@ -113,28 +131,61 @@ def union_box(
     )
 
 
+def _molecule_region(molecule: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a molecule box into the region shape used downstream."""
+    return {
+        "region_id": str(molecule.get("region_id", "")),
+        "doc_id": str(molecule.get("doc_id", "")),
+        "page": int(molecule.get("page", 0)),
+        "kind": _MOLECULE_KIND,
+        "type": _MOLECULE_TYPE,
+        "label": _MOLECULE_KIND,
+        "cls_id": int(molecule.get("cls_id", -1)),
+        "score": float(molecule.get("score", 0.0)),
+        "source": str(molecule.get("source", "molecule_det")),
+        "reading_order": molecule.get("reading_order"),
+        "bbox_px": list(molecule["bbox_px"]),
+        "bbox_pdf": list(molecule["bbox_pdf"]),
+        "children": [],
+        "meta": dict(molecule.get("meta") or {}),
+    }
+
+
 def merge(
     regions: Sequence[dict[str, Any]],
+    molecules: Sequence[dict[str, Any]] | None = None,
     *,
     page_height_pt: float,
     px_per_pt: float,
     params: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Apply R1/R2/R5 and renumber the surviving regions.
+    """Apply R1/R2/R5 (intra) and R3/R4 (cross-model) then renumber regions.
 
-    Returns ``(regions, stats)``. The result preserves input order; the reading
-    order is (re)assigned afterwards on this final set by
-    :func:`mbforge.pipeline.layout.reading_order.assign`.
+    ``molecules`` are the MolDet boxes already assembled into region shape (see
+    :func:`mbforge.pipeline.layout.regions.molecule_regions`). Returns
+    ``(regions, stats)``; the reading order is (re)assigned afterwards on this
+    final set by :func:`mbforge.pipeline.layout.reading_order.assign`.
     """
     config = {**DEFAULTS, **(params or {})}
     texty_labels = config["texty_labels"] or HIRO_TEXTY_LABELS
     inline_child = config["inline_child_labels"] or HIRO_INLINE_CHILD_LABELS
     r2_parent_labels = config["r2_parent_labels"] or HIRO_R2_PARENT_LABELS
 
-    stats = {"r1_dup_removed": 0, "r2_suppressed": 0, "r5_text_merged": 0}
+    stats = {
+        "r1_dup_removed": 0,
+        "r2_suppressed": 0,
+        "r5_text_merged": 0,
+        "r3_yielded": 0,
+        "r4_containers": 0,
+        "r4_children": 0,
+        "molecules_standalone": 0,
+    }
 
     # Shallow-copy each region: R5 mutates bbox in place on the survivors.
-    regs = [dict(region, meta=dict(region.get("meta") or {})) for region in regions]
+    regs = [
+        dict(region, meta=dict(region.get("meta") or {}), children=[])
+        for region in regions
+    ]
 
     # ---------- R1: same-label duplicate boxes ----------
     dropped: set[int] = set()
@@ -253,12 +304,76 @@ def merge(
                 region for index, region in enumerate(regs) if index not in drop_set
             ]
 
+    # ---------- R3 / R4: cross-model molecule arbitration ----------
+    # ``cross_module=False`` skips both and appends molecules flat, leaving the
+    # region ↔ molecule arbitration to ``evidence_join._join_evidence_dedupe``.
+    mols = [dict(molecule) for molecule in (molecules or [])]
+    used: set[int] = set()
+    if mols and config["cross_module"]:
+        containers = [
+            region for region in regs if str(region.get("type")) in _CONTAINER_TYPES
+        ]
+        for region in containers:
+            region_box = region["bbox_px"]
+            inside = [
+                index
+                for index, molecule in enumerate(mols)
+                if index not in used
+                and coverage(molecule["bbox_px"], region_box) > config["contain_ratio"]
+            ]
+            if not inside:
+                continue
+            # R3 — 1:1: the region and the molecule are the same object.
+            if (
+                len(inside) == 1
+                and bbox_iou(mols[inside[0]]["bbox_px"], region_box)
+                > config["iou_yield"]
+            ):
+                molecule = mols[inside[0]]
+                used.add(inside[0])
+                region["type"] = _MOLECULE_TYPE
+                region["label"] = _MOLECULE_KIND
+                region["kind"] = _MOLECULE_KIND
+                region["score"] = float(molecule.get("score", region["score"]))
+                region["bbox_px"] = list(molecule["bbox_px"])
+                region["bbox_pdf"] = list(molecule["bbox_pdf"])
+                region["source"] = "merged"
+                region["meta"]["merged_from"] = ["layout_hiro", _MOLECULE_KIND]
+                stats["r3_yielded"] += 1
+                continue
+            # R4 — 1:N: keep the region as a container, molecules become children.
+            children = []
+            for index in sorted(
+                inside,
+                key=lambda i: (mols[i]["bbox_px"][1], mols[i]["bbox_px"][0]),
+            ):
+                used.add(index)
+                child = _molecule_region(mols[index])
+                child["reading_order"] = len(children)
+                children.append(child)
+            region["children"] = children
+            region["source"] = "merged"
+            region["meta"]["container"] = True
+            region["meta"]["molecule_count"] = len(children)
+            stats["r4_containers"] += 1
+            stats["r4_children"] += len(children)
+
+    # Molecules no container absorbed become standalone molecule regions.
+    for index, molecule in enumerate(mols):
+        if index in used:
+            continue
+        stats["molecules_standalone"] += 1
+        regs.append(_molecule_region(molecule))
+
     # ---------- renumber ----------
     for seq, region in enumerate(regs):
         region["reading_order"] = seq
         region["region_id"] = (
             f"{region['doc_id']}-{region['page']}-{region['type']}-{seq}"
         )
+        for child_seq, child in enumerate(region.get("children") or []):
+            child["region_id"] = f"{region['region_id']}.mol{child_seq}"
+            child["reading_order"] = child_seq
 
     return regs, stats
 
