@@ -10,14 +10,14 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from mbforge.infra.ingest import worker
-from mbforge.infra.process.filelock import (
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.adapters.runtime.ingest import worker
+from mbforge.adapters.runtime.process.filelock import (
     LockMeta,
     queue_lock_path,
     try_lock_file,
     unlock_file,
 )
-from mbforge.storage.sqlite.database import DatabaseManager
 
 
 def _library(tmp_path: Path, name: str = "library") -> str:
@@ -135,7 +135,7 @@ def _node_id(db: DatabaseManager, stage: str) -> str:
 
 
 def _seed_dag(tmp_path: Path) -> tuple[str, DatabaseManager]:
-    from mbforge.infra.ingest import queue
+    from mbforge.adapters.runtime.ingest import queue
 
     root = _library(tmp_path)
     db = DatabaseManager.get(root)
@@ -146,7 +146,7 @@ def _seed_dag(tmp_path: Path) -> tuple[str, DatabaseManager]:
 
 def test_advance_dependents_promotes_join_only_once(tmp_path: Path) -> None:
     """Join turns pending only after both branches are done, and only once."""
-    from mbforge.infra.ingest import queue
+    from mbforge.adapters.runtime.ingest import queue
 
     root, db = _seed_dag(tmp_path)
 
@@ -182,7 +182,7 @@ def test_advance_dependents_promotes_join_only_once(tmp_path: Path) -> None:
 
 def test_node_failure_cascades_and_reset_reopens_dependents(tmp_path: Path) -> None:
     """A failed branch cascades downstream; retrying it re-blocks them."""
-    from mbforge.infra.ingest import queue
+    from mbforge.adapters.runtime.ingest import queue
 
     root, db = _seed_dag(tmp_path)
     worker._claim_rows(root, "w", 8)

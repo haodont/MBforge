@@ -2,24 +2,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mbforge.core.evidence import SourceEvidence
-from mbforge.core.molecule import Molecule
-from mbforge.pipeline.artifacts.evidence_models import (
+from mbforge.application.pipeline.artifacts.evidence_models import (
     CandidateArtifact,
     DocumentEvidenceArtifact,
     PageFrame,
 )
-from mbforge.pipeline.detection.extraction import candidate_id
-from mbforge.pipeline.markdown.esmiles_insert import insert_esmiles_blocks
-from mbforge.pipeline.persist.text_links import (
+from mbforge.application.pipeline.detection.extraction import candidate_id
+from mbforge.application.pipeline.markdown.esmiles_insert import insert_esmiles_blocks
+from mbforge.application.pipeline.persist.text_links import (
     _find_esmiles_in_text,
     enrich_molecule_contexts_from_markdown,
 )
+from mbforge.domain.evidence import SourceEvidence
+from mbforge.domain.molecule import Molecule
 
 
 def test_register_molecules_from_text_skips_non_complete_roles(tmp_path: Path) -> None:
-    from mbforge.pipeline.persist.text_links import register_molecules_from_text
-    from mbforge.storage.sqlite.database import DatabaseManager
+    from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+    from mbforge.application.pipeline.persist.text_links import (
+        register_molecules_from_text,
+    )
 
     markdown = tmp_path / "document.md"
     markdown.write_text("# Doc", encoding="utf-8")
@@ -59,7 +61,7 @@ def test_enrich_molecule_contexts_from_markdown(tmp_path: Path) -> None:
 def test_enrich_attaches_distant_compound_context_for_review_routing(
     tmp_path: Path,
 ) -> None:
-    from mbforge.pipeline.detection.structure_role import (
+    from mbforge.application.pipeline.detection.structure_role import (
         classify_structure_role,
     )
 

@@ -57,9 +57,9 @@ async def test_import_upload_oversize_rejected_early(
     handler stopped calling ``read`` after a small number of calls — far
     short of the 100 reads the body would require if it were drained.
     """
-    from mbforge.routers.documents import library as library_router
-    from mbforge.services.documents import library as library_service
-    from mbforge.utils import config
+    from mbforge.application.use_cases.documents import library as library_service
+    from mbforge.foundation import config
+    from mbforge.interfaces.http.documents import library as library_router
 
     # Lower the upload cap for this test.
     monkeypatch.setattr(library_service, "MAX_UPLOAD_BYTES", 5 * 1024 * 1024)

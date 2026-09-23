@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.services.documents.library import LibraryStore
-from mbforge.utils.errors import MBForgeError
+from mbforge.application.use_cases.documents.library import LibraryStore
+from mbforge.foundation.errors import MBForgeError
 
 
 def test_add_document_and_get(tmp_path: Path) -> None:
@@ -36,7 +36,7 @@ def test_delete_document(tmp_path: Path) -> None:
     backups = list((tmp_path / ".mbforge" / "backups").iterdir())
     assert len(backups) == 1
     assert (backups[0] / "storage" / doc.doc_id / "input.pdf").read_bytes() == b"pdf"
-    assert (backups[0] / "library.db").is_file()
+    assert (backups[0] / "database.json").is_file()
 
 
 def test_search_documents_substring(tmp_path: Path) -> None:

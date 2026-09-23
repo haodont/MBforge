@@ -6,10 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.core.evidence import SourceEvidence
-from mbforge.core.molecule import Molecule
-from mbforge.core.types import DetectionSource, ExtractionResult
-from mbforge.pipeline.artifacts import (
+from mbforge.adapters.persistence.source_evidence import persist_source_evidence
+from mbforge.application.pipeline.artifacts import (
     build_detection_artifact,
     build_extract_artifact,
     hydrate_context_from_artifacts,
@@ -22,14 +20,20 @@ from mbforge.pipeline.artifacts import (
     save_detection_branch,
     save_extract_branch,
 )
-from mbforge.pipeline.artifacts.evidence_models import (
+from mbforge.application.pipeline.artifacts.evidence_models import (
     DocumentEvidenceArtifact,
     PageFrame,
 )
-from mbforge.pipeline.artifacts.staging import publish_run
-from mbforge.pipeline.extract.text import ExtractedDocument, PageContent, TextSpan
-from mbforge.pipeline.run.context import PipelineContext
-from mbforge.storage.source_evidence import persist_source_evidence
+from mbforge.application.pipeline.artifacts.staging import publish_run
+from mbforge.application.pipeline.extract.text import (
+    ExtractedDocument,
+    PageContent,
+    TextSpan,
+)
+from mbforge.application.pipeline.run.context import PipelineContext
+from mbforge.domain.evidence import SourceEvidence
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import DetectionSource, ExtractionResult
 
 DOC = "doc-artifacts"
 
@@ -41,7 +45,7 @@ def _extracted() -> ExtractedDocument:
         ocr_dpi=200,
         text_spans=[TextSpan("hello", (1.0, 2.0, 3.0, 4.0), 0)],
         figure_bboxes=[(10.0, 20.0, 30.0, 40.0)],
-        ocr_backend="paddleocr",
+        ocr_backend="layout:stub",
         ocr_attempts=1,
         ocr_elapsed_ms=123,
         ocr_error=None,
@@ -236,7 +240,8 @@ def test_join_keeps_one_row_per_location(tmp_path: Path) -> None:
     extracted = build_extract_artifact(DOC, "run-1", _extracted(), frames)
     candidate = _candidate()
     candidate.detections[0] = replace(
-        candidate.detections[0], bbox=(1.0, 2.0, 3.0, 4.0)  # the text span's rect
+        candidate.detections[0],
+        bbox=(1.0, 2.0, 3.0, 4.0),  # the text span's rect
     )
     detection = build_detection_artifact(
         DOC, "run-1", [_result(candidate)], {}, frames, library_root=tmp_path
@@ -249,6 +254,41 @@ def test_join_keeps_one_row_per_location(tmp_path: Path) -> None:
     assert not any(item.kind == "text_span" for item in joined.evidence)
     molecule = next(item for item in joined.evidence if item.kind == "molecule")
     assert molecule.raw_text, "the winner keeps content"
+
+
+def test_join_keeps_the_content_bearing_molecule_over_an_overlapping_bare_one(
+    tmp_path: Path,
+) -> None:
+    """An overlapping claim without content never displaces one that has it.
+
+    A cross-model layout region re-typed to a molecule carries MolDet's own
+    geometry but no payload, and its box never matches Detection's exactly
+    (different render DPI).  Letting it win would drop the SMILES and the crop.
+    """
+    _archive_crop(tmp_path)
+    frames = _frames()
+    extracted_input = _layout_extracted()
+    # R3: the ``chem`` figure region becomes the molecule MolDet found in it,
+    # with the slightly larger box the layout render produces.
+    extracted_input.pages[0].regions[1].update(
+        {"kind": "molecule", "type": "molecule", "bbox": [9.5, 19.5, 30.5, 40.5]}
+    )
+    extracted = build_extract_artifact(DOC, "run-1", extracted_input, frames)
+    candidate = _candidate()
+    candidate.detections[0] = replace(
+        candidate.detections[0], bbox=(10.0, 20.0, 30.0, 40.0)
+    )
+    detection = build_detection_artifact(
+        DOC, "run-1", [_result(candidate)], {}, frames, library_root=tmp_path
+    )
+
+    joined = join_evidence_artifacts(extracted, detection)
+
+    molecules = [item for item in joined.evidence if item.kind == "molecule"]
+    assert len(molecules) == 1
+    assert molecules[0].raw_text, "the content-bearing molecule keeps its payload"
+    assert molecules[0].bbox == (10.0, 20.0, 30.0, 40.0)
+    assert molecules[0].coref == f"storage/{DOC}/crops/a.png"
 
 
 def test_v2_join_records_every_figure_region_against_the_source_pdf(
@@ -416,7 +456,7 @@ def test_v2_join_order_is_independent_of_branch_input_order(tmp_path: Path) -> N
 
 def _layout_extracted() -> ExtractedDocument:
     """An Extract branch authored by the local layout producer."""
-    from mbforge.pipeline.layout.labels import kind_vocab
+    from mbforge.application.pipeline.layout.labels import kind_vocab
 
     text_bbox = (1.0, 2.0, 3.0, 4.0)
     chem_bbox = (10.0, 20.0, 30.0, 40.0)

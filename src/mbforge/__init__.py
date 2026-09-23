@@ -4,7 +4,7 @@
 支持 PDF OCR 解析、分子数据建库、LLM 智能对话、以及分子生成/对接/QSAR/MD 工作流扩展。
 """
 
-from .utils.paths import APP_VERSION
+from mbforge.foundation.paths import APP_VERSION
 
 __version__ = APP_VERSION
 __all__ = ["__version__"]

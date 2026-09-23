@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from mbforge.pipeline.detection.document_registration import (
+from mbforge.application.pipeline.detection.document_registration import (
     MoleculeRegistrationError,
     MoleculeRegistrationSession,
     collect_molecule_candidates_with_tool,
@@ -264,7 +264,7 @@ async def test_cloud_tool_adapter_continues_after_malformed_call(
 
     import json as json_mod
 
-    import mbforge.pipeline.detection.document_registration as reg_mod
+    import mbforge.application.pipeline.detection.document_registration as reg_mod
 
     real_loads = reg_mod.json.loads
     counter = {"n": 0}
@@ -332,7 +332,7 @@ async def test_cloud_tool_adapter_propagates_cancellation_in_loop() -> None:
     user-initiated cancel aborts the cloud pass without waiting for the
     LLM provider."""
 
-    from mbforge.pipeline.cancellation import (
+    from mbforge.application.pipeline.cancellation import (
         CancellationRegistry,
         TaskCancelledError,
     )
@@ -376,7 +376,7 @@ async def test_cloud_tool_adapter_polls_cancel_before_ainvoke() -> None:
     """cancel_check is called once before the LLM and again before each
     per-call ainvoke, so even a single LLM call cannot bypass cancellation."""
 
-    from mbforge.pipeline.cancellation import (
+    from mbforge.application.pipeline.cancellation import (
         CancellationRegistry,
         TaskCancelledError,
     )

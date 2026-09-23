@@ -7,14 +7,14 @@ from pathlib import Path
 import pymupdf
 from fastapi.testclient import TestClient
 
-from mbforge.models.readiness import (
+from mbforge.application.dto.readiness import (
     DatabaseReadiness,
     LibraryReadiness,
     ModelReadiness,
     OCRReadiness,
 )
-from mbforge.services.system import readiness as readiness_service
-from mbforge.utils.config import AppConfig, LLMConfig
+from mbforge.application.use_cases.system import readiness as readiness_service
+from mbforge.foundation.config import AppConfig, LLMConfig
 
 
 def test_diagnostics_summary_returns_degraded_subsystems(
@@ -46,8 +46,8 @@ def test_diagnostics_summary_returns_degraded_subsystems(
     )
     monkeypatch.setattr(
         readiness_service,
-        "_probe_ocr_sync",
-        lambda: OCRReadiness(chain=[], error="ocr unavailable"),
+        "_probe_layout_sync",
+        lambda: OCRReadiness(chain=[], error="layout weights missing"),
     )
     monkeypatch.setattr(
         readiness_service,
@@ -72,7 +72,7 @@ def test_diagnostics_summary_returns_degraded_subsystems(
     assert body["database"]["error"] == "library_not_configured"
     assert body["models"][0]["last_error"] == "download failed"
     assert body["models"][0]["expected_size_mb"] == 640.0
-    assert body["ocr"]["error"] == "ocr unavailable"
+    assert body["ocr"]["error"] == "layout weights missing"
     assert body["llm"]["configured"] is False
     assert body["llm"]["has_api_key"] is False
     assert body["llm"]["base_url"] == "https://api.openai.com/v1"
@@ -113,7 +113,7 @@ def test_demo_pdf_is_sanitized_and_registered(
     assert "Synthetic sample document" in text
     assert "caffeine C8H10N4O2" in text
     # The document is registered in library storage.
-    from mbforge.storage.document_store import load_document
+    from mbforge.adapters.persistence.document_store import load_document
 
     doc = load_document(doc_id, str(tmp_path))
     assert doc is not None

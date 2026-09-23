@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from mbforge.infra.process.tasks import TaskManager, TaskPool
+from mbforge.adapters.runtime.process.tasks import TaskManager, TaskPool
 
 
 def test_shutdown_waits_for_running_task() -> None:

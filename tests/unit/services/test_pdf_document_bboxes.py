@@ -9,11 +9,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mbforge.core.molecule import Molecule
-from mbforge.core.types import DetectionSource
-from mbforge.pipeline.extract.text import ExtractedDocument, PageContent, TextSpan
-from mbforge.services.documents.pdf_layout import build_document_overlay
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.pipeline.extract.text import (
+    ExtractedDocument,
+    PageContent,
+    TextSpan,
+)
+from mbforge.application.use_cases.documents.pdf_layout import build_document_overlay
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import DetectionSource
 from tests.unit.v2_artifact_helpers import publish_v2_run
 
 DOC = "doc-1"

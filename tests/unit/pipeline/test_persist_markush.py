@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.molecule import Molecule
-from mbforge.core.types import DetectionSource
-from mbforge.pipeline.persist.markush import (
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.pipeline.persist.markush import (
     delete_markush_for_doc,
     persist_markush_fragments,
     persist_markush_scaffolds,
 )
-from mbforge.pipeline.persist.molecules import persist_molecule_candidates
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.application.pipeline.persist.molecules import persist_molecule_candidates
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import DetectionSource
 
 
 @pytest.fixture

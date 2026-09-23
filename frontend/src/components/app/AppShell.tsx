@@ -6,7 +6,6 @@
 import type { ReactNode } from 'react'
 import Sidebar from '../Sidebar'
 import ErrorBoundary from '../ErrorBoundary'
-import OcrConfigModal from '../OcrConfigModal'
 import { ToastContainer } from '../ui'
 import '../../styles/AppShell.css'
 
@@ -27,7 +26,6 @@ export function AppShell({
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>
       <ToastContainer position="bottom-right" />
-      <OcrConfigModal />
     </div>
   )
 }

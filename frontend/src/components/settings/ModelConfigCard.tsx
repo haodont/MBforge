@@ -6,7 +6,7 @@ import Badge, { type BadgeTone } from '@/components/ui/Badge'
 import InlineAlert from '@/components/ui/InlineAlert'
 import LlmConfigSection from './model/LlmConfigSection'
 import VlmConfigSection from './model/VlmConfigSection'
-import OcrConfigSection from './model/OcrConfigSection'
+import LayoutConfigSection from './model/LayoutConfigSection'
 import { getUserFacingError } from '@/utils/errors'
 import type { SettingsState } from './types'
 
@@ -138,7 +138,7 @@ export default function ModelConfigCard({
 
       {modelType === 'llm' && <LlmConfigSection {...sectionProps} />}
       {modelType === 'vlm' && <VlmConfigSection {...sectionProps} />}
-      {modelType === 'ocr' && <OcrConfigSection {...sectionProps} />}
+      {modelType === 'ocr' && <LayoutConfigSection {...sectionProps} />}
 
       {testStatus?.error && (
         <InlineAlert tone="danger" title={t('settings.connectionFailed')} style={{ marginTop: 'var(--space-4)' }}>

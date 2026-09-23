@@ -1,4 +1,4 @@
-"""Unit tests for ``mbforge.pipeline.persist.activities``.
+"""Unit tests for ``mbforge.application.pipeline.persist.activities``.
 
 Since ``125a63d6`` the persist path writes the ``activities.json``
 artifact instead of SQLite rows, so the per-row persistence contract
@@ -20,11 +20,11 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from mbforge.pipeline.activity.extraction import ActivityRecord
-from mbforge.pipeline.persist.activities import (
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.pipeline.activity.extraction import ActivityRecord
+from mbforge.application.pipeline.persist.activities import (
     persist_activities,
 )
-from mbforge.storage.sqlite.database import DatabaseManager
 
 
 def _candidate(

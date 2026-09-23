@@ -93,7 +93,7 @@ gpu = [
     # 显著快于 CPU onnx（~495ms）。依赖 torch，故归入本条 extra。
     "rapidocr>=3",
     # Hiro-Layout 版面检测（ONNX / onnxruntime）。CUDA EP 需要在建 session 前
-    # 从 nvidia-* 轮子预加载 cublasLt/cudnn DLL（见 backends/hiro_layout.py），
+    # 从 nvidia-* 轮子预加载 cublasLt/cudnn DLL（见 adapters/inference/hiro_layout.py），
     # 否则会静默回落到 CPU。
     #
     # ⚠️ 与 `onnx` extra 互斥：`onnxruntime-gpu` 与 `onnxruntime`（CPU 版，由

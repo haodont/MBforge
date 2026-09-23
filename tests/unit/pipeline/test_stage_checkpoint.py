@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.pipeline.composition import effective_stage_names
-from mbforge.pipeline.run.checkpoint import (
+from mbforge.application.pipeline.composition import effective_stage_names
+from mbforge.application.pipeline.run.checkpoint import (
     INCOMPATIBLE_CHECKPOINT,
     STAGE_ORDER,
     collect_all_summaries,

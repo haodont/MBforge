@@ -7,20 +7,24 @@ from unittest.mock import patch
 
 import pytest
 
-from mbforge.core.evidence import SourceEvidence
-from mbforge.core.stage import PipelineErrorCode, StageExecutor, StageResult
-from mbforge.pipeline.artifacts.evidence_models import (
+from mbforge.adapters.persistence.source_evidence import persist_source_evidence
+from mbforge.application.pipeline.artifacts.evidence_models import (
     DocumentEvidenceArtifact,
     PageFrame,
 )
-from mbforge.pipeline.run.context import PipelineContext
-from mbforge.pipeline.runner import STAGES, run_pipeline
-from mbforge.pipeline.stages import (
+from mbforge.application.pipeline.run.context import PipelineContext
+from mbforge.application.pipeline.runner import STAGES, run_pipeline
+from mbforge.application.pipeline.stage import (
+    PipelineErrorCode,
+    StageExecutor,
+    StageResult,
+)
+from mbforge.application.pipeline.stages import (
     DetectionStage,
     ExtractStage,
     MarkdownStage,
 )
-from mbforge.storage.source_evidence import persist_source_evidence
+from mbforge.domain.evidence import SourceEvidence
 
 
 class TestStageExecutors:
@@ -92,7 +96,10 @@ class TestStageNullChecks:
         assert result.error_code == PipelineErrorCode.MISSING_CONTEXT
 
     def test_markdown_stage_persists_canonical_markdown(self, tmp_path):
-        from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
+        from mbforge.application.pipeline.extract.text import (
+            ExtractedDocument,
+            PageContent,
+        )
 
         source = SourceEvidence.create(
             doc_id="t-markdown-persist",
@@ -147,14 +154,16 @@ class TestStageNullChecks:
         )
         with (
             patch(
-                "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
+                "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
                 return_value=[],
             ),
             patch(
-                "mbforge.pipeline.artifacts.branch_io.page_frames_from_pdf",
+                "mbforge.application.pipeline.artifacts.branch_io.page_frames_from_pdf",
                 return_value=[],
             ),
-            patch("mbforge.pipeline.artifacts.branch_io.save_detection_branch"),
+            patch(
+                "mbforge.application.pipeline.artifacts.branch_io.save_detection_branch"
+            ),
         ):
             result = DetectionStage().execute(ctx)
 
@@ -169,7 +178,7 @@ class TestStageNullChecks:
             run_id="run-1",
         )
         with patch(
-            "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
             side_effect=RuntimeError("crop archive missing"),
         ):
             result = DetectionStage().execute(ctx)
@@ -183,13 +192,16 @@ class TestExtractStage:
     """Step 11: cover ExtractStage happy path and PDF failure path."""
 
     def test_execute_success(self, tmp_path):
-        """Mock extract_pdf_text to return a fake ExtractedDocument."""
-        from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
+        """Mock extract_layout_text to return a fake ExtractedDocument."""
+        from mbforge.application.pipeline.extract.text import (
+            ExtractedDocument,
+            PageContent,
+        )
 
         fake_doc = ExtractedDocument(
             raw_text="hello",
             page_count=1,
-            parser="pymupdf",
+            parser="layout",
             pages=[PageContent(page_num=1, text="hello")],
         )
         ctx = PipelineContext(
@@ -201,11 +213,11 @@ class TestExtractStage:
 
         with (
             patch(
-                "mbforge.pipeline.extract.text.extract_document_text",
+                "mbforge.application.pipeline.extract.text.extract_layout_text",
                 return_value=fake_doc,
             ),
             patch(
-                "mbforge.pipeline.artifacts.branch_io.page_frames_from_pdf",
+                "mbforge.application.pipeline.artifacts.branch_io.page_frames_from_pdf",
                 return_value=[PageFrame(page=1, width=100.0, height=100.0)],
             ),
         ):
@@ -215,10 +227,10 @@ class TestExtractStage:
         assert result.status == "success"
         assert ctx.extracted is fake_doc
         assert result.context["page_count"] == 1
-        assert result.context["parser"] == "pymupdf"
+        assert result.context["parser"] == "layout"
 
     def test_execute_failure_returns_error_result(self, tmp_path):
-        """When extract_pdf_text raises, stage returns error result (does NOT raise)."""
+        """When the layout producer raises, stage returns an error result."""
         ctx = PipelineContext(
             pdf_path=tmp_path / "bad.pdf",
             library_root=tmp_path,
@@ -227,7 +239,7 @@ class TestExtractStage:
         )
 
         with patch(
-            "mbforge.pipeline.extract.text.extract_document_text",
+            "mbforge.application.pipeline.extract.text.extract_layout_text",
             side_effect=ValueError("corrupt pdf"),
         ):
             result = ExtractStage().execute(ctx)
@@ -237,9 +249,9 @@ class TestExtractStage:
         assert "Text extraction failed" in result.message
         assert ctx.extracted is None
 
-    def test_execute_reports_ocr_unavailable_separately(self, tmp_path):
-        """Missing cloud OCR is actionable and must not look like PDF corruption."""
-        from mbforge.backends.ocr.chain import OCRUnavailableError
+    def test_execute_reports_layout_unavailable_separately(self, tmp_path):
+        """A missing local layout model is actionable, not PDF corruption."""
+        from mbforge.application.pipeline.layout.parse import LayoutUnavailableError
 
         ctx = PipelineContext(
             pdf_path=tmp_path / "scan.pdf",
@@ -249,22 +261,22 @@ class TestExtractStage:
         )
 
         with patch(
-            "mbforge.pipeline.extract.text.extract_document_text",
-            side_effect=OCRUnavailableError(
-                "no configured cloud OCR backend available"
+            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            side_effect=LayoutUnavailableError(
+                "Hiro-Layout model is not available; cannot produce a local layout"
             ),
         ):
             result = ExtractStage().execute(ctx)
 
         assert result.status == "error"
-        assert result.error_code == PipelineErrorCode.OCR_UNAVAILABLE
+        assert result.error_code == PipelineErrorCode.LAYOUT_UNAVAILABLE
         assert result.recoverable is False
-        assert "OCR unavailable" in result.message
+        assert "Layout detection unavailable" in result.message
 
 
 def test_write_rough_markdown_keeps_page_text_verbatim(tmp_path: Path) -> None:
     """The rough markdown copies page text as-is and marks each page boundary."""
-    from mbforge.pipeline.stages.markdown_stage import write_rough_markdown
+    from mbforge.application.pipeline.stages.markdown_stage import write_rough_markdown
 
     class FakePage:
         def __init__(self, num: int, text: str) -> None:

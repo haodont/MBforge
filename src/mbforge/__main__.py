@@ -12,7 +12,7 @@ import socket
 import sys
 from collections.abc import Sequence
 
-from mbforge.utils.logger import get_logger
+from mbforge.foundation.logger import get_logger
 
 logger = get_logger("mbforge.__main__")
 
@@ -37,8 +37,8 @@ def _replace_existing(host: str, port: int) -> None:
     the strict A1-A5/B1-B2 criteria (registry-confirmed MBForge instances
     holding the queue lock or listening on our port).
     """
-    from .infra.process import find_orphans, reap
-    from .utils.config import load_global_config
+    from mbforge.adapters.runtime.process import find_orphans, reap
+    from mbforge.foundation.config import load_global_config
 
     cfg = load_global_config()
     library_root = cfg.library_root
@@ -65,13 +65,13 @@ def _run_doctor(options) -> None:
     """Run the diagnostic doctor command."""
     import json as _json
 
-    from .infra.process import (
+    from mbforge.adapters.runtime.process import (
         ProcessRegistry,
         find_orphans,
         port_listeners,
         read_lock_holder,
     )
-    from .utils.config import load_global_config
+    from mbforge.foundation.config import load_global_config
 
     library_root = options.library_root
     if library_root is None:
@@ -179,7 +179,7 @@ def _run_doctor(options) -> None:
 
     if options.fix and blocking:
         print("\nReaping blocking orphans...")
-        from .infra.process import reap
+        from mbforge.adapters.runtime.process import reap
 
         for o in blocking:
             result = reap(o, dry_run=False, grace=5.0)
@@ -203,7 +203,7 @@ def _pid_alive_simple(pid: int) -> bool:
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Start the MBForge web application or run a diagnostic command."""
-    from .utils.paths import DEFAULT_SIDECAR_PORT
+    from mbforge.foundation.paths import DEFAULT_SIDECAR_PORT
 
     parser = argparse.ArgumentParser(description="Start the MBForge web application.")
     subparsers = parser.add_subparsers(dest="command")

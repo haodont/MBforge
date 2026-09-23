@@ -14,13 +14,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from mbforge.pipeline.activity.extraction import ActivityRecord
-from mbforge.pipeline.activity.family_gate import (
+from mbforge.application.pipeline.activity.extraction import ActivityRecord
+from mbforge.application.pipeline.activity.family_gate import (
     FAMILY_CORE_MISMATCH,
     derive_family_core,
     make_family_core_guard,
 )
-from mbforge.pipeline.activity.matching import match_activities
+from mbforge.application.pipeline.activity.matching import match_activities
 
 # Real Markush scaffolds recognised from the document (pages 5/9/10).
 SCAFFOLD_1 = (

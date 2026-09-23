@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from mbforge.infra.resource_manager import (
+from mbforge.adapters.runtime.resource_manager import (
     RESOURCE_CATALOG,
     ResourceInfo,
     ResourceManager,
@@ -125,7 +125,7 @@ def test_check_model_file_flags_size_mismatch(tmp_path: Path) -> None:
         expected_size=1000,
     )
     # Temporarily point the MBForge cache dir to our tmp_path via monkeypatching
-    import mbforge.infra.resource_manager as rm
+    import mbforge.adapters.runtime.resource_manager as rm
 
     original_get_model_cache_dir = rm._get_model_cache_dir
     try:
@@ -154,7 +154,7 @@ def test_check_model_snapshot_flags_size_mismatch(tmp_path: Path) -> None:
         files=["model.pth"],
         expected_size=1000,
     )
-    import mbforge.infra.resource_manager as rm
+    import mbforge.adapters.runtime.resource_manager as rm
 
     original_get_model_cache_dir = rm._get_model_cache_dir
     try:
@@ -184,7 +184,7 @@ def test_check_model_snapshot_ignores_sidecar_file_sizes(tmp_path: Path) -> None
         files=["model.pth"],
         expected_size=weight.stat().st_size,
     )
-    import mbforge.infra.resource_manager as rm
+    import mbforge.adapters.runtime.resource_manager as rm
 
     original_get_model_cache_dir = rm._get_model_cache_dir
     try:
@@ -225,7 +225,7 @@ def test_bundled_asset_takes_precedence_over_downloads(
     tmp_path: Path,
 ) -> None:
     """A project-bundled weight makes the model READY without a download."""
-    import mbforge.infra.model_locator as ml
+    import mbforge.adapters.runtime.model_locator as ml
 
     asset = tmp_path / "moldetv2_structure_ft.pt"
     asset.write_bytes(b"fake weights")
@@ -248,7 +248,7 @@ def test_resolve_model_for_backend_returns_bundled_single_file(
 ) -> None:
     """resolve_model_for_backend returns the bundled file even when the
     catalog subpath does not exist under the asset directory."""
-    import mbforge.infra.model_locator as ml
+    import mbforge.adapters.runtime.model_locator as ml
 
     asset = tmp_path / "moldetv2_structure_ft.pt"
     asset.write_bytes(b"fake weights")

@@ -1,7 +1,7 @@
-"""Unit tests for ``mbforge.pipeline.activity.parsing.tables``.
+"""Unit tests for ``mbforge.application.pipeline.activity.parsing.tables``.
 
 Targets the deterministic table-parsing primitives that used to live
-inside ``mbforge.pipeline.activity.extraction``. The existing pipeline
+inside ``mbforge.application.pipeline.activity.extraction``. The existing pipeline
 tests already cover them transitively through the orchestrator; this
 file pins the split-module surface directly.
 """
@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.evidence import SourceEvidence
-from mbforge.pipeline.activity.extraction import (
+from mbforge.application.pipeline.activity.extraction import (
     extract_activity_measurements_from_evidence,
 )
-from mbforge.pipeline.activity.parsing import (
+from mbforge.application.pipeline.activity.parsing import (
     _is_activity_table,
     _parse_simple_activity_table,
 )
+from mbforge.domain.evidence import SourceEvidence
 
 DOC = "activity-evidence"
 

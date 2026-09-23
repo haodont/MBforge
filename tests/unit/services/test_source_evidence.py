@@ -7,19 +7,19 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.core.evidence import SourceEvidence
-from mbforge.pipeline.artifacts.evidence_models import (
+from mbforge.adapters.persistence.source_evidence import persist_source_evidence
+from mbforge.application.pipeline.artifacts.evidence_models import (
     DocumentEvidenceArtifact,
     PageFrame,
 )
-from mbforge.services.documents.source_evidence import (
+from mbforge.application.use_cases.documents.source_evidence import (
     at,
     find_text,
     list_evidence,
     resolve,
     update_molecule,
 )
-from mbforge.storage.source_evidence import persist_source_evidence
+from mbforge.domain.evidence import SourceEvidence
 
 
 def test_source_evidence_queries_resolve_text_and_bbox_intersection(
@@ -194,7 +194,7 @@ def test_update_molecule_overwrites_same_evidence_id_and_backs_up_source(
     assert payload["moldet_conf"] == 1.0
     backups = list((tmp_path / ".mbforge" / "backups").iterdir())
     assert len(backups) == 1
-    assert (backups[0] / "library.db").is_file()
+    assert (backups[0] / "database.json").is_file()
 
 
 def test_update_molecule_allows_empty_name(tmp_path: Path) -> None:

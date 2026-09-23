@@ -200,6 +200,8 @@ export default defineConfig(({ mode }) => {
     resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Ketcher's browser build imports Node's EventEmitter directly.
+      events: path.resolve(__dirname, 'node_modules/events/events.js'),
     },
     },
     server: {

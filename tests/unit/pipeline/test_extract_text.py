@@ -1,293 +1,70 @@
-"""Unit tests for the OCR-only PDF text extraction contract."""
+"""Unit tests for the local layout extract contract (text guard + title)."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
-
-import pymupdf
 import pytest
 
-from mbforge.backends.ocr.base import OCRResult
-from mbforge.backends.ocr.chain import OCRUnavailableError
-from mbforge.pipeline.extract.text import (
+from mbforge.application.pipeline.extract.text import (
     _extract_title,
-    _ocr_pages,
-    extract_document_text,
-    extract_pdf_text,
+    extract_layout_text,
+)
+from mbforge.application.pipeline.layout.parse import (
+    LayoutPage,
+    LayoutUnavailableError,
 )
 
 
-def _make_pdf_with_pages(tmp_path: Path, page_texts: list[str]) -> Path:
-    """Create a PDF where page i contains page_texts[i] at a fixed position."""
-    pdf_path = tmp_path / "non_consecutive.pdf"
-    doc = pymupdf.open()
-    for text in page_texts:
-        page = doc.new_page(width=612, height=792)
-        page.insert_text((72, 72), text, fontsize=12)
-    doc.save(str(pdf_path))
-    doc.close()
-    return pdf_path
+class _Detector:
+    """Stand-in for the Hiro-Layout detector (available, never loaded)."""
+
+    backend = "stub"
+    model_path = "<stub>"
+
+    def is_available(self) -> bool:
+        return True
 
 
-def test_ocr_pages_non_consecutive_indices_no_index_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _stub_layout(monkeypatch: pytest.MonkeyPatch, pages: list[LayoutPage]) -> None:
+    monkeypatch.setattr(
+        "mbforge.adapters.inference.hiro_layout.get_hiro", lambda: _Detector()
+    )
+    monkeypatch.setattr(
+        "mbforge.application.pipeline.layout.parse.parse_pdf_layout",
+        lambda *_args, **_kwargs: pages,
+    )
+
+
+def _empty_page() -> LayoutPage:
+    return LayoutPage(page_num=1, width_pt=595.0, height_pt=842.0, dpi=144.0)
+
+
+def test_layout_extract_refuses_a_document_with_no_text(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Non-consecutive page_indices must not trigger IndexError in _ocr_pages.
+    """Reading nothing is a defect, not a result.
 
-    Regression for issue C3: the result list is sized to ``len(page_indices)``,
-    but the old code used the absolute page number as a list index.
+    The local producer is the only text source now, so a run that read no text
+    anywhere would publish a document with no body — the same failure mode a
+    missing detector guards against.
     """
-    page_texts = ["page zero", "page one", "page two", "page three", "page four"]
-    pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-    doc: Any = pymupdf.open(str(pdf_path))
+    _stub_layout(monkeypatch, [_empty_page()])
 
-    # Ask for pages 0, 2, 4 (non-consecutive absolute page numbers).
-    requested_indices = [0, 2, 4]
-
-    def fake_extract(image_bytes: bytes, _config: dict | None, **_kwargs) -> OCRResult:
-        # Return text based on a simple marker derived from image content.
-        # We don't actually OCR; just verify the right page index reached us.
-        return OCRResult(text="ocr text")
-
-    monkeypatch.setattr("mbforge.backends.ocr.extract_text_with_chain", fake_extract)
-    monkeypatch.setattr(
-        "mbforge.backends.ocr.build_backends",
-        lambda _config: [SimpleNamespace(name="fake-cloud")],
-    )
-
-    try:
-        results = _ocr_pages(doc, requested_indices, ocr_config={})
-    finally:
-        doc.close()
-
-    assert len(results) == len(requested_indices)
-    # All requested pages should have received the mocked OCR text.
-    assert all(r == "ocr text" for r in results)
+    with pytest.raises(LayoutUnavailableError, match="read no text"):
+        extract_layout_text(str(tmp_path / "x.pdf"), doc_id="d")
 
 
-def test_ocr_pages_result_positions_align_with_input(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_layout_extract_allows_no_text_when_reading_is_disabled(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Result list order must match the order of ``page_indices`` exactly."""
-    page_texts = ["A", "B", "C", "D", "E"]
-    pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-    doc: Any = pymupdf.open(str(pdf_path))
+    """Disabling text reading is an explicit choice, not a defect."""
+    _stub_layout(monkeypatch, [_empty_page()])
 
-    requested_indices = [4, 1, 3]
-
-    def fake_extract(image_bytes: bytes, _config: dict | None, **_kwargs) -> OCRResult:
-        return OCRResult(text="aligned")
-
-    monkeypatch.setattr("mbforge.backends.ocr.extract_text_with_chain", fake_extract)
-    monkeypatch.setattr(
-        "mbforge.backends.ocr.build_backends",
-        lambda _config: [SimpleNamespace(name="fake-cloud")],
+    extracted = extract_layout_text(
+        str(tmp_path / "x.pdf"), doc_id="d", layout_config={"read_text": False}
     )
 
-    try:
-        results = _ocr_pages(doc, requested_indices, ocr_config={})
-    finally:
-        doc.close()
-
-    assert results == ["aligned", "aligned", "aligned"]
-
-
-def test_ocr_pages_does_not_retry_empty_page_results(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Page-level retries stay disabled because the backend owns retries."""
-    page_texts = ["A", "B", "C"]
-    pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-    doc: Any = pymupdf.open(str(pdf_path))
-
-    requested_indices = [0, 1, 2]
-    calls: list[int] = []
-
-    def fake_extract(image_bytes: bytes, _config: dict | None, **_kwargs) -> OCRResult:
-        calls.append(len(calls))
-        if len(calls) == 2:
-            return OCRResult(text="", error="empty")
-        return OCRResult(text=f"page-{len(calls)}")
-
-    monkeypatch.setattr("mbforge.backends.ocr.extract_text_with_chain", fake_extract)
-    monkeypatch.setattr(
-        "mbforge.backends.ocr.build_backends",
-        lambda _config: [SimpleNamespace(name="fake-cloud")],
-    )
-
-    try:
-        with pytest.raises(
-            OCRUnavailableError, match="page 2 yielded no OCR text after 1 attempts"
-        ):
-            _ocr_pages(doc, requested_indices, ocr_config={})
-    finally:
-        doc.close()
-
-    assert len(calls) == 3
-
-
-def test_extract_pdf_text_preserves_ocr_page_order(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Full OCR results are assembled in the original PDF page order."""
-    pdf_path = tmp_path / "mixed.pdf"
-    doc = pymupdf.open()
-    for _ in range(3):
-        doc.new_page(width=612, height=792)
-    doc.save(str(pdf_path))
-    doc.close()
-
-    monkeypatch.setattr(
-        "mbforge.pipeline.extract.text._ocr_pages",
-        lambda *_args, **_kwargs: [
-            "ocr first page",
-            "ocr middle page",
-            "ocr last page",
-        ],
-    )
-    extracted = extract_pdf_text(str(pdf_path))
-
-    assert (
-        extracted.raw_text.index("ocr first")
-        < extracted.raw_text.index("ocr middle")
-        < extracted.raw_text.index("ocr last")
-    )
-    assert extracted.parser == "ocr"
-
-
-def test_ocr_pages_uses_chain_backends_per_page(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Each scanned page is OCR'd through the chain's configured backends."""
-    pdf_path = _make_pdf_with_pages(tmp_path, ["", ""])
-    doc: Any = pymupdf.open(str(pdf_path))
-    chain_calls: list[list[str]] = []
-
-    class _Paddle:
-        name = "paddleocr"
-
-    monkeypatch.setattr(
-        "mbforge.backends.ocr.build_backends",
-        lambda _config: [_Paddle()],
-    )
-
-    def fake_chain(_image: bytes, _config: dict | None, **kwargs: Any) -> OCRResult:
-        backends = kwargs["backends"]
-        chain_calls.append([backend.name for backend in backends])
-        return OCRResult(text="paddle text", backend="paddleocr")
-
-    monkeypatch.setattr("mbforge.backends.ocr.extract_text_with_chain", fake_chain)
-
-    try:
-        results = _ocr_pages(doc, [0, 1])
-    finally:
-        doc.close()
-
-    assert results == ["paddle text", "paddle text"]
-    assert chain_calls == [["paddleocr"], ["paddleocr"]]
-
-
-def _cached_document(library_root: Path, doc_id: str, page_texts: list[str]) -> Any:
-    """Build a Document whose extraction cache mirrors page_texts."""
-    from mbforge.core.document import Document
-
-    doc = Document(
-        doc_id=doc_id,
-        library_root=library_root,
-        title="cached",
-        file_name="source.pdf",
-        page_count=len(page_texts),
-    )
-    doc._page_texts = list(page_texts)
-    doc._page_spans = [
-        [{"text": t, "bbox": [0.0, 0.0, 100.0, 20.0], "block_type": 0}]
-        for t in page_texts
-    ]
-    return doc
-
-
-def _fake_ocr_pages(calls: list[list[int]]) -> Any:
-    """Return an _ocr_pages stand-in recording requested page indices."""
-
-    def fake(
-        _pdf,
-        page_indices: list[int],
-        ocr_config: dict | None = None,
-        cancel_check=None,
-        metrics: dict[int, Any] | None = None,
-    ) -> list[str]:
-        calls.append(list(page_indices))
-        results: list[str] = []
-        for idx in page_indices:
-            text = f"ocr page {idx + 1}"
-            results.append(text)
-            if metrics is not None:
-                metrics[idx] = OCRResult(
-                    text=text,
-                    backend="fake-cloud",
-                    chain_attempts=1,
-                    elapsed_ms=5,
-                )
-        return results
-
-    return fake
-
-
-def test_extract_document_text_uses_full_ocr_for_cached_document(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A Document cache is not a pipeline evidence source under OCR-only."""
-    page_texts = [
-        "native first page with enough text" * 3,
-        "",
-        "native last page with enough text" * 3,
-    ]
-    pdf_path = _make_pdf_with_pages(tmp_path, page_texts)
-    doc = _cached_document(tmp_path, "mixed-cached", page_texts)
-
-    calls: list[list[int]] = []
-    monkeypatch.setattr(
-        "mbforge.pipeline.extract.text._ocr_pages", _fake_ocr_pages(calls)
-    )
-
-    extracted = extract_document_text(doc, str(pdf_path), ocr_config={})
-
-    assert calls == [[0, 1, 2]]
-    assert [p.text for p in extracted.pages] == [
-        "ocr page 1",
-        "ocr page 2",
-        "ocr page 3",
-    ]
-    assert extracted.parser == "ocr"
-    assert extracted.ocr_stats["pages_requested"] == 3
-    assert extracted.ocr_stats["pages_succeeded"] == 3
-    assert extracted.ocr_stats["backend_counts"] == {"fake-cloud": 3}
-
-
-def test_extract_document_text_delegates_to_full_extraction_without_document(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The optional Document argument does not alter the full OCR path."""
-    from mbforge.pipeline.extract.text import ExtractedDocument
-
-    calls: list[tuple[Any, Any]] = []
-
-    def fake_extract_pdf_text(pdf_path: str, **kwargs: Any) -> ExtractedDocument:
-        calls.append((pdf_path, kwargs.get("ocr_config")))
-        return ExtractedDocument(raw_text="full fallback", page_count=1)
-
-    monkeypatch.setattr(
-        "mbforge.pipeline.extract.text.extract_pdf_text", fake_extract_pdf_text
-    )
-
-    extracted = extract_document_text(
-        None, str(tmp_path / "missing.pdf"), ocr_config={"paddleocr_api_key": "k"}
-    )
-
-    assert calls == [(str(tmp_path / "missing.pdf"), {"paddleocr_api_key": "k"})]
-    assert extracted.raw_text == "full fallback"
+    assert extracted.raw_text == ""
+    assert extracted.parser == "layout"
 
 
 # --- Title extraction (WIPO bibliographic first pages) ---

@@ -20,7 +20,7 @@ def client() -> TestClient:
     Models are loaded lazily; no startup pre-warming to patch.
     """
     # Patch heavy startup routine before importing the app.
-    import mbforge.infra.environment as _environment
+    import mbforge.adapters.runtime.environment as _environment
 
     _orig_check_environment = getattr(_environment, "check_environment", lambda: None)
 
@@ -29,7 +29,7 @@ def client() -> TestClient:
 
     _environment.check_environment = _noop
 
-    from mbforge.infra.ingest import worker
+    from mbforge.adapters.runtime.ingest import worker
 
     _orig_ensure = worker.ensure_queue_worker
     worker.ensure_queue_worker = lambda _root: True  # type: ignore[assignment]
@@ -76,8 +76,6 @@ ROUTES: list[tuple[str, str, dict | None, tuple[int, ...]]] = [
     ("POST", "/api/v1/pdf/document-overlay", {}, (200, 422)),
     # sar
     ("POST", "/api/v1/sar/build-matrix", {}, (200,)),
-    # ocr
-    ("GET", "/api/v1/ocr/chain-status", None, (200,)),
     # diagnostics
     ("GET", "/api/v1/diagnostics/stats", None, (200,)),
     # repository documentation pages

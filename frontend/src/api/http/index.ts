@@ -5,7 +5,6 @@
  */
 
 export * from './_utils'
-export * from './text'
 export * from './pdf'
 export * from './molecule'
 export * from './environment'

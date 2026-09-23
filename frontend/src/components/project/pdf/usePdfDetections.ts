@@ -177,11 +177,6 @@ export function usePdfDetections(args: UsePdfDetectionsArgs): UsePdfDetectionsRe
     showToast('分子结构和标签已更新', 'success')
   }, [currentPage, doc.doc_id, libraryRoot, pageDetections, selectedDetection, setPageDetections])
 
-  // ``pageTextItems`` is exposed via the navigation hook so future
-  // enrichResults enhancements can read it; suppress the unused warning by
-  // reading it through the args proxy.
-  void pageTextItems
-
   return {
     pageDetections, setPageDetections,
     isDetecting, setIsDetecting,

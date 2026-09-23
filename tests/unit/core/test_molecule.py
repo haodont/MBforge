@@ -1,8 +1,8 @@
-"""Unit tests for the :class:`mbforge.core.molecule.Molecule` value object."""
+"""Unit tests for the :class:`mbforge.domain.molecule.Molecule` value object."""
 
 from __future__ import annotations
 
-from mbforge.core.molecule import Molecule
+from mbforge.domain.molecule import Molecule
 
 # ---------------------------------------------------------------------------
 # Construction

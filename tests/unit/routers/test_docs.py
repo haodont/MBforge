@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from mbforge.routers.documents import project_docs as docs
+from mbforge.interfaces.http.documents import project_docs as docs
 
 
 def test_list_wiki_pages_returns_sorted_titles(tmp_path, monkeypatch) -> None:

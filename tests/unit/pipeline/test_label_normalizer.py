@@ -9,14 +9,14 @@ The extractor upstream produces labels in many OCR-derived forms:
 
 Downstream persistence must read a single stable shape
 ``raw_coref_label`` / ``normalized_label`` / ``label_kind``. The
-mapping lives in ``mbforge.pipeline.detection.label_normalization``.
+mapping lives in ``mbforge.application.pipeline.detection.label_normalization``.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from mbforge.pipeline.detection.label_normalization import (
+from mbforge.application.pipeline.detection.label_normalization import (
     LABEL_KINDS,
     LabelKind,
     NormalizedLabel,

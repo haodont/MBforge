@@ -6,8 +6,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from mbforge.models.detection_cache import DetectionInput
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.dto.detection_cache import DetectionInput
 
 
 def _seed_detection(library_root: Path, doc_id: str = "doc1", page: int = 1) -> None:

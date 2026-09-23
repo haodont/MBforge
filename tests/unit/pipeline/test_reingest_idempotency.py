@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.services.documents.library import LibraryStore
-from mbforge.storage.layout import LibraryLayout
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.use_cases.documents.library import LibraryStore
+from mbforge.foundation.layout import LibraryLayout
 
 
 def test_clear_pipeline_data_removes_molecule_detections(

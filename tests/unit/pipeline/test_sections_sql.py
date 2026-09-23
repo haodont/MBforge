@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.evidence import SourceEvidence
-from mbforge.pipeline.patent.sections import parse_source_evidence_sections
+from mbforge.application.pipeline.patent.sections import parse_source_evidence_sections
+from mbforge.domain.evidence import SourceEvidence
 
 DOC = "doc-sections"
 

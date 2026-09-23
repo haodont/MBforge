@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from PIL import Image
 
-from mbforge.backends.ocr import crop_labels
-from mbforge.backends.ocr.crop_labels import (
+from mbforge.adapters.inference.ocr import crop_labels
+from mbforge.adapters.inference.ocr.crop_labels import (
     extract_label_reads,
     filter_label_texts,
 )

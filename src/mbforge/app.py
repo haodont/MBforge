@@ -19,15 +19,15 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .utils.errors import MBForgeError
-from .utils.logger import (
+from mbforge.foundation.errors import MBForgeError
+from mbforge.foundation.logger import (
     configure_uvicorn_access_logging,
     get_logger,
     push_diagnostic,
     reset_request_path,
     set_request_path,
 )
-from .utils.paths import APP_VERSION
+from mbforge.foundation.paths import APP_VERSION
 
 logger = get_logger("mbforge.app")
 
@@ -103,22 +103,22 @@ async def lifespan(app: FastAPI):
 
     # Start the durable queue worker for the configured library so rows
     # orphaned by a previous crash/restart are reclaimed and drained.
-    from .infra.ingest import worker
-    from .utils.config import load_global_config
+    from mbforge.adapters.runtime.ingest import worker
+    from mbforge.foundation.config import load_global_config
 
     cfg = load_global_config()
     port = int(os.environ.get("MBFORGE_PORT", "18792"))
 
     # Register this process and sweep stale entries
     if cfg.library_root:
-        from .storage.sqlite.database import DatabaseManager
+        from mbforge.adapters.persistence.sqlite.database import DatabaseManager
 
         # The queue worker assumes the unified database schema already exists.
         # Initialize it before scheduling the worker so a newly created or
         # previously empty library.db cannot reach the reclaim query first.
         DatabaseManager.get(cfg.library_root).initialize()
 
-        from .infra.process import ProcessRegistry, find_orphans, reap
+        from mbforge.adapters.runtime.process import ProcessRegistry, find_orphans, reap
 
         registry = ProcessRegistry.get(cfg.library_root)
         registry.register("server", port=port)
@@ -141,7 +141,7 @@ async def lifespan(app: FastAPI):
 
     prewarm_task: asyncio.Task[dict[str, str]] | None = None
     if os.environ.get("MBFORGE_PREWARM_MODELS") == "1":
-        from .backends.prewarm import prewarm_models
+        from mbforge.adapters.inference.prewarm import prewarm_models
 
         # Fire-and-forget: prewarm must not delay first-request handling.
         prewarm_task = asyncio.create_task(asyncio.to_thread(prewarm_models))
@@ -157,7 +157,7 @@ async def lifespan(app: FastAPI):
             prewarm_task.cancel()
 
         # Ordered shutdown: workers → executor drain → backends → registry
-        from .infra.process import orchestrate_shutdown
+        from mbforge.adapters.runtime.process import orchestrate_shutdown
 
         await orchestrate_shutdown(timeout=30.0)
 
@@ -303,6 +303,18 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
         False). Tests can pass an explicit value to opt in/out without
         touching process-wide state.
     """
+    # The composition root is the only place that selects persistence
+    # implementations.  Application code consumes the repository port and
+    # never constructs DatabaseManager itself.
+    from mbforge.adapters.persistence.sqlite.repositories import create_repositories
+    from mbforge.adapters.runtime.provider import create_runtime_provider
+    from mbforge.application.ports import (
+        configure_repository_factory,
+        configure_runtime_provider,
+    )
+
+    configure_repository_factory(create_repositories)
+    configure_runtime_provider(create_runtime_provider())
     configure_uvicorn_access_logging()
     app = FastAPI(
         title="MBForge",
@@ -329,8 +341,8 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.middleware("http")(_request_path_middleware)
 
     # Register all routers
-    from .routers import agent, markush, review
-    from .routers.documents import (
+    from mbforge.interfaces.http import agent, markush, review
+    from mbforge.interfaces.http.documents import (
         activity,
         documents,
         library,
@@ -338,23 +350,22 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
         pdf,
         pdf_render,
     )
-    from .routers.documents import (
+    from mbforge.interfaces.http.documents import (
         project_docs as docs_router,
     )
-    from .routers.molecule import (
+    from mbforge.interfaces.http.molecule import (
         chem,
         moldet,
         molecule,
         molparser,
         sar,
     )
-    from .routers.pipeline import detection_cache, pipeline
-    from .routers.system import (
+    from mbforge.interfaces.http.pipeline import detection_cache, pipeline
+    from mbforge.interfaces.http.system import (
         diagnostics,
         events,
         health,
         models,
-        ocr,
         readiness,
         resource,
         settings,
@@ -387,7 +398,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.include_router(markush.router, prefix="/api/v1/markush", tags=["markush"])
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
     app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent-tools"])
-    app.include_router(ocr.router, prefix="/api/v1/ocr", tags=["ocr"])
     app.include_router(
         diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"]
     )

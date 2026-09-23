@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CheckIcon } from '../icons'
 
@@ -64,12 +64,12 @@ export default function Menu({
   const open = isControlled ? controlledOpen : internalOpen
   const rootRef = useRef<HTMLDivElement>(null)
 
-  const setOpen = (next: boolean) => {
+  const setOpen = useCallback((next: boolean) => {
     if (!isControlled) setInternalOpen(next)
     onOpenChange?.(next)
-  }
-  const toggle = () => setOpen(!open)
-  const close = () => setOpen(false)
+  }, [isControlled, onOpenChange])
+  const toggle = useCallback(() => setOpen(!open), [open, setOpen])
+  const close = useCallback(() => setOpen(false), [setOpen])
 
   useEffect(() => {
     if (!open) return
@@ -85,7 +85,7 @@ export default function Menu({
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [open])
+  }, [close, open])
 
   const handleItem = (item: MenuActionItem) => {
     close()

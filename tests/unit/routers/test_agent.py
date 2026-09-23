@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from mbforge.app import create_app
-from mbforge.routers import agent
+from mbforge.interfaces.http import agent
 
 
 def test_agent_molecule_tool_resolves_library_server_side(monkeypatch) -> None:
@@ -25,9 +25,7 @@ def test_agent_molecule_tool_resolves_library_server_side(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["results"] == [
-        {"mol_id": "M-1", "canonical_smiles": "CCO"}
-    ]
+    assert response.json()["results"] == [{"mol_id": "M-1", "canonical_smiles": "CCO"}]
     assert captured == {
         "root": "C:/library",
         "query": "ethanol",

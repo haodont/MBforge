@@ -94,17 +94,11 @@ const LOADED_SETTINGS = {
     language: 'en',
   },
   vlm: { provider: '', base_url: '', api_key: '', model: '' },
-  ocr: {
-    priority: [],
-    provider: '',
-    base_url: '',
-    api_key: '',
-    model: '',
-    use_hf_mirror: false,
-    use_pdf_inspector: false,
-    paddleocr_api_key: null,
-    paddleocr_host: null,
-    paddleocr_model: null,
+  layout: {
+    conf_threshold: 0.4,
+    read_text: true,
+    cross_model: true,
+    max_pages_per_doc: null,
   },
   model_server: { host: '127.0.0.1', port: 18791, auto_start: true, startup_timeout: 30 },
   pipeline: {

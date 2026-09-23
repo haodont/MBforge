@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.storage.sqlite.database import DatabaseManager, record_ingest_event
+from mbforge.adapters.persistence.sqlite.database import (
+    DatabaseManager,
+    record_ingest_event,
+)
 
 
 def test_database_initializes_schema(tmp_path: Path) -> None:

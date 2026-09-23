@@ -6,18 +6,18 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from mbforge.core.molecule import Molecule
-from mbforge.core.types import ExtractionResult
-from mbforge.pipeline.artifacts import (
+from mbforge.adapters.persistence.source_evidence import persist_source_evidence
+from mbforge.application.pipeline.artifacts import (
     build_detection_artifact,
     build_extract_artifact,
     join_evidence_artifacts,
     save_detection_branch,
     save_extract_branch,
 )
-from mbforge.pipeline.artifacts.evidence_models import PageFrame
-from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.storage.source_evidence import persist_source_evidence
+from mbforge.application.pipeline.artifacts.evidence_models import PageFrame
+from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import ExtractionResult
 
 
 def publish_v2_run(

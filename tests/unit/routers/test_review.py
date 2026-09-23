@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from mbforge.services.review_queue import insert_review_item
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.use_cases.review_queue import insert_review_item
 
 
 def test_review_queue_stats_and_batch_decision(

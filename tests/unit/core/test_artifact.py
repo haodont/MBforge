@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.storage.layout import InvalidDocIdError, LibraryLayout
+from mbforge.foundation.layout import InvalidDocIdError, LibraryLayout
 
 
 def test_storage_dir_rejects_invalid_doc_id(tmp_path: Path) -> None:

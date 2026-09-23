@@ -94,7 +94,7 @@ const OcrOverlay = memo(function OcrOverlay({
         const isSelected = selectedIndex === box.index
         const isHovered = hoveredIdx === box.index
         const color = blockTypeColor(box.block.block_type)
-        const label = blockTypeLabel(box.block.block_type, t)
+        const label = box.block.kind || blockTypeLabel(box.block.block_type, t)
 
         return (
           <div

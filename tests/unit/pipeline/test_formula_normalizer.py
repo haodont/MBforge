@@ -1,4 +1,6 @@
-from mbforge.pipeline.detection.formula_normalization import normalize_patent_formulas
+from mbforge.application.pipeline.detection.formula_normalization import (
+    normalize_patent_formulas,
+)
 
 
 def test_normalize_patent_formulas_repairs_ocr_notation() -> None:

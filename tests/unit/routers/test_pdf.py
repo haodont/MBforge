@@ -4,9 +4,9 @@ import asyncio
 
 import pytest
 
-from mbforge.models.pdf import PdfDocumentOverlayRequest
-from mbforge.routers.documents.pdf import document_overlay
-from mbforge.storage.layout import InvalidPathError
+from mbforge.application.dto.pdf import PdfDocumentOverlayRequest
+from mbforge.foundation.layout import InvalidPathError
+from mbforge.interfaces.http.documents.pdf import document_overlay
 
 
 def test_document_overlay_returns_empty_payload(tmp_path) -> None:

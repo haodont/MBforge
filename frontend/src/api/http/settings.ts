@@ -24,14 +24,12 @@ export interface VlmConfig {
   model?: string
 }
 
-export interface OcrConfig {
-  priority?: string[]
-  paddleocr_api_key?: string | null
-  paddleocr_host?: string | null
-  paddleocr_model?: string | null
-  glmocr_api_key?: string | null
-  glmocr_base_url?: string | null
-  glmocr_model?: string | null
+export interface LayoutConfig {
+  conf_threshold?: number
+  read_text?: boolean
+  cross_model?: boolean
+  read_tables?: boolean
+  max_pages_per_doc?: number | null
 }
 
 export interface ModelServerConfig {
@@ -47,7 +45,7 @@ export interface AppSettings {
   language?: string
   llm?: LlmConfig
   vlm?: VlmConfig
-  ocr?: OcrConfig
+  layout?: LayoutConfig
   model_server?: ModelServerConfig
   model_cache_dir?: string
   pdf_parse?: PdfParseConfig

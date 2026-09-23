@@ -3,7 +3,7 @@
 // Single source of truth: every section reads and writes the same
 // `SettingsState` so saving never drops or misroutes a field.
 // `DEFAULT_SETTINGS` stays aligned with the backend `AppConfig` Pydantic
-// schema (see `src/mbforge/utils/config.py`).
+// schema (see `src/mbforge/foundation/config.py`).
 
 import type { AppSettings } from '../../api/http/settings'
 
@@ -35,16 +35,13 @@ export interface SettingsState {
   vlm_api_key: string
   vlm_model: string
 
-  // —— OCR ——
-  ocr_priority: string[]
-
-  // —— OCR cloud backends (per-backend: key + endpoint + model) ——
-  ocr_paddleocr_api_key: string
-  ocr_paddleocr_host: string
-  ocr_paddleocr_model: string
-  ocr_glmocr_api_key: string
-  ocr_glmocr_base_url: string
-  ocr_glmocr_model: string
+  // —— Local layout producer (text + regions) ——
+  /** Detector confidence threshold for layout regions. */
+  layout_conf_threshold: number
+  /** Read region text locally; without it text regions carry no content. */
+  layout_read_text: boolean
+  /** Run MolDet on the same render so a figure region can be typed as one molecule. */
+  layout_cross_model: boolean
 
   // —— Model Service ——
   server_host: string
@@ -109,14 +106,9 @@ export const DEFAULT_SETTINGS: SettingsState = {
   vlm_api_key: '',
   vlm_model: '',
 
-  ocr_priority: ['paddleocr'],
-
-  ocr_paddleocr_api_key: '',
-  ocr_paddleocr_host: '',
-  ocr_paddleocr_model: 'PaddleOCR-VL-1.6',
-  ocr_glmocr_api_key: '',
-  ocr_glmocr_base_url: '',
-  ocr_glmocr_model: 'glm-ocr',
+  layout_conf_threshold: 0.4,
+  layout_read_text: true,
+  layout_cross_model: true,
 
   server_host: '127.0.0.1',
   server_port: 18792,
@@ -164,7 +156,7 @@ export function flattenSettings(raw: AppSettings | null | undefined): SettingsSt
   const s: AppSettings = raw ?? {}
   const llm = s.llm ?? {}
   const vlm = s.vlm ?? {}
-  const ocr = s.ocr ?? {}
+  const layout = s.layout ?? {}
   const ms = s.model_server ?? {}
   return {
     theme: (s.theme as SettingsState['theme'] | undefined) || DEFAULT_SETTINGS.theme,
@@ -194,15 +186,12 @@ export function flattenSettings(raw: AppSettings | null | undefined): SettingsSt
     vlm_api_key: vlm.api_key || DEFAULT_SETTINGS.vlm_api_key,
     vlm_model: vlm.model || DEFAULT_SETTINGS.vlm_model,
 
-    ocr_priority: Array.isArray(ocr.priority) && ocr.priority.length > 0
-      ? ocr.priority
-      : DEFAULT_SETTINGS.ocr_priority,
-    ocr_paddleocr_api_key: ocr.paddleocr_api_key || DEFAULT_SETTINGS.ocr_paddleocr_api_key,
-    ocr_paddleocr_host: ocr.paddleocr_host || DEFAULT_SETTINGS.ocr_paddleocr_host,
-    ocr_paddleocr_model: ocr.paddleocr_model || DEFAULT_SETTINGS.ocr_paddleocr_model,
-    ocr_glmocr_api_key: ocr.glmocr_api_key || DEFAULT_SETTINGS.ocr_glmocr_api_key,
-    ocr_glmocr_base_url: ocr.glmocr_base_url || DEFAULT_SETTINGS.ocr_glmocr_base_url,
-    ocr_glmocr_model: ocr.glmocr_model || DEFAULT_SETTINGS.ocr_glmocr_model,
+    layout_conf_threshold:
+      typeof layout.conf_threshold === 'number'
+        ? layout.conf_threshold
+        : DEFAULT_SETTINGS.layout_conf_threshold,
+    layout_read_text: layout.read_text !== false,
+    layout_cross_model: layout.cross_model !== false,
 
     server_host: ms.host || DEFAULT_SETTINGS.server_host,
     server_port: ms.port || DEFAULT_SETTINGS.server_port,
@@ -281,19 +270,10 @@ export function toBackendPayload(s: SettingsState): Record<string, unknown> {
       api_key: s.vlm_api_key,
       model: s.vlm_model,
     },
-    ocr: {
-      priority: s.ocr_priority,
-      // Pass the value through verbatim (no empty-string fallback): the
-      // backend uses the "***" sentinel returned by GET to preserve
-      // a stored secret, and an empty string to clear it. Forcing an
-      // empty string here collapses "user has never set this" with
-      // "user explicitly cleared this" and loses the sentinel.
-      paddleocr_api_key: s.ocr_paddleocr_api_key,
-      paddleocr_host: s.ocr_paddleocr_host,
-      paddleocr_model: s.ocr_paddleocr_model,
-      glmocr_api_key: s.ocr_glmocr_api_key,
-      glmocr_base_url: s.ocr_glmocr_base_url,
-      glmocr_model: s.ocr_glmocr_model,
+    layout: {
+      conf_threshold: s.layout_conf_threshold,
+      read_text: s.layout_read_text,
+      cross_model: s.layout_cross_model,
     },
     model_server: {
       host: s.server_host,

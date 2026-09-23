@@ -8,6 +8,8 @@ export interface OcrBlock {
   evidence_id: string
   page: number
   block_type: string
+  /** Original producer label (for example `bib` or `noise`). */
+  kind?: string
   bbox: [number, number, number, number]
   content: string | null
   index: number

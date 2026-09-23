@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from PIL import Image
 
-from mbforge.backends import molparser as molparser_module
-from mbforge.backends.molparser import predict, predict_batch
+from mbforge.adapters.inference import molparser as molparser_module
+from mbforge.adapters.inference.molparser import predict, predict_batch
 
 
 @pytest.fixture

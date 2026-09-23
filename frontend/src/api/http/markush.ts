@@ -4,7 +4,7 @@ import { httpPost, invokeWithError } from './_utils'
 import { ErrorCode } from '@/utils/errors'
 
 // ============================================================================
-// Types — mirror src/mbforge/models/markush.py
+// Types — mirror src/mbforge/application/dto/markush.py
 // ============================================================================
 
 export type RecognizedRole = 'complete' | 'scaffold' | 'fragment' | 'review_required'

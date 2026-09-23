@@ -12,12 +12,15 @@ the active path, and Persist remains unregistered pending redesign.
 ## Active plans
 
 - [Source layout reorganization](../docs/plan-source-layout-reorganization.md)
+- [SLANet-1M as table parser on the Hiro-Layout path](../docs/plan-slanet-1m-table-parser.md)
+- [Backend architecture](../docs/wiki/architecture.md)
+- [Pipeline contract](../docs/wiki/pipeline.md)
 
 ## Conventions
 
 - Treat `docs/wiki/pipeline.md` as the per-stage contract.
 - Keep raw branch data and SQL source evidence separate from the shared
-  `core.entities.molecule.Molecule` entity and inferred facts.
+  `domain.molecule.Molecule` entity and inferred facts.
 - `Molecule` is the only structure-bearing molecule domain object across
   detection normalization, correction, Markush handling, hydration, query,
   and future persistence. `ExtractionResult`/`DetectionSource` remain raw

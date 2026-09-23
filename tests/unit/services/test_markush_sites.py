@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from mbforge.core.markush import MarkushSiteError
-from mbforge.services.markush.sites import (
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.use_cases.markush.sites import (
     create_mount,
     create_option,
     create_site,
@@ -17,7 +17,7 @@ from mbforge.services.markush.sites import (
     list_sites,
     update_site,
 )
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.domain.markush import MarkushSiteError
 
 
 @pytest.fixture

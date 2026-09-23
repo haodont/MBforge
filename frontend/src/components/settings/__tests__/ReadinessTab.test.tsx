@@ -77,7 +77,7 @@ function makeSummary(overrides: Partial<ReadinessSummary> = {}): ReadinessSummar
       base_url: 'https://api.openai.com/v1',
       has_api_key: true,
     },
-    ocr: { chain: ['paddleocr'], error: null },
+    ocr: { chain: ['hiro-layout'], error: null },
     ...overrides,
   }
 }

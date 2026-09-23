@@ -38,7 +38,7 @@ export const MOL_CARD_HEIGHT = 120
  *
  * 坐标语义：PDF text item.y 是 PDF bottom-left origin 的 baseline；OcrBlock.bbox
  * 是 backend 已做 top-left → bottom-left 翻转后的 PDF points bottom-left origin
- * （见 services/documents/pdf_layout.py 的坐标翻转契约）。
+ * （见 application/use_cases/documents/pdf_layout.py 的坐标翻转契约）。
  */
 export function groupTextLines(
   items: TextItem[],

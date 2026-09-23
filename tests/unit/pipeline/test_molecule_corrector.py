@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from mbforge.core.molecule import Molecule
-from mbforge.pipeline.detection.correction import (
+from mbforge.application.pipeline.detection.correction import (
     check_markush_consistency,
     correct_molecules_with_context,
     correct_rgroup_misread,
     verify_element_consistency,
     verify_name_substructure,
 )
+from mbforge.domain.molecule import Molecule
 
 
 def _make_molecule(

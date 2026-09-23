@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mbforge.infra import resource_manager as rm
-from mbforge.infra.resource_manager import ResourceManager, ResourceStatus
+from mbforge.adapters.runtime import resource_manager as rm
+from mbforge.adapters.runtime.resource_manager import ResourceManager, ResourceStatus
 
 _FILES = ("moldet_v2_yolo26n_960_doc.pt", "moldet_v2_yolo26n_640_general.pt")
 
@@ -16,7 +16,7 @@ def _no_bundled_assets(monkeypatch, tmp_path: Path) -> None:
     # with resource_manager during collection); resource_manager already
     # imports model_locator at module load, so the attribute is resolvable.
     monkeypatch.setattr(
-        "mbforge.infra.model_locator._project_assets_dir",
+        "mbforge.adapters.runtime.model_locator._project_assets_dir",
         lambda: tmp_path / "no-assets",
     )
 

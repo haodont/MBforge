@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from mbforge.pipeline.activity.family_gate import derive_family_core
-from mbforge.pipeline.detection.label_recovery import recover_labels_from_ms
+from mbforge.application.pipeline.activity.family_gate import derive_family_core
+from mbforge.application.pipeline.detection.label_recovery import recover_labels_from_ms
 
 SCAFFOLD_1 = (
     "*CC1(C*)CC(NC(=O)c2c([8*])nn([9*])c2[7*])CC(Nc2cc(C(F)(F)F)nc3ccc(Cl)cc23)C1"

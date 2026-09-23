@@ -1,6 +1,7 @@
 /** Library API — unified document library. */
 
 import { apiUrl, httpGet, httpGetText, httpPost, httpFetch, invokeWithError } from './_utils'
+import { AppError, ErrorCode } from '@/utils/errors'
 
 // ── Types ───────────────────────────────────────────
 
@@ -139,21 +140,24 @@ export async function importDocument(
   if (title) fd.append('title', title)
 
   const resp = onProgress && typeof XMLHttpRequest !== 'undefined'
-    ? await new Promise<{ success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string }>((resolve, reject) => {
+    ? await new Promise<{ success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string; error_code?: string }>((resolve, reject) => {
         const request = new XMLHttpRequest()
         request.open('POST', apiUrl('/library/import'))
         request.upload.onprogress = (event) => {
           if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100))
         }
         request.onload = () => {
-          let body: { success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string } | null
+          let body: { success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string; error_code?: string } | null
           try {
-            body = JSON.parse(request.responseText) as { success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string }
+            body = JSON.parse(request.responseText) as { success: boolean; document?: DocumentInfo; run_id?: string; error?: string; detail?: string; error_code?: string }
           } catch {
             body = null
           }
           if (request.status >= 400) {
-            reject(new Error(body?.error ?? body?.detail ?? `Import failed (HTTP ${request.status})`))
+            const message = body?.error ?? body?.detail ?? `Import failed (HTTP ${request.status})`
+            reject(body?.error_code === 'duplicate_filename'
+              ? new AppError(ErrorCode.ApiError, message, { context: { backend_code: body.error_code } })
+              : new Error(message))
             return
           }
           if (body === null) {

@@ -7,13 +7,16 @@ FastAPI backend.
 
 ## Current scope
 
-- PDF pipeline: Extract ∥ Detection → Markdown → Patent. Extract and Detection independently collect page evidence; Patent reads SQL `SourceEvidence`, publishes one facts artifact, and performs deterministic document-local associations. Link has been removed from the active path; Persist remains unregistered for a later redesign. See `docs/wiki/pipeline.md` for the canonical stage contract.
+- PDF pipeline: Extract ∥ Detection → Markdown → Patent. Extract and Detection independently collect page evidence; Patent reads SQL `SourceEvidence`, publishes one facts artifact, and performs deterministic document-local associations. Link has been removed from the active path; Persist remains unregistered for a later redesign.
 - Molecule detection and recognition with MolDetv2-YOLO26, MolParser-Mobile
-  (E-SMILES), RDKit, and MoleCode; scanned-page OCR runs through the cloud-only
-  PaddleOCR backend.
+  (E-SMILES), RDKit, and MoleCode; page layout and text recognition run entirely
+  locally (Hiro-Layout + RapidOCR) — no cloud OCR service is called.
 - Local storage per library: SQLite business data and document artifacts; no
   third-party knowledge-index runtime is required.
 - Knowledge-base search, molecule search, evidence review, and activity data.
+- Workspace document import accepts multiple PDFs at once, rejects duplicate
+  filenames, and reports partial failures; documents can be selected, queued, or
+  deleted in bulk.
 
 The project is a research baseline. Recognition and extracted data require
 human review; model loading can take several seconds on the first request.
@@ -22,7 +25,7 @@ scope. Track active work in [TODO/INDEX.md](TODO/INDEX.md).
 
 ## Requirements
 
-Python 3.12, [uv](https://github.com/astral-sh/uv), Node.js 20.19+ and npm.
+Python 3.12, [uv](https://github.com/astral-sh/uv), Node.js 24.14.1+ and npm.
 GPU is optional, but required by local MolDet/MolParser inference. Business
 settings are stored in `~/MBForge/settings.json`; the default library root is
 `~/MBForge`.
@@ -49,7 +52,8 @@ Heavy models are downloaded at runtime by `ResourceManager` (ModelScope) into
   repository, so a fresh clone has a working patent-aware detector out of
   the box. To use it as the active detector, copy it over the runtime model:
   `cp assets/models/moldetv2_structure_ft.pt ~/MBForge/models/MolDetv2/moldet_v2_yolo26n_960_doc.pt`
-  (or point `DEFAULT_SUBPATH` in `src/mbforge/backends/moldet_v2_ft.py` at it).
+  (or point `DEFAULT_SUBPATH` in `src/mbforge/adapters/inference/moldet_v2_ft.py`
+  at it).
 
 ## Quick start
 

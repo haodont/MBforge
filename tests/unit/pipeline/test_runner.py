@@ -13,16 +13,30 @@ from unittest.mock import patch
 
 import pytest
 
-from mbforge.core.stage import PipelineErrorCode, StageResult
-from mbforge.core.types import ExtractionResult
-from mbforge.pipeline.runner import PipelineResult, run_pipeline
+from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.application.pipeline.runner import PipelineResult, run_pipeline
+from mbforge.application.pipeline.stage import PipelineErrorCode, StageResult
+from mbforge.domain.types import ExtractionResult
 
 RUN_ID = "20260909123456"
 
 
+def _fake_layout_extract(*_args: Any, **_kwargs: Any) -> ExtractedDocument:
+    """Stand-in for ``extract_layout_text`` over the 2-page ``sample_pdf``."""
+    return ExtractedDocument(
+        raw_text="page one text\n\npage two text",
+        page_count=2,
+        parser="layout",
+        pages=[
+            PageContent(page_num=1, text="page one text"),
+            PageContent(page_num=2, text="page two text"),
+        ],
+    )
+
+
 def _dag_order() -> list[str]:
     """Topological order of the stage DAG (deterministic for the fixed graph)."""
-    from mbforge.pipeline.composition import stage_dependencies
+    from mbforge.application.pipeline.composition import stage_dependencies
 
     deps = stage_dependencies()
     order: list[str] = []
@@ -61,7 +75,7 @@ def _drive_all(
 
 def test_stage_dag_shape() -> None:
     """Extract and Detection are independent roots; Join fans them in."""
-    from mbforge.pipeline.composition import stage_dependencies
+    from mbforge.application.pipeline.composition import stage_dependencies
 
     deps = stage_dependencies()
     assert deps["extract"] == ()
@@ -90,7 +104,7 @@ def test_run_pipeline_executes_only_the_named_stage(tmp_path: Path) -> None:
             return StageResult(stage="markdown", status="success", message="ok")
 
     with patch(
-        "mbforge.pipeline.runner._effective_stages",
+        "mbforge.application.pipeline.runner._effective_stages",
         return_value=[ExtractProbe(), MarkdownProbe()],
     ):
         result = run_pipeline(
@@ -129,12 +143,12 @@ def test_drive_all_nodes_persists_markdown(sample_pdf: Path, tmp_path: Path) -> 
 
     with (
         patch(
-            "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
             return_value=[],
         ),
         patch(
-            "mbforge.pipeline.extract.text._ocr_pages",
-            return_value=["ocr page 1", "ocr page 2"],
+            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            side_effect=_fake_layout_extract,
         ),
     ):
         result = _drive_all(str(sample_pdf), str(library_root), doc_id="sample_doc")
@@ -147,7 +161,7 @@ def test_join_failure_does_not_run_downstream_stages(
     sample_pdf: Path, tmp_path: Path
 ) -> None:
     """A failed Join stage aborts before Markdown/Patent run."""
-    from mbforge.pipeline.stages.markdown_stage import MarkdownStage
+    from mbforge.application.pipeline.stages.markdown_stage import MarkdownStage
 
     library_root = tmp_path / "library"
     library_root.mkdir(parents=True, exist_ok=True)
@@ -157,12 +171,15 @@ def test_join_failure_does_not_run_downstream_stages(
 
     with (
         patch(
-            "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
             return_value=[],
         ),
-        patch("mbforge.pipeline.extract.text._ocr_pages", return_value=["text"]),
         patch(
-            "mbforge.storage.source_evidence.persist_source_evidence",
+            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            side_effect=_fake_layout_extract,
+        ),
+        patch(
+            "mbforge.adapters.persistence.source_evidence.persist_source_evidence",
             side_effect=RuntimeError("sqlite unavailable"),
         ),
         patch.object(MarkdownStage, "execute", forbidden_markdown),
@@ -171,7 +188,7 @@ def test_join_failure_does_not_run_downstream_stages(
         _drive_all(str(sample_pdf), str(library_root), doc_id="join-fail")
 
     # The join stage recorded a hard error for the queue node.
-    from mbforge.pipeline.run.checkpoint import load_stage_summary
+    from mbforge.application.pipeline.run.checkpoint import load_stage_summary
 
     staging = library_root / "storage" / "join-fail" / ".staging"
     summary = load_stage_summary(staging, "join")
@@ -201,7 +218,7 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
         moldet_conf=0.9,
     )
 
-    from mbforge.pipeline.stages.detection_stage import DetectionStage
+    from mbforge.application.pipeline.stages.detection_stage import DetectionStage
 
     events: list[dict] = []
 
@@ -209,9 +226,12 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
         events.append({"stage": event.stage, "event": event.event, "data": event.data})
 
     with (
-        patch("mbforge.pipeline.extract.text._ocr_pages", return_value=[]),
         patch(
-            "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            side_effect=_fake_layout_extract,
+        ),
+        patch(
+            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
             return_value=[],
         ),
         patch.object(
@@ -225,7 +245,7 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
             },
         ),
         patch(
-            "mbforge.pipeline.artifacts.staging.publish_run",
+            "mbforge.application.pipeline.artifacts.staging.publish_run",
             side_effect=RuntimeError("disk full"),
         ),
         pytest.raises(RuntimeError, match="disk full"),
@@ -259,7 +279,8 @@ def test_progress_callback_failure_does_not_abort_stage(tmp_path: Path) -> None:
         raise OSError("stdout pipe closed")
 
     with patch(
-        "mbforge.pipeline.runner._effective_stages", return_value=[ExtractProbe()]
+        "mbforge.application.pipeline.runner._effective_stages",
+        return_value=[ExtractProbe()],
     ):
         result = run_pipeline(
             str(tmp_path / "document.pdf"),

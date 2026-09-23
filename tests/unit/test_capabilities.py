@@ -7,7 +7,7 @@ raising, so the API boots even when model/GPU features are unavailable.
 
 from __future__ import annotations
 
-from mbforge.utils.capabilities import (
+from mbforge.foundation.capabilities import (
     CapabilityProbe,
     log_capability_summary,
     probe,

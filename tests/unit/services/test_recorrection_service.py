@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.services.molecule.recorrection import (
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.use_cases.molecule.recorrection import (
     RecorrectionResult,
     _rebuild_molecule,
     recorrect_molecules,
 )
-from mbforge.storage.sqlite.database import DatabaseManager
 
 
 @pytest.fixture

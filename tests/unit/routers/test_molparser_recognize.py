@@ -9,7 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mbforge.pipeline.detection.recognition import RecognizedMolecule
+from mbforge.application.pipeline.detection.recognition import RecognizedMolecule
 
 
 def _png_base64() -> str:
@@ -22,7 +22,7 @@ def test_recognize_returns_esmiles_smiles_coref(
     app_client: TestClient,
 ) -> None:
     with patch(
-        "mbforge.routers.molecule.molparser.recognize_molecule",
+        "mbforge.interfaces.http.molecule.molparser.recognize_molecule",
         return_value=RecognizedMolecule(
             esmiles="CCO<sep>NH2",
             smiles="CCO",
@@ -46,7 +46,7 @@ def test_recognize_returns_esmiles_smiles_coref(
 
 def test_recognize_maps_molparser_failure_to_503(app_client: TestClient) -> None:
     with patch(
-        "mbforge.routers.molecule.molparser.recognize_molecule",
+        "mbforge.interfaces.http.molecule.molparser.recognize_molecule",
         return_value=RecognizedMolecule(esmiles="", smiles="", coref=[]),
     ):
         resp = app_client.post(

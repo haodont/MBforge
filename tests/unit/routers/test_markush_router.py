@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from mbforge.adapters.persistence.markush_candidates import persist_review_candidates
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
 from mbforge.app import create_app
-from mbforge.core.molecule import Molecule
-from mbforge.core.types import DetectionSource
-from mbforge.storage.markush_candidates import persist_review_candidates
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import DetectionSource
 
 
 @pytest.fixture

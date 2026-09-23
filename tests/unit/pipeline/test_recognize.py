@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from PIL import Image
 
-import mbforge.pipeline.detection.recognition as recognize_mod
-from mbforge.pipeline.detection.recognition import (
+import mbforge.application.pipeline.detection.recognition as recognize_mod
+from mbforge.application.pipeline.detection.recognition import (
     RecognizedMolecule,
     recognize_molecule,
     select_primary_coref,

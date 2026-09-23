@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 from PIL import Image
 
-from mbforge.backends import moldet_v2_ft as moldet_module
-from mbforge.backends.moldet_v2_ft import (
+from mbforge.adapters.inference import moldet_v2_ft as moldet_module
+from mbforge.adapters.inference.moldet_v2_ft import (
     MolDetv2Detector,
     detect_molecules,
     detect_molecules_batch,

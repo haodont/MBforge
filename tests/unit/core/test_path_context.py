@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mbforge.storage.layout import (
+from mbforge.foundation.layout import (
     LibraryLayout,
     LibraryPathContext,
     canonicalize_library_root,
@@ -17,7 +17,9 @@ def test_library_root_is_canonicalized_before_configured_comparison(
 ) -> None:
     root = tmp_path / "library"
     configured = SimpleNamespace(library_root=str(root))
-    monkeypatch.setattr("mbforge.storage.layout.load_global_config", lambda: configured)
+    monkeypatch.setattr(
+        "mbforge.foundation.layout.load_global_config", lambda: configured
+    )
 
     resolved = resolve_library_root(str(root / ".." / root.name))
 

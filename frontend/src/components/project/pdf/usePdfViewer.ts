@@ -104,7 +104,6 @@ export function usePdfViewer(
     currentPage: navigation.currentPage,
     currentPageDataUrl: navigation.currentPageDataUrl,
     pageInfo: navigation.pageInfo,
-    pageDetections,
     setPageDetections,
     setIsDetecting: detections.setIsDetecting,
     setSelectedDetection: detections.setSelectedDetection,

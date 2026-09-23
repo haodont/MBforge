@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from mbforge.utils.logger import (
+from mbforge.foundation.logger import (
     JsonFormatter,
     reset_trace,
     set_trace,
@@ -64,7 +64,7 @@ def test_set_trace_is_restored_after_reset() -> None:
 
 def test_push_diagnostic_preserves_trace_fields(tmp_path: Path) -> None:
     """push_diagnostic passes caller-supplied doc_id through."""
-    from mbforge.utils.logger import get_diagnostic_by_id, push_diagnostic
+    from mbforge.foundation.logger import get_diagnostic_by_id, push_diagnostic
 
     seq = push_diagnostic(
         {
@@ -82,7 +82,7 @@ def test_push_diagnostic_preserves_trace_fields(tmp_path: Path) -> None:
 def test_export_endpoint_writes_durable_json_snapshot(
     app_client: TestClient, tmp_path: Path
 ) -> None:
-    from mbforge.utils.logger import push_diagnostic
+    from mbforge.foundation.logger import push_diagnostic
 
     push_diagnostic(
         {

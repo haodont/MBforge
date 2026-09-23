@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from mbforge.core.patent import label_key_for
-from mbforge.pipeline.activity.normalization import (
+from mbforge.application.pipeline.activity.normalization import (
     canonical_value_for_legacy,
     extract_qualitative_legend,
     normalize_activity_measurement,
     normalize_activity_metric,
     normalize_reference_label,
 )
+from mbforge.domain.patent import label_key_for
 
 
 def test_pic50_is_converted_to_comparable_nm_and_preserves_raw_scale() -> None:

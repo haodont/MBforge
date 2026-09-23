@@ -6,8 +6,8 @@ import time
 import pytest
 from PIL import Image
 
-from mbforge.backends import molparser as molparser_module
-from mbforge.backends.molparser import load, predict, predict_batch
+from mbforge.adapters.inference import molparser as molparser_module
+from mbforge.adapters.inference.molparser import load, predict, predict_batch
 
 
 @pytest.fixture
@@ -98,7 +98,7 @@ def test_load_concurrent_first_call_creates_single_model(monkeypatch, _restore_s
         lambda: False,
     )
     monkeypatch.setattr(
-        "mbforge.infra.resource_manager.ResourceManager.get_molparser_path",
+        "mbforge.adapters.runtime.resource_manager.ResourceManager.get_molparser_path",
         staticmethod(lambda: "/fake/path"),
     )
 
@@ -151,11 +151,11 @@ def test_load_auto_ensures_missing_model_path(monkeypatch, _restore_state):
         return next(paths)
 
     monkeypatch.setattr(
-        "mbforge.infra.resource_manager.ResourceManager.get_molparser_path",
+        "mbforge.adapters.runtime.resource_manager.ResourceManager.get_molparser_path",
         staticmethod(_fake_path),
     )
     monkeypatch.setattr(
-        "mbforge.infra.resource_manager.ResourceManager.ensure",
+        "mbforge.adapters.runtime.resource_manager.ResourceManager.ensure",
         classmethod(
             lambda cls, resource_id, callback=None: ensure_calls.append(resource_id)
         ),

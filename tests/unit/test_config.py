@@ -1,4 +1,4 @@
-"""Tests for mbforge.utils.config schema and helpers."""
+"""Tests for mbforge.foundation.config schema and helpers."""
 
 from __future__ import annotations
 
@@ -8,17 +8,16 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from mbforge.routers.system.settings import _redact_secrets
-from mbforge.utils.config import (
+from mbforge.foundation.config import (
     AppConfig,
     IngestConfig,
     LLMConfig,
     MoldetConfig,
-    OCRConfig,
     PdfParseConfig,
     reset_config_cache,
     update_settings,
 )
+from mbforge.interfaces.http.system.settings import _redact_secrets
 
 # Neutral stand-ins for secret-shaped literals: the tests only assert that
 # stored values round-trip, so the stubs stay free of credential shapes.
@@ -47,14 +46,6 @@ class TestDefaultValues:
         assert cfg.request_timeout == 60
         assert cfg.molecule_tool_enabled is False
         assert cfg.molecule_tool_max_chars == 16000
-
-    def test_ocr_defaults(self) -> None:
-        cfg = OCRConfig()
-        assert cfg.priority == ["paddleocr"]
-        assert (
-            cfg.paddleocr_host == "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
-        )
-        assert cfg.paddleocr_model == "PaddleOCR-VL-1.6"
 
     def test_moldet_defaults(self) -> None:
         cfg = MoldetConfig()
@@ -106,8 +97,8 @@ class TestDictDeserialization:
 
     def test_app_config_from_nested_dict(self) -> None:
         data: dict[str, Any] = {
-            "ocr": {
-                "paddleocr_api_key": "pk",
+            "layout": {
+                "conf_threshold": 0.55,
             },
             "moldet": {
                 "detection_dpi": 300.0,
@@ -115,12 +106,12 @@ class TestDictDeserialization:
             },
         }
         cfg = AppConfig.model_validate(data)
-        assert cfg.ocr.paddleocr_api_key == "pk"
+        assert cfg.layout.conf_threshold == pytest.approx(0.55)
         assert cfg.moldet.detection_dpi == pytest.approx(300.0)
         assert cfg.moldet.detection_batch_size == 2
 
     def test_update_settings_deep_merge(self, monkeypatch, tmp_path) -> None:
-        from mbforge.utils import config
+        from mbforge.foundation import config
 
         settings_path = tmp_path / "settings.json"
         monkeypatch.setattr(config, "_SETTINGS_PATH", settings_path)
@@ -132,20 +123,20 @@ class TestDictDeserialization:
 
         new_cfg = update_settings(
             {
-                "ocr": {"paddleocr_model": "PaddleOCR-VL-2.0"},
+                "layout": {"conf_threshold": 0.55},
                 "moldet": {"device": "cpu"},
             }
         )
-        assert new_cfg.ocr.paddleocr_model == "PaddleOCR-VL-2.0"
+        assert new_cfg.layout.conf_threshold == pytest.approx(0.55)
         assert new_cfg.moldet.device == "cpu"
         # Other defaults preserved
-        assert new_cfg.ocr.paddleocr_api_key == ""
+        assert new_cfg.layout.read_text is True
         assert new_cfg.moldet.detection_dpi == pytest.approx(200.0)
 
     def test_load_normalizes_and_persists_library_root(
         self, monkeypatch, tmp_path
     ) -> None:
-        from mbforge.utils import config
+        from mbforge.foundation import config
 
         settings_path = tmp_path / "settings.json"
         raw_root = tmp_path / "library" / ".." / "library"
@@ -196,12 +187,12 @@ class TestSecretRedaction:
     def test_nested_redaction(self) -> None:
         data = {
             "llm": {"api_key": "ak", "model": "m"},
-            "ocr": {"paddleocr_api_key": "pk"},
+            "vlm": {"api_key": "vk"},
         }
         redacted = _redact_secrets(data)
         assert redacted["llm"]["api_key"] == "***"
         assert redacted["llm"]["model"] == "m"
-        assert redacted["ocr"]["paddleocr_api_key"] == "***"
+        assert redacted["vlm"]["api_key"] == "***"
 
     def test_redacted_roundtrip_preserves_real_secret(
         self, monkeypatch, tmp_path
@@ -209,7 +200,7 @@ class TestSecretRedaction:
         """Boot a config with a real api_key, simulate the redacted GET path
         returning '***', then PUT that redacted payload back — the real
         secret on disk must survive (B1 regression)."""
-        from mbforge.utils import config
+        from mbforge.foundation import config
 
         settings_path = tmp_path / "settings.json"
         monkeypatch.setattr(config, "_SETTINGS_PATH", settings_path)
@@ -228,15 +219,15 @@ class TestSecretRedaction:
         new_cfg = update_settings(
             {
                 "llm": {"api_key": "***", "model": "gpt-4o"},
-                "ocr": {"paddleocr_api_key": "***"},
+                "vlm": {"api_key": "***"},
             }
         )
         assert new_cfg.llm.api_key == _DISK_VALUE, (
             f"*** marker must preserve the disk value, but got {new_cfg.llm.api_key!r}"
         )
         assert new_cfg.llm.model == "gpt-4o"
-        # OCR keys were empty on disk → *** marker preserves that empty state
-        assert new_cfg.ocr.paddleocr_api_key == ""
+        # The VLM key was empty on disk → *** marker preserves that empty state
+        assert new_cfg.vlm.api_key == ""
         # Real PUT (e.g. user typing a new key, or empty to clear) still works.
         cleared = update_settings({"llm": {"api_key": ""}})
         assert cleared.llm.api_key == ""

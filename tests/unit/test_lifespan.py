@@ -13,9 +13,11 @@ async def test_app_lifespan_does_not_load_models() -> None:
 
     app = FastAPI()
     with (
-        patch("mbforge.backends.molparser.load") as mock_molparser_load,
-        patch("mbforge.backends.moldet_v2_ft.get_moldet") as mock_moldet_ft,
-        patch("mbforge.infra.process.shutdown._unload_backends") as mock_unload,
+        patch("mbforge.adapters.inference.molparser.load") as mock_molparser_load,
+        patch("mbforge.adapters.inference.moldet_v2_ft.get_moldet") as mock_moldet_ft,
+        patch(
+            "mbforge.adapters.runtime.process.shutdown._unload_backends"
+        ) as mock_unload,
     ):
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(lifespan(app))
@@ -32,10 +34,10 @@ async def test_app_lifespan_prewarms_when_env_gate_is_on(monkeypatch) -> None:
     monkeypatch.setenv("MBFORGE_PREWARM_MODELS", "1")
     app = FastAPI()
     with (
-        patch("mbforge.backends.molparser.load") as mock_molparser_load,
-        patch("mbforge.backends.moldet_v2_ft.get_moldet") as mock_moldet_ft,
+        patch("mbforge.adapters.inference.molparser.load") as mock_molparser_load,
+        patch("mbforge.adapters.inference.moldet_v2_ft.get_moldet") as mock_moldet_ft,
         patch(
-            "mbforge.backends.prewarm.prewarm_models",
+            "mbforge.adapters.inference.prewarm.prewarm_models",
             return_value={"moldet": "ready", "molparser": "ready"},
         ) as mock_prewarm,
     ):

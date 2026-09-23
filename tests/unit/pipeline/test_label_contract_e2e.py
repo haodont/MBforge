@@ -1,6 +1,6 @@
 """End-to-end test for the coreference-label persistence contract.
 
-Reproduces the Phase-0 bug fixed by :mod:`mbforge.pipeline.detection.label_normalization`:
+Reproduces the Phase-0 bug fixed by :mod:`mbforge.application.pipeline.detection.label_normalization`:
 
 - An ``ExtractionResult`` carrying a ``formula_label`` of ``"R₁"`` used to
   land in :class:`Molecule.properties` only as a list entry
@@ -18,10 +18,10 @@ to ``properties`` for downstream consumers.
 
 from __future__ import annotations
 
-from mbforge.core.types import ExtractionResult
-from mbforge.pipeline.detection.normalization import normalize_molecules
-from mbforge.pipeline.persist.markush import persist_markush_scaffolds
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.pipeline.detection.normalization import normalize_molecules
+from mbforge.application.pipeline.persist.markush import persist_markush_scaffolds
+from mbforge.domain.types import ExtractionResult
 
 
 def _extraction(*, esmiles: str, formula_label: str | None) -> ExtractionResult:

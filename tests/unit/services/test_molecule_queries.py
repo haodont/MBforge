@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mbforge.core.molecule import Molecule
-from mbforge.core.types import DetectionSource
-from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.services.molecule.queries import molecules_by_location
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.application.use_cases.molecule.queries import molecules_by_location
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import DetectionSource
 from tests.unit.v2_artifact_helpers import publish_v2_run
 
 # Router-order bbox tuple (x0, x1, y0, y1); values are PDF points.

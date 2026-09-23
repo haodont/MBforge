@@ -14,14 +14,14 @@ from unittest.mock import patch
 
 import pytest
 
-from mbforge.pipeline.artifacts.staging import (
+from mbforge.application.pipeline.artifacts.staging import (
     cleanup_staging,
     staging_dir,
 )
-from mbforge.pipeline.cancellation import TaskCancelledError
-from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.pipeline.runner import cancel_task, run_pipeline
-from mbforge.storage.layout import LibraryLayout
+from mbforge.application.pipeline.cancellation import TaskCancelledError
+from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.application.pipeline.runner import cancel_task, run_pipeline
+from mbforge.foundation.layout import LibraryLayout
 
 _DOC_ID = "sample_doc"
 _RUN_ID = "20260909123456"
@@ -29,7 +29,7 @@ _RUN_ID = "20260909123456"
 
 def _dag_order() -> list[str]:
     """Topological order of the stage DAG (matches the queue's node order)."""
-    from mbforge.pipeline.composition import stage_dependencies
+    from mbforge.application.pipeline.composition import stage_dependencies
 
     deps = stage_dependencies()
     order: list[str] = []
@@ -42,13 +42,13 @@ def _dag_order() -> list[str]:
     return order
 
 
-def _fake_extract_pdf_text(
+def _fake_extract_layout_text(
     pdf_path: str,
-    ocr_fallback: bool = True,
-    ocr_config: dict | None = None,
+    doc_id: str = "",
+    layout_config: dict | None = None,
     cancel_check: Any = None,
 ) -> ExtractedDocument:
-    """Stand-in for extract_pdf_text."""
+    """Stand-in for extract_layout_text."""
     return ExtractedDocument(
         raw_text="page one text\n\npage two text",
         page_count=2,
@@ -87,18 +87,18 @@ def _run(
 ):
     patches = [
         patch(
-            "mbforge.pipeline.extract.text.extract_pdf_text",
-            side_effect=_fake_extract_pdf_text,
+            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            side_effect=_fake_extract_layout_text,
         ),
         patch(
-            "mbforge.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
             side_effect=_fake_extract_molecules,
         ),
     ]
     if fail_patent_publish:
         patches.append(
             patch(
-                "mbforge.pipeline.artifacts.staging.publish_run",
+                "mbforge.application.pipeline.artifacts.staging.publish_run",
                 side_effect=RuntimeError("disk full"),
             )
         )
@@ -121,9 +121,9 @@ def _run(
             )
 
         # Simulate the worker's finalization: write merged report + promote.
-        from mbforge.pipeline.artifacts.staging import promote_staging
-        from mbforge.pipeline.artifacts.staging import staging_dir as _sd
-        from mbforge.pipeline.run.checkpoint import write_merged_report
+        from mbforge.application.pipeline.artifacts.staging import promote_staging
+        from mbforge.application.pipeline.artifacts.staging import staging_dir as _sd
+        from mbforge.application.pipeline.run.checkpoint import write_merged_report
 
         staging = _sd(str(library_root), _DOC_ID)
         write_merged_report(staging, doc_id=_DOC_ID, library_root=str(library_root))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from mbforge.infra.llm.provider_models import fetch_provider_models
+from mbforge.adapters.runtime.llm.provider_models import fetch_provider_models
 
 # Neutral stand-in for a secret-shaped literal; only round-trip equality is
 # asserted.

@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.stage import ORDER, REGISTRY, StageResult, next_after, register
-from mbforge.pipeline import stages as _pipeline_stages  # noqa: F401
+from mbforge.application.pipeline import stages as _pipeline_stages  # noqa: F401
+from mbforge.application.pipeline.stage import (
+    ORDER,
+    REGISTRY,
+    StageResult,
+    next_after,
+    register,
+)
 
 
 @pytest.fixture

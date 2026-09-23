@@ -9,6 +9,29 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from mbforge.adapters.persistence.sqlite.repositories import create_repositories
+from mbforge.adapters.runtime.provider import create_runtime_provider
+from mbforge.application.ports import (
+    configure_repository_factory,
+    configure_runtime_provider,
+)
+from mbforge.foundation import config as app_config
+
+# Keep the suite independent from a developer's personal settings.json. In
+# particular, a local Hiro layout setting would load ONNX weights during tests.
+_TEST_APP_DIR = Path.cwd() / ".tmp" / "pytest-app"
+_TEST_APP_DIR.mkdir(parents=True, exist_ok=True)
+app_config.GLOBAL_APP_DIR = _TEST_APP_DIR
+app_config._SETTINGS_PATH = _TEST_APP_DIR / "settings.json"
+app_config._SETTINGS_PATH.unlink(missing_ok=True)
+app_config.load_global_config.cache_clear()
+
+# Direct application-use-case tests do not import the FastAPI composition
+# root.  Configure the same concrete adapter once for the test composition
+# root so those tests exercise the repository boundary as production does.
+configure_repository_factory(create_repositories)
+configure_runtime_provider(create_runtime_provider())
+
 
 @pytest.fixture
 def scratch() -> Iterator[Path]:
@@ -81,9 +104,9 @@ def sample_pdf(tmp_path: Path) -> Path:
 @pytest.fixture
 def app_client(tmp_library: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """FastAPI TestClient with global config pointing to a temp library."""
+    from mbforge.adapters.runtime.ingest import worker
     from mbforge.app import app
-    from mbforge.infra.ingest import worker
-    from mbforge.utils import config
+    from mbforge.foundation import config
 
     # Routers must never start a real worker during router tests: enqueueing
     # still persists rows; the durable worker is exercised by dedicated unit
@@ -105,7 +128,7 @@ def app_client(tmp_library: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
 
     # Routers that imported ``load_global_config`` directly must be patched
     # in their own module namespace; patching ``config.load_global_config``
-    # only affects runtime lookups inside ``mbforge.utils.config``.
+    # only affects runtime lookups inside ``mbforge.foundation.config``.
     monkeypatch.setattr(config, "load_global_config", patched)
     return TestClient(app)
 
@@ -127,8 +150,8 @@ def _disable_llm_completion_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 def _clear_singleton_caches() -> None:
     """Clear module-level singleton caches after every test for isolation."""
     yield
-    from mbforge.services.documents.library import LibraryStore
-    from mbforge.storage.sqlite.database import DatabaseManager
+    from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+    from mbforge.application.use_cases.documents.library import LibraryStore
 
     DatabaseManager.get.cache_clear()
     LibraryStore.get.cache_clear()

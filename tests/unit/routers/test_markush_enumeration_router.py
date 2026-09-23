@@ -12,8 +12,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
 from mbforge.app import create_app
-from mbforge.storage.sqlite.database import DatabaseManager
 
 
 @pytest.fixture

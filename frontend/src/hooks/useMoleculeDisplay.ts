@@ -34,13 +34,11 @@ export interface UseMoleculeDisplayReturn {
  */
 export function useMoleculeDisplay(
   smiles: string,
-  name: string | undefined,
   showMetadata: boolean,
   onChange?: (newSmiles: string) => void,
   onValidate?: (isValid: boolean, message?: string) => void,
   validateRemotely = true,
 ): UseMoleculeDisplayReturn {
-  void name
   const [imgError, setImgError] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [draftSmiles, setDraftSmilesState] = useState(smiles)

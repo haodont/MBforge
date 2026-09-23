@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from mbforge.core.types import ExtractionResult
-from mbforge.pipeline.detection.normalization import normalize_molecules
+from mbforge.application.pipeline.detection.normalization import normalize_molecules
+from mbforge.domain.types import ExtractionResult
 
 
 def test_normalize_deduplicates_equivalent_smiles() -> None:

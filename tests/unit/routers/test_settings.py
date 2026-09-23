@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mbforge.routers.system import settings as settings_router
+from mbforge.interfaces.http.system import settings as settings_router
 
 # Neutral stand-in for a secret-shaped literal; only round-trip equality is
 # asserted.

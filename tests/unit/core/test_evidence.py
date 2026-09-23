@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.evidence import SourceEvidence
+from mbforge.domain.evidence import SourceEvidence
 
 
 def test_source_evidence_id_is_position_based_and_round_trips() -> None:

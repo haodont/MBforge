@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
 
 
 @pytest.fixture
@@ -21,9 +21,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     The durable queue worker is stubbed so enqueueing never runs a real
     pipeline during router tests.
     """
-    import mbforge.infra.environment as _environment
-    from mbforge.infra.ingest import worker
-    from mbforge.utils import config
+    import mbforge.adapters.runtime.environment as _environment
+    from mbforge.adapters.runtime.ingest import worker
+    from mbforge.foundation import config
 
     monkeypatch.setattr(worker, "ensure_queue_worker", lambda _root: True)
 
@@ -233,8 +233,8 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Queue consumers receive the real fork statuses from the run checkpoint."""
-    from mbforge.pipeline.artifacts.staging import staging_dir
-    from mbforge.pipeline.run.checkpoint import (
+    from mbforge.application.pipeline.artifacts.staging import staging_dir
+    from mbforge.application.pipeline.run.checkpoint import (
         ensure_run_checkpoint,
         save_stage_summary,
     )
@@ -321,7 +321,7 @@ def _capture_to_thread(monkeypatch: pytest.MonkeyPatch):
 
 def _patch_config_root(monkeypatch: pytest.MonkeyPatch, root: str) -> None:
     """Point load_global_config at ``root`` so path validation succeeds."""
-    from mbforge.utils import config
+    from mbforge.foundation import config
 
     original_load = config.load_global_config
 
@@ -339,8 +339,8 @@ def test_pipeline_queue_offloads_sqlite_to_thread(
     """The /queue route must not run SQLite queries on the event loop."""
     import asyncio
 
-    from mbforge.models.pipeline import PipelineQueueRequest
-    from mbforge.routers.pipeline.pipeline import pipeline_queue
+    from mbforge.application.dto.pipeline import PipelineQueueRequest
+    from mbforge.interfaces.http.pipeline.pipeline import pipeline_queue
 
     calls = _capture_to_thread(monkeypatch)
 
@@ -363,8 +363,8 @@ def test_pipeline_queue_stats_offloads_sqlite_to_thread(
     """The /queue/stats route must not run SQLite queries on the event loop."""
     import asyncio
 
-    from mbforge.models.pipeline import PipelineQueueRequest
-    from mbforge.routers.pipeline.pipeline import pipeline_queue_stats
+    from mbforge.application.dto.pipeline import PipelineQueueRequest
+    from mbforge.interfaces.http.pipeline.pipeline import pipeline_queue_stats
 
     calls = _capture_to_thread(monkeypatch)
 
@@ -388,8 +388,8 @@ def test_pipeline_enqueue_unresolved_offloads_scan_and_sqlite(
     import asyncio
     from unittest.mock import patch
 
-    from mbforge.models.pipeline import PipelineEnqueueRequest
-    from mbforge.routers.pipeline.pipeline import pipeline_enqueue
+    from mbforge.application.dto.pipeline import PipelineEnqueueRequest
+    from mbforge.interfaces.http.pipeline.pipeline import pipeline_enqueue
 
     calls: list[tuple[object, tuple, dict]] = []
 
@@ -408,7 +408,9 @@ def test_pipeline_enqueue_unresolved_offloads_scan_and_sqlite(
     db = DatabaseManager.get(root)
     db.initialize()
 
-    with patch("mbforge.infra.ingest.worker.ensure_queue_worker", return_value=True):
+    with patch(
+        "mbforge.adapters.runtime.ingest.worker.ensure_queue_worker", return_value=True
+    ):
         result = asyncio.run(
             pipeline_enqueue(
                 PipelineEnqueueRequest(library_root=root, action="enqueue_unresolved")

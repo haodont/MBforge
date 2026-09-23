@@ -1,10 +1,9 @@
 /*
- * Settings styles live in this file plus two siblings:
+ * Settings styles live in this file plus one sibling:
  *
  *   settings.css       shared settings components (form rows, cards,
  *                      models tab, status cards, progress) — this file
  *   settings-page.css  page layout (header, tabs, save bar)
- *   settings-ocr.css   OCR backend cards + responsive tweaks
  *
  * main.tsx imports each file explicitly for clarity.
  *

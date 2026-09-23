@@ -68,7 +68,6 @@ export default function MoleculeDisplay({
     setDraftSmiles,
   } = useMoleculeDisplay(
     smiles,
-    name,
     showMetadata,
     onChange,
     onValidate,

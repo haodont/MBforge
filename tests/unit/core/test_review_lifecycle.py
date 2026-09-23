@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.markush import MarkushSiteError
-from mbforge.core.review import (
+from mbforge.domain.markush import MarkushSiteError
+from mbforge.domain.review import (
     ReviewConflictError,
     ReviewNotFoundError,
     ReviewTransitionError,
     resolve_status_transition,
 )
-from mbforge.utils.errors import MBForgeError
+from mbforge.foundation.errors import MBForgeError
 
 
 def test_review_errors_inherit_mbforge_error_with_status_code() -> None:

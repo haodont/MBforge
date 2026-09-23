@@ -8,23 +8,23 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.core.activity import ActivityMeasurement, MeasurementValue
-from mbforge.core.evidence import SourceEvidence
-from mbforge.core.molecule import Molecule
-from mbforge.core.types import DetectionSource
-from mbforge.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.pipeline.run.context import PipelineContext
-from mbforge.pipeline.stages.patent_stage import (
+from mbforge.adapters.persistence.source_evidence import persist_source_evidence
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.application.pipeline.run.context import PipelineContext
+from mbforge.application.pipeline.stages.patent_stage import (
     PatentStage,
     extract_assay_method_from_title,
     extract_entries_from_title,
 )
-from mbforge.services.documents.patent_facts import (
+from mbforge.application.use_cases.documents.patent_facts import (
     iter_published_doc_ids,
     load_patent_facts,
 )
-from mbforge.storage.source_evidence import persist_source_evidence
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.domain.activity import ActivityMeasurement, MeasurementValue
+from mbforge.domain.evidence import SourceEvidence
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import DetectionSource
 
 
 @dataclass
@@ -75,7 +75,7 @@ def _seed_evidence(tmp_path: Path, pages: list[FakePage]) -> list[SourceEvidence
 def _activity_parser(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep Patent tests independent from Worker A's parallel module."""
     monkeypatch.setattr(
-        "mbforge.pipeline.activity.extraction.extract_activity_measurements_from_evidence",
+        "mbforge.application.pipeline.activity.extraction.extract_activity_measurements_from_evidence",
         lambda _evidence, _doc_id: ([], []),
         raising=False,
     )
@@ -266,7 +266,7 @@ def test_patent_stage_associates_measurement_assay_and_detection_evidence(
         provenance={"reference_raw": "化合物20"},
     ).to_dict()
     monkeypatch.setattr(
-        "mbforge.pipeline.activity.extraction.extract_activity_measurements_from_evidence",
+        "mbforge.application.pipeline.activity.extraction.extract_activity_measurements_from_evidence",
         lambda _evidence, _doc_id: ([measurement], []),
     )
 

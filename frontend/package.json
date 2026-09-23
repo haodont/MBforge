@@ -4,7 +4,7 @@
   "version": "0.3.0",
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=24.14.1"
   },
   "description": "MBForge — molecule intelligence frontend (React 19 + Vite 8 + TypeScript).",
   "license": "MIT",
@@ -29,6 +29,7 @@
     "@tanstack/react-virtual": "^3.14.3",
     "@types/dompurify": "^3.0.5",
     "dompurify": "^3.4.12",
+    "events": "^3.3.0",
     "framer-motion": "^12.41.0",
     "i18next": "^26.3.2",
     "katex": "^0.17.0",

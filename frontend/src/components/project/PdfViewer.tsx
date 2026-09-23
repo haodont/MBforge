@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { OcrBlock } from '@/api/http/pdf'
 import PdfCanvas from '@/components/PdfCanvas'
 import MoleculeOverlay from '@/components/MoleculeOverlay'
 import OcrOverlay from '@/components/OcrOverlay'
@@ -39,6 +40,8 @@ interface Props {
   viewerKey?: string
 }
 
+const DIRECTORY_KINDS = new Set(['title', 'head', 'sec', 'toc'])
+
 const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
   { doc, libraryRoot, onClose: _onClose, onMoleculeClick, initialPage, initialBbox, viewerKey },
   ref,
@@ -66,11 +69,15 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
   const [isResultPaneCollapsed, setIsResultPaneCollapsed] = useState(false)
   const [sourcePaneWidth, setSourcePaneWidth] = useState<number | null>(null)
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
-  const [sidePaneTab, setSidePaneTab] = useState<'evidence' | 'molecules'>('evidence')
+  const [sidePaneTab, setSidePaneTab] = useState<'evidence' | 'molecules' | 'directory'>('evidence')
   const [editingDetectionIndex, setEditingDetectionIndex] = useState<number | null>(null)
   const [continuousMode, setContinuousMode] = useState(false)
+  const pendingDirectoryJumpRef = useRef<{ page: number; index: number; evidenceId: string } | null>(null)
   const { data: patentFactsResult } = useDocumentPatentFacts(doc.doc_id, libraryRoot)
   const patentFacts = patentFactsResult?.ok ? patentFactsResult.data : null
+  const directoryEntries = useMemo(() => ocrBlocks
+    .filter(block => block.page > 0 && DIRECTORY_KINDS.has(block.kind ?? '') && Boolean(block.content?.trim()))
+    .sort((a, b) => a.page - b.page || b.bbox[3] - a.bbox[3]), [ocrBlocks])
   const pdfCanvasStyle = useMemo(() => ({
     background: '#fff',
     boxShadow: 'var(--shadow-md)',
@@ -84,10 +91,40 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
   }, [pageInfo, sourcePaneWidth])
 
   useEffect(() => {
-    setSelectedEvidenceId(null)
-    setSelectedOcrIndex(null)
+    const pending = pendingDirectoryJumpRef.current
+    if (pending?.page === currentPage) {
+      setSelectedEvidenceId(pending.evidenceId)
+      setSelectedOcrIndex(pending.index)
+      pendingDirectoryJumpRef.current = null
+    } else {
+      setSelectedEvidenceId(null)
+      setSelectedOcrIndex(null)
+    }
     setEditingDetectionIndex(null)
-  }, [currentPage, setSelectedOcrIndex])
+  }, [currentPage, setSelectedEvidenceId, setSelectedOcrIndex])
+
+  const handleDirectorySelect = useCallback((block: OcrBlock) => {
+    setSelectedDetection(null)
+    if (block.page === currentPage) {
+      pendingDirectoryJumpRef.current = null
+      setSelectedEvidenceId(block.evidence_id)
+      setSelectedOcrIndex(block.index)
+    } else {
+      pendingDirectoryJumpRef.current = {
+        page: block.page,
+        index: block.index,
+        evidenceId: block.evidence_id,
+      }
+      setSelectedEvidenceId(null)
+      setSelectedOcrIndex(null)
+    }
+    if (continuousMode) {
+      const pageElement = pdfScrollRef.current?.querySelector<HTMLElement>(`[data-page="${block.page}"]`)
+      if (pageElement) pageElement.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      else setContinuousMode(false)
+    }
+    setCurrentPage(block.page)
+  }, [continuousMode, currentPage, pdfScrollRef, setCurrentPage, setSelectedDetection, setSelectedEvidenceId, setSelectedOcrIndex])
   // 覆盖层读源：文档打开时一次性加载全文 bbox（流水线 v2 证据 ∪ 交互识别写入的
   // molecule_detections，后端逐页去重，含低置信/被拒候选，框颜色编码置信度）；
   // MoleculeOverlay 自身保留 bbox 有效性过滤。置信度阈值过滤已随旧按页读源移除
@@ -262,6 +299,7 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
               <div className="pdf-document-sidebar__tabs" role="tablist" aria-label={t('pdf.moleculesHeader')}>
                 <button type="button" role="tab" aria-selected={sidePaneTab === 'evidence'} className={sidePaneTab === 'evidence' ? 'is-active' : ''} onClick={() => setSidePaneTab('evidence')}>{t('pdf.tabEvidence')}</button>
                 <button type="button" role="tab" aria-selected={sidePaneTab === 'molecules'} className={sidePaneTab === 'molecules' ? 'is-active' : ''} onClick={() => setSidePaneTab('molecules')}>{t('pdf.tabMolecules')}</button>
+                <button type="button" role="tab" aria-selected={sidePaneTab === 'directory'} className={sidePaneTab === 'directory' ? 'is-active' : ''} onClick={() => setSidePaneTab('directory')}>{t('pdf.tabDirectory')}</button>
                 <IconButton
                   size={28}
                   className="pdf-document-sidebar__collapse-button"
@@ -297,6 +335,34 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
                       </button>
                     ))}
                   </section>
+                )}
+                {sidePaneTab === 'directory' && (
+                  <nav className="pdf-directory" aria-label={t('pdf.tabDirectory')}>
+                    <div className="pdf-directory__header">
+                      <strong>{t('pdf.tabDirectory')}</strong>
+                      <Badge tone="neutral">{directoryEntries.length}</Badge>
+                    </div>
+                    {directoryEntries.length === 0 ? (
+                      <p className="pdf-directory__empty">{t('pdf.directoryEmpty')}</p>
+                    ) : (
+                      <div className="pdf-directory__list">
+                        {directoryEntries.map(block => (
+                          <button
+                            type="button"
+                            key={block.evidence_id}
+                            className={`pdf-directory__item${block.evidence_id === selectedEvidenceId ? ' is-selected' : ''}`}
+                            aria-current={block.evidence_id === selectedEvidenceId ? 'location' : undefined}
+                            title={block.content?.trim()}
+                            onClick={() => handleDirectorySelect(block)}
+                          >
+                            <span className="pdf-directory__kind">{block.kind}</span>
+                            <span className="pdf-directory__text">{block.content?.trim()}</span>
+                            <span className="pdf-directory__page">{block.page}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </nav>
                 )}
               </div>
             </>

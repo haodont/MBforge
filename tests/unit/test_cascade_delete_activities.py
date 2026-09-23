@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
 
 
 def _seed_molecule(conn: sqlite3.Connection, mol_id: str, smiles: str = "CCO") -> None:

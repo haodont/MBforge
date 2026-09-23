@@ -28,7 +28,6 @@ export interface UsePdfOcrArgs {
   currentPageDataUrl: string | null
   pageInfo: { pageNumber: number } | null
   // Detection-owned state the recognition flow mutates.
-  pageDetections: Map<number, ExtractionResult[]>
   setPageDetections: React.Dispatch<React.SetStateAction<Map<number, ExtractionResult[]>>>
   setIsDetecting: React.Dispatch<React.SetStateAction<boolean>>
   setSelectedDetection: React.Dispatch<React.SetStateAction<number | null>>
@@ -49,7 +48,7 @@ export function usePdfOcr(args: UsePdfOcrArgs): UsePdfOcrResult {
     doc, libraryRoot,
     initialShowOcrPanel,
     currentPage, currentPageDataUrl, pageInfo,
-    pageDetections, setPageDetections,
+    setPageDetections,
     setIsDetecting, setSelectedDetection,
     enrichResults,
   } = args
@@ -101,10 +100,6 @@ export function usePdfOcr(args: UsePdfOcrArgs): UsePdfOcrResult {
       showToast('清除缓存失败: ' + getUserFacingError(e), 'error')
     } finally { setIsDetecting(false) }
   }, [libraryRoot, doc.doc_id, setIsDetecting, setPageDetections, setSelectedDetection])
-
-  // ``pageDetections`` is read through the args proxy to keep the caller's
-  // contract explicit; recognition writes go through ``setPageDetections``.
-  void pageDetections
 
   return {
     showOcrPanel, setShowOcrPanel,

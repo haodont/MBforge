@@ -6,25 +6,25 @@ import asyncio
 
 import pytest
 
-from mbforge.infra.models import (
+from mbforge.adapters.runtime.models import (
     clear as clear_loaded_models,
 )
-from mbforge.infra.models import (
+from mbforge.adapters.runtime.models import (
     test as run_model_test_sync,
 )
-from mbforge.models.common import (
+from mbforge.application.dto.common import (
     ModelTestRequest,
     ModelTestResponse,
     MoleculeRenderRequest,
 )
-from mbforge.routers.system.models import (
+from mbforge.application.use_cases.chem.chem import (
+    render_molecule_png_sync as _render_molecule_sync,
+)
+from mbforge.interfaces.http.system.models import (
     render_molecule,
 )
-from mbforge.routers.system.models import (
+from mbforge.interfaces.http.system.models import (
     test_model as model_test_handler,
-)
-from mbforge.services.chem.chem import (
-    render_molecule_png_sync as _render_molecule_sync,
 )
 
 
@@ -74,7 +74,7 @@ def test_clear_loaded_models_releases_both_singletons(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Model management clears in-process models without deleting downloaded weights."""
-    from mbforge.backends import moldet_v2_ft, molparser
+    from mbforge.adapters.inference import moldet_v2_ft, molparser
 
     moldet_v2_ft._detector_singleton = object()
     molparser._MODEL = object()

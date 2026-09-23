@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from mbforge.utils.file_scanner import (
+from mbforge.foundation.file_scanner import (
     build_file_tree,
     scan_library_files,
 )
@@ -57,7 +57,7 @@ def test_build_file_tree(tmp_path: Path) -> None:
 
 def test_build_file_tree_logs_permission_warning(tmp_path: Path) -> None:
     """Permission errors during tree walk must be logged, not swallowed silently."""
-    from mbforge.utils import file_scanner
+    from mbforge.foundation import file_scanner
 
     with (
         patch.object(file_scanner, "logger") as mock_logger,

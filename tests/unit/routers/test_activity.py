@@ -5,12 +5,12 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from mbforge.services.documents.activity_queries import (
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.use_cases.documents.activity_queries import (
     list_activities,
     list_activity_records,
 )
-from mbforge.services.review_queue import insert_review_item
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.application.use_cases.review_queue import insert_review_item
 
 
 def _seed_activity_data(library_root: Path) -> None:

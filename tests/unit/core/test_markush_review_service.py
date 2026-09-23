@@ -16,14 +16,14 @@ import json
 
 import pytest
 
-from mbforge.core.molecule import Molecule
-from mbforge.core.provenance import (
+from mbforge.adapters.persistence.markush_candidates import persist_review_candidates
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.provenance import (
     compute_content_hash,
     compute_source_key,
 )
-from mbforge.core.types import DetectionSource
-from mbforge.storage.markush_candidates import persist_review_candidates
-from mbforge.storage.sqlite.database import DatabaseManager
+from mbforge.domain.types import DetectionSource
 
 
 @pytest.fixture

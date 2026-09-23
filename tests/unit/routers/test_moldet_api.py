@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from mbforge.backends.moldet_v2_ft import MoleculeBbox, MoleculeResult
+from mbforge.adapters.inference.moldet_v2_ft import MoleculeBbox, MoleculeResult
 
 
 def _import_sample(client: TestClient, library_root: Path, sample_pdf: Path) -> str:
@@ -46,11 +46,11 @@ def test_extract_pdf_page_with_mock(
 
     with (
         patch(
-            "mbforge.services.molecule.detection.detect_molecules",
+            "mbforge.application.use_cases.molecule.detection.detect_molecules",
             return_value=result,
         ),
-        patch("mbforge.backends.molparser.load"),
-        patch("mbforge.backends.molparser.predict") as mock_predict,
+        patch("mbforge.adapters.inference.molparser.load"),
+        patch("mbforge.adapters.inference.molparser.predict") as mock_predict,
     ):
         mock_predict.return_value.esmiles = "CCO"
         mock_predict.return_value.smiles = "CCO"

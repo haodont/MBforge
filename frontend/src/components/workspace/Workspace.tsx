@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { fadeUp } from '@/hooks/useAnimations'
@@ -20,6 +20,7 @@ import {
   GridIcon,
   PdfIcon,
   PlusIcon,
+  QueueIcon,
   RefreshCwIcon,
   TableIcon,
   TrashIcon,
@@ -34,11 +35,13 @@ import ProgressBar from '@/components/ui/ProgressBar'
 import Skeleton from '@/components/ui/Skeleton'
 import type { DocumentInfo } from '@/api/http/library'
 import type { CollectionNode } from '@/api/http/library'
-import { getUserFacingError } from '@/utils/errors'
+import { AppError, getUserFacingError } from '@/utils/errors'
 
 type ViewMode = 'grid' | 'list'
 
-type DocConfirmAction = { doc: DocumentInfo; action: 'delete' | 'clear' }
+type DocConfirmAction =
+  | { doc: DocumentInfo; action: 'delete' | 'clear' }
+  | { docs: DocumentInfo[]; action: 'delete-selected' }
 
 type DocumentActionMenuProps = {
   doc: DocumentInfo
@@ -167,6 +170,8 @@ type DocumentItemProps = {
   onDelete: (doc: DocumentInfo) => void
   onClear: (doc: DocumentInfo) => void
   onMove: (doc: DocumentInfo, targetCollectionId: string | null) => void
+  selected: boolean
+  onToggleSelect: (doc: DocumentInfo, selected: boolean) => void
   statusBadge: (status: string) => ReactNode
 }
 
@@ -181,11 +186,21 @@ function DocumentCard({
   onDelete,
   onClear,
   onMove,
+  selected,
+  onToggleSelect,
   statusBadge,
 }: DocumentItemProps) {
   const { t } = useTranslation()
   return (
-    <article className="doc-card">
+    <article className={`doc-card${selected ? ' is-selected' : ''}`}>
+      <label className="doc-card-select">
+        <input
+          type="checkbox"
+          aria-label={t('workspace.selectDocument', { filename: doc.file_name })}
+          checked={selected}
+          onChange={(event) => onToggleSelect(doc, event.currentTarget.checked)}
+        />
+      </label>
       <div className="doc-card-menu" onClick={(event) => event.stopPropagation()}>
         <DocumentActionMenu
           doc={doc}
@@ -236,11 +251,21 @@ function DocumentRow({
   onDelete,
   onClear,
   onMove,
+  selected,
+  onToggleSelect,
   statusBadge,
 }: DocumentItemProps) {
   const { t } = useTranslation()
   return (
-    <div className="doc-list__row" role="listitem">
+    <div className={`doc-list__row${selected ? ' is-selected' : ''}`} role="listitem">
+      <label className="doc-list__select">
+        <input
+          type="checkbox"
+          aria-label={t('workspace.selectDocument', { filename: doc.file_name })}
+          checked={selected}
+          onChange={(event) => onToggleSelect(doc, event.currentTarget.checked)}
+        />
+      </label>
       <button
         type="button"
         className="doc-list__main"
@@ -290,11 +315,18 @@ export default function Workspace() {
   const { data, isLoading, isError } = useDocuments(activeCollectionId ?? undefined)
   const importMutation = useImportDocument()
   const deleteMutation = useDeleteDocument()
+  const bulkEnqueueMutation = useEnqueueTask()
   const clearMutation = useClearDocument()
   const moveMutation = useMoveDocument()
   const documents = data?.documents ?? []
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(() => new Set())
   const [isDraggingFile, setIsDraggingFile] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [uploadBatch, setUploadBatch] = useState<{ current: number; total: number } | null>(null)
+  const [isImporting, setIsImporting] = useState(false)
+  const [isEnqueueingSelected, setIsEnqueueingSelected] = useState(false)
+  const importInProgressRef = useRef(false)
+  const enqueueSelectedInProgressRef = useRef(false)
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window === 'undefined') return 'grid'
     const stored = window.localStorage.getItem('mbforge.workspace.view')
@@ -314,47 +346,104 @@ export default function Workspace() {
   const groups = useMemo<CollectionNode[]>(() => groupsData?.collections ?? [], [groupsData])
   const activeGroup = groups.find(group => group.collection_id === activeCollectionId)
   const totalPages = documents.reduce((total, doc) => total + Math.max(0, doc.page_count), 0)
+  const selectedDocuments = documents.filter(doc => selectedDocumentIds.has(doc.doc_id))
+  const allDocumentsSelected = documents.length > 0 && selectedDocuments.length === documents.length
 
-  const handleImportFile = useCallback(async (file: File) => {
-    if (importMutation.isPending) return
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      showToast(t('library.importError', { error: 'PDF files only' }), 'error')
+  useEffect(() => {
+    setSelectedDocumentIds(new Set())
+  }, [activeCollectionId])
+
+  const handleToggleSelect = useCallback((doc: DocumentInfo, selected: boolean) => {
+    setSelectedDocumentIds(current => {
+      const next = new Set(current)
+      if (selected) next.add(doc.doc_id)
+      else next.delete(doc.doc_id)
+      return next
+    })
+  }, [])
+
+  const handleImportFiles = useCallback(async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList)
+    if (files.length === 0 || importInProgressRef.current) return
+
+    const isPdfFile = (file: File) =>
+      file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    const failures = files
+      .filter(file => !isPdfFile(file))
+      .map(file => ({ file, message: t('library.pdfFilesOnly') }))
+    const pdfFiles = files.filter(isPdfFile)
+
+    if (files.length === 1 && pdfFiles.length === 0) {
+      showToast(t('library.importError', { error: failures[0].message }), 'error')
       return
     }
+
+    importInProgressRef.current = true
+    setIsImporting(true)
+    let successCount = 0
+    let completedCount = 0
     try {
-      setUploadProgress(0)
-      await importMutation.mutateAsync({ file, onProgress: setUploadProgress })
-      showToast(t('library.importSuccess'), 'success')
-    } catch (e) {
-      showToast(t('library.importError', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
+      if (pdfFiles.length > 0) setUploadProgress(0)
+      for (const [index, file] of pdfFiles.entries()) {
+        setUploadBatch(files.length > 1 ? { current: index + 1, total: pdfFiles.length } : null)
+        try {
+          await importMutation.mutateAsync({
+            file,
+            onProgress: (percent) => setUploadProgress(
+              Math.round(((completedCount + percent / 100) / pdfFiles.length) * 100),
+            ),
+          })
+          successCount += 1
+        } catch (error) {
+          const message = error instanceof AppError && error.context?.backend_code === 'duplicate_filename'
+            ? t('library.duplicateFilename', { filename: file.name })
+            : getUserFacingError(error, t('common.unknownError'))
+          failures.push({ file, message })
+        }
+        completedCount += 1
+        setUploadProgress(Math.round((completedCount / pdfFiles.length) * 100))
+      }
     } finally {
+      importInProgressRef.current = false
+      setIsImporting(false)
       setUploadProgress(null)
+      setUploadBatch(null)
+    }
+
+    if (files.length === 1) {
+      if (failures.length > 0) {
+        showToast(t('library.importError', { error: failures[0].message }), 'error')
+      } else {
+        showToast(t('library.importSuccess'), 'success')
+      }
+    } else if (failures.length > 0) {
+      const firstFailure = failures[0]
+      showToast(t('library.importBatchPartial', {
+        success: successCount,
+        failed: failures.length,
+        error: `${firstFailure.file.name}: ${firstFailure.message}`,
+      }), 'error')
+    } else {
+      showToast(t('library.importBatchSuccess', { count: successCount }), 'success')
     }
   }, [importMutation, t])
 
   const handleImport = useCallback(() => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.pdf'
-    input.onchange = async () => {
-      const file = input.files?.[0]
-      if (!file) return
-      await handleImportFile(file)
+    input.accept = '.pdf,application/pdf'
+    input.multiple = true
+    input.onchange = () => {
+      if (input.files?.length) void handleImportFiles(input.files)
     }
     input.click()
-  }, [handleImportFile])
+  }, [handleImportFiles])
 
   const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDraggingFile(false)
-    if (event.dataTransfer.files.length > 1) {
-      showToast(t('library.singleFileOnly'), 'error')
-      return
-    }
-    const file = event.dataTransfer.files.item(0)
-    if (!file) return
-    void handleImportFile(file)
-  }, [handleImportFile, t])
+    void handleImportFiles(event.dataTransfer.files)
+  }, [handleImportFiles])
 
   const handleOpenDocument = (doc: DocumentInfo) => {
     openTab({
@@ -375,11 +464,85 @@ export default function Workspace() {
   const handleDeleteDocument = useCallback(async (doc: DocumentInfo) => {
     try {
       await deleteMutation.mutateAsync(doc.doc_id)
+      setSelectedDocumentIds(current => {
+        if (!current.has(doc.doc_id)) return current
+        const next = new Set(current)
+        next.delete(doc.doc_id)
+        return next
+      })
       showToast(t('doc.deleteSuccess', { filename: doc.file_name }), 'success')
     } catch (e) {
       showToast(t('doc.deleteError', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
     }
   }, [deleteMutation, t])
+
+  const handleDeleteSelected = useCallback(async (docs: DocumentInfo[]) => {
+    const deletedIds = new Set<string>()
+    let failed = 0
+    for (const doc of docs) {
+      try {
+        await deleteMutation.mutateAsync(doc.doc_id)
+        deletedIds.add(doc.doc_id)
+      } catch {
+        failed += 1
+      }
+    }
+    setSelectedDocumentIds(current => {
+      const next = new Set(current)
+      deletedIds.forEach(docId => next.delete(docId))
+      return next
+    })
+    const deleted = deletedIds.size
+    if (failed > 0) {
+      showToast(t('workspace.bulkDeletePartial', { deleted, failed }), 'error')
+    } else {
+      showToast(t('workspace.bulkDeleteSuccess', { count: deleted }), 'success')
+    }
+  }, [deleteMutation, t])
+
+  const handleEnqueueSelected = async (docs: DocumentInfo[]) => {
+    if (!libraryRoot || docs.length === 0 || enqueueSelectedInProgressRef.current) return
+    enqueueSelectedInProgressRef.current = true
+    setIsEnqueueingSelected(true)
+    const queuedIds = new Set<string>()
+    const failures: { doc: DocumentInfo; message: string }[] = []
+    try {
+      for (const doc of docs) {
+        try {
+          await bulkEnqueueMutation.mutateAsync({
+            libraryRoot,
+            filePath: '',
+            docId: doc.doc_id,
+          })
+          queuedIds.add(doc.doc_id)
+        } catch (error) {
+          failures.push({
+            doc,
+            message: getUserFacingError(error, t('common.unknownError')),
+          })
+        }
+      }
+    } finally {
+      enqueueSelectedInProgressRef.current = false
+      setIsEnqueueingSelected(false)
+    }
+    setSelectedDocumentIds(current => {
+      const next = new Set(current)
+      queuedIds.forEach(docId => next.delete(docId))
+      return next
+    })
+    if (failures.length > 0) {
+      const firstFailure = failures[0]
+      showToast(t('workspace.bulkEnqueuePartial', {
+        queued: queuedIds.size,
+        failed: failures.length,
+        filename: firstFailure.doc.file_name,
+        error: firstFailure.message,
+      }), 'error')
+    } else {
+      showToast(t('workspace.bulkEnqueueSuccess', { count: queuedIds.size }), 'success')
+    }
+  }
 
   const handleClearDocument = useCallback(async (doc: DocumentInfo) => {
     try {
@@ -396,17 +559,21 @@ export default function Workspace() {
 
   const confirmDocAction = useCallback(async (target: DocConfirmAction) => {
     setPendingConfirm(null)
-    if (target.action === 'delete') await handleDeleteDocument(target.doc)
+    if (target.action === 'delete-selected') await handleDeleteSelected(target.docs)
+    else if (target.action === 'delete') await handleDeleteDocument(target.doc)
     else await handleClearDocument(target.doc)
-  }, [handleDeleteDocument, handleClearDocument, setPendingConfirm])
+  }, [handleDeleteDocument, handleDeleteSelected, handleClearDocument, setPendingConfirm])
 
   const pending = pendingConfirm
-  const isDeletingDoc = pending !== null && pending.action === 'delete'
-  const confirmDialogTitle = pending === null ? '' : isDeletingDoc ? t('doc.delete') : t('doc.clear')
-  const confirmDialogMessage = pending === null ? '' : isDeletingDoc
-    ? t('doc.deleteConfirm', { filename: pending.doc.file_name })
-    : t('doc.clearConfirm', { filename: pending.doc.file_name })
-  const confirmDialogLabel = confirmDialogTitle
+  const confirmDialogTitle = pending === null ? '' : pending.action === 'clear' ? t('doc.clear') : t('doc.delete')
+  const confirmDialogMessage = pending === null ? '' : pending.action === 'delete-selected'
+    ? t('workspace.bulkDeleteConfirm', { count: pending.docs.length })
+    : pending.action === 'delete'
+      ? t('doc.deleteConfirm', { filename: pending.doc.file_name })
+      : t('doc.clearConfirm', { filename: pending.doc.file_name })
+  const confirmDialogLabel = pending?.action === 'delete-selected'
+    ? t('workspace.deleteSelected', { count: pending.docs.length })
+    : confirmDialogTitle
 
   const handleMoveToGroup = useCallback(async (doc: DocumentInfo, targetCollectionId: string | null) => {
     const groupName = targetCollectionId
@@ -462,6 +629,8 @@ export default function Workspace() {
           onDelete={(document) => setPendingConfirm({ doc: document, action: 'delete' })}
           onClear={(document) => setPendingConfirm({ doc: document, action: 'clear' })}
           onMove={(document, target) => void handleMoveToGroup(document, target)}
+          selected={selectedDocumentIds.has(doc.doc_id)}
+          onToggleSelect={handleToggleSelect}
           statusBadge={statusBadge}
         />
       ))}
@@ -471,9 +640,12 @@ export default function Workspace() {
   const renderList = () => (
     <div className="doc-list" role="list">
       <div className="doc-list__header" role="presentation">
+        <span className="doc-list__col--select" aria-hidden="true" />
+        <span className="doc-list__col--icon" aria-hidden="true" />
         <span className="doc-list__col doc-list__col--title">{t('workspace.documents')}</span>
         <span className="doc-list__col doc-list__col--meta">{t('workspace.pages', { count: 0 }).replace('0', '')}</span>
         <span className="doc-list__col doc-list__col--status">{t('doc.actions')}</span>
+        <span className="doc-list__col--menu" aria-hidden="true" />
       </div>
       {documents.map(doc => (
         <DocumentRow
@@ -488,6 +660,8 @@ export default function Workspace() {
           onDelete={(document) => setPendingConfirm({ doc: document, action: 'delete' })}
           onClear={(document) => setPendingConfirm({ doc: document, action: 'clear' })}
           onMove={(document, target) => void handleMoveToGroup(document, target)}
+          selected={selectedDocumentIds.has(doc.doc_id)}
+          onToggleSelect={handleToggleSelect}
           statusBadge={statusBadge}
         />
       ))}
@@ -517,6 +691,45 @@ export default function Workspace() {
             </span>
           </div>
           <div className="workspace-toolbar-actions">
+            {documents.length > 0 && (
+              <div className="workspace-bulk-actions">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  ariaPressed={allDocumentsSelected}
+                  onClick={() => setSelectedDocumentIds(allDocumentsSelected
+                    ? new Set()
+                    : new Set(documents.map(doc => doc.doc_id)))}
+                  disabled={deleteMutation.isPending || isEnqueueingSelected}
+                >
+                  {allDocumentsSelected ? t('workspace.deselectAll') : t('workspace.selectAll')}
+                </Button>
+                {selectedDocuments.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<QueueIcon size={16} />}
+                    onClick={() => void handleEnqueueSelected(selectedDocuments)}
+                    disabled={deleteMutation.isPending || isEnqueueingSelected || !libraryRoot}
+                  >
+                    {isEnqueueingSelected
+                      ? t('workspace.enqueueingSelected')
+                      : t('workspace.enqueueSelected', { count: selectedDocuments.length })}
+                  </Button>
+                )}
+                {selectedDocuments.length > 0 && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    icon={<TrashIcon size={16} />}
+                    onClick={() => setPendingConfirm({ docs: selectedDocuments, action: 'delete-selected' })}
+                    disabled={deleteMutation.isPending || isEnqueueingSelected}
+                  >
+                    {t('workspace.deleteSelected', { count: selectedDocuments.length })}
+                  </Button>
+                )}
+              </div>
+            )}
             <span className="workspace-view-label">{viewMode === 'grid' ? t('workspace.viewGrid') : t('workspace.viewList')}</span>
             <div
               className="workspace-view-toggle"
@@ -552,9 +765,9 @@ export default function Workspace() {
               icon={<PlusIcon size={16} />}
               className="workspace-import-btn"
               onClick={handleImport}
-              disabled={importMutation.isPending}
+              disabled={isImporting || importMutation.isPending}
             >
-              {importMutation.isPending ? t('library.importing') : t('library.importPdf')}
+              {isImporting || importMutation.isPending ? t('library.importing') : t('library.importPdf')}
             </Button>
           </div>
         </div>
@@ -565,7 +778,9 @@ export default function Workspace() {
               showPercent
               color="var(--accent)"
               height={6}
-              label={t('library.importing')}
+              label={uploadBatch
+                ? t('library.importBatchProgress', uploadBatch)
+                : t('library.importing')}
             />
           </div>
         )}
@@ -614,8 +829,17 @@ export default function Workspace() {
               >
                 <PdfIcon size={28} aria-hidden="true" />
                 <span>{t('library.emptyImportHint')}</span>
-                <Button variant="secondary" size="sm" icon={<PlusIcon size={16} />} className="workspace-import-btn" onClick={handleImport}>
-                  {t('library.importPdf')}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<PlusIcon size={16} />}
+                  className="workspace-import-btn"
+                  onClick={handleImport}
+                  disabled={isImporting || importMutation.isPending}
+                >
+                  {isImporting || importMutation.isPending
+                    ? t('library.importing')
+                    : t('library.importPdf')}
                 </Button>
               </div>
             )}

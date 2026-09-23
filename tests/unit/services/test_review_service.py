@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from mbforge.services.review_queue import (
+from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.application.use_cases.review_queue import (
     clear_all,
     decide,
     insert_review_item,
     list_queue,
     stats,
 )
-from mbforge.storage.sqlite.database import DatabaseManager
 
 
 def test_unified_queue_maps_native_and_markush_rows(tmp_path) -> None:

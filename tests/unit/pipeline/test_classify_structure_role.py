@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.core.molecule import Molecule
-from mbforge.pipeline.detection.structure_role import classify_structure_role
+from mbforge.application.pipeline.detection.structure_role import (
+    classify_structure_role,
+)
+from mbforge.domain.molecule import Molecule
 
 
 def _molecule(

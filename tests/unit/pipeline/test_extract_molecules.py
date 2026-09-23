@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from mbforge.pipeline.detection.extraction import (
+from mbforge.application.pipeline.detection.extraction import (
     MAX_SCRIBE_BATCH_SIZE,
     _clamp_scribe_batch_size,
     _nearby_page_text,
@@ -57,7 +57,7 @@ def test_clamp_scribe_batch_size_enforces_bounds() -> None:
 @pytest.fixture(autouse=True)
 def _reset_moldet_singletons():
     """Reset detector singletons so each test builds its own mock detector."""
-    from mbforge.backends import moldet_v2_ft
+    from mbforge.adapters.inference import moldet_v2_ft
 
     moldet_v2_ft._detector_singleton = None
     yield
@@ -149,15 +149,17 @@ def test_extract_molecules_from_pdf_mocked_backends(
     mocks["pymupdf"].open.return_value = fake_doc
 
     with (
-        patch("mbforge.backends.molparser", new=mocks["molparser"]),
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch("mbforge.adapters.inference.molparser", new=mocks["molparser"]),
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules",
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules",
             return_value=mocks["detect"],
         ),
         patch(
-            "mbforge.pipeline.detection.image_preprocessing.split_molecule_crop",
+            "mbforge.application.pipeline.detection.image_preprocessing.split_molecule_crop",
             side_effect=_fake_split,
         ),
     ):
@@ -205,8 +207,10 @@ def test_extract_molecules_from_pdf_skips_pure_text_pages(
     mocks["pymupdf"].open.return_value = fake_doc
 
     with (
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
     ):
         mock_detector = MagicMock()
         mock_detector.is_available.return_value = True
@@ -228,8 +232,10 @@ def test_extract_molecules_from_pdf_returns_empty_when_detector_unavailable(
     Path(pdf_path).write_text("dummy")
 
     with (
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
     ):
         mock_detector = MagicMock()
         mock_detector.is_available.return_value = False
@@ -401,15 +407,17 @@ def test_extract_molecules_from_pdf_reads_page_blocks_once_per_page(
     ]
 
     with (
-        patch("mbforge.backends.molparser", new=mocks["molparser"]),
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch("mbforge.adapters.inference.molparser", new=mocks["molparser"]),
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules",
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules",
             return_value=mocks["detect"],
         ),
         patch(
-            "mbforge.pipeline.detection.image_preprocessing.split_molecule_crop",
+            "mbforge.application.pipeline.detection.image_preprocessing.split_molecule_crop",
             side_effect=_fake_split,
         ),
     ):
@@ -455,7 +463,9 @@ def test_extract_molecules_from_pdf_bounds_scribe_batches(
             molparser_batch_size=2,
         )
     )
-    monkeypatch.setattr("mbforge.utils.config.load_global_config", lambda: fake_config)
+    monkeypatch.setattr(
+        "mbforge.foundation.config.load_global_config", lambda: fake_config
+    )
 
     mocks["detect"].bboxes = [
         _mol_bbox([0.0, 0.0, 0.5, 0.5]),
@@ -486,15 +496,17 @@ def test_extract_molecules_from_pdf_bounds_scribe_batches(
     monkeypatch.setattr(Image.Image, "close", _spy_close)
 
     with (
-        patch("mbforge.backends.molparser", new=mocks["molparser"]),
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch("mbforge.adapters.inference.molparser", new=mocks["molparser"]),
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules",
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules",
             return_value=mocks["detect"],
         ),
         patch(
-            "mbforge.pipeline.detection.image_preprocessing.split_molecule_crop",
+            "mbforge.application.pipeline.detection.image_preprocessing.split_molecule_crop",
             side_effect=_fake_split,
         ),
     ):
@@ -542,15 +554,17 @@ def test_extract_molecules_from_pdf_archives_expanded_moldet_crop(
     ]
 
     with (
-        patch("mbforge.backends.molparser", new=mocks["molparser"]),
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch("mbforge.adapters.inference.molparser", new=mocks["molparser"]),
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules",
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules",
             return_value=mocks["detect"],
         ),
         patch(
-            "mbforge.pipeline.detection.image_preprocessing.split_molecule_crop",
+            "mbforge.application.pipeline.detection.image_preprocessing.split_molecule_crop",
             side_effect=_fake_split,
         ),
     ):
@@ -595,19 +609,21 @@ def test_extract_molecules_from_pdf_collects_ocr_labels(
     monkeypatch.setattr(Image.Image, "close", _spy_close)
 
     with (
-        patch("mbforge.backends.molparser", new=mocks["molparser"]),
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch("mbforge.adapters.inference.molparser", new=mocks["molparser"]),
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules",
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules",
             return_value=mocks["detect"],
         ),
         patch(
-            "mbforge.pipeline.detection.image_preprocessing.split_molecule_crop",
+            "mbforge.application.pipeline.detection.image_preprocessing.split_molecule_crop",
             side_effect=_fake_split_with_empty_mask,
         ),
         patch(
-            "mbforge.backends.ocr.crop_labels.extract_label_reads",
+            "mbforge.adapters.inference.ocr.crop_labels.extract_label_reads",
             return_value=[
                 ("1a", 0.95, (0, 0, 10, 8), True),
                 ("1", 0.95, (0, 0, 10, 9), True),
@@ -644,19 +660,21 @@ def test_extract_molecules_from_pdf_skips_ocr_without_offcut_foreground(
     _setup_fake_page(mocks, blocks=[])
 
     with (
-        patch("mbforge.backends.molparser", new=mocks["molparser"]),
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch("mbforge.adapters.inference.molparser", new=mocks["molparser"]),
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules",
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules",
             return_value=mocks["detect"],
         ),
         patch(
-            "mbforge.pipeline.detection.image_preprocessing.split_molecule_crop",
+            "mbforge.application.pipeline.detection.image_preprocessing.split_molecule_crop",
             side_effect=_fake_split_with_empty_mask,
         ),
         patch(
-            "mbforge.backends.ocr.crop_labels.extract_label_reads",
+            "mbforge.adapters.inference.ocr.crop_labels.extract_label_reads",
             return_value=["4A"],
         ) as mock_ocr,
     ):
@@ -679,7 +697,7 @@ def test_extract_molecules_from_pdf_batches_page_rois_into_one_gpu_call(
     The single-image path is never taken, and the ROI-local detection boxes
     are mapped back to page-normalized coordinates.
     """
-    from mbforge.backends.moldet_v2_ft import MoleculeBbox, MoleculeResult
+    from mbforge.adapters.inference.moldet_v2_ft import MoleculeBbox, MoleculeResult
 
     mocks = _patch_pdf_dependencies(monkeypatch)
 
@@ -689,18 +707,22 @@ def test_extract_molecules_from_pdf_batches_page_rois_into_one_gpu_call(
     _setup_fake_page(mocks, blocks=[])
 
     with (
-        patch("mbforge.backends.molparser", new=mocks["molparser"]),
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch("mbforge.adapters.inference.molparser", new=mocks["molparser"]),
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules_batch",
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules_batch",
             return_value=[
                 MoleculeResult(bboxes=[MoleculeBbox(1, (0.1, 0.2, 0.9, 0.8), 0.95)])
             ],
         ) as mock_batch,
-        patch("mbforge.backends.moldet_v2_ft.detect_molecules") as mock_single,
         patch(
-            "mbforge.pipeline.detection.image_preprocessing.split_molecule_crop",
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules"
+        ) as mock_single,
+        patch(
+            "mbforge.application.pipeline.detection.image_preprocessing.split_molecule_crop",
             side_effect=_fake_split,
         ),
     ):
@@ -737,7 +759,7 @@ def test_extract_molecules_from_pdf_falls_back_to_full_page_when_rois_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """ROI detection that yields no molecules still runs full-page MolDet."""
-    from mbforge.backends.moldet_v2_ft import MoleculeResult
+    from mbforge.adapters.inference.moldet_v2_ft import MoleculeResult
 
     mocks = _patch_pdf_dependencies(monkeypatch)
 
@@ -747,19 +769,21 @@ def test_extract_molecules_from_pdf_falls_back_to_full_page_when_rois_empty(
     _setup_fake_page(mocks, blocks=[])
 
     with (
-        patch("mbforge.backends.molparser", new=mocks["molparser"]),
-        patch("mbforge.backends.moldet_v2_ft.MolDetv2Detector") as mock_detector_cls,
-        patch("mbforge.infra.resource_manager.ResourceManager"),
+        patch("mbforge.adapters.inference.molparser", new=mocks["molparser"]),
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules_batch",
+            "mbforge.adapters.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.adapters.runtime.resource_manager.ResourceManager"),
+        patch(
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules_batch",
             return_value=[MoleculeResult(bboxes=[])],
         ) as mock_batch,
         patch(
-            "mbforge.backends.moldet_v2_ft.detect_molecules",
+            "mbforge.adapters.inference.moldet_v2_ft.detect_molecules",
             return_value=mocks["detect"],
         ) as mock_single,
         patch(
-            "mbforge.pipeline.detection.image_preprocessing.split_molecule_crop",
+            "mbforge.application.pipeline.detection.image_preprocessing.split_molecule_crop",
             side_effect=_fake_split,
         ),
     ):

@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from mbforge.utils.logger import (
+from mbforge.foundation.logger import (
     UvicornAccessLogFilter,
     configure_uvicorn_access_logging,
 )

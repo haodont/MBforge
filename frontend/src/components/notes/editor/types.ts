@@ -1,7 +1,7 @@
 /**
  * 笔记实体.
  *
- * Field shape matches the Pydantic `Note` schema in `src/mbforge/models/`.
+ * Field shape matches the Pydantic `Note` schema in `src/mbforge/application/dto/`.
  */
 export interface Note {
   id: string
