@@ -9,6 +9,7 @@ from typing import Any
 
 from mbforge.application.pipeline.labels import _explicit_compound_labels
 from mbforge.application.pipeline.markdown.markers import _ESMILES_BLOCK_RE
+from mbforge.domain.evidence_kind import TEXT_CATEGORIES, category_of
 from mbforge.foundation.ids import stable_id
 
 # The optional numeric prefix is OCR page-margin noise, not part of a title.
@@ -133,7 +134,7 @@ def parse_source_evidence_sections(
     Markdown or Extract page text: a section is
     the block range between two heading blocks, and evidence provenance comes
     straight from the loaded SourceEvidence rows. Only text-bearing
-    ``text_span``/``table_span`` blocks are eligible for heading detection.
+    ``text``-category blocks (prose and tables) are eligible for heading detection.
 
     Args:
         evidence: SourceEvidence rows already in deterministic reading order
@@ -155,7 +156,7 @@ def parse_source_evidence_sections(
             raise ValueError("source evidence contains an empty evidence_id")
 
     def _text_kind(item: Any) -> bool:
-        return item.kind in {"text_span", "table_span"} and bool(item.raw_text.strip())
+        return category_of(item.kind) in TEXT_CATEGORIES and bool(item.raw_text.strip())
 
     def _heading_match(item: Any) -> re.Match[str] | None:
         for line in item.raw_text.splitlines():

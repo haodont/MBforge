@@ -17,7 +17,7 @@ import type { IngestTask } from '../http/ingest_queue'
 
 const PIPELINE_STAGES = new Set([
   'extract',
-  'detection',
+  'join',
   'markdown',
   'patent',
 ])

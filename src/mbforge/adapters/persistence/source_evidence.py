@@ -3,10 +3,10 @@
 Overwrite policy
 ----------------
 ``evidence_id`` is derived from the geometric location
-(``doc_id`` / ``page`` / ``kind`` / rounded bbox), so re-detecting the same
-region reproduces the same id while the payload (compound label, SMILES,
-confidence) may legitimately change.  A changed payload is therefore allowed
-to overwrite the stored row, but only through an explicit
+(``doc_id`` / ``page`` / rounded bbox — ``kind`` is deliberately excluded), so
+re-detecting the same region reproduces the same id while the payload (compound
+label, SMILES, confidence) may legitimately change.  A changed payload is
+therefore allowed to overwrite the stored row, but only through an explicit
 ``DELETE`` by ``evidence_id`` followed by an ``INSERT`` of the new content in
 the same transaction: the id is never re-pointed, so downstream references
 stay valid, and no ``UPDATE`` can leave a half-refreshed row behind.
@@ -41,7 +41,6 @@ _PROBE_FIELDS = (
     "bbox_x1",
     "bbox_y1",
     "raw_text",
-    "coref",
     "kind",
 )
 
@@ -116,12 +115,11 @@ def persist_source_evidence(
                 x1,
                 y1,
                 item.raw_text,
-                item.coref,
                 item.kind,
             )
             existing = active_conn.execute(
                 "SELECT doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, "
-                "raw_text, coref, kind FROM source_evidence "
+                "raw_text, kind FROM source_evidence "
                 "WHERE evidence_id = ?",
                 (item.evidence_id,),
             ).fetchone()
@@ -132,7 +130,7 @@ def persist_source_evidence(
                     continue
                 # 覆写：先按 evidence_id 删除旧行，再在同一事务内写入新内容。
                 # evidence_id 保持不变，因此下游引用（molecules / activities）
-                # 无需重建；created_at 会随重新插入刷新。
+                # 无需重建。
                 active_conn.execute(
                     "DELETE FROM source_evidence WHERE evidence_id = ?",
                     (item.evidence_id,),
@@ -149,7 +147,7 @@ def persist_source_evidence(
             active_conn.execute(
                 "INSERT INTO source_evidence "
                 "(evidence_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, "
-                "raw_text, coref, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "raw_text, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 values,
             )
             count += 1

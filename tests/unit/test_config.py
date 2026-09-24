@@ -130,7 +130,7 @@ class TestDictDeserialization:
         assert new_cfg.layout.conf_threshold == pytest.approx(0.55)
         assert new_cfg.moldet.device == "cpu"
         # Other defaults preserved
-        assert new_cfg.layout.read_text is True
+        assert new_cfg.layout.cross_model is True
         assert new_cfg.moldet.detection_dpi == pytest.approx(200.0)
 
     def test_load_normalizes_and_persists_library_root(

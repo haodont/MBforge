@@ -91,8 +91,10 @@ class LibraryEvidenceItem(BaseModel):
     page: int
     bbox: tuple[float, float, float, float]
     raw_text: str = ""
-    coref: str = ""
     kind: str
+    #: Category of ``kind`` (``text`` / ``table`` / ``image`` / ``molecule``), so
+    #: readers never have to match a producer label by name.
+    category: str = ""
 
 
 class LibraryConfigureResponse(BaseModel):

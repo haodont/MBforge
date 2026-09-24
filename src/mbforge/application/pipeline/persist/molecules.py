@@ -106,16 +106,10 @@ def _candidate_context_text(candidate: Molecule) -> str:
     properties = getattr(candidate, "properties", {})
     if not isinstance(properties, dict):
         return ""
-    raw = _clean_contexts(properties.get("context_texts"))
-    document_context = _clean_contexts(
-        properties.get("role_contexts"), exclude=set(raw)
-    )
-    sections: list[str] = []
-    if raw:
-        sections.append("\n".join(raw))
-    if document_context:
-        sections.append(DOCUMENT_CONTEXT_MARKER + "\n" + "\n".join(document_context))
-    return "\n".join(sections)[:_CONTEXT_TOTAL_CAP]
+    contexts = _clean_contexts(properties.get("role_contexts"))
+    if not contexts:
+        return ""
+    return (DOCUMENT_CONTEXT_MARKER + "\n" + "\n".join(contexts))[:_CONTEXT_TOTAL_CAP]
 
 
 def persist_molecule_candidates(
@@ -376,7 +370,7 @@ def filter_persistable_candidates(
     page, or no canonical SMILES.
 
     Also used by read paths (by-location overlay queries) to reproduce the
-    persisted subset from the normalized Detection branch; pass ``warn=False``
+    persisted subset from the normalized molecule results; pass ``warn=False``
     there — skipped candidates are the normal case for a read, not a
     persistence anomaly worth logging.
     """

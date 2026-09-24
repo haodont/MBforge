@@ -38,8 +38,6 @@ export interface SettingsState {
   // —— Local layout producer (text + regions) ——
   /** Detector confidence threshold for layout regions. */
   layout_conf_threshold: number
-  /** Read region text locally; without it text regions carry no content. */
-  layout_read_text: boolean
   /** Run MolDet on the same render so a figure region can be typed as one molecule. */
   layout_cross_model: boolean
 
@@ -107,7 +105,6 @@ export const DEFAULT_SETTINGS: SettingsState = {
   vlm_model: '',
 
   layout_conf_threshold: 0.4,
-  layout_read_text: true,
   layout_cross_model: true,
 
   server_host: '127.0.0.1',
@@ -190,7 +187,6 @@ export function flattenSettings(raw: AppSettings | null | undefined): SettingsSt
       typeof layout.conf_threshold === 'number'
         ? layout.conf_threshold
         : DEFAULT_SETTINGS.layout_conf_threshold,
-    layout_read_text: layout.read_text !== false,
     layout_cross_model: layout.cross_model !== false,
 
     server_host: ms.host || DEFAULT_SETTINGS.server_host,
@@ -272,7 +268,6 @@ export function toBackendPayload(s: SettingsState): Record<string, unknown> {
     },
     layout: {
       conf_threshold: s.layout_conf_threshold,
-      read_text: s.layout_read_text,
       cross_model: s.layout_cross_model,
     },
     model_server: {

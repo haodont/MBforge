@@ -4,15 +4,13 @@ import { flattenSettings, isSettingsEqual, toBackendPayload } from './types'
 describe('Local layout settings', () => {
   it('round-trips saved layout parameters through the settings state', () => {
     const state = flattenSettings({
-      layout: { conf_threshold: 0.55, read_text: false, cross_model: false },
+      layout: { conf_threshold: 0.55, cross_model: false },
     })
 
     expect(state.layout_conf_threshold).toBe(0.55)
-    expect(state.layout_read_text).toBe(false)
     expect(state.layout_cross_model).toBe(false)
     expect(toBackendPayload(state).layout).toEqual({
       conf_threshold: 0.55,
-      read_text: false,
       cross_model: false,
     })
   })
@@ -21,7 +19,6 @@ describe('Local layout settings', () => {
     const state = flattenSettings({})
 
     expect(state.layout_conf_threshold).toBe(0.4)
-    expect(state.layout_read_text).toBe(true)
     expect(state.layout_cross_model).toBe(true)
   })
 

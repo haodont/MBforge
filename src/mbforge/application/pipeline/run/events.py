@@ -105,7 +105,7 @@ class PipelineEventSink:
                 logger.warning("Pipeline event callback failed: %s", exc)
         if event == "error" or data.get("error"):
             logger.error("[%s] %s", event, message)
-        elif stage not in {"extract", "detection"}:
+        elif stage != "extract":
             logger.info("[%s] %s", event, message)
         self._record(event, message, stage=stage, data=data or None)
 

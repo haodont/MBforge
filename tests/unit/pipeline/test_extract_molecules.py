@@ -19,8 +19,6 @@ from mbforge.application.pipeline.detection.extraction import (
     candidate_id,
     extract_molecules_from_pdf,
     extract_molecules_from_pdf_async,
-    extract_molecules_from_text,
-    extract_molecules_from_text_async,
 )
 
 
@@ -62,34 +60,6 @@ def _reset_moldet_singletons():
     moldet_v2_ft._detector_singleton = None
     yield
     moldet_v2_ft._detector_singleton = None
-
-
-def test_extract_molecules_from_text_finds_valid_smiles() -> None:
-    """SMILES embedded in plain text are extracted and canonicalized."""
-    text = "The ethanol molecule is CCO and propane is CCC"
-    results = extract_molecules_from_text(text, doc_id="doc-1")
-
-    canonicals = {r.esmiles for r in results}
-    assert "CCO" in canonicals
-    assert "CCC" in canonicals
-    assert all(r.source == "text" for r in results)
-
-
-def test_extract_molecules_from_text_ignores_invalid_tokens() -> None:
-    """Random alphanumeric tokens that are not valid SMILES are skipped."""
-    text = "Some abbreviations like ATP and NADPH should not parse."
-    results = extract_molecules_from_text(text, doc_id="doc-1")
-    assert results == []
-
-
-def test_extract_molecules_from_text_deduplicates_canonical_smiles() -> None:
-    """Repeated textual mentions produce one canonical candidate."""
-    results = extract_molecules_from_text(
-        "ethanol CCO and the same compound CCO", "doc-1"
-    )
-    assert len(results) == 1
-    assert results[0].esmiles == "CCO"
-    assert "ethanol" in results[0].context_text
 
 
 def _patch_pdf_dependencies(monkeypatch: pytest.MonkeyPatch) -> dict:
@@ -264,24 +234,6 @@ def test_extract_molecules_from_pdf_async_offloads_to_thread(
     assert result == []
     assert len(calls) == 1
     assert calls[0][0] is extract_molecules_from_pdf
-
-
-def test_extract_molecules_from_text_async_offloads_to_thread(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The async wrapper runs the text extractor in asyncio.to_thread."""
-    calls: list[tuple[object, ...]] = []
-
-    async def _fake_to_thread(func, *args, **kwargs):
-        calls.append((func, args, kwargs))
-        return []
-
-    monkeypatch.setattr(asyncio, "to_thread", _fake_to_thread)
-
-    result = asyncio.run(extract_molecules_from_text_async("some text", "doc"))
-    assert result == []
-    assert len(calls) == 1
-    assert calls[0][0] is extract_molecules_from_text
 
 
 def test_candidate_id_deterministic_per_structure_and_position() -> None:

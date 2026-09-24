@@ -96,7 +96,6 @@ const LOADED_SETTINGS = {
   vlm: { provider: '', base_url: '', api_key: '', model: '' },
   layout: {
     conf_threshold: 0.4,
-    read_text: true,
     cross_model: true,
     max_pages_per_doc: null,
   },

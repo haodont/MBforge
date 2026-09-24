@@ -118,7 +118,6 @@ export const TaskRow = memo(function TaskRow({
   const STAGE_OPTIONS: { value: string | null; label: string }[] = [
     { value: null, label: t('queue.retryFromCheckpoint') },
     { value: 'extract', label: t('queue.retryFromExtract') },
-    { value: 'detection', label: t('queue.retryFromMoleculeDetection') },
     { value: 'markdown', label: t('queue.retryFromMarkdown') },
     { value: 'patent', label: t('queue.retryFromPatent') },
   ]

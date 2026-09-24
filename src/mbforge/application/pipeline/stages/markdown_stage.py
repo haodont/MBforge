@@ -36,7 +36,7 @@ def write_rough_markdown(pages: list, output_path: str) -> None:
     Path(output_path).write_text("\n".join(lines), encoding="utf-8")
 
 
-@register(after="join")
+@register(after="extract")
 class MarkdownStage:
     name = "markdown"
 

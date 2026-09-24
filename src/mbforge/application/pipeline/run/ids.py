@@ -7,10 +7,8 @@ re-claimed afterwards), so a fresh timestamp normally never collides; the
 scan-and-increment guard below only exists to keep two *concurrent* rows for
 the same document (double re-ingest) from ever sharing a run ID.
 
-Artifact kinds follow the stage that publishes them:
-
-- branch kinds under ``.staging/`` — ``extract.json``
-  (extract) and ``detection.json`` (detection).
+Artifact kinds were once published per stage under ``.staging/``; Extract now
+persists straight to SQL, so this module only mints run IDs.
 """
 
 from __future__ import annotations
@@ -23,20 +21,6 @@ from mbforge.foundation.layout import LibraryLayout
 
 #: UTC timestamp format for run IDs.
 RUN_ID_FORMAT = "%Y%m%d%H%M%S"
-
-# Kind filename for every fork branch under ``.staging/``.
-_BRANCH_KIND_BY_STAGE: dict[str, str] = {
-    "extract": "extract.json",
-    "detection": "detection.json",
-}
-
-# Branch stage → kind file.
-_KIND_BY_STAGE = _BRANCH_KIND_BY_STAGE
-
-
-def stage_kind_file(stage: str) -> str | None:
-    """Return the artifact filename published by *stage*, or ``None``."""
-    return _KIND_BY_STAGE.get(stage)
 
 
 def mint_run_id(library_root: str | Path, doc_id: str) -> str:

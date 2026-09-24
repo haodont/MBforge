@@ -124,8 +124,7 @@ def advance_dependents(
 
     A dependent moves ``blocked`` → ``pending`` only when **every** one of
     its prerequisites is ``done``. The ``status = 'blocked'`` guard makes the
-    promotion idempotent, so when two siblings finish at nearly the same time
-    only one of them turns the same join row pending.
+    promotion idempotent, so re-promoting the same node is a no-op.
     """
     db = DatabaseManager.get(library_root)
     promoted: list[str] = []
@@ -266,9 +265,9 @@ def reset_node(library_root: str, task_id: str, *, allow_done: bool = False) -> 
     ``allow_done=False`` (default) retries a failed/cancelled node; ``True``
     also re-opens a node that already succeeded, which is how the UI's
     "rerun from stage" reaches back into a completed run. Dependents go back
-    to ``blocked`` so they cannot run until the reopened node (and its
-    siblings) succeed again. Siblings that already succeeded are left
-    untouched — that is what lets a retry reuse the other initial branch.
+    to ``blocked`` so they cannot run until the reopened node succeeds again.
+    Nodes that already succeeded are left untouched, so a retry reuses their
+    artifacts.
     """
     allowed = ("done", "failed", "cancelled") if allow_done else ("failed", "cancelled")
     placeholders = ",".join("?" for _ in allowed)
@@ -357,10 +356,9 @@ def queue_snapshot(library_root: str) -> dict:
 def fetch_run_status(library_root: str, run_id: str) -> str | None:
     """Aggregate a run's status across its queue nodes by worst precedence.
 
-    One ``run_id`` spans several stage nodes (extract/detection run in
-    parallel); aggregate with terminal states winning over active ones so
-    the UI shows a stable run-level status: cancelled/failed >
-    processing > pending > done.
+    One ``run_id`` spans several stage nodes; aggregate with terminal states
+    winning over active ones so the UI shows a stable run-level status:
+    cancelled/failed > processing > pending > done.
     """
     precedence = {
         "cancelled": 0,

@@ -19,8 +19,6 @@ from mbforge.application.pipeline.detection.extraction.coordinator import (
     candidate_id,
     extract_molecules_from_pdf,
     extract_molecules_from_pdf_async,
-    extract_molecules_from_text,
-    extract_molecules_from_text_async,
 )
 from mbforge.application.pipeline.detection.extraction.crop_processor import (
     CropProcessor,
@@ -49,8 +47,6 @@ __all__ = [
     "clamp_scribe_batch_size",
     "extract_molecules_from_pdf",
     "extract_molecules_from_pdf_async",
-    "extract_molecules_from_text",
-    "extract_molecules_from_text_async",
     "fill_ocr_slot",
     "load_extraction_config",
     "candidate_id",

@@ -12,8 +12,7 @@ from mbforge.domain.evidence import SourceEvidence, _normalise_bbox
 from mbforge.foundation.errors import NotFoundError, ValidationError
 
 _COLUMNS = (
-    "evidence_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, "
-    "raw_text, coref, kind"
+    "evidence_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, raw_text, kind"
 )
 
 
@@ -30,7 +29,6 @@ def _row_to_evidence(row) -> SourceEvidence:  # type: ignore[no-untyped-def]
                 row["bbox_y1"],
             ],
             "raw_text": row["raw_text"],
-            "coref": row["coref"],
             "kind": row["kind"],
         }
     )

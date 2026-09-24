@@ -20,12 +20,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from mbforge.application.pipeline.artifacts.branch_io import (
-    branch_path as resolve_branch_path,
-)
-from mbforge.application.pipeline.artifacts.json_io import read_json_object
 from mbforge.application.pipeline.patent.artifact import PatentFactsArtifact
-from mbforge.application.pipeline.run.ids import stage_kind_file
 from mbforge.foundation.layout import LibraryLayout
 from mbforge.foundation.logger import get_logger
 
@@ -174,22 +169,3 @@ def publish_run(
         "Published patent facts for %s (run %s): %s", doc_id, run_id, artifact_path
     )
     return artifact_path
-
-
-def reap_stage_run(
-    library_root: str | Path, doc_id: str, stage: str, run_id: str
-) -> None:
-    """Remove one superseded Extract/Detection branch artifact.
-
-    A staged branch is removed only when its embedded run ID matches the
-    superseded run.
-    """
-    if stage not in ("extract", "detection"):
-        return
-    kind = stage_kind_file(stage)
-    if kind is None:
-        return
-    branch_path = resolve_branch_path(library_root, doc_id, kind)
-    data = read_json_object(branch_path)
-    if data is not None and data.get("run_id") == run_id:
-        branch_path.unlink()

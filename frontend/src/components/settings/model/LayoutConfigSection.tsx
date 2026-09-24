@@ -47,16 +47,6 @@ export default function LayoutConfigSection({
           dirty={dirtyFields.layout_conf_threshold}
         />
         <ToggleField
-          label={t('settings.layoutReadText')}
-          description={t('settings.layoutReadTextDesc')}
-          value={settings.layout_read_text}
-          onChange={v => {
-            markDirty('layout_read_text')
-            update('layout_read_text', v)
-          }}
-          dirty={dirtyFields.layout_read_text}
-        />
-        <ToggleField
           label={t('settings.layoutCrossModel')}
           description={t('settings.layoutCrossModelDesc')}
           value={settings.layout_cross_model}

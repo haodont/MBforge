@@ -1,4 +1,15 @@
-"""Join raw Extract and Detection branches into SQL-backed evidence."""
+"""Mint the canonical ``SourceEvidence`` rows from one page of Extract output.
+
+This is the only place that turns a raw page bbox into a
+:class:`SourceEvidence`, so the evidence ID is computed after the visual page
+coordinate system is fixed and rows sharing a location are arbitrated in the
+same pass — the location *is* the evidence ID, so only one row per location may
+survive.
+
+``kind`` is the producer's own label, stored verbatim.  The closed label →
+category mapping lives in :mod:`mbforge.domain.evidence_kind`; readers compare
+categories, never label strings.
+"""
 
 from __future__ import annotations
 
@@ -7,119 +18,151 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from mbforge.application.pipeline.artifacts.branch_io import (
-    _bbox_in_frame,
-    _extracted_from_artifact,
-    _frame_map,
-    detection_results,
-)
-from mbforge.application.pipeline.artifacts.evidence_models import (
-    DetectionArtifact,
-    DocumentEvidenceArtifact,
-    ExtractArtifact,
-    PageFrame,
-)
+from mbforge.application.pipeline.artifacts.evidence_models import PageFrame
+from mbforge.application.pipeline.extract.text import ExtractedDocument
+from mbforge.application.pipeline.layout.labels import kind_vocab
 from mbforge.domain.evidence import SourceEvidence
 from mbforge.domain.evidence_kind import (
     IMAGE,
     MOLECULE,
-    TABLE,
-    TEXT,
     category_of,
     kind_rank,
-    register_kind_vocab,
     register_kinds,
 )
 from mbforge.domain.molecule import Molecule
 from mbforge.domain.types import ExtractionResult
+from mbforge.foundation.layout import LibraryLayout
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger("mbforge.application.pipeline.artifacts.evidence_join")
 
-# Kinds this stage mints, registered where they are minted.
-register_kinds(
-    {
-        "text_span": TEXT,
-        "table_span": TABLE,
-        "image_region": IMAGE,
-        "molecule": MOLECULE,
-    }
-)
+# The closed label → category mapping is declared in code: the layout producer's
+# own labels plus the molecule label.  A reader that only opens SQL gets it by
+# importing this module (or ``hydration``), never from a producer artifact.
+register_kinds(kind_vocab())
+
+#: Observation fields the evidence row already carries in its own columns.
+_LOCATION_FIELDS = ("page_idx", "bbox_pdf")
 
 
-def _extract_frames(artifact: ExtractArtifact) -> list[PageFrame]:
-    return [
-        PageFrame(
-            page=page.page_num,
-            width=page.width,
-            height=page.height,
-            rotation=page.rotation,
-        )
-        for page in artifact.pages
-    ]
+def page_frames_from_pdf(pdf_path: str | Path) -> list[PageFrame]:
+    """Read the visual page frames once at the producer boundary."""
+    import pymupdf
+
+    document = pymupdf.open(str(pdf_path))
+    try:
+        return [
+            PageFrame(
+                page=index + 1,
+                width=float(page.rect.width),
+                height=float(page.rect.height),
+                rotation=int(page.rotation),
+            )
+            for index, page in enumerate(document)
+        ]
+    finally:
+        document.close()
 
 
-def _detection_frames(artifact: DetectionArtifact) -> list[PageFrame]:
-    return [
-        PageFrame(
-            page=page.page_num,
-            width=page.width,
-            height=page.height,
-            rotation=page.rotation,
-        )
-        for page in artifact.pages
-    ]
+def _frame_map(pages: Sequence[PageFrame]) -> dict[int, PageFrame]:
+    frames = {page.page: page for page in pages}
+    if len(frames) != len(pages):
+        raise ValueError("page frames must contain each page number once")
+    return frames
 
 
-def _result_coref(result: ExtractionResult) -> str:
-    path = str(result.mol_img_path or "").replace("\\", "/")
-    return path if path.startswith("storage/") else ""
+def _validated_bbox(
+    bbox: Iterable[float], width: float, height: float
+) -> tuple[float, float, float, float]:
+    raw_values = list(bbox)
+    if len(raw_values) != 4:
+        raise ValueError("bbox must contain exactly four coordinates")
+    x0, y0, x1, y1 = (float(value) for value in raw_values)
+    values = (x0, y0, x1, y1)
+    if not (0 <= x0 <= x1 <= width and 0 <= y0 <= y1 <= height):
+        raise ValueError("bbox is outside page frame")
+    return values
 
 
-def _figure_coref(doc_id: str) -> str:
-    """Reference a figure region back to the source PDF.
+def _bbox_in_frame(
+    bbox: Iterable[float], frame: PageFrame
+) -> tuple[float, float, float, float]:
+    return _validated_bbox(bbox, frame.width, frame.height)
 
-    Figure regions are recorded as layout rectangles only; the pipeline no
-    longer extracts or stores page images, so the source document is the
-    honest reference for them.
+
+def _canonical_crop_path(
+    library_root: str | Path,
+    doc_id: str,
+    image_path: str | None,
+    *,
+    staging_dir: str | Path | None,
+) -> str:
+    """Rewrite a crop path to its library-relative reference, or return ``""``.
+
+    The crop must already be archived (canonically, or in this run's staging
+    directory) — a row that references a missing image is a defect, not a fact.
     """
-    return f"storage/{doc_id}/source.pdf"
+    if not image_path:
+        return ""
+    name = Path(str(image_path).replace("\\", "/")).name
+    if not name or name in {".", ".."}:
+        return ""
+    layout = LibraryLayout(library_root)
+    canonical_path = layout.crop(doc_id, name)
+    staged_path = (
+        Path(staging_dir) / "crops" / name if staging_dir is not None else None
+    )
+    if not canonical_path.is_file() and (
+        staged_path is None or not staged_path.is_file()
+    ):
+        raise ValueError(f"molecule crop is not archived: {name}")
+    return f"storage/{doc_id}/crops/{name}"
 
 
-def _validate_join_inputs(
-    extracted: ExtractArtifact, detection: DetectionArtifact
-) -> None:
-    if extracted.doc_id != detection.doc_id:
-        raise ValueError("cannot join artifacts from different doc_id values")
-    if extracted.run_id != detection.run_id:
-        raise ValueError("cannot join artifacts from different run_id values")
-    extract_frames = _extract_frames(extracted)
-    detection_frames = _detection_frames(detection)
-    if extract_frames != detection_frames:
-        raise ValueError("Extract and Detection page frames differ")
-    frames = _frame_map(extract_frames)
-    if {page.page_num for page in extracted.pages} != set(frames):
-        raise ValueError("Extract pages and page frames do not match")
-    for result in detection_results(detection):
-        if result.page_idx is None or result.bbox_pdf is None:
-            raise ValueError("detection result must contain page_idx and bbox_pdf")
-        frame = frames.get(result.page_idx + 1)
-        if frame is None:
-            raise ValueError(f"detection references unknown page {result.page_idx + 1}")
-        _bbox_in_frame(result.bbox_pdf, frame)
+def observation_payload(
+    result: ExtractionResult,
+    *,
+    doc_id: str,
+    library_root: str | Path,
+    staging_dir: str | Path | None,
+) -> dict[str, Any]:
+    """Return the JSON payload stored in a molecule row's ``raw_text``.
+
+    The observation keeps everything that has no column of its own; the location
+    (``page_idx`` / ``bbox_pdf``) is dropped because the row's ``page`` and
+    ``bbox_x0..y1`` already carry it.  ``mol_img_path`` is rewritten to the
+    canonical library-relative crop reference.
+    """
+    payload = result.to_dict()
+    payload["mol_img_path"] = _canonical_crop_path(
+        library_root, doc_id, result.mol_img_path, staging_dir=staging_dir
+    )
+    return {key: value for key, value in payload.items() if key not in _LOCATION_FIELDS}
+
+
+def observation_from_payload(
+    raw_text: str, *, page: int, bbox: Sequence[float]
+) -> ExtractionResult:
+    """Rebuild one molecule observation from its row payload plus the row location."""
+    payload = json.loads(raw_text)
+    if not isinstance(payload, dict):
+        raise ValueError("molecule payload must be a JSON object")
+    return ExtractionResult.from_dict(
+        {
+            **payload,
+            "page_idx": page - 1,
+            "bbox_pdf": list(bbox),
+        }
+    )
 
 
 def _location_key(page: int, bbox: Iterable[float]) -> tuple[int, tuple[str, ...]]:
-    """Location key formatted exactly as :func:`core.evidence._location_id` does."""
+    """Location key formatted exactly as :func:`domain.evidence._location_id` does."""
     return (page, tuple(f"{round(float(value), 2):.2f}" for value in bbox))
 
 
 def _reading_order_hint(document: Any) -> dict[tuple[int, tuple[str, ...]], int]:
-    """Map a layout region's location to its column-aware reading order.
-
-    Only the local layout producer emits ``reading_order``; pages from the
-    cloud-OCR layout contribute nothing and keep the raster order.
-    """
+    """Map a layout region's location to its column-aware reading order."""
     hint: dict[tuple[int, tuple[str, ...]], int] = {}
     for page in document.pages:
         for region in page.regions:
@@ -140,19 +183,16 @@ def _region_evidence(
 ) -> SourceEvidence:
     """Turn one typed layout region into source evidence.
 
-    ``kind`` is the detector's own label (``chem`` / ``figcx`` / ``mnote`` …),
-    kept verbatim. Content is the recognized text when there is any; otherwise
-    the region points back at the source PDF — the pipeline no longer stores
-    page images, so the document itself is the honest reference.
+    ``kind`` is the detector's own label (``text`` / ``sec`` / ``figcx`` …), kept
+    verbatim.  Content is the recognized text when there is any; a region the
+    producer located but could not read carries an empty payload.
     """
-    raw_text = str(region.get("text") or "").strip()
     return SourceEvidence.create(
         doc_id=doc_id,
         page=page,
         bbox=_bbox_in_frame(region.get("bbox") or (), frame),
-        raw_text=raw_text,
-        coref="" if raw_text else _figure_coref(doc_id),
-        kind=str(region.get("kind") or "text_span"),
+        raw_text=str(region.get("text") or "").strip(),
+        kind=str(region.get("kind") or "text"),
     )
 
 
@@ -160,7 +200,7 @@ def _evidence_sort_key(
     item: SourceEvidence,
     order_hint: dict[tuple[int, tuple[str, ...]], int] | None = None,
 ) -> tuple[Any, ...]:
-    """Sort key for the joined evidence list.
+    """Sort key for the evidence list.
 
     A row whose location carries a layout ``reading_order`` sorts by it (inside
     its page, ahead of everything unordered), which is what makes a two-column
@@ -200,7 +240,7 @@ def _join_evidence_dedupe(
     A claim that carries content is never displaced by one that does not:
     ``raw_text`` outranks box geometry, so a layout region re-typed to a molecule
     (R3) — which claims the molecule with MolDet's own geometry but no payload —
-    leaves Detection's row, and its SMILES, in place.
+    leaves the molecule pass' row, and its SMILES, in place.
 
     Comparison is by **category**, not by raw label: producers name their regions
     freely (``chem`` / ``figcx`` / …), so two figure regions from one model can
@@ -211,9 +251,9 @@ def _join_evidence_dedupe(
     def sort_key(item: SourceEvidence) -> tuple[Any, ...]:
         # Molecule first, then content, then larger box, then the higher-ranked
         # category.  Content before size: the two sides of an overlap are usually
-        # one molecule seen by two detectors, and only Detection's row holds the
-        # recognition payload.  The size and rank keys only ever decide between
-        # equally content-bearing boxes, so the winner stays deterministic.
+        # one molecule seen by two detectors, and only the molecule pass' row
+        # holds the recognition payload.  The size and rank keys only ever decide
+        # between equally content-bearing boxes, so the winner stays deterministic.
         return (
             item.page,
             0 if category_of(item.kind) == MOLECULE else 1,
@@ -270,41 +310,32 @@ def _location_precedence(item: SourceEvidence) -> tuple[int, str]:
     return (kind_rank(item.kind), item.kind)
 
 
-def join_evidence_artifacts(
-    extracted: ExtractArtifact, detection: DetectionArtifact
-) -> DocumentEvidenceArtifact:
-    """Validate both raw branches and create the final SQL source facts.
+def mint_evidence(
+    extracted: ExtractedDocument,
+    frames: Sequence[PageFrame],
+    results: Sequence[ExtractionResult] = (),
+    *,
+    library_root: str | Path,
+    staging_dir: str | Path | None = None,
+) -> list[SourceEvidence]:
+    """Create the document's canonical source evidence, ordered for reading."""
+    page_frames = list(frames)
+    frame_by_page = _frame_map(page_frames)
+    if {page.page_num for page in extracted.pages} != set(frame_by_page):
+        raise ValueError("Extract pages and page frames do not match")
+    for result in results:
+        if result.page_idx is None or result.bbox_pdf is None:
+            raise ValueError("molecule result must contain page_idx and bbox_pdf")
+        frame = frame_by_page.get(result.page_idx + 1)
+        if frame is None:
+            raise ValueError(f"molecule references unknown page {result.page_idx + 1}")
+        _bbox_in_frame(result.bbox_pdf, frame)
 
-    This is the only place that turns a raw page bbox into a
-    :class:`SourceEvidence`. Consequently the ID is computed after rotation
-    and the visual page coordinate system are fixed. Rows sharing a location are
-    arbitrated in this same pass — the location is the evidence ID, so only one
-    row per location may survive.
-
-    The producer declares its ``kind`` vocabulary in ``detection.meta.kind_vocab``
-    (``{"chem": "image", ...}``); it is registered here so every downstream stage
-    can map labels to categories without knowing the detector.
-    """
-    register_kind_vocab(detection.meta)
-    # The layout producer declares its own region vocabulary the same way.
-    register_kind_vocab(extracted.meta)
-
-    _validate_join_inputs(extracted, detection)
-    frames = _frame_map(_extract_frames(extracted))
-    raw_document = _extracted_from_artifact(extracted)
-    order_hint = _reading_order_hint(raw_document)
-
+    order_hint = _reading_order_hint(extracted)
     by_id: dict[str, SourceEvidence] = {}
 
     def add(item: SourceEvidence) -> None:
-        """Record one claim, keeping a single row per location.
-
-        ``evidence_id`` is the location, and it is the table's primary key, so two
-        claims on the same box cannot both be stored. The stronger one keeps its
-        ``kind``; neither side's content is thrown away — a text span and a figure
-        at the same rect fold into one row carrying both ``raw_text`` and
-        ``coref``.
-        """
+        """Record one claim, keeping a single row per location."""
         previous = by_id.get(item.evidence_id)
         if previous is None:
             by_id[item.evidence_id] = item
@@ -321,96 +352,44 @@ def join_evidence_artifacts(
             page=winner.page,
             bbox=winner.bbox,
             raw_text=winner.raw_text or loser.raw_text,
-            coref=winner.coref or loser.coref,
             kind=winner.kind,
         )
 
-    for page in raw_document.pages:
-        frame = frames[page.page_num]
+    for page in extracted.pages:
+        frame = frame_by_page[page.page_num]
+        # A page carrying typed regions came from the local layout producer:
+        # those regions are the authoritative layout (they keep the detector's
+        # own ``kind``), and the derived text_spans/figure_bboxes are only a
+        # legacy view for the markdown stage. Minting both would duplicate rows.
+        for region in page.regions:
+            add(_region_evidence(region, extracted.doc_id, page.page_num, frame))
 
-        if page.regions:
-            # A page carrying typed regions was authored by the local layout
-            # producer: those regions are the authoritative layout (they keep
-            # the detector's own ``kind``), and the derived
-            # text_spans/figure_bboxes are only a legacy view for the markdown
-            # stage. Minting both would duplicate every row.
-            for region in page.regions:
-                add(_region_evidence(region, extracted.doc_id, page.page_num, frame))
-            continue
-
-        # Figure regions arrive through ``figure_bboxes``; a raw artifact may
-        # also carry one as a text span. Both feed one bbox set so each region
-        # is emitted exactly once.
-        image_bboxes: list[tuple[float, float, float, float]] = list(page.figure_bboxes)
-        for span in page.text_spans:
-            if span.block_type == 1:
-                image_bboxes.append(span.bbox)
-            elif span.block_type in {0, 2} and span.text.strip():
-                add(
-                    SourceEvidence.create(
-                        doc_id=extracted.doc_id,
-                        page=page.page_num,
-                        bbox=_bbox_in_frame(span.bbox, frame),
-                        raw_text=span.text,
-                        kind="table_span" if span.block_type == 2 else "text_span",
-                    )
-                )
-        for raw_bbox in dict.fromkeys(image_bboxes):
-            add(
-                SourceEvidence.create(
-                    doc_id=extracted.doc_id,
-                    page=page.page_num,
-                    bbox=_bbox_in_frame(raw_bbox, frame),
-                    coref=_figure_coref(extracted.doc_id),
-                    kind="image_region",
-                )
-            )
-
-    for result in detection_results(detection):
-        if result.page_idx is None or result.bbox_pdf is None:
-            raise ValueError("detection result must contain page_idx and bbox_pdf")
-        coref = _result_coref(result)
-        raw_text = (
-            json.dumps(
-                {
-                    "name": result.name,
-                    "smiles": result.smiles,
-                    "esmiles": result.esmiles,
-                    "moldet_conf": result.moldet_conf,
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-            if result.source == "image"
-            else (result.name or result.context_text or result.smiles)
-        )
-        if not coref and not raw_text:
-            raise ValueError("detection result has no source content")
+    for result in results:
+        if result.page_idx is None or result.bbox_pdf is None:  # pragma: no cover
+            raise ValueError("molecule result must contain page_idx and bbox_pdf")
+        page = result.page_idx + 1
         add(
             SourceEvidence.create(
                 doc_id=extracted.doc_id,
-                page=result.page_idx + 1,
-                bbox=_bbox_in_frame(result.bbox_pdf, frames[result.page_idx + 1]),
-                raw_text=raw_text,
-                coref=coref,
-                kind="molecule" if result.source == "image" else "text_span",
+                page=page,
+                bbox=_bbox_in_frame(result.bbox_pdf, frame_by_page[page]),
+                raw_text=json.dumps(
+                    observation_payload(
+                        result,
+                        doc_id=extracted.doc_id,
+                        library_root=library_root,
+                        staging_dir=staging_dir,
+                    ),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                kind="molecule",
             )
         )
 
     evidence = _join_evidence_dedupe(list(by_id.values()))
     evidence.sort(key=lambda item: _evidence_sort_key(item, order_hint))
-    return DocumentEvidenceArtifact(
-        doc_id=extracted.doc_id,
-        run_id=extracted.run_id,
-        conventions={
-            "extract_bbox": "pdf_bottom_left",
-            "detection_bbox": "pdf_bottom_left",
-            "joined_bbox": "pdf_bottom_left",
-        },
-        pages=list(frames.values()),
-        evidence=evidence,
-        evidence_ids=[item.evidence_id for item in evidence],
-    )
+    return evidence
 
 
 def load_document_evidence(
@@ -475,34 +454,23 @@ def _candidates_from_evidence(
     by_location = {
         (item.page, item.bbox, item.kind): item.evidence_id for item in evidence
     }
-    rejected_locations = {
-        (result.page_idx + 1, result.bbox_pdf)
-        for result in results
-        if result.status == "rejected"
-        and result.page_idx is not None
-        and result.bbox_pdf is not None
-    }
     for candidate in candidates:
         for detection in candidate.detections:
             if detection.page is None or detection.bbox is None:
                 continue
-            kind = "molecule" if detection.source == "image" else "text_span"
             detection.evidence_id = by_location.get(
-                (detection.page + 1, detection.bbox, kind)
+                (detection.page + 1, detection.bbox, "molecule")
             )
-            if (detection.page + 1, detection.bbox) in rejected_locations:
-                candidate.status = "rejected"
     return candidates
 
 
 def summarize_molecules(
     candidates: Sequence[Molecule], base: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Build the post-Join molecule statistics without creating an ID."""
+    """Build the post-extract molecule statistics without creating an ID."""
     pending = [item for item in candidates if item.status == "pending"]
     pending_review = [item for item in candidates if item.status == "pending_review"]
     rejected = [item for item in candidates if item.status == "rejected"]
-    sources = sorted({source for item in candidates for source in item.sources})
     stats = dict(base or {})
     stats.update(
         {
@@ -513,17 +481,17 @@ def summarize_molecules(
             "corrected_count": sum(
                 1 for item in candidates if item.properties.get("corrections")
             ),
-            "sources": sources,
         }
     )
     return stats
 
 
-# --- pages (ExtractStage output) ---------------------------------------------
-
 __all__ = [
     "evidence_ids_for",
-    "join_evidence_artifacts",
     "load_document_evidence",
+    "mint_evidence",
+    "observation_from_payload",
+    "observation_payload",
+    "page_frames_from_pdf",
     "summarize_molecules",
 ]

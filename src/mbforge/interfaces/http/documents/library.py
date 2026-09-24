@@ -37,6 +37,7 @@ from mbforge.application.dto.library import (
 from mbforge.application.use_cases.documents import collections as collection_service
 from mbforge.application.use_cases.documents import library as library_service
 from mbforge.application.use_cases.documents import source_evidence
+from mbforge.domain.evidence_kind import category_of
 from mbforge.foundation.config import update_settings
 from mbforge.foundation.errors import (
     FileAccessError,
@@ -260,7 +261,10 @@ async def library_get_document_evidence(
         doc_id,
         page,
     )
-    return [LibraryEvidenceItem(**item.to_dict()) for item in evidence]
+    return [
+        LibraryEvidenceItem(**item.to_dict(), category=category_of(item.kind))
+        for item in evidence
+    ]
 
 
 @router.post(

@@ -1,6 +1,6 @@
 """Effective stage selection — the pipeline composition root.
 
-The current execution boundary is Extract ∥ Detection → Markdown → Patent.
+The current execution boundary is Extract → Join → Markdown → Patent.
 The registry is the single source of truth for both the runner and
 stage-checkpoint transitions.
 """
@@ -22,7 +22,6 @@ def effective_stage_names() -> list[str]:
 def stage_dependencies() -> dict[str, tuple[str, ...]]:
     """Return the execution DAG: stage → prerequisites that must succeed first.
 
-    Roots (Extract, Detection) have no prerequisites; the join fans in both;
-    the linear tail depends on its single predecessor.
+    Extract is the root; join, markdown and patent form a linear tail.
     """
     return {name: tuple(_REGISTRY_DEPS.get(name, ())) for name in _REGISTRY_ORDER}

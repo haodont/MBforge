@@ -1,8 +1,7 @@
 """Unit tests for the pipeline runner's single-stage (queue node) model.
 
-Each queue node executes exactly one stage; Extract ∥ Detection concurrency is
-queue-level (see ``ingest_stage_deps``), not a runner-side fork. These tests
-cover stage selection, the DAG shape, and end-to-end node driving.
+Each queue node executes exactly one stage. These tests cover stage selection,
+the DAG shape, and end-to-end node driving.
 """
 
 from __future__ import annotations
@@ -74,13 +73,12 @@ def _drive_all(
 
 
 def test_stage_dag_shape() -> None:
-    """Extract and Detection are independent roots; Join fans them in."""
+    """Extract is the root; the rest of the pipeline is a linear tail."""
     from mbforge.application.pipeline.composition import stage_dependencies
 
     deps = stage_dependencies()
     assert deps["extract"] == ()
-    assert deps["detection"] == ()
-    assert deps["join"] == ("extract", "detection")
+    assert deps["join"] == ("extract",)
     assert deps["markdown"] == ("join",)
     assert deps["patent"] == ("markdown",)
 
@@ -218,8 +216,6 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
         moldet_conf=0.9,
     )
 
-    from mbforge.application.pipeline.stages.detection_stage import DetectionStage
-
     events: list[dict] = []
 
     def _capture(event) -> None:
@@ -231,12 +227,7 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
             side_effect=_fake_layout_extract,
         ),
         patch(
-            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
-            return_value=[],
-        ),
-        patch.object(
-            DetectionStage,
-            "_detect_molecules",
+            "mbforge.application.pipeline.stages.extract_stage._detect_molecules",
             return_value={
                 "molecule_count": 1,
                 "rejected_count": 0,

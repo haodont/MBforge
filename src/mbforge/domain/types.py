@@ -8,7 +8,6 @@ by detection backends.  The canonical molecule entity itself is
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Literal
 
 
@@ -50,47 +49,41 @@ def strip_esmiles_tags(esmiles: str) -> str:
 
 @dataclass
 class ExtractionResult:
-    """分子提取结果.
+    """一次分子观测（分子链路的原始产物）.
 
     Attributes:
-        esmiles: 识别出的 E-SMILES 字符串（Layer 2，含 <sep> 标签或纯 SMILES）
-        smiles: Layer 1 纯 SMILES（RDKit 可解析；MolParser 输出含标签时由
-            postprocess 分离，供下游 normalize/RDKit 使用）
-        name: 化合物名称（可选）
-        source: 来源类型：image=图像检测, text=文本正则, manual=手动录入
-        moldet_conf: MolDetv2 检测置信度（图像来源时有效）
-        bbox_pdf: PDF 坐标系中的边界框（点单位，左下原点）
-        page_idx: PDF 页码（从 0 开始）
-        context_text: 关联到的文本上下文（caption / 段落 / 表格单元格）
-        mol_img_path: 裁剪保存的分子图像路径（图像来源时有效）
-        status: 审核状态：pending=待确认, confirmed=已入库, rejected=已丢弃
+        smiles: Layer 1 纯 SMILES（RDKit 可解析）
+        esmiles: 识别出的 E-SMILES（Layer 2，含 ``<sep>`` 标签或纯 SMILES）
+        moldet_conf: MolDetv2 检测置信度
+        bbox_pdf: PDF 坐标系中的边界框（点单位，左下原点）。落库时不写进载荷——
+            证据行的 ``bbox_x0..y1`` 列已承载它，解码时按行补回。
+        page_idx: PDF 页码（从 0 开始）。同上，由证据行的 ``page`` 列承载。
+        name: 化合物名称/编号（裁切标签 OCR 结果，可选）
+        mol_img_path: 裁剪图的库内相对路径（``storage/{doc_id}/crops/{name}``）
+        properties: 生产者附加的原始元数据
+            （``markush`` / ``groups`` / ``role_context`` / ``ocr_labels`` /
+            ``ocr_labels_primary``）
     """
 
-    esmiles: str
-    smiles: str = ""
-    name: str = ""
-    source: Literal["image", "text", "manual"] = "image"
+    smiles: str
+    esmiles: str = ""
     moldet_conf: float = 0.0
     bbox_pdf: tuple[float, float, float, float] | None = None
     page_idx: int | None = None
-    context_text: str = ""
-    mol_img_path: Path | None = None
-    status: Literal["pending", "confirmed", "rejected"] = "pending"
+    name: str = ""
+    mol_img_path: str | None = None
     properties: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """序列化为字典."""
         return {
-            "esmiles": self.esmiles,
             "smiles": self.smiles,
-            "name": self.name,
-            "source": self.source,
+            "esmiles": self.esmiles,
             "moldet_conf": self.moldet_conf,
             "bbox_pdf": self.bbox_pdf,
             "page_idx": self.page_idx,
-            "context_text": self.context_text,
-            "mol_img_path": str(self.mol_img_path) if self.mol_img_path else None,
-            "status": self.status,
+            "name": self.name,
+            "mol_img_path": self.mol_img_path,
             "properties": self.properties,
         }
 
@@ -98,22 +91,16 @@ class ExtractionResult:
     def from_dict(cls, data: dict) -> ExtractionResult:
         """从字典反序列化."""
         img_path = data.get("mol_img_path")
-        source = data.get("source", "image")
         raw_esmiles = data.get("esmiles", "") or data.get("smiles", "")
-        smiles = data.get("smiles", "")
-        if not smiles and source != "image":
-            smiles = raw_esmiles
+        smiles = data.get("smiles", "") or raw_esmiles
         return cls(
-            esmiles=raw_esmiles,
             smiles=smiles,
-            name=data.get("name", ""),
-            source=source,
+            esmiles=raw_esmiles,
             moldet_conf=data.get("moldet_conf", 0.0),
             bbox_pdf=tuple(data["bbox_pdf"]) if data.get("bbox_pdf") else None,
             page_idx=data.get("page_idx"),
-            context_text=data.get("context_text", ""),
-            mol_img_path=Path(img_path) if img_path else None,
-            status=data.get("status", "pending"),
+            name=data.get("name", ""),
+            mol_img_path=str(img_path) if img_path else None,
             properties=data.get("properties", {}),
         )
 

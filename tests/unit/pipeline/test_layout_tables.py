@@ -1,8 +1,9 @@
-"""Hiro-Layout table recognition contract (``read_tables`` / ``_fill_tables``).
+"""Hiro-Layout table recognition contract (``_fill_tables``).
 
 ``parse_page_image`` is the public boundary: table regions must carry
-HTML/Markdown content when the SLANet-1M recognizer works, stay empty when
-it does not, and never break the page (best-effort enrichment).
+HTML/Markdown content when the SLANet-1M recognizer works, stay empty when it
+does not, and never break the page (best-effort enrichment). Recognition is
+unconditional — there is no switch that turns it off.
 """
 
 from __future__ import annotations
@@ -56,12 +57,10 @@ def _table_region(page) -> dict:
     return next(r for r in page.regions if r["type"] == "table")
 
 
-def test_parse_page_image_reads_table_regions_when_enabled(
-    monkeypatch,
-) -> None:
-    """With ``read_tables`` the table region carries HTML and Markdown text."""
+def test_parse_page_image_reads_table_regions(monkeypatch) -> None:
+    """A table region carries the recognized HTML and Markdown text."""
     runtime = _FakeRuntime(html=_HTML_TABLE)
-    page = _parse(runtime, monkeypatch, read_tables=True)
+    page = _parse(runtime, monkeypatch)
 
     region = _table_region(page)
     assert region["html"] == _HTML_TABLE
@@ -70,20 +69,10 @@ def test_parse_page_image_reads_table_regions_when_enabled(
     assert page.stats["tables_filled"] == 1
 
 
-def test_parse_page_image_skips_tables_by_default(monkeypatch) -> None:
-    """Table recognition is opt-in; default runs leave table regions empty."""
-    page = _parse(_FakeRuntime(html=_HTML_TABLE), monkeypatch)
-
-    assert page.stats["table_regions"] == 0
-    region = _table_region(page)
-    assert "html" not in region
-    assert not region.get("text")
-
-
 def test_parse_page_image_survives_table_recognizer_failure(monkeypatch) -> None:
     """A failing recognizer leaves the region empty and does not break the page."""
     runtime = _FakeRuntime(error=RuntimeError("boom"))
-    page = _parse(runtime, monkeypatch, read_tables=True)
+    page = _parse(runtime, monkeypatch)
 
     region = _table_region(page)
     assert "html" not in region
@@ -93,7 +82,7 @@ def test_parse_page_image_survives_table_recognizer_failure(monkeypatch) -> None
 
 def test_parse_page_image_keeps_table_empty_on_empty_html(monkeypatch) -> None:
     """Empty recognizer output is treated as 'no table content'."""
-    page = _parse(_FakeRuntime(html=""), monkeypatch, read_tables=True)
+    page = _parse(_FakeRuntime(html=""), monkeypatch)
 
     region = _table_region(page)
     assert "html" not in region

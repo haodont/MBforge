@@ -23,6 +23,7 @@ from mbforge.domain.activity import (
     measurement_id,
 )
 from mbforge.domain.evidence import SourceEvidence
+from mbforge.domain.evidence_kind import TABLE, TEXT, category_of
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger("mbforge.application.pipeline.activity.extraction")
@@ -436,10 +437,11 @@ def extract_activity_measurements_from_evidence(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Extract serializable activity measurements from ordered SourceEvidence.
 
-    ``text_span`` prose and complete ``table_span`` tables are parsed only from
-    their ``raw_text``.  The caller supplies the already joined and validated
-    evidence sequence; this function does not load SQL, files, PDF, OCR, or an
-    LLM.  Each table measurement keeps the one table-level evidence ID.
+    ``text``-category prose and complete ``table``-category tables are parsed
+    only from their ``raw_text``.  The caller supplies the already joined and
+    validated evidence sequence; this function does not load SQL, files, PDF,
+    OCR, or an LLM.  Each table measurement keeps the one table-level evidence
+    ID.
     """
     measurements: list[ActivityMeasurement] = []
     issues: list[dict[str, Any]] = []
@@ -453,12 +455,13 @@ def extract_activity_measurements_from_evidence(
             text_blocks.clear()
 
     for item in evidence:
-        if item.kind == "text_span":
+        category = category_of(item.kind)
+        if category == TEXT:
             if item.raw_text.strip():
                 text_blocks.append(item)
             continue
         flush_text()
-        if item.kind != "table_span":
+        if category != TABLE:
             continue
         table_index += 1
         table_text = _table_text(item.raw_text)

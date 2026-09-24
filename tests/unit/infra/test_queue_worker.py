@@ -145,39 +145,68 @@ def _seed_dag(tmp_path: Path) -> tuple[str, DatabaseManager]:
 
 
 def test_advance_dependents_promotes_join_only_once(tmp_path: Path) -> None:
-    """Join turns pending only after both branches are done, and only once."""
+    """Join turns pending only after its one predecessor is done, and only once."""
     from mbforge.adapters.runtime.ingest import queue
 
     root, db = _seed_dag(tmp_path)
 
     assert _stage_status(db, "extract") == "pending"
-    assert _stage_status(db, "detection") == "pending"
     assert _stage_status(db, "join") == "blocked"
 
     worker._claim_rows(root, "w", 8)
 
     queue.set_node_status(root, _node_id(db, "extract"), "done")
-    assert (
-        queue.advance_dependents(
-            root, doc_id="dag-doc", run_id="run-1", completed_stage="extract"
-        )
-        == []
-    )
-    assert _stage_status(db, "join") == "blocked"
-
-    queue.set_node_status(root, _node_id(db, "detection"), "done")
     assert queue.advance_dependents(
-        root, doc_id="dag-doc", run_id="run-1", completed_stage="detection"
+        root, doc_id="dag-doc", run_id="run-1", completed_stage="extract"
     ) == ["join"]
     assert _stage_status(db, "join") == "pending"
 
     # Idempotent: a second completion of the same node never re-flips join.
     assert (
         queue.advance_dependents(
-            root, doc_id="dag-doc", run_id="run-1", completed_stage="detection"
+            root, doc_id="dag-doc", run_id="run-1", completed_stage="extract"
         )
         == []
     )
+
+
+def test_migration_drops_retired_detection_nodes(tmp_path: Path) -> None:
+    """A pre-merge queue DAG loses its retired ``detection`` node and edges.
+
+    Leaving them behind keeps the document stuck forever: the stale
+    ``join → detection`` edge stops ``advance_dependents`` from ever promoting
+    ``join``, and ``all_stages_done`` can never be true because the retired node
+    never reaches ``done``.
+    """
+    root = _library(tmp_path)
+    db = DatabaseManager(root)
+    db.initialize()
+
+    with db.kb_conn() as conn:
+        conn.execute(
+            "INSERT INTO ingest_queue (id, file_path, doc_id, stage, run_id, status) "
+            "VALUES ('legacy-detect', 'doc.pdf', 'legacy-doc', 'detection', "
+            "'run-old', 'pending')"
+        )
+        conn.execute(
+            "INSERT INTO ingest_stage_deps (doc_id, run_id, stage, depends_on) "
+            "VALUES ('legacy-doc', 'run-old', 'join', 'detection')"
+        )
+        # Pretend this database predates the merge.
+        conn.execute("PRAGMA user_version = 0")
+
+    DatabaseManager(root).initialize()
+
+    with db.kb_conn() as conn:
+        nodes = conn.execute(
+            "SELECT COUNT(*) FROM ingest_queue WHERE stage = 'detection'"
+        ).fetchone()[0]
+        edges = conn.execute(
+            "SELECT COUNT(*) FROM ingest_stage_deps "
+            "WHERE stage = 'detection' OR depends_on = 'detection'"
+        ).fetchone()[0]
+    assert nodes == 0
+    assert edges == 0
 
 
 def test_node_failure_cascades_and_reset_reopens_dependents(tmp_path: Path) -> None:

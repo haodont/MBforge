@@ -10,7 +10,7 @@ persistence and Markush review stages.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from rdkit import Chem
 
@@ -53,34 +53,21 @@ DEFAULT_ALLOWED_ELEMENTS = {
 def _detection_from_result(r: ExtractionResult) -> DetectionSource:
     """Build a DetectionSource from an ExtractionResult."""
     return DetectionSource(
-        source=r.source,
+        source="image",
         page=r.page_idx,
         bbox=r.bbox_pdf,
-        image_path=(str(r.mol_img_path).replace("\\", "/") if r.mol_img_path else None),
+        image_path=(r.mol_img_path.replace("\\", "/") if r.mol_img_path else None),
         confidence=r.moldet_conf,
         conf_moldet=r.moldet_conf,
     )
 
 
-def _append_context(properties: dict[str, Any], context_text: str) -> None:
-    """Accumulate non-empty context texts in a list."""
-    if not context_text:
-        return
-    contexts: list[str] = properties.setdefault("context_texts", [])
-    contexts.append(context_text)
-
-
 def _structure_fields(result: ExtractionResult) -> tuple[str, bool, str, str]:
     """Return Layer 1 plus the optional Markush payload.
 
-    MolParser image results must provide Layer 1 explicitly.  Text/manual
-    extraction predates that split and continues to use its plain SMILES
-    field as the structure input.
+    MolParser image results provide Layer 1 explicitly in ``smiles``.
     """
-    if result.source == "image":
-        raw = result.smiles.strip()
-    else:
-        raw = (result.smiles or result.esmiles).strip()
+    raw = result.smiles.strip()
     metadata = result.properties
     markush = isinstance(metadata, dict) and metadata.get("markush") is True
     esmiles = result.esmiles.strip() if markush else ""
@@ -200,15 +187,6 @@ def _append_detection_metadata(
         properties.setdefault("ocr_labels_primary", primary)
 
 
-def _add_source(
-    sources: list[Literal["image", "text", "manual"]],
-    source: Literal["image", "text", "manual"],
-) -> None:
-    """Append a source if it is not already tracked."""
-    if source not in sources:
-        sources.append(source)
-
-
 def select_molecule_name(
     candidates: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -271,8 +249,6 @@ def _merge_detection(existing: Molecule, r: ExtractionResult) -> None:
     """Append a detection to an existing molecule and keep it sorted."""
     existing.detections.append(_detection_from_result(r))
     existing.detections.sort(key=lambda d: d.confidence, reverse=True)
-    _add_source(existing.sources, r.source)
-    _append_context(existing.properties, r.context_text)
     _append_detection_metadata(existing.properties, r)
 
 
@@ -324,13 +300,12 @@ def normalize_molecules(
                 _merge_detection(by_invalid[identity], r)
             else:
                 properties: dict[str, Any] = {}
-                _append_context(properties, r.context_text)
                 _append_detection_metadata(properties, r)
                 by_invalid[identity] = Molecule(
                     canonical_smiles=raw,
                     esmiles=stored_esmiles,
                     name=r.name,
-                    sources=[r.source],
+                    sources=["image"],
                     detections=[_detection_from_result(r)],
                     status="rejected",
                     reject_reason="low_quality_smiles",
@@ -350,13 +325,12 @@ def normalize_molecules(
                 _merge_detection(by_invalid[identity], r)
             else:
                 properties: dict[str, Any] = {}
-                _append_context(properties, r.context_text)
                 _append_detection_metadata(properties, r)
                 by_invalid[identity] = Molecule(
                     canonical_smiles=raw,
                     esmiles=stored_esmiles,
                     name=r.name,
-                    sources=[r.source],
+                    sources=["image"],
                     detections=[_detection_from_result(r)],
                     status="rejected",
                     reject_reason="invalid_smiles",
@@ -388,13 +362,12 @@ def normalize_molecules(
                 _merge_detection(by_invalid[identity], r)
             else:
                 properties = {}
-                _append_context(properties, r.context_text)
                 _append_detection_metadata(properties, r)
                 by_invalid[identity] = Molecule(
                     canonical_smiles=raw,
                     esmiles=stored_esmiles,
                     name=r.name,
-                    sources=[r.source],
+                    sources=["image"],
                     detections=[_detection_from_result(r)],
                     status="rejected",
                     reject_reason="invalid_element",
@@ -410,13 +383,12 @@ def normalize_molecules(
                 _merge_detection(by_invalid[identity], r)
             else:
                 properties = {}
-                _append_context(properties, r.context_text)
                 _append_detection_metadata(properties, r)
                 by_invalid[identity] = Molecule(
                     canonical_smiles=raw,
                     esmiles=stored_esmiles,
                     name=r.name,
-                    sources=[r.source],
+                    sources=["image"],
                     detections=[_detection_from_result(r)],
                     status="rejected",
                     reject_reason="canonicalization_failed",
@@ -434,13 +406,12 @@ def normalize_molecules(
             _merge_detection(by_canonical[identity], r)
         else:
             properties = {}
-            _append_context(properties, r.context_text)
             _append_detection_metadata(properties, r)
             by_canonical[identity] = Molecule(
                 canonical_smiles=canonical,
                 esmiles=stored_esmiles,
                 name=r.name,
-                sources=[r.source],
+                sources=["image"],
                 detections=[_detection_from_result(r)],
                 status="pending",
                 properties=properties,

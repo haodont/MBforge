@@ -112,9 +112,9 @@ def extract_layout_text(
     authoritative layout for such a page and does not mint them twice.
 
     Raises:
-        LayoutUnavailableError: when the detector is unavailable, or when text
-            reading was requested and no page yielded any text — a run must not
-            silently degrade into an evidenceless document.
+        LayoutUnavailableError: when the detector is unavailable, or when no
+            page yielded any text — a run must not silently degrade into an
+            evidenceless document.
     """
     from mbforge.application.pipeline.layout.labels import kind_vocab
     from mbforge.application.pipeline.layout.parse import (
@@ -132,13 +132,10 @@ def extract_layout_text(
         )
 
     config = layout_config or {}
-    read_text = bool(config.get("read_text", True))
     layout_pages = parse_pdf_layout(
         pdf_path,
         doc_id=doc_id,
         conf=float(config.get("conf_threshold", DEFAULT_CONF)),
-        read_text=read_text,
-        read_tables=bool(config.get("read_tables", False)),
         cross_model=bool(config.get("cross_model", True)),
         max_pages=config.get("max_pages_per_doc"),
         cancel_check=cancel_check,
@@ -182,9 +179,9 @@ def extract_layout_text(
         region_counts.append(len(regions))
 
     full_text = "\n\n".join(page.text for page in pages if page.text.strip())
-    if read_text and not full_text.strip():
+    if not full_text.strip():
         # Same rationale as a missing detector: an evidenceless document is a
-        # defect, not a result. Only enforced when reading was requested.
+        # defect, not a result.
         raise LayoutUnavailableError(
             f"the local layout producer read no text from any of the {len(pages)} "
             "page(s); refusing to publish an evidenceless document"

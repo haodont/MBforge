@@ -1,8 +1,8 @@
 """Document overlay payloads for the PDF viewer.
 
 Both overlays come from a single SQL read of the ``source_evidence`` index —
-the only runtime evidence store — so the endpoint never reloads an Extract or
-Detection branch and never re-normalizes a candidate. The row's **category**
+the only runtime evidence store — so the endpoint never reloads the Extract
+branch and never re-normalizes a candidate. The row's **category**
 decides which overlay consumes it:
 
 - text category → ``text`` blocks
@@ -33,7 +33,7 @@ from typing import Any
 from mbforge.application.pipeline.artifacts.hydration import (
     load_detections,
     load_extracted,
-    register_branch_kind_vocab,
+    register_evidence_kinds,
 )
 from mbforge.application.pipeline.extract.text import ExtractedDocument
 from mbforge.application.use_cases.documents.source_evidence import list_evidence
@@ -53,7 +53,7 @@ def load_document_bboxes(
 ) -> tuple[ExtractedDocument | None, list[Molecule] | None]:
     """Artifact-side reader for the molecule reverse lookup (a click on a box).
 
-    Unlike the overlay readers below this one restores the Detection branch;
+    Unlike the overlay readers below this one restores the Extract branch;
     it backs :func:`mbforge.application.use_cases.molecule.queries.molecules_by_location`.
     """
     restored = load_detections(library_root, doc_id)
@@ -71,10 +71,9 @@ def build_document_overlay(library_root: str, doc_id: str, path: str) -> dict[st
 
     One branch ``meta`` read comes first: a producer names its regions freely and
     SQL stores only that label, so the declared ``kind_vocab`` must be registered
-    before labels can be mapped to categories.  Both branches can contribute rows,
-    so both vocabularies are registered. It is cached per document.
+    before labels can be mapped to categories. It is cached per document.
     """
-    register_branch_kind_vocab(library_root, doc_id)
+    register_evidence_kinds()
     text_by_page: dict[int, list[dict[str, Any]]] = {}
     image_by_page: dict[int, list[dict[str, Any]]] = {}
     pages: dict[str, list[dict[str, Any]]] = {}
@@ -138,12 +137,12 @@ def _molecule_entry(item: SourceEvidence) -> dict[str, Any]:
     """
     x0, y0, x1, y1 = item.bbox
     page_idx = item.page - 1
-    crop = item.coref or None
     metadata: dict[str, Any] = {}
     with suppress(json.JSONDecodeError, TypeError):
         decoded = json.loads(item.raw_text or "")
         if isinstance(decoded, dict):
             metadata = decoded
+    crop = str(metadata.get("mol_img_path") or "") or None
 
     confidence = metadata.get("moldet_conf", 0.0)
     try:

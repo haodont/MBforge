@@ -20,8 +20,8 @@ export interface DocumentEvidenceItem {
   page: number
   bbox: [number, number, number, number]
   raw_text: string
-  coref: string
   kind: string
+  category: string
 }
 
 export interface PatentFactsSection {

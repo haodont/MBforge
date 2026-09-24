@@ -7,9 +7,8 @@ Thin facade over ``pipeline/run/*`` collaborators:
 3. ``StageRunner`` — executes the single stage named by the claimed node.
 4. ``Finalizer`` — per-node completion and failure/cancellation cleanup.
 
-Stage flow: Extract ∥ Detection → Join → Markdown → Patent. The Extract and
-Detection nodes run concurrently because the queue admits both (see
-``ingest_stage_deps``), not because the runner forks threads. The current
+Stage flow: Extract → Join → Markdown → Patent. The queue admits exactly one
+node at a time per document, so the runner never forks threads. The current
 pipeline ends after Patent; downstream linking and persistence remain separate
 work and are not invoked here.
 
@@ -27,7 +26,7 @@ from mbforge.application.pipeline import (
     stages as _stage_modules,  # noqa: F401  (triggers stage registration)
 )
 from mbforge.application.pipeline.artifacts.hydration import (
-    hydrate_context_from_artifacts,
+    hydrate_context_from_evidence,
 )
 from mbforge.application.pipeline.cancellation import (
     PIPELINE_CANCELLED,
@@ -168,7 +167,7 @@ def run_pipeline(
         # Non-root stages read the artifacts/evidence produced upstream; this
         # also makes a missing source-evidence row a hard pipeline error.
         if dependencies(stage):
-            hydrate_context_from_artifacts(run.ctx)
+            hydrate_context_from_evidence(run.ctx)
 
         completed_stage = StageRunner(run, sink, active_stages).run_stage(stage)
 

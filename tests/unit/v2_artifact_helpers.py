@@ -8,10 +8,8 @@ from typing import Any
 
 from mbforge.adapters.persistence.source_evidence import persist_source_evidence
 from mbforge.application.pipeline.artifacts import (
-    build_detection_artifact,
     build_extract_artifact,
     join_evidence_artifacts,
-    save_detection_branch,
     save_extract_branch,
 )
 from mbforge.application.pipeline.artifacts.evidence_models import PageFrame
@@ -87,17 +85,16 @@ def publish_v2_run(
         PageFrame(page=page, width=width, height=height)
         for page in sorted(page_numbers)
     ]
-    extract = build_extract_artifact(doc_id, run_id, extracted, frames)
-    detection = build_detection_artifact(
+    extract = build_extract_artifact(
         doc_id,
         run_id,
-        results,
-        molecule_stats or {},
+        extracted,
         frames,
+        results=results,
+        molecule_stats=molecule_stats or {},
         library_root=library_root,
     )
     save_extract_branch(library_root, extract)
-    save_detection_branch(library_root, detection)
-    joined = join_evidence_artifacts(extract, detection)
+    joined = join_evidence_artifacts(extract)
     persist_source_evidence(library_root, joined)
     return frames

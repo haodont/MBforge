@@ -63,14 +63,12 @@ def _rebuild_molecule(
     properties = _parse_properties(row_dict.get("properties"))
 
     # Merge context from evidence rows into properties
-    context_texts = properties.get("context_texts", [])
+    contexts: list[str] = properties.setdefault("role_contexts", [])
     for ev in evidence_rows:
         ev_dict = dict(ev) if hasattr(ev, "keys") else ev
         ctx = ev_dict.get("context_text")
-        if ctx and ctx not in context_texts:
-            context_texts.append(ctx)
-    if context_texts:
-        properties["context_texts"] = context_texts
+        if ctx and ctx not in contexts:
+            contexts.append(ctx)
 
     # Rebuild DetectionSource list
     detection_sources: list[DetectionSource] = []

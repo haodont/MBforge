@@ -75,7 +75,7 @@ class PipelineTaskBatchRequest(BaseModel):
     run_ids: list[str] = Field(..., min_length=1, max_length=1000)
     resume_from_stage: str | None = Field(
         default=None,
-        description="Optional stage to resume from (extract/detection/markdown/patent). "
+        description="Optional stage to resume from (extract/join/markdown/patent). "
         "If provided, the pipeline will restart from this stage; otherwise it resumes "
         "from the last completed stage checkpoint.",
     )

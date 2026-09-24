@@ -1,4 +1,4 @@
-"""Tests for raw branch artifacts and SQL source evidence."""
+"""Tests for the raw Extract branch artifact and SQL source evidence."""
 
 import json
 from dataclasses import replace
@@ -8,16 +8,13 @@ import pytest
 
 from mbforge.adapters.persistence.source_evidence import persist_source_evidence
 from mbforge.application.pipeline.artifacts import (
-    build_detection_artifact,
     build_extract_artifact,
     hydrate_context_from_artifacts,
     join_evidence_artifacts,
-    load_detection_branch,
     load_detections,
     load_document_evidence,
     load_extract_branch,
     load_extracted,
-    save_detection_branch,
     save_extract_branch,
 )
 from mbforge.application.pipeline.artifacts.evidence_models import (
@@ -102,6 +99,27 @@ def _frames() -> list[PageFrame]:
     return [PageFrame(page=1, width=100.0, height=100.0, rotation=0)]
 
 
+def _build(
+    tmp_path: Path,
+    *,
+    run_id: str = "run-1",
+    extracted: ExtractedDocument | None = None,
+    results: list[ExtractionResult] | None = None,
+    molecule_stats: dict | None = None,
+    frames: list[PageFrame] | None = None,
+):
+    """Build the one Extract artifact, with molecules folded in."""
+    return build_extract_artifact(
+        DOC,
+        run_id,
+        extracted if extracted is not None else _extracted(),
+        frames if frames is not None else _frames(),
+        results=results or [],
+        molecule_stats=molecule_stats,
+        library_root=tmp_path,
+    )
+
+
 def _archive_crop(tmp_path: Path) -> None:
     crop = tmp_path / "storage" / DOC / "crops" / "a.png"
     crop.parent.mkdir(parents=True, exist_ok=True)
@@ -109,64 +127,45 @@ def _archive_crop(tmp_path: Path) -> None:
 
 
 def _publish_joined_evidence(tmp_path: Path, run_id: str = "run-1") -> None:
-    extracted = build_extract_artifact(DOC, run_id, _extracted(), _frames())
-    detection = build_detection_artifact(
-        DOC,
-        run_id,
-        [_result()],
-        {"molecule_count": 1},
-        _frames(),
-        library_root=tmp_path,
+    extracted = _build(
+        tmp_path,
+        run_id=run_id,
+        results=[_result()],
+        molecule_stats={"molecule_count": 1},
     )
     save_extract_branch(tmp_path, extracted)
-    save_detection_branch(tmp_path, detection)
-    joined = join_evidence_artifacts(extracted, detection)
-    persist_source_evidence(tmp_path, joined)
+    persist_source_evidence(tmp_path, join_evidence_artifacts(extracted))
 
 
-def test_v2_producers_write_independent_minimal_branches_and_join(
+def test_extract_artifact_carries_regions_and_molecules_then_joins(
     tmp_path: Path,
 ) -> None:
     _archive_crop(tmp_path)
-    frames = _frames()
     extracted_input = _extracted()
     extracted_input.pages[0].ocr_backend = None
-    extracted = build_extract_artifact(DOC, "run-1", extracted_input, frames)
-    detection = build_detection_artifact(
-        DOC,
-        "run-1",
-        [_result()],
-        {"molecule_count": 1},
-        frames,
-        library_root=tmp_path,
+    extracted = _build(
+        tmp_path,
+        extracted=extracted_input,
+        results=[_result()],
+        molecule_stats={"molecule_count": 1},
     )
 
     extract_path = save_extract_branch(tmp_path, extracted)
-    detection_path = save_detection_branch(tmp_path, detection)
     assert extract_path.name == "extract.json"
-    assert detection_path.name == "detection.json"
-    assert extract_path.parent == detection_path.parent
     assert extract_path.parent == tmp_path / "storage" / DOC / ".staging"
     assert load_extract_branch(tmp_path, DOC, "run-1") == extracted
-    assert load_detection_branch(tmp_path, DOC, "run-1") == detection
 
-    extract_payload = json.loads(extract_path.read_text(encoding="utf-8"))
-    assert "schema_version" not in extract_payload
-    assert "evidence_id" not in json.dumps(extract_payload)
-    assert extract_payload["pages"][0]["text"] == "hello world"
-    assert extract_payload["pages"][0]["text_spans"][0]["bbox"] == [
-        1.0,
-        2.0,
-        3.0,
-        4.0,
-    ]
+    payload = json.loads(extract_path.read_text(encoding="utf-8"))
+    assert "schema_version" not in payload
+    assert "evidence_id" not in json.dumps(payload)
+    assert payload["pages"][0]["text"] == "hello world"
+    assert payload["pages"][0]["text_spans"][0]["bbox"] == [1.0, 2.0, 3.0, 4.0]
+    molecule = payload["pages"][0]["molecules"][0]
+    assert molecule["page_idx"] == 0
+    assert molecule["mol_img_path"] == f"storage/{DOC}/crops/a.png"
+    assert payload["meta"]["molecule_stats"]["molecule_count"] == 1
 
-    detection_payload = json.loads(detection_path.read_text(encoding="utf-8"))
-    assert "schema_version" not in detection_payload
-    assert "evidence_id" not in json.dumps(detection_payload)
-    assert detection_payload["pages"][0]["detections"][0]["page_idx"] == 0
-
-    joined = join_evidence_artifacts(extracted, detection)
+    joined = join_evidence_artifacts(extracted)
     assert isinstance(joined, DocumentEvidenceArtifact)
     # Ordered top-to-bottom by ``_evidence_sort_key``: the molecule sits highest
     # on the page, the figure next, the text span lowest.
@@ -175,8 +174,10 @@ def test_v2_producers_write_independent_minimal_branches_and_join(
         "image_region",
         "text_span",
     ]
-    molecule = next(item for item in joined.evidence if item.kind == "molecule")
-    assert json.loads(molecule.raw_text) == {
+    molecule_evidence = next(
+        item for item in joined.evidence if item.kind == "molecule"
+    )
+    assert json.loads(molecule_evidence.raw_text) == {
         "esmiles": "CCO<sep>",
         "moldet_conf": 0.95,
         "name": "EtOH",
@@ -187,42 +188,28 @@ def test_v2_producers_write_independent_minimal_branches_and_join(
     assert not (extract_path.parent.parent.parent / "bbox.json").exists()
 
 
-def test_v2_join_registers_table_span(tmp_path: Path) -> None:
+def test_join_registers_table_span(tmp_path: Path) -> None:
     extracted_input = _extracted()
     extracted_input.pages[0].text_spans = [
         TextSpan("A | B", (10.0, 10.0, 30.0, 30.0), 2)
     ]
-    extracted = build_extract_artifact(DOC, "run-1", extracted_input, _frames())
-    detection = build_detection_artifact(
-        DOC, "run-1", [], {}, _frames(), library_root=tmp_path
-    )
 
-    joined = join_evidence_artifacts(extracted, detection)
+    joined = join_evidence_artifacts(_build(tmp_path, extracted=extracted_input))
 
     assert [item.kind for item in joined.evidence] == ["image_region", "table_span"]
 
 
-def test_v2_join_prefers_molecule_bbox_over_overlapping_image_region(
+def test_join_prefers_molecule_bbox_over_overlapping_image_region(
     tmp_path: Path,
 ) -> None:
     """Join-time bbox dedup keeps MolDet molecule evidence over figure evidence."""
     _archive_crop(tmp_path)
-    frames = _frames()
-    extracted = build_extract_artifact(DOC, "run-1", _extracted(), frames)
     candidate = _candidate()
     candidate.detections[0] = replace(
         candidate.detections[0], bbox=(10.0, 20.0, 30.0, 40.0)
     )
-    detection = build_detection_artifact(
-        DOC,
-        "run-1",
-        [_result(candidate)],
-        {},
-        frames,
-        library_root=tmp_path,
-    )
 
-    joined = join_evidence_artifacts(extracted, detection)
+    joined = join_evidence_artifacts(_build(tmp_path, results=[_result(candidate)]))
 
     assert [item.kind for item in joined.evidence].count("molecule") == 1
     assert not any(item.kind == "image_region" for item in joined.evidence)
@@ -236,18 +223,13 @@ def test_join_keeps_one_row_per_location(tmp_path: Path) -> None:
     than dropped.
     """
     _archive_crop(tmp_path)
-    frames = _frames()
-    extracted = build_extract_artifact(DOC, "run-1", _extracted(), frames)
     candidate = _candidate()
     candidate.detections[0] = replace(
         candidate.detections[0],
         bbox=(1.0, 2.0, 3.0, 4.0),  # the text span's rect
     )
-    detection = build_detection_artifact(
-        DOC, "run-1", [_result(candidate)], {}, frames, library_root=tmp_path
-    )
 
-    joined = join_evidence_artifacts(extracted, detection)
+    joined = join_evidence_artifacts(_build(tmp_path, results=[_result(candidate)]))
 
     locations = [(item.page, item.bbox) for item in joined.evidence]
     assert len(locations) == len(set(locations)), "one row per location"
@@ -262,27 +244,24 @@ def test_join_keeps_the_content_bearing_molecule_over_an_overlapping_bare_one(
     """An overlapping claim without content never displaces one that has it.
 
     A cross-model layout region re-typed to a molecule carries MolDet's own
-    geometry but no payload, and its box never matches Detection's exactly
+    geometry but no payload, and its box never matches the molecule pass' exactly
     (different render DPI).  Letting it win would drop the SMILES and the crop.
     """
     _archive_crop(tmp_path)
-    frames = _frames()
     extracted_input = _layout_extracted()
     # R3: the ``chem`` figure region becomes the molecule MolDet found in it,
     # with the slightly larger box the layout render produces.
     extracted_input.pages[0].regions[1].update(
         {"kind": "molecule", "type": "molecule", "bbox": [9.5, 19.5, 30.5, 40.5]}
     )
-    extracted = build_extract_artifact(DOC, "run-1", extracted_input, frames)
     candidate = _candidate()
     candidate.detections[0] = replace(
         candidate.detections[0], bbox=(10.0, 20.0, 30.0, 40.0)
     )
-    detection = build_detection_artifact(
-        DOC, "run-1", [_result(candidate)], {}, frames, library_root=tmp_path
-    )
 
-    joined = join_evidence_artifacts(extracted, detection)
+    joined = join_evidence_artifacts(
+        _build(tmp_path, extracted=extracted_input, results=[_result(candidate)])
+    )
 
     molecules = [item for item in joined.evidence if item.kind == "molecule"]
     assert len(molecules) == 1
@@ -291,19 +270,15 @@ def test_join_keeps_the_content_bearing_molecule_over_an_overlapping_bare_one(
     assert molecules[0].coref == f"storage/{DOC}/crops/a.png"
 
 
-def test_v2_join_records_every_figure_region_against_the_source_pdf(
+def test_join_records_every_figure_region_against_the_source_pdf(
     tmp_path: Path,
 ) -> None:
     """Figure regions survive as layout rectangles without any image file."""
     extracted_input = _extracted()
     page = extracted_input.pages[0]
     page.figure_bboxes = [(10.0, 20.0, 30.0, 40.0), (10.0, 60.0, 30.0, 80.0)]
-    extracted = build_extract_artifact(DOC, "run-1", extracted_input, _frames())
-    detection = build_detection_artifact(
-        DOC, "run-1", [], {}, _frames(), library_root=tmp_path
-    )
 
-    joined = join_evidence_artifacts(extracted, detection)
+    joined = join_evidence_artifacts(_build(tmp_path, extracted=extracted_input))
 
     assert {
         item.bbox: item.coref for item in joined.evidence if item.kind == "image_region"
@@ -313,25 +288,15 @@ def test_v2_join_records_every_figure_region_against_the_source_pdf(
     }
 
 
-def test_v2_detection_round_trip_preserves_markush_layer_fields(tmp_path: Path) -> None:
+def test_molecule_round_trip_preserves_markush_layer_fields(tmp_path: Path) -> None:
     """SQL-backed artifact reload keeps Layer 1 and Markush metadata distinct."""
     _archive_crop(tmp_path)
     candidate = _candidate()
     candidate.esmiles = "CCO<sep>R1-definition"
     candidate.properties = {"markush": True, "groups": "R1=alkyl"}
-    detection = build_detection_artifact(
-        DOC,
-        "run-1",
-        [_result(candidate)],
-        {},
-        _frames(),
-        library_root=tmp_path,
-    )
-    extracted = build_extract_artifact(DOC, "run-1", _extracted(), _frames())
+    extracted = _build(tmp_path, results=[_result(candidate)])
     save_extract_branch(tmp_path, extracted)
-    save_detection_branch(tmp_path, detection)
-    joined = join_evidence_artifacts(extracted, detection)
-    persist_source_evidence(tmp_path, joined)
+    persist_source_evidence(tmp_path, join_evidence_artifacts(extracted))
 
     restored, _ = load_detections(tmp_path, DOC)
 
@@ -342,30 +307,15 @@ def test_v2_detection_round_trip_preserves_markush_layer_fields(tmp_path: Path) 
     assert restored[0].properties["groups"] == "R1=alkyl"
 
 
-def test_v2_join_rejects_mismatched_run_and_missing_candidate_evidence(
-    tmp_path: Path,
-) -> None:
-    _archive_crop(tmp_path)
-    frames = _frames()
-    extracted = build_extract_artifact(DOC, "run-1", _extracted(), frames)
-    detection = build_detection_artifact(
-        DOC,
-        "run-2",
-        [_result()],
-        {},
-        frames,
-        library_root=tmp_path,
-    )
-    with pytest.raises(ValueError, match="run_id"):
-        join_evidence_artifacts(extracted, detection)
+def test_join_rejects_molecule_without_page_or_bbox(tmp_path: Path) -> None:
+    extracted = _build(tmp_path)
+    extracted.pages[0].molecules = [{"bbox_pdf": [1, 2, 3, 4]}]
 
-    detection.run_id = "run-1"
-    detection.pages[0].detections = [{"bbox_pdf": [1, 2, 3, 4]}]
     with pytest.raises(ValueError, match="page_idx and bbox_pdf"):
-        join_evidence_artifacts(extracted, detection)
+        join_evidence_artifacts(extracted)
 
 
-def test_v2_join_keeps_ocr_pdf_bbox_coordinates() -> None:
+def test_join_keeps_ocr_pdf_bbox_coordinates() -> None:
     extracted = ExtractedDocument(
         raw_text="hello",
         page_count=1,
@@ -377,21 +327,9 @@ def test_v2_join_keeps_ocr_pdf_bbox_coordinates() -> None:
             )
         ],
     )
-    artifact = build_extract_artifact(
-        DOC,
-        "run-1",
-        extracted,
-        [PageFrame(page=1, width=200.0, height=100.0, rotation=90)],
-    )
-    detection = build_detection_artifact(
-        DOC,
-        "run-1",
-        [],
-        {},
-        [PageFrame(page=1, width=200.0, height=100.0, rotation=90)],
-        library_root=".",
-    )
-    joined = join_evidence_artifacts(artifact, detection)
+    rotated = [PageFrame(page=1, width=200.0, height=100.0, rotation=90)]
+    artifact = build_extract_artifact(DOC, "run-1", extracted, rotated)
+    joined = join_evidence_artifacts(artifact)
     assert joined.evidence[0].bbox == (10.0, 8.0, 33.0, 23.0)
 
 
@@ -405,52 +343,35 @@ def test_source_evidence_rejects_page_only_evidence() -> None:
         )
 
 
-def test_v2_detection_requires_archived_molecule_crop(tmp_path: Path) -> None:
+def test_build_extract_artifact_requires_archived_molecule_crop(
+    tmp_path: Path,
+) -> None:
     with pytest.raises(ValueError, match="not archived"):
-        build_detection_artifact(
-            DOC,
-            "run-1",
-            [_result()],
-            {},
-            _frames(),
-            library_root=tmp_path,
-        )
+        _build(tmp_path, results=[_result()])
 
 
-def test_v2_join_order_is_independent_of_branch_input_order(tmp_path: Path) -> None:
+def test_join_order_is_independent_of_input_order(tmp_path: Path) -> None:
     _archive_crop(tmp_path)
-    frames = _frames()
-    extracted = build_extract_artifact(DOC, "run-1", _extracted(), frames)
-    candidate = _candidate()
-    detection = build_detection_artifact(
-        DOC,
-        "run-1",
-        [_result(candidate)],
-        {"molecule_count": 1},
-        frames,
-        library_root=tmp_path,
+    extracted = _build(
+        tmp_path,
+        results=[_result()],
+        molecule_stats={"molecule_count": 1},
     )
     reversed_extract = extracted.model_copy(
         update={
             "pages": [
                 extracted.pages[0].model_copy(
-                    update={"text_spans": list(reversed(extracted.pages[0].text_spans))}
-                )
-            ]
-        }
-    )
-    reversed_detection = detection.model_copy(
-        update={
-            "pages": [
-                detection.pages[0].model_copy(
-                    update={"detections": list(reversed(detection.pages[0].detections))}
+                    update={
+                        "text_spans": list(reversed(extracted.pages[0].text_spans)),
+                        "molecules": list(reversed(extracted.pages[0].molecules)),
+                    }
                 )
             ]
         }
     )
     assert (
-        join_evidence_artifacts(extracted, detection).model_dump()
-        == join_evidence_artifacts(reversed_extract, reversed_detection).model_dump()
+        join_evidence_artifacts(extracted).model_dump()
+        == join_evidence_artifacts(reversed_extract).model_dump()
     )
 
 
@@ -502,12 +423,7 @@ def _layout_extracted() -> ExtractedDocument:
 
 def test_join_mints_layout_regions_under_the_detector_kind(tmp_path: Path) -> None:
     """Typed regions become evidence under their own label, exactly once."""
-    extracted = build_extract_artifact(DOC, "run-1", _layout_extracted(), _frames())
-    detection = build_detection_artifact(
-        DOC, "run-1", [], {}, _frames(), library_root=tmp_path
-    )
-
-    joined = join_evidence_artifacts(extracted, detection)
+    joined = join_evidence_artifacts(_build(tmp_path, extracted=_layout_extracted()))
 
     assert {item.kind: item.bbox for item in joined.evidence} == {
         "text": (1.0, 2.0, 3.0, 4.0),
@@ -548,12 +464,8 @@ def test_join_orders_layout_regions_by_reading_order(tmp_path: Path) -> None:
     ]
     extracted_input.pages[0].text_spans = []
     extracted_input.pages[0].figure_bboxes = []
-    extracted = build_extract_artifact(DOC, "run-1", extracted_input, _frames())
-    detection = build_detection_artifact(
-        DOC, "run-1", [], {}, _frames(), library_root=tmp_path
-    )
 
-    joined = join_evidence_artifacts(extracted, detection)
+    joined = join_evidence_artifacts(_build(tmp_path, extracted=extracted_input))
 
     assert [item.bbox for item in joined.evidence] == [left, right]
 

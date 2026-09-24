@@ -85,18 +85,17 @@ def parse_page_image(
     zoom: float = DEFAULT_RENDER_ZOOM,
     detector: Any | None = None,
     conf: float = DEFAULT_CONF,
-    read_text: bool = True,
-    read_tables: bool = False,
     cross_model: bool = True,
     params: dict[str, Any] | None = None,
 ) -> LayoutPage:
-    """Detect, merge, order and (optionally) read one already-rendered page.
+    """Detect, merge, order and read one already-rendered page.
 
-    ``image`` is HWC uint8 **RGB** at *zoom* px/pt. ``cross_model`` also runs
-    MolDet on that same render, so the merge rules can re-type a figure region
-    that is really one molecule (R3) and keep a multi-molecule figure as a
-    container (R4). ``read_tables`` recognizes ``table`` region content with
-    the local SLANet-1M backend (best-effort enrichment).
+    ``image`` is HWC uint8 **RGB** at *zoom* px/pt. Text regions are always read
+    with the local recognizer, and ``table`` region content is always recognized
+    with the local SLANet-1M backend (best-effort enrichment). ``cross_model``
+    also runs MolDet on that same render, so the merge rules can re-type a
+    figure region that is really one molecule (R3) and keep a multi-molecule
+    figure as a container (R4).
     """
     from mbforge.application.ports import get_runtime
 
@@ -133,8 +132,8 @@ def parse_page_image(
     # Reading order must be assigned once, on the final post-merge set.
     regions = assign_reading_order(regions, page_frame)
 
-    text_stats = _fill_text(regions, image) if read_text else {"text_regions": 0}
-    table_stats = _fill_tables(regions, image) if read_tables else {"table_regions": 0}
+    text_stats = _fill_text(regions, image)
+    table_stats = _fill_tables(regions, image)
 
     return LayoutPage(
         page_num=page_num,
@@ -263,8 +262,6 @@ def parse_pdf_layout(
     zoom: float = DEFAULT_RENDER_ZOOM,
     detector: Any | None = None,
     conf: float = DEFAULT_CONF,
-    read_text: bool = True,
-    read_tables: bool = False,
     cross_model: bool = True,
     max_pages: int | None = None,
     cancel_check: Any | None = None,
@@ -291,8 +288,6 @@ def parse_pdf_layout(
                 zoom=zoom,
                 detector=detector,
                 conf=conf,
-                read_text=read_text,
-                read_tables=read_tables,
                 cross_model=cross_model,
                 params=params,
             )

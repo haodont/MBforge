@@ -33,8 +33,7 @@ def test_next_stage_from_none() -> None:
 
 
 def test_next_stage_walks_order() -> None:
-    assert next_stage("extract") == "detection"
-    assert next_stage("detection") == "join"
+    assert next_stage("extract") == "join"
     assert next_stage("join") == "markdown"
     assert next_stage("markdown") == "patent"
     assert next_stage("patent") is None
@@ -160,7 +159,6 @@ def test_last_completed_stage_empty(tmp_path: Path) -> None:
 
 def test_last_completed_stage_partial(tmp_path: Path) -> None:
     save_stage_summary(tmp_path, "extract", status="success")
-    save_stage_summary(tmp_path, "detection", status="success")
     save_stage_summary(tmp_path, "join", status="success")
     save_stage_summary(tmp_path, "markdown", status="success")
     # patent missing → last completed is markdown
@@ -175,10 +173,9 @@ def test_last_completed_stage_all_done(tmp_path: Path) -> None:
 
 def test_last_completed_stage_stops_at_failure(tmp_path: Path) -> None:
     save_stage_summary(tmp_path, "extract", status="success")
-    save_stage_summary(tmp_path, "detection", status="success")
-    save_stage_summary(tmp_path, "markdown", status="error")
-    # Gap at markdown → only the two branches count as contiguous
-    assert last_completed_stage(tmp_path) == "detection"
+    save_stage_summary(tmp_path, "join", status="error")
+    # Gap at join → only the contiguous extract run counts
+    assert last_completed_stage(tmp_path) == "extract"
 
 
 # ── collect_all_summaries ────────────────────────────────────────────
@@ -207,13 +204,6 @@ def _populate_all_stages(staging: Path) -> None:
         status="success",
         elapsed_ms=100,
         context={"page_count": 3, "parser": "pymupdf", "title": "Test Doc"},
-    )
-    save_stage_summary(
-        staging,
-        "detection",
-        status="success",
-        elapsed_ms=150,
-        context={"molecule_count": 2},
     )
     save_stage_summary(
         staging,
@@ -248,7 +238,7 @@ def test_merge_report(tmp_path: Path) -> None:
     assert report["page_count"] == 3
     assert report["parser"] == "pymupdf"
     assert report["title"] == "Test Doc"
-    assert report["duration_ms"] == 460  # 100+150+200+10
+    assert report["duration_ms"] == 310  # 100+0+200+10
     assert report["molecule_count"] == 0
     assert report["activity_count"] == 0
     assert set(report["stages"].keys()) == set(effective_stage_names())
@@ -272,4 +262,4 @@ def test_write_merged_report(tmp_path: Path) -> None:
     assert report_path.is_file()
     data = json.loads(report_path.read_text(encoding="utf-8"))
     assert data["doc_id"] == doc_id
-    assert data["duration_ms"] == 460  # 100+150+200+10
+    assert data["duration_ms"] == 310  # 100+0+200+10

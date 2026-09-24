@@ -1,8 +1,8 @@
 """Stage 4: the single SQL-backed patent-facts parser.
 
-Patent consumes the SourceEvidence rows written by the Extract/Detection
-Join. Sections, entries, examples, assay methods, and activity measurements
-are assembled once and published as ``patent_facts.json``.
+Patent consumes the SourceEvidence rows written by the Join. Sections,
+entries, examples, assay methods, and activity measurements are assembled once
+and published as ``patent_facts.json``.
 
 Reads:
     SQL ``source_evidence`` for ``ctx.doc_id``

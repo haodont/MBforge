@@ -136,7 +136,8 @@ class RunContext:
         run.staging_dir = staging_dir(root, doc_id)
         ctx.staging_dir = run.staging_dir
         # One run ID per ingestion attempt: every node of the attempt reuses
-        # it, so the Extract/Detection branches always agree on their run ID.
+        # it, so the extract branch and its downstream stages always agree on
+        # the run ID.
         run.run_id = run_id or mint_run_id(root, doc_id)
         ctx.run_id = run.run_id
         ensure_attempt_run(run.staging_dir, run.run_id)

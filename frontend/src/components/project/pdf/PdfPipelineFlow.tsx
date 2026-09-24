@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { FC } from 'react'
-import { FileTextIcon, EyeIcon, CheckIcon, XIcon, FlaskIcon, BookIcon } from '../../icons'
+import { FileTextIcon, NetworkIcon, CheckIcon, XIcon, FlaskIcon, BookIcon } from '../../icons'
 import type { IngestStageStatus, IngestTask } from '@/api/http/ingest_queue'
 
 type PipelineVariant = 'compact' | 'full'
@@ -14,7 +14,7 @@ function useStageLabels() {
   const { t } = useTranslation()
   return [
     { key: 'extract', label: t('pdfPipeline.stage.extract'), Icon: FileTextIcon },
-    { key: 'detection', label: t('pdfPipeline.stage.detection'), Icon: EyeIcon },
+    { key: 'join', label: t('pdfPipeline.stage.join'), Icon: NetworkIcon },
     { key: 'markdown', label: t('pdfPipeline.stage.markdown'), Icon: FlaskIcon },
     { key: 'patent', label: t('pdfPipeline.stage.patent'), Icon: BookIcon },
   ]

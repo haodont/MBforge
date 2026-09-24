@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from pathlib import PurePath
 from typing import Any
 
 from mbforge.foundation.ids import stable_id
-
-_SEP = "\x1f"
 
 
 def _normalise_bbox(
@@ -50,15 +47,6 @@ def _location_id(
     return stable_id(*parts)
 
 
-def _validate_coref(coref: str) -> None:
-    if not coref:
-        return
-    if "://" in coref or PurePath(coref).is_absolute():
-        raise ValueError("coref must be a relative library path")
-    if any(part == ".." for part in PurePath(coref).parts):
-        raise ValueError("coref must stay within the library layout")
-
-
 @dataclass(frozen=True)
 class SourceEvidence:
     """One immutable source region and its raw content.
@@ -66,6 +54,13 @@ class SourceEvidence:
     A source evidence object is valid only when it has a geometric location.
     Secondary domain objects reference it by ``evidence_id``; they do not
     create page-only source evidence of their own.
+
+    ``kind`` is the **producer's own label** (``text`` / ``sec`` / ``head`` /
+    ``tab`` / ``molecule`` …) stored verbatim; readers map it to a category
+    through :mod:`mbforge.domain.evidence_kind`.  ``raw_text`` is the row's
+    single payload column — recognized text, a Markdown table, or, for a
+    molecule, the observation JSON.  A region the producer found but could not
+    read carries an empty payload; that is a legal row.
     """
 
     doc_id: str
@@ -73,8 +68,7 @@ class SourceEvidence:
     bbox: tuple[float, float, float, float]
     evidence_id: str = ""
     raw_text: str = ""
-    coref: str = ""
-    kind: str = "text_span"
+    kind: str = "text"
 
     def __post_init__(self) -> None:
         if not self.doc_id:
@@ -87,10 +81,7 @@ class SourceEvidence:
             raise ValueError("page must be a positive 1-based integer")
         if not self.kind:
             raise ValueError("kind must not be empty")
-        if not self.raw_text and not self.coref:
-            raise ValueError("evidence must contain raw_text or coref")
         normalised = _normalise_bbox(self.bbox)
-        _validate_coref(self.coref)
         if normalised != self.bbox:
             object.__setattr__(self, "bbox", normalised)
         if not self.evidence_id:
@@ -111,7 +102,6 @@ class SourceEvidence:
             "evidence_id": self.evidence_id,
             "bbox": list(self.bbox),
             "raw_text": self.raw_text,
-            "coref": self.coref,
             "kind": self.kind,
         }
 
@@ -123,8 +113,7 @@ class SourceEvidence:
         page: int,
         bbox: tuple[float, float, float, float] | list[float],
         raw_text: str = "",
-        coref: str = "",
-        kind: str = "text_span",
+        kind: str = "text",
     ) -> SourceEvidence:
         normalised = _normalise_bbox(bbox)
         return cls(
@@ -132,7 +121,6 @@ class SourceEvidence:
             page=page,
             bbox=normalised,
             raw_text=raw_text,
-            coref=coref,
             kind=kind,
             evidence_id=_location_id(
                 doc_id,
@@ -153,8 +141,7 @@ class SourceEvidence:
             bbox=normalised,
             evidence_id=data.get("evidence_id", ""),
             raw_text=data.get("raw_text", ""),
-            coref=data.get("coref", ""),
-            kind=data.get("kind", "text_span"),
+            kind=data.get("kind", "text"),
         )
 
 

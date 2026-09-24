@@ -19,12 +19,29 @@ from mbforge.application.pipeline.stage import (
     StageExecutor,
     StageResult,
 )
-from mbforge.application.pipeline.stages import (
-    DetectionStage,
-    ExtractStage,
-    MarkdownStage,
-)
+from mbforge.application.pipeline.stages import ExtractStage, MarkdownStage
 from mbforge.domain.evidence import SourceEvidence
+from mbforge.domain.types import ExtractionResult
+
+#: The molecule pass lives inside ExtractStage; every ExtractStage test must
+#: stub it so the suite never loads real detector/recognizer weights.
+_MOLECULE_PASS = (
+    "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf"
+)
+
+
+def _molecule_result() -> ExtractionResult:
+    """A text-sourced molecule observation (no archived crop to resolve)."""
+    return ExtractionResult(
+        esmiles="CCO<sep>",
+        smiles="CCO",
+        name="EtOH",
+        source="text",
+        moldet_conf=0.9,
+        bbox_pdf=(10.0, 20.0, 30.0, 40.0),
+        page_idx=0,
+        status="pending",
+    )
 
 
 class TestStageExecutors:
@@ -40,7 +57,6 @@ class TestStageExecutors:
     def test_stage_registry_runs_in_document_order(self):
         assert [type(stage).__name__ for stage in STAGES] == [
             "ExtractStage",
-            "DetectionStage",
             "JoinStage",
             "MarkdownStage",
             "PatentStage",
@@ -137,55 +153,85 @@ class TestStageNullChecks:
         assert ctx.document_md_path.exists()
         assert "Source text" in ctx.document_md_path.read_text(encoding="utf-8")
 
-    def test_detection_stage_does_not_read_extract_context(self, tmp_path):
-        """Detection's independent branch must not consume Extract output."""
+    def test_extract_stage_produces_and_reports_molecules(self, tmp_path):
+        """Extract owns the molecule pass, so its results land in the context."""
+        from mbforge.application.pipeline.extract.text import (
+            ExtractedDocument,
+            PageContent,
+        )
 
-        class ForbiddenExtract:
-            @property
-            def pages(self):
-                raise AssertionError("Detection read Extract output")
-
+        fake_doc = ExtractedDocument(
+            raw_text="hello",
+            page_count=1,
+            parser="layout",
+            pages=[PageContent(page_num=1, text="hello")],
+        )
         ctx = PipelineContext(
             pdf_path=tmp_path / "x.pdf",
             library_root=tmp_path,
-            doc_id="t-detection-independent",
+            doc_id="t-molecules",
             run_id="run-1",
-            extracted=ForbiddenExtract(),
         )
+        molecules = [_molecule_result()]
+
         with (
             patch(
-                "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
-                return_value=[],
+                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                return_value=fake_doc,
             ),
+            patch(_MOLECULE_PASS, return_value=molecules),
             patch(
                 "mbforge.application.pipeline.artifacts.branch_io.page_frames_from_pdf",
-                return_value=[],
-            ),
-            patch(
-                "mbforge.application.pipeline.artifacts.branch_io.save_detection_branch"
+                return_value=[PageFrame(page=1, width=100.0, height=100.0)],
             ),
         ):
-            result = DetectionStage().execute(ctx)
+            result = ExtractStage().execute(ctx)
 
         assert result.status == "success"
+        assert result.warnings == []
+        assert result.context["molecule_count"] == 1
+        assert ctx.molecule_stats["results"] == molecules
+        # Candidates are always rebuilt from the artifact at Join/Patent.
+        assert ctx.candidates == []
 
-    def test_detection_stage_keeps_extraction_error_detail(self, tmp_path):
-        """A MolDet-side failure must expose its cause for a targeted retry."""
+    def test_molecule_pass_failure_does_not_fail_the_document(self, tmp_path):
+        """A molecule-side failure keeps the page text evidence alive."""
+        from mbforge.application.pipeline.extract.text import (
+            ExtractedDocument,
+            PageContent,
+        )
+
+        fake_doc = ExtractedDocument(
+            raw_text="hello",
+            page_count=1,
+            parser="layout",
+            pages=[PageContent(page_num=1, text="hello")],
+        )
         ctx = PipelineContext(
             pdf_path=tmp_path / "x.pdf",
             library_root=tmp_path,
-            doc_id="t-detection-error",
+            doc_id="t-molecule-error",
             run_id="run-1",
         )
-        with patch(
-            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
-            side_effect=RuntimeError("crop archive missing"),
-        ):
-            result = DetectionStage().execute(ctx)
 
-        assert result.status == "error"
-        assert result.error_code == PipelineErrorCode.MOLDET_UNAVAILABLE
-        assert "crop archive missing" in result.message
+        with (
+            patch(
+                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                return_value=fake_doc,
+            ),
+            patch(_MOLECULE_PASS, side_effect=RuntimeError("crop archive missing")),
+            patch(
+                "mbforge.application.pipeline.artifacts.branch_io.page_frames_from_pdf",
+                return_value=[PageFrame(page=1, width=100.0, height=100.0)],
+            ),
+        ):
+            result = ExtractStage().execute(ctx)
+
+        assert result.status == "success"
+        assert ctx.extracted is fake_doc
+        assert ctx.molecule_stats["molecule_count"] == 0
+        assert "crop archive missing" in ctx.molecule_stats["error"]
+        assert any("crop archive missing" in w for w in result.warnings)
 
 
 class TestExtractStage:
@@ -216,6 +262,7 @@ class TestExtractStage:
                 "mbforge.application.pipeline.extract.text.extract_layout_text",
                 return_value=fake_doc,
             ),
+            patch(_MOLECULE_PASS, return_value=[]),
             patch(
                 "mbforge.application.pipeline.artifacts.branch_io.page_frames_from_pdf",
                 return_value=[PageFrame(page=1, width=100.0, height=100.0)],
@@ -238,9 +285,12 @@ class TestExtractStage:
             run_id="run-1",
         )
 
-        with patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
-            side_effect=ValueError("corrupt pdf"),
+        with (
+            patch(
+                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                side_effect=ValueError("corrupt pdf"),
+            ),
+            patch(_MOLECULE_PASS, return_value=[]),
         ):
             result = ExtractStage().execute(ctx)
 
@@ -260,11 +310,14 @@ class TestExtractStage:
             run_id="run-1",
         )
 
-        with patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
-            side_effect=LayoutUnavailableError(
-                "Hiro-Layout model is not available; cannot produce a local layout"
+        with (
+            patch(
+                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                side_effect=LayoutUnavailableError(
+                    "Hiro-Layout model is not available; cannot produce a local layout"
+                ),
             ),
+            patch(_MOLECULE_PASS, return_value=[]),
         ):
             result = ExtractStage().execute(ctx)
 

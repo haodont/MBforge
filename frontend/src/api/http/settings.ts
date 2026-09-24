@@ -26,9 +26,7 @@ export interface VlmConfig {
 
 export interface LayoutConfig {
   conf_threshold?: number
-  read_text?: boolean
   cross_model?: boolean
-  read_tables?: boolean
   max_pages_per_doc?: number | null
 }
 

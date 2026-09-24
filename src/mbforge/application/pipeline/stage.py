@@ -41,7 +41,6 @@ class PipelineErrorCode:
     """Machine-readable error codes emitted by pipeline stages."""
 
     PDF_PARSE_ERROR = "PDF_PARSE_ERROR"
-    MOLDET_UNAVAILABLE = "MOLDET_UNAVAILABLE"
     LAYOUT_UNAVAILABLE = "LAYOUT_UNAVAILABLE"
     EVIDENCE_JOIN_FAILED = "EVIDENCE_JOIN_FAILED"
     PATENT_EXTRACTION_FAILED = "PATENT_EXTRACTION_FAILED"
@@ -93,8 +92,8 @@ REGISTRY: dict[str, Any] = {}
 ORDER: list[str] = []
 # Stage dependency DAG: ``DEPS[stage]`` lists the stages that must succeed
 # before ``stage`` may run. ``after=`` supplies the single-predecessor
-# default (the linear tail); a stage that fans in — e.g. the Extract ∥
-# Detection join — declares its full prerequisite set via ``depends_on=``.
+# default, which the current composition uses throughout (Extract → Join →
+# Markdown → Patent); ``depends_on=`` is available for a stage that fans in.
 DEPS: dict[str, tuple[str, ...]] = {}
 
 
@@ -137,16 +136,15 @@ def register(
 
     Usable both bare (``@register``) and parameterized
     (``@register(after="extract")`` / ``@register(after="extract",
-    depends_on=("extract", "detection"))``).
+    depends_on=("extract",))``).
 
     ``after`` names the stage this one follows, anchoring the derived
     order independent of module import order. Omit it for the first
     stage only.
 
     ``depends_on`` declares the full prerequisite set for the execution
-    DAG; it defaults to ``(after,)``. A fan-in stage (the Extract ∥
-    Detection join) needs both predecessors, which a single ``after``
-    cannot express.
+    DAG; it defaults to ``(after,)``. Use it only for a stage that fans
+    in, which a single ``after`` cannot express.
 
     Raises:
         ValueError: on duplicate stage names or unknown ``after`` /

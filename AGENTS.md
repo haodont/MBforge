@@ -1,7 +1,7 @@
 # Repository Guidelines
 function and type restrict is more import than a lot of test!!!
 more structure less test!!!
-MBForge is a local AI workbench that turns molecular-science PDFs into a searchable knowledge base. The current pipeline is `Extract ∥ Detection → Markdown → Patent`; Patent reads SQL `SourceEvidence`, publishes the unified facts artifact, and performs deterministic document-local associations. Link is removed from the active path; Persist remains unregistered for a later redesign. Read `TODO/INDEX.md` before changing pipeline, storage, or APIs.
+MBForge is a local AI workbench that turns molecular-science PDFs into a searchable knowledge base. The current pipeline is `Extract → Join → Markdown → Patent`; Extract runs the layout/text/table producer and the molecule (MolDet + MolParser) pass and publishes the single raw branch artifact, Join validates it into SQL `SourceEvidence`, and Patent reads that evidence, publishes the unified facts artifact, and performs deterministic document-local associations. Link is removed from the active path; Persist remains unregistered for a later redesign. Read `TODO/INDEX.md` before changing pipeline, storage, or APIs.
 
 ## Project Structure & Architecture
 

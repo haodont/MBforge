@@ -53,20 +53,6 @@ def test_layout_extract_refuses_a_document_with_no_text(
         extract_layout_text(str(tmp_path / "x.pdf"), doc_id="d")
 
 
-def test_layout_extract_allows_no_text_when_reading_is_disabled(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Disabling text reading is an explicit choice, not a defect."""
-    _stub_layout(monkeypatch, [_empty_page()])
-
-    extracted = extract_layout_text(
-        str(tmp_path / "x.pdf"), doc_id="d", layout_config={"read_text": False}
-    )
-
-    assert extracted.raw_text == ""
-    assert extracted.parser == "layout"
-
-
 # --- Title extraction (WIPO bibliographic first pages) ---
 
 

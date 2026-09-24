@@ -207,20 +207,17 @@ class MolParserBatcher:
             ) from exc
 
         return ExtractionResult(
+            smiles=smiles,
             esmiles=(
                 scribe.esmiles.strip()
                 if markush and isinstance(scribe.esmiles, str)
                 else smiles
             ),
-            smiles=smiles,
-            name=ocr_labels[0] if ocr_labels else "",
-            source="image",
             moldet_conf=crop.score,
             bbox_pdf=crop.bbox_pdf,
             page_idx=crop.page_idx,
-            context_text=crop.nearby_text,
-            mol_img_path=crop.crop_path,
-            status="pending",
+            name=ocr_labels[0] if ocr_labels else "",
+            mol_img_path=str(crop.crop_path),
             properties=properties,
         )
 

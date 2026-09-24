@@ -4,10 +4,22 @@ This directory records active architecture and implementation plans.
 
 ## Current pipeline
 
-`Extract ∥ Detection → Markdown → Patent` is the registered pipeline. Extract
-and Detection publish independent run-scoped branch artifacts; Join validates
-them and writes canonical `SourceEvidence` rows to SQLite. Link is removed from
-the active path, and Persist remains unregistered pending redesign.
+`Extract → Join → Markdown → Patent` is the registered pipeline. Extract is the
+single producer — the layout/text/table producer and the molecule pass
+(MolDet + MolParser) both run inside it — and publishes one run-scoped branch
+artifact; Join validates it and writes canonical `SourceEvidence` rows to
+SQLite. Link is removed from the active path, and Persist remains unregistered
+pending redesign.
+
+## Known gaps
+
+- `patent/sections.py:parse_source_evidence_sections` treats only
+  `kind in {"text_span", "table_span"}` as heading-eligible, but the local
+  Hiro-Layout producer mints every region under its own label (`text`, `sec`,
+  `head`, `tab`, …). A scanned document therefore reports 0 sections / 0
+  entries even though its `source_evidence` rows hold the full text. Either the
+  parser must classify through `evidence_kind.category_of`, or the join must
+  mint the producer's labels into the text category.
 
 ## Active plans
 

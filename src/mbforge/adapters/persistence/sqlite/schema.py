@@ -403,9 +403,11 @@ CREATE INDEX IF NOT EXISTS idx_ev_doc_page ON evidence(doc_id, page);
 CREATE INDEX IF NOT EXISTS idx_ev_kind ON evidence(kind);
 """
 
-# Canonical page evidence shared by Extract, Detection, Markdown and all
-# interpretation layers. This is deliberately separate from ``evidence``,
-# the existing molecule-observation table used by molecule queries.
+# Canonical page evidence shared by Extract, Markdown and all interpretation
+# layers. One row per page location: ``kind`` is the producer's own label and
+# ``raw_text`` is the single payload column (recognized text, Markdown table, or
+# the molecule observation JSON).  A region the producer located but could not
+# read carries an empty payload.
 _SOURCE_EVIDENCE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS source_evidence (
     evidence_id TEXT PRIMARY KEY NOT NULL,
@@ -416,12 +418,8 @@ CREATE TABLE IF NOT EXISTS source_evidence (
     bbox_x1 REAL NOT NULL,
     bbox_y1 REAL NOT NULL,
     raw_text TEXT NOT NULL DEFAULT '',
-    coref TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    CHECK (bbox_x0 >= 0 AND bbox_y0 >= 0 AND bbox_x0 <= bbox_x1 AND bbox_y0 <= bbox_y1),
-    CHECK (length(trim(raw_text)) > 0 OR length(trim(coref)) > 0),
-    UNIQUE(doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, kind)
+    CHECK (bbox_x0 >= 0 AND bbox_y0 >= 0 AND bbox_x0 <= bbox_x1 AND bbox_y0 <= bbox_y1)
 );
 CREATE INDEX IF NOT EXISTS idx_se_doc_page_kind
     ON source_evidence(doc_id, page, kind);

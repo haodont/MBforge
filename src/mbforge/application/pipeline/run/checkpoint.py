@@ -1,9 +1,9 @@
 """Stage checkpoint management for stage-by-stage pipeline execution.
 
 Each pipeline stage writes a lightweight summary file into the document's
-staging directory (``storage/{doc_id}/.staging/``).  The branch artifacts
-are stored as ``extract.json`` and ``detection.json`` in that directory. These
-summaries serve two purposes:
+staging directory (``storage/{doc_id}/.staging/``).  The branch artifact is
+stored as ``extract.json`` in that directory. These summaries serve two
+purposes:
 
 1. **Observability** — every completed stage leaves a readable JSON
    artifact that can be inspected without parsing the full pipeline log.
@@ -153,7 +153,7 @@ def ensure_run_checkpoint(staging_dir: Path | None, *, start_new: bool = False) 
 def _record_run_stage(
     staging_dir: Path | None, stage_name: str, status: str, run_id: str | None = None
 ) -> None:
-    # ponytail: one process-wide lock is enough for the fixed two-branch fork;
+    # ponytail: one process-wide lock is enough for the fixed stage set;
     # use a file lock only if multiple runner processes ever share a checkpoint.
     with _RUN_CHECKPOINT_LOCK:
         data = load_run_checkpoint(staging_dir)
@@ -176,8 +176,8 @@ def ensure_attempt_run(staging_dir: Path | None, run_id: str) -> None:
     checkpoint is bound once and reused by every node. A checkpoint holding a
     *different* run ID means a new ingestion attempt: stale staging is
     discarded so a previous attempt's artifacts cannot leak into this run. A
-    retry keeps the same run ID and therefore reuses the surviving sibling
-    branch.
+    retry keeps the same run ID and therefore reuses the surviving branch
+    artifact.
     """
     if staging_dir is None:
         return
@@ -239,7 +239,7 @@ def next_stage(current: str | None) -> str | None:
     >>> next_stage(None)
     'extract'
     >>> next_stage("extract")
-    'markdown'
+    'join'
     >>> next_stage("patent")
     None
     """

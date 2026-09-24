@@ -11,7 +11,7 @@ from mbforge.application.pipeline.detection.formula_normalization import (
     normalize_patent_formulas,
 )
 from mbforge.domain.evidence import SourceEvidence
-from mbforge.domain.evidence_kind import is_text, kind_rank
+from mbforge.domain.evidence_kind import IMAGE, category_of, is_text, kind_rank
 from mbforge.domain.molecule import Molecule
 from mbforge.foundation.logger import get_logger
 
@@ -148,7 +148,7 @@ def _page_blocks(
     slots: dict[int, list[_PlacedBlock]] = {}
 
     for item in page_evidence:
-        if item.kind != "image_region":
+        if category_of(item.kind) != IMAGE:
             continue
         placed = _PlacedBlock(
             key=_reading_key(item),

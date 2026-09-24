@@ -27,7 +27,9 @@ tokenizer; SLANet-1M is a 7.6 MB ONNX model with zero new dependencies).
 - Adapter `mbforge/adapters/inference/table_slanet.py` — lazy onnxruntime
   session (CUDA EP when available, CPU fallback), `predict_table(image) -> HTML`,
   best-effort enrichment (empty on any failure, never breaks the page).
-- `LayoutConfig.read_tables` (default off) + `table_recognizer="slanet"`.
+- `table_recognizer="slanet"`; recognition is unconditional (the
+  `read_tables` switch was removed — the ONNX weights download on first use
+  and recognition is best-effort enrichment).
 - `layout/parse.py:_fill_tables` crops Hiro `table` regions, calls
   `runtime.table_slanet.predict_table`, stores `region["html"]` /
   `region["text"]` (Markdown) → flows into `page_text` / `SourceEvidence`
@@ -53,13 +55,17 @@ tokenizer; SLANet-1M is a 7.6 MB ONNX model with zero new dependencies).
   cuDNN, then preload). Session now reports `CUDAExecutionProvider` active.
   Note: `nvidia-cublas` is a runtime environment fix, intentionally **not**
   added to `pyproject.toml` — machines without it fall back to CPU.
+- End-to-end (2026-09-24, `CN121270515A.pdf`, 23 scanned pages, single Extract
+  branch): 8 Hiro `tab` regions, all 8 recognized into Markdown tables (e.g.
+  `| 试剂和耗材 | 来源 | 批号 |`), 8 `tab` evidence rows in `source_evidence`.
+- **Provider wiring bug found by that run**: `adapters/inference/__init__.py`
+  binds the submodules the runtime provider resolves by attribute, and
+  `table_slanet` was missing — so `_DynamicModule` raised `AttributeError` on
+  every call and recognition silently degraded to empty (the enrichment
+  try/except swallows it). Now imported and guarded by
+  `tests/unit/test_runtime_provider.py`.
 
 ## Outstanding
 
-- End-to-end run of a scanned patent document through
-  `source="hiro", read_tables=True` (Hiro-Layout weights are now resolvable
-  after the `model_locator` fix).
-- The reorganization workspace still has uncommitted leftovers
-  (`test_extract_text.py` imports removed `ocr.base`; one
-  `test_stages.py` case imports removed `ocr.chain`) — owner of the
-  reorganization to clean up.
+- None. Recognition is unconditional on the Hiro path (the `read_tables`
+  switch was removed) and verified end-to-end on a 23-page scanned patent.

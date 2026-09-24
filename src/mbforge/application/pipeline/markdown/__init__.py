@@ -19,7 +19,6 @@ from mbforge.application.pipeline.detection.correction import (
 from mbforge.application.pipeline.detection.extraction import (
     candidate_id,
     extract_molecules_from_pdf,
-    extract_molecules_from_text,
 )
 from mbforge.application.pipeline.detection.formula_normalization import (
     clean_markdown_file,
@@ -52,7 +51,6 @@ __all__ = [
     "clean_markdown_file",
     "correct_molecules_with_context",
     "extract_molecules_from_pdf",
-    "extract_molecules_from_text",
     "insert_esmiles_blocks",
     "candidate_id",
     "normalize_coref_label",

@@ -1,71 +1,43 @@
-"""Public façade for the run-scoped artifact boundary."""
+"""Public façade for the page-evidence boundary."""
 
-from mbforge.application.pipeline.artifacts.branch_io import (
-    branch_path,
-    build_detection_artifact,
-    build_extract_artifact,
-    detection_results,
-    load_detection_branch,
-    load_extract_branch,
-    page_frames_from_pdf,
-    save_detection_branch,
-    save_extract_branch,
-)
 from mbforge.application.pipeline.artifacts.evidence_join import (
     evidence_ids_for,
-    join_evidence_artifacts,
     load_document_evidence,
+    mint_evidence,
+    observation_from_payload,
+    observation_payload,
+    page_frames_from_pdf,
     summarize_molecules,
 )
-from mbforge.application.pipeline.artifacts.evidence_models import (
-    CandidateArtifact,
-    DetectionArtifact,
-    DetectionPage,
-    DocumentEvidenceArtifact,
-    ExtractArtifact,
-    ExtractPage,
-    PageFrame,
-)
+from mbforge.application.pipeline.artifacts.evidence_models import PageFrame
 from mbforge.application.pipeline.artifacts.hydration import (
-    hydrate_context_from_artifacts,
+    hydrate_context_from_evidence,
     load_detections,
     load_extracted,
+    register_evidence_kinds,
 )
 from mbforge.application.pipeline.artifacts.staging import (
     cleanup_staging,
     promote_staging,
     publish_run,
-    reap_stage_run,
     staging_dir,
 )
 
 __all__ = [
-    "CandidateArtifact",
-    "DetectionArtifact",
-    "DetectionPage",
-    "DocumentEvidenceArtifact",
-    "ExtractArtifact",
-    "ExtractPage",
     "PageFrame",
-    "build_detection_artifact",
-    "build_extract_artifact",
-    "branch_path",
     "cleanup_staging",
-    "detection_results",
     "evidence_ids_for",
-    "hydrate_context_from_artifacts",
-    "join_evidence_artifacts",
-    "load_detection_branch",
+    "hydrate_context_from_evidence",
     "load_detections",
     "load_document_evidence",
-    "load_extract_branch",
     "load_extracted",
+    "mint_evidence",
+    "observation_from_payload",
+    "observation_payload",
     "page_frames_from_pdf",
     "promote_staging",
     "publish_run",
-    "reap_stage_run",
-    "save_detection_branch",
-    "save_extract_branch",
+    "register_evidence_kinds",
     "staging_dir",
     "summarize_molecules",
 ]

@@ -7,7 +7,7 @@ FastAPI backend.
 
 ## Current scope
 
-- PDF pipeline: Extract ∥ Detection → Markdown → Patent. Extract and Detection independently collect page evidence; Patent reads SQL `SourceEvidence`, publishes one facts artifact, and performs deterministic document-local associations. Link has been removed from the active path; Persist remains unregistered for a later redesign.
+- PDF pipeline: Extract → Join → Markdown → Patent. Extract is the single producer: one render drives the local layout/text/table producer and a second drives the molecule pass (MolDet + MolParser), and both feed one raw branch artifact. Join validates it into SQL `SourceEvidence`; Patent reads those rows, publishes one facts artifact, and performs deterministic document-local associations. Link has been removed from the active path; Persist remains unregistered for a later redesign.
 - Molecule detection and recognition with MolDetv2-YOLO26, MolParser-Mobile
   (E-SMILES), RDKit, and MoleCode; page layout and text recognition run entirely
   locally (Hiro-Layout + RapidOCR) — no cloud OCR service is called.
@@ -96,12 +96,12 @@ FastAPI serves `frontend/dist/` when it exists.
 
 ### Pipeline evidence contract
 
-The initial Extract/Detection fork writes independent raw branch files under
-the run staging directory (`.staging/<run_id>/extract.json` and
-`detection.json`); the Join validates both branches and indexes the joined
-`SourceEvidence` rows in SQLite, which is the only runtime evidence store.
-After Join, text spans in the readable `extract.json` branch also carry their
-final `evidence_id`.
+The Extract branch writes one raw branch file under the document staging
+directory (`.staging/extract.json`), carrying page text, typed layout regions,
+recognized table content and the molecule pass' SMILES/E-SMILES; the Join
+validates it and indexes the joined `SourceEvidence` rows in SQLite, which is
+the only runtime evidence store. After Join, text spans in the readable
+`extract.json` branch also carry their final `evidence_id`.
 
 ## Verification
 

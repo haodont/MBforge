@@ -1,8 +1,7 @@
 """Public molecule extraction entry points.
 
 PDF image extraction is coordinated here while page rendering, page-level
-MolDet, and crop/MolParser processing live in focused components. Native text
-SMILES extraction remains available through the same compatibility API.
+MolDet, and crop/MolParser processing live in focused components.
 """
 
 from __future__ import annotations
@@ -10,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import queue as queue_module
-import re
 import shutil  # noqa: F401 — tests patch this legacy module attribute
 import threading
 from collections.abc import Iterable
@@ -54,8 +52,6 @@ DEFAULT_RENDER_DPI = _DEFAULT_RENDER_DPI
 DEFAULT_SCRIBE_BATCH_SIZE = _DEFAULT_SCRIBE_BATCH_SIZE
 MAX_SCRIBE_BATCH_SIZE = _MAX_SCRIBE_BATCH_SIZE
 _TEXT_PAGE_CHAR_THRESHOLD = _DEFAULT_TEXT_PAGE_CHAR_THRESHOLD
-
-_SMILES_LIKE_PATTERN = re.compile(r"[A-Za-z0-9\(\)\[\]\=\#\+\-\\\\/@\.]{3,}")
 
 
 def candidate_id(
@@ -344,46 +340,3 @@ async def extract_molecules_from_pdf_async(
         doc_id,
         max_pages,
     )
-
-
-def extract_molecules_from_text(text: str, doc_id: str) -> list[ExtractionResult]:
-    """Extract SMILES strings from raw text and validate them with RDKit."""
-    from rdkit import Chem
-
-    results: list[ExtractionResult] = []
-    seen: set[str] = set()
-    for match in _SMILES_LIKE_PATTERN.finditer(text):
-        candidate = match.group(0)
-        try:
-            mol = Chem.MolFromSmiles(candidate)
-            if mol is None:
-                continue
-            canonical = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
-        except Exception as exc:
-            logger.debug("RDKit failed to parse candidate %r: %s", candidate, exc)
-            continue
-        if canonical in seen:
-            continue
-        seen.add(canonical)
-        start = max(0, match.start() - 200)
-        end = min(len(text), match.end() + 200)
-        results.append(
-            ExtractionResult(
-                esmiles=canonical,
-                name="",
-                source="text",
-                context_text=text[start:end],
-                status="pending",
-            )
-        )
-
-    logger.info("Extracted %d text SMILES candidates from %s", len(results), doc_id)
-    return results
-
-
-async def extract_molecules_from_text_async(
-    text: str,
-    doc_id: str,
-) -> list[ExtractionResult]:
-    """Run native text extraction outside the event loop."""
-    return await asyncio.to_thread(extract_molecules_from_text, text, doc_id)

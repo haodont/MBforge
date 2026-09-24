@@ -35,6 +35,19 @@ logger = get_logger("mbforge.adapters.persistence.sqlite.database")
 # claimed, reclaimed, or transitioned again; the worker and the pipeline
 # router share this definition so the queue state machine has a single
 # source of truth.
+#
+# Bumped whenever a retired stage must be dropped from persisted queue DAGs
+# (see ``DatabaseManager._migrate_ingest_dag``).
+#
+# 1 — removed the retired ``detection`` node (molecule detection moved into
+#     ``extract``).
+# 2 — removed the retired ``join`` node (extract persists evidence directly).
+_INGEST_DAG_VERSION = 2
+
+#: Retired stage names, removed from any persisted queue DAG.
+_RETIRED_STAGES = ("detection", "join")
+
+
 class DatabaseManager:
     """Manages SQLite connections to the library's unified database."""
 
@@ -326,6 +339,7 @@ class DatabaseManager:
                 # The activities table is defined in _ACTIVITIES_SCHEMA but not
                 # included in _KB_SCHEMA, so it is created explicitly here.
                 conn.executescript(_ACTIVITIES_SCHEMA)
+                self._migrate_ingest_dag(conn)
                 conn.commit()
             finally:
                 conn.close()
@@ -339,6 +353,35 @@ class DatabaseManager:
                 conn.close()
             self._initialized.set()
             logger.info("DB initialized: %s", self._db_path)
+
+    @staticmethod
+    def _migrate_ingest_dag(conn: sqlite3.Connection) -> None:
+        """Drop retired stage nodes from a persisted ingest queue DAG.
+
+        Molecule detection now lives inside the Extract stage, and Extract
+        persists its own evidence — so a leftover ``detection`` or ``join`` node
+        would keep its document stuck forever: the stale edge stops
+        ``advance_dependents`` from ever promoting the next stage, and
+        ``all_stages_done`` can never be true because the retired node is never
+        ``done``. Runs once per database file.
+        """
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version >= _INGEST_DAG_VERSION:
+            return
+        placeholders = ", ".join("?" for _ in _RETIRED_STAGES)
+        conn.execute(
+            "DELETE FROM ingest_stage_deps "
+            f"WHERE stage IN ({placeholders}) OR depends_on IN ({placeholders})",
+            (*_RETIRED_STAGES, *_RETIRED_STAGES),
+        )
+        conn.execute(
+            f"DELETE FROM ingest_queue WHERE stage IN ({placeholders})",
+            _RETIRED_STAGES,
+        )
+        conn.execute(f"PRAGMA user_version = {_INGEST_DAG_VERSION}")
+        logger.info(
+            "Ingest DAG migrated: removed retired stages %s", list(_RETIRED_STAGES)
+        )
 
     def _thread_connection(self) -> sqlite3.Connection:
         """Return a per-thread SQLite connection for the unified database.

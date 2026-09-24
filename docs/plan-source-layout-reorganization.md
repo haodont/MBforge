@@ -39,7 +39,7 @@ The only runtime database is still `{library_root}/.mbforge/library.db`. `Librar
 
 ## Pipeline contract
 
-The registered path remains `Extract ∥ Detection → Join → Markdown → Patent`. Extract and Detection write independent run-scoped artifacts; Join validates them and writes canonical `SourceEvidence` rows to SQLite. Link is removed from the active path and Persist remains an unregistered future redesign. The stage contract lives in `application/pipeline/stage.py`, while the terminal queue statuses live in `foundation/queue_contract.py` so both the application queue facade and the runtime worker use one definition.
+The registered path is now `Extract → Join → Markdown → Patent`. Extract is the single producer (layout/text/table recognition plus the MolDet+MolParser molecule pass) and writes one run-scoped artifact; Join validates it and writes canonical `SourceEvidence` rows to SQLite. Link is removed from the active path and Persist remains an unregistered future redesign. The stage contract lives in `application/pipeline/stage.py`, while the terminal queue statuses live in `foundation/queue_contract.py` so both the application queue facade and the runtime worker use one definition.
 
 ## Verification
 

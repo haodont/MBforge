@@ -23,7 +23,7 @@ function panelTitle(title: string, count: number) {
 }
 
 function evidenceContent(item: DocumentEvidenceItem, fallback: string): string {
-  return item.raw_text.trim() ? item.raw_text : item.coref || fallback
+  return item.raw_text.trim() ? item.raw_text : fallback
 }
 
 export default function PageEvidencePane({ docId, page, libraryRoot, selectedEvidenceId }: PageEvidencePaneProps) {
@@ -72,7 +72,7 @@ export default function PageEvidencePane({ docId, page, libraryRoot, selectedEvi
                 key={item.evidence_id}
               >
                 <div className="pdf-evidence-item__topline">
-                  <Badge tone={item.kind === 'text_span' ? 'neutral' : 'info'}>
+                  <Badge tone={item.category === 'text' ? 'neutral' : 'info'}>
                     {item.kind}
                   </Badge>
                   <code>{item.evidence_id}</code>

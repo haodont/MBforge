@@ -105,8 +105,8 @@ describe('TaskRow', () => {
       />,
     )
     fireEvent.click(screen.getByText('queue.retryTask'))
-    fireEvent.click(screen.getByText('queue.retryFromMoleculeDetection'))
-    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }), 'detection')
+    fireEvent.click(screen.getByText('queue.retryFromMarkdown'))
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }), 'markdown')
   })
 
   it('calls onCancel when cancel button clicked', () => {

@@ -39,7 +39,6 @@ def test_registered_stage_needs_only_a_decorator(_clean_registry) -> None:
     assert REGISTRY["temp_probe"].name == "temp_probe"
     assert ORDER == [
         "extract",
-        "detection",
         "join",
         "markdown",
         "temp_probe",
@@ -74,6 +73,6 @@ def test_register_rejects_duplicate_and_unknown_after(_clean_registry) -> None:
 def test_next_after_walks_pipeline_order() -> None:
     """next_after mirrors the historical stage_checkpoint.next_stage semantics."""
     assert next_after(None) == "extract"
-    assert next_after("extract") == "detection"
+    assert next_after("extract") == "join"
     assert next_after("patent") is None
     assert next_after("bogus") == "extract"

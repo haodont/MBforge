@@ -8,7 +8,7 @@ protocol defined in :mod:`mbforge.application.pipeline.stage`:
 - Returns StageResult
 
 Usage:
-    from mbforge.application.pipeline.stages.stages import ExtractStage, MarkdownStage, PatentStage
+    from mbforge.application.pipeline.stages import ExtractStage, MarkdownStage
 
     ctx = PipelineContext(...)
     stage = ExtractStage()
@@ -19,15 +19,11 @@ Usage:
 # current pipeline endpoint; Persist remains an unregistered future module.
 # ruff: noqa: I001
 from mbforge.application.pipeline.stages.extract_stage import ExtractStage
-from mbforge.application.pipeline.stages.detection_stage import DetectionStage
-from mbforge.application.pipeline.stages.join_stage import JoinStage
 from mbforge.application.pipeline.stages.markdown_stage import MarkdownStage
 from mbforge.application.pipeline.stages.patent_stage import PatentStage
 
 __all__ = [
     "ExtractStage",
     "MarkdownStage",
-    "DetectionStage",
-    "JoinStage",
     "PatentStage",
 ]

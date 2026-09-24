@@ -4,6 +4,11 @@ Provides lazy-loading wrappers for the heavyweight local models used by the
 pipeline (MolParser-Mobile for chemical structure recognition and MolDetv2
 for molecule detection), plus shared path resolution through the
 ResourceManager.
+
+Every submodule the runtime provider resolves lazily by attribute must be bound
+here first: ``_DynamicModule`` uses ``getattr`` on this package, and a submodule
+that was never imported is simply absent (``table_slanet`` was, so table
+recognition silently degraded to empty).
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from pathlib import Path
 
 from mbforge.adapters.inference import (
     molparser,  # noqa: F401
+    table_slanet,  # noqa: F401
 )
 from mbforge.foundation.logger import get_logger
 

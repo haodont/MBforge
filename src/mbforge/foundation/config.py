@@ -105,20 +105,11 @@ class LayoutConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     conf_threshold: float = 0.4
-    #: Run the layout-guided local text OCR to fill region ``raw_text``. Without
-    #: it, text regions have no content and cannot become evidence.
-    read_text: bool = True
     #: Run MolDet on the same page render so the cross-model rules can type a
     #: figure region that is really one molecule, and keep a figure holding
     #: several molecules as a container. Without it the layout path emits
-    #: geometry only and molecule detection stays Detection's job.
+    #: geometry only and molecule recognition stays the molecule pass' job.
     cross_model: bool = True
-    #: Recognize Hiro ``table`` region content with the local SLANet-1M table
-    #: structure recognizer (ONNX) plus RapidOCR cell text, and store
-    #: HTML/Markdown on the region (Hiro path only). Default off: the ONNX
-    #: weights (~8 MB) are fetched on first use and recognition is best-effort
-    #: enrichment.
-    read_tables: bool = False
     #: Table recognizer backend id (reserved for backend switching).
     table_recognizer: str = "slanet"
     max_pages_per_doc: int | None = None
@@ -138,8 +129,7 @@ class IngestConfig(BaseModel):
         ge=1,
         le=8,
         description=(
-            "同时运行的 pipeline 任务数(每库)。Extract ∥ Detection 作为两个独立队列节点"
-            "需要 >= 2 才能并行，故默认 4；GPU 阶段仍由 gpu_gate 串行保护。"
+            "同时运行的 pipeline 任务数(每库)。GPU 阶段仍由 gpu_gate 串行保护。"
         ),
     )
 
