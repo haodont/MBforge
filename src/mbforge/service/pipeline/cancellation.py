@@ -19,6 +19,7 @@ from collections.abc import Callable
 
 from mbforge.foundation.logger import get_logger
 from mbforge.service.pipeline.stage import PipelineErrorCode
+from mbforge.service.ports.pipeline import TaskCancelledError  # noqa: F401 — re-export
 
 logger = get_logger("mbforge.service.pipeline.cancellation")
 
@@ -29,16 +30,6 @@ PIPELINE_CANCELLED = PipelineErrorCode.PIPELINE_CANCELLED
 # A cooperative cancellation checkpoint: raises TaskCancelledError when the
 # owning task has been cancelled, otherwise returns immediately.
 CancelCheck = Callable[[], None]
-
-
-class TaskCancelledError(RuntimeError):
-    """Raised at a cooperative checkpoint after the user cancels a task."""
-
-    error_code = PIPELINE_CANCELLED
-
-    def __init__(self, task_id: str | None = None) -> None:
-        super().__init__("Pipeline cancelled by user")
-        self.task_id = task_id
 
 
 class CancellationRegistry:

@@ -12,7 +12,9 @@ from fastapi.testclient import TestClient
 from mbforge.db.sqlite.repositories import create_repositories
 from mbforge.foundation import config as app_config
 from mbforge.server.provider import create_runtime_provider
+from mbforge.service.pipeline.runtime import create_pipeline_runtime
 from mbforge.service.ports import (
+    configure_pipeline_runtime,
     configure_repository_factory,
     configure_runtime_provider,
 )
@@ -31,6 +33,7 @@ app_config.load_global_config.cache_clear()
 # root so those tests exercise the repository boundary as production does.
 configure_repository_factory(create_repositories)
 configure_runtime_provider(create_runtime_provider())
+configure_pipeline_runtime(create_pipeline_runtime())
 
 
 @pytest.fixture

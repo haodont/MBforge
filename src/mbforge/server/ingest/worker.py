@@ -251,10 +251,11 @@ async def _drain_loop(library_root: str, worker: str) -> None:
         # prevents a new worker from running the same task while an executor
         # thread is still writing its current stage.
         if active:
-            from mbforge.service.pipeline.runner import cancel_task
+            from mbforge.service.ports import get_pipeline_runtime
 
+            runtime = get_pipeline_runtime()
             for task_id in tuple(active):
-                cancel_task(task_id)
+                runtime.cancel_task(task_id)
         if running:
             await asyncio.gather(*running, return_exceptions=True)
         _release_current_worker_rows(library_root, worker)
@@ -284,11 +285,11 @@ async def _execute_claimed(library_root: str, row: dict[str, Any], worker: str) 
         )
         logger.debug("Queue task %s finished", task_id)
     finally:
-        from mbforge.service.pipeline.runner import release_task
+        from mbforge.service.ports import get_pipeline_runtime
 
         # Covers the small race where cancellation is requested after
         # run_pipeline has already reached its own finally block.
-        release_task(task_id)
+        get_pipeline_runtime().release_task(task_id)
         active = _active_for(library_root)
         active.discard(task_id)
         if run_id:
@@ -315,10 +316,10 @@ def _run_pipeline_sync(
     terminal state.
     """
     from mbforge.server.ingest import queue as queue_dao
-    from mbforge.service.pipeline.runner import TaskCancelledError, run_pipeline
+    from mbforge.service.ports import TaskCancelledError, get_pipeline_runtime
 
     try:
-        run_pipeline(
+        get_pipeline_runtime().run_pipeline(
             file_path,
             library_root,
             doc_id=doc_id,
@@ -362,16 +363,13 @@ def _write_final_report(library_root: str, doc_id: str, task_id: str) -> None:
     The report must be written *before* promotion because promote_staging
     deletes the staging directory (which holds the checkpoint files).
     """
-    from mbforge.service.pipeline.artifacts.staging import (
-        promote_staging,
-        staging_dir,
-    )
-    from mbforge.service.pipeline.run.checkpoint import write_merged_report
+    from mbforge.service.ports import get_pipeline_runtime
 
-    staging = staging_dir(library_root, doc_id)
+    runtime = get_pipeline_runtime()
+    staging = runtime.staging_dir(library_root, doc_id)
     try:
-        write_merged_report(staging, doc_id=doc_id, library_root=library_root)
-        promote_staging(staging, library_root, doc_id)
+        runtime.write_merged_report(staging, doc_id=doc_id, library_root=library_root)
+        runtime.promote_staging(staging, library_root, doc_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to finalize pipeline output for %s: %s", doc_id, exc)
         raise

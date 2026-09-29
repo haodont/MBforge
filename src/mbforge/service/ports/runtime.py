@@ -1,27 +1,110 @@
-"""Runtime capability port used by HTTP and application use cases."""
+"""Runtime capability port used by HTTP and application use cases.
+
+Each field is a narrow :class:`Protocol` capturing the methods the application
+actually calls, so consumers are typed against the capability boundary without
+importing the concrete adapter modules. ``process``/``ingest_queue``/
+``ingest_worker`` are process-level handles passed through opaquely, so they
+stay ``Any``.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
+
+
+class ResourceManagerCapability(Protocol):
+    catalog: Any
+
+    def check(self, resource_id: str) -> Any: ...
+
+    def check_all(self) -> Any: ...
+
+    def ensure(self, resource_id: str) -> Any: ...
+
+
+class ModelLocatorCapability(Protocol):
+    def bundled_model_asset(self, info: Any) -> Any: ...
+
+
+class ModelStatusCapability(Protocol):
+    def get_all(self) -> Any: ...
+
+    def ensure(self, model_id: str, status: str) -> None: ...
+
+
+class ModelsCapability(Protocol):
+    def loaded(self) -> Any: ...
+
+    def clear(self, model_id: str) -> Any: ...
+
+    def test(self, model_id: str, subpath: Any) -> Any: ...
+
+
+class MolparserCapability(Protocol):
+    def health(self) -> dict[str, Any]: ...
+
+    def predict(self, image: Any) -> Any: ...
+
+    def load(self) -> None: ...
+
+
+class MoldetCapability(Protocol):
+    def detect_molecules(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def detect_molecules_batch(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def to_api_dict(self, result: Any) -> Any: ...
+
+
+class HiroLayoutCapability(Protocol):
+    def get_hiro(self) -> Any: ...
+
+    def detect_regions(self, image: Any, detector: Any, *, threshold: float) -> Any: ...
+
+
+class TableSlanetCapability(Protocol):
+    def predict_table(self, crop: Any) -> Any: ...
+
+
+class OcrCropLabelsCapability(Protocol):
+    def extract_label_reads(self, image: Any) -> Any: ...
+
+
+class OcrPageTextCapability(Protocol):
+    def read_text_in_boxes(self, image: Any, boxes: Any) -> Any: ...
+
+
+class OcrLabelReaderCapability(Protocol):
+    def get_label_reader(self) -> Any: ...
+
+
+class LlmCapability(Protocol):
+    def default_base_url(self, provider: str) -> str: ...
+
+    def create_llm(self, **kwargs: Any) -> Any: ...
+
+    def fetch_provider_models(
+        self, provider: str, base_url: str, api_key: str | None
+    ) -> Any: ...
 
 
 @dataclass(frozen=True)
 class RuntimeProvider:
     """Runtime capabilities supplied by the adapter composition root."""
 
-    resource_manager: Any
-    model_locator: Any
-    model_status: Any
-    models: Any
-    molparser: Any
-    moldet: Any
-    hiro_layout: Any
-    table_slanet: Any
-    ocr_crop_labels: Any
-    ocr_label_reader: Any
-    ocr_page_text: Any
-    llm: Any
+    resource_manager: ResourceManagerCapability
+    model_locator: ModelLocatorCapability
+    model_status: ModelStatusCapability
+    models: ModelsCapability
+    molparser: MolparserCapability
+    moldet: MoldetCapability
+    hiro_layout: HiroLayoutCapability
+    table_slanet: TableSlanetCapability
+    ocr_crop_labels: OcrCropLabelsCapability
+    ocr_label_reader: OcrLabelReaderCapability
+    ocr_page_text: OcrPageTextCapability
+    llm: LlmCapability
     process: Any
     ingest_queue: Any
     ingest_worker: Any
@@ -48,4 +131,8 @@ def get_runtime() -> RuntimeProvider:
     return _provider
 
 
-__all__ = ["RuntimeProvider", "configure_runtime_provider", "get_runtime"]
+__all__ = [
+    "RuntimeProvider",
+    "configure_runtime_provider",
+    "get_runtime",
+]

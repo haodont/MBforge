@@ -33,9 +33,9 @@ def insert_dag(
 
     Idempotent for the same ``(doc_id, run_id)`` via the unique node index.
     """
-    from mbforge.service.pipeline.composition import stage_dependencies
+    from mbforge.service.ports import get_pipeline_runtime
 
-    deps = stage_dependencies()
+    deps = get_pipeline_runtime().stage_dependencies()
     db = DatabaseManager.get(library_root)
     with db.kb_conn() as conn:
         conn.execute(

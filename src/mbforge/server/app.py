@@ -308,13 +308,16 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     # never constructs DatabaseManager itself.
     from mbforge.db.sqlite.repositories import create_repositories
     from mbforge.server.provider import create_runtime_provider
+    from mbforge.service.pipeline.runtime import create_pipeline_runtime
     from mbforge.service.ports import (
+        configure_pipeline_runtime,
         configure_repository_factory,
         configure_runtime_provider,
     )
 
     configure_repository_factory(create_repositories)
     configure_runtime_provider(create_runtime_provider())
+    configure_pipeline_runtime(create_pipeline_runtime())
     configure_uvicorn_access_logging()
     app = FastAPI(
         title="MBForge",
