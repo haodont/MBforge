@@ -6,9 +6,8 @@ detector's ``molecule``.  Nothing is rejected and no detection detail is lost.
 
 Every label carries a **category**.  Categories are a small closed set
 (:data:`CATEGORIES`); labels are open.  A label is registered where it is produced:
-an external producer declares its vocabulary in the artifact it writes under
-``meta.kind_vocab``; code inside MBForge that mints labels registers them in the
-module that mints them.
+code inside MBForge that mints labels registers them in the module that mints
+them.
 
 Lookups are exact.  ``category_of`` raises :class:`UnknownKind` for a label nobody
 registered — a region whose meaning was never declared is a defect to fix, not
@@ -62,25 +61,13 @@ def register_kinds(mapping: Mapping[str, str]) -> None:
         register_kind(kind, category)
 
 
-def register_kind_vocab(meta: Mapping[str, object]) -> None:
-    """Register the ``kind_vocab`` a producer declared in its artifact ``meta``.
-
-    A producer that declares no vocabulary registers nothing here.
-    """
-    vocab = meta.get("kind_vocab")
-    if vocab is None:
-        return
-    register_kinds(vocab)  # type: ignore[arg-type]
-
-
 def category_of(kind: str) -> str:
     """Category of a producer label."""
     try:
         return _KIND_CATEGORY[kind]
     except KeyError:
         raise UnknownKind(
-            f"kind {kind!r} is not registered — declare it in the producing "
-            f"artifact's meta.kind_vocab, or where the label is minted"
+            f"kind {kind!r} is not registered — declare it where the label is minted"
         ) from None
 
 

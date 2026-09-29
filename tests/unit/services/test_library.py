@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.application.use_cases.documents.library import LibraryStore
 from mbforge.foundation.errors import MBForgeError
+from mbforge.service.use_cases.documents.library import LibraryStore
 
 
 def test_add_document_and_get(tmp_path: Path) -> None:

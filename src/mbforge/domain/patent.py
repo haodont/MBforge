@@ -46,7 +46,7 @@ def entry_id(doc_id: str, section_id: str, label_key: str) -> str:
     """Deterministic entry ID: doc + type + section + normalized label.
 
     Same (document, section, label) always yields the same ID, so a
-    re-run does not duplicate entries (spec §3.5 rule 3).
+    re-run does not duplicate entries.
     """
     return stable_id("entry", doc_id, section_id, label_key)
 

@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from mbforge.adapters.persistence.sqlite.repositories import create_repositories
-from mbforge.adapters.runtime.provider import create_runtime_provider
-from mbforge.application.ports import (
+from mbforge.db.sqlite.repositories import create_repositories
+from mbforge.foundation import config as app_config
+from mbforge.server.provider import create_runtime_provider
+from mbforge.service.ports import (
     configure_repository_factory,
     configure_runtime_provider,
 )
-from mbforge.foundation import config as app_config
 
 # Keep the suite independent from a developer's personal settings.json. In
 # particular, a local Hiro layout setting would load ONNX weights during tests.
@@ -104,9 +104,9 @@ def sample_pdf(tmp_path: Path) -> Path:
 @pytest.fixture
 def app_client(tmp_library: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """FastAPI TestClient with global config pointing to a temp library."""
-    from mbforge.adapters.runtime.ingest import worker
-    from mbforge.app import app
     from mbforge.foundation import config
+    from mbforge.server.app import app
+    from mbforge.server.ingest import worker
 
     # Routers must never start a real worker during router tests: enqueueing
     # still persists rows; the durable worker is exercised by dedicated unit
@@ -150,8 +150,8 @@ def _disable_llm_completion_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 def _clear_singleton_caches() -> None:
     """Clear module-level singleton caches after every test for isolation."""
     yield
-    from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-    from mbforge.application.use_cases.documents.library import LibraryStore
+    from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.service.use_cases.documents.library import LibraryStore
 
     DatabaseManager.get.cache_clear()
     LibraryStore.get.cache_clear()

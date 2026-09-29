@@ -11,6 +11,7 @@ interface Props {
   onClose: () => void
   initialPage?: number
   initialBbox?: [number, number, number, number]
+  initialEvidenceId?: string
   viewerKey?: string
 }
 
@@ -20,6 +21,7 @@ export default function DocumentViewer({
   onClose,
   initialPage,
   initialBbox,
+  initialEvidenceId,
   viewerKey,
 }: Props) {
   const pdfRef = useRef<PdfViewerHandle>(null)
@@ -62,6 +64,7 @@ export default function DocumentViewer({
             viewerKey={viewerKey}
             initialPage={initialPage}
             initialBbox={initialBbox}
+            initialEvidenceId={initialEvidenceId}
             onMoleculeClick={handleMoleculeClick}
           />
         </div>

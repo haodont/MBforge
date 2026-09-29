@@ -7,7 +7,7 @@ FastAPI backend.
 
 ## Current scope
 
-- PDF pipeline: Extract → Join → Markdown → Patent. Extract is the single producer: one render drives the local layout/text/table producer and a second drives the molecule pass (MolDet + MolParser), and both feed one raw branch artifact. Join validates it into SQL `SourceEvidence`; Patent reads those rows, publishes one facts artifact, and performs deterministic document-local associations. Link has been removed from the active path; Persist remains unregistered for a later redesign.
+- PDF pipeline: Extract → Markdown → Patent. Extract is the single producer: one render drives the local layout/text/table producer and a second drives the molecule pass (MolDet + MolParser), and it mints and persists the canonical SQL `SourceEvidence` rows itself. Markdown assembles the readable document from that evidence; Patent reads it, publishes one facts artifact, and performs deterministic document-local associations. SQL is the only evidence store — there is no branch artifact. Link and Persist have been removed from the active path.
 - Molecule detection and recognition with MolDetv2-YOLO26, MolParser-Mobile
   (E-SMILES), RDKit, and MoleCode; page layout and text recognition run entirely
   locally (Hiro-Layout + RapidOCR) — no cloud OCR service is called.
@@ -52,7 +52,7 @@ Heavy models are downloaded at runtime by `ResourceManager` (ModelScope) into
   repository, so a fresh clone has a working patent-aware detector out of
   the box. To use it as the active detector, copy it over the runtime model:
   `cp assets/models/moldetv2_structure_ft.pt ~/MBForge/models/MolDetv2/moldet_v2_yolo26n_960_doc.pt`
-  (or point `DEFAULT_SUBPATH` in `src/mbforge/adapters/inference/moldet_v2_ft.py`
+  (or point `DEFAULT_SUBPATH` in `src/mbforge/foundation/inference/moldet_v2_ft.py`
   at it).
 
 ## Quick start
@@ -96,12 +96,12 @@ FastAPI serves `frontend/dist/` when it exists.
 
 ### Pipeline evidence contract
 
-The Extract branch writes one raw branch file under the document staging
-directory (`.staging/extract.json`), carrying page text, typed layout regions,
-recognized table content and the molecule pass' SMILES/E-SMILES; the Join
-validates it and indexes the joined `SourceEvidence` rows in SQLite, which is
-the only runtime evidence store. After Join, text spans in the readable
-`extract.json` branch also carry their final `evidence_id`.
+Extract mints the canonical `SourceEvidence` rows from page text, typed layout
+regions, recognized table content and the molecule pass' SMILES/E-SMILES, and
+persists them directly into SQLite (`{library_root}/.mbforge/library.db`) — SQL
+is the only runtime evidence store and there is no intermediate branch artifact.
+Text spans and downstream artifacts carry the resulting `evidence_id` rather
+than duplicating the evidence payload.
 
 ## Verification
 
@@ -124,10 +124,16 @@ field. The canonical layout is:
 
 ```text
 {library_root}/
-├── .mbforge/library.db       # unified SQLite database
-├── .mbforge/wiki/            # native Wiki artifacts
-├── storage/{doc_id}/         # source, pages, crops, reports
-└── notes/                    # user notes
+├── .mbforge/library.db                 # unified SQLite database
+├── notes/                              # user-editable notes
+└── storage/{doc_id}/                   # document artifacts
+    ├── source.pdf
+    ├── document.md
+    ├── report.json
+    ├── pages/page_{n:04d}.json         # per-page OCR text + metadata
+    ├── crops/{filename}                # molecule crop images
+    ├── artifacts/                      # per-stage state artifacts
+    └── runs/                           # published pipeline runs
 ```
 
 Use `LibraryLayout` for library paths and `ArtifactResolver` for document

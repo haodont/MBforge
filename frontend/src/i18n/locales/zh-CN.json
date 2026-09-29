@@ -1125,7 +1125,6 @@
   "pdfFloat.singlePage": "切换为单页模式",
   "pdfFloat.continuous": "切换为连续翻页",
   "pdfPipeline.stage.extract": "提取",
-  "pdfPipeline.stage.join": "证据合并",
   "pdfPipeline.stage.markdown": "Markdown生成",
   "pdfPipeline.stage.patent": "专利事实",
   "pdfResult.ariaLabel": "识别结果",

@@ -5,7 +5,7 @@ The value objects (:class:`ReviewState`, :class:`ReviewDecision`) plus the
 are defined here so every review workflow (native review queue, Markush
 review, activity review) relies on a single source of truth for legal
 transitions. Audit persistence for decisions lives in
-:mod:`mbforge.adapters.persistence.review_audit`.
+:mod:`mbforge.db.review_audit`.
 """
 
 from __future__ import annotations

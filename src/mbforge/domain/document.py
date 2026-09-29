@@ -6,7 +6,7 @@ document identity (``doc_id`` + ``library_root``) and the record fields
 
 The record serializes to and from plain dicts/JSON. Persistence to
 ``storage/{doc_id}/document.json`` and PDF text extraction live in
-:mod:`mbforge.adapters.persistence.document_store`; artifact path resolution belongs to
+:mod:`mbforge.db.document_store`; artifact path resolution belongs to
 :class:`~mbforge.foundation.layout.LibraryLayout`.
 """
 
@@ -38,7 +38,7 @@ class Document:
         self._status = status
         self._created_at = created_at
         # Extraction caches, populated by
-        # :func:`mbforge.adapters.persistence.document_store.extract_pdf_text`.
+        # :func:`mbforge.db.document_store.extract_pdf_text`.
         self._text: str | None = None
         self._page_texts: list[str] | None = None
         self._page_spans: list[list[dict]] | None = None

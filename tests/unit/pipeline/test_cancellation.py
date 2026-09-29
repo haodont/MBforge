@@ -15,16 +15,16 @@ from unittest.mock import patch
 
 import pytest
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-from mbforge.application.pipeline.cancellation import (
+from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.service.pipeline.cancellation import (
     PIPELINE_CANCELLED,
     CancellationRegistry,
     TaskCancelledError,
     default_registry,
 )
-from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.application.pipeline.run.context import PipelineContext
-from mbforge.application.pipeline.runner import (
+from mbforge.service.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.service.pipeline.run.context import PipelineContext
+from mbforge.service.pipeline.runner import (
     cancel_task,
     is_task_cancelled,
     release_task,
@@ -145,11 +145,11 @@ def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:
 
     with (
         patch(
-            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.service.pipeline.detection.extraction.extract_molecules_from_pdf",
             return_value=[],
         ),
         patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            "mbforge.service.pipeline.extract.text.extract_layout_text",
             return_value=ExtractedDocument(
                 raw_text="page one text\n\npage two text",
                 page_count=2,
@@ -159,9 +159,7 @@ def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:
                 ],
             ),
         ),
-        patch(
-            "mbforge.application.pipeline.markdown.esmiles_insert.insert_esmiles_blocks"
-        ),
+        patch("mbforge.service.pipeline.markdown.esmiles_insert.insert_esmiles_blocks"),
     ):
         run_pipeline(
             str(sample_pdf),
@@ -183,7 +181,7 @@ def test_registry_cleared_on_failure(sample_pdf: Path, tmp_path: Path) -> None:
     # so the failure must happen during extract.
     with (
         patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            "mbforge.service.pipeline.extract.text.extract_layout_text",
             side_effect=RuntimeError("disk full"),
         ),
         pytest.raises(RuntimeError, match="disk full"),
@@ -206,7 +204,7 @@ def test_registry_cleared_on_failure(sample_pdf: Path, tmp_path: Path) -> None:
 
 
 def test_extract_stage_reraises_cancellation(tmp_path: Path, sample_pdf: Path) -> None:
-    from mbforge.application.pipeline.stages.extract_stage import ExtractStage
+    from mbforge.service.pipeline.stages.extract_stage import ExtractStage
 
     ctx = PipelineContext(
         pdf_path=sample_pdf,
@@ -217,7 +215,7 @@ def test_extract_stage_reraises_cancellation(tmp_path: Path, sample_pdf: Path) -
     )
     with (
         patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            "mbforge.service.pipeline.extract.text.extract_layout_text",
             side_effect=TaskCancelledError("t"),
         ),
         pytest.raises(TaskCancelledError),
@@ -232,8 +230,8 @@ def test_extract_stage_reraises_cancellation(tmp_path: Path, sample_pdf: Path) -
 
 
 def test_router_cancel_pending_future_unregisters(tmp_path: Path) -> None:
-    from mbforge.application.dto.pipeline import PipelineTaskBatchRequest
-    from mbforge.interfaces.http.pipeline import pipeline as pipeline_router
+    from mbforge.api.http.pipeline import pipeline as pipeline_router
+    from mbforge.service.dto.pipeline import PipelineTaskBatchRequest
 
     library_root = tmp_path / "library"
     library_root.mkdir(parents=True, exist_ok=True)
@@ -243,11 +241,11 @@ def test_router_cancel_pending_future_unregisters(tmp_path: Path) -> None:
         library_root=str(library_root), run_ids=["pending-task"]
     )
     # The task is not executing inside this process: no worker has claimed it.
-    from mbforge.adapters.runtime.ingest import worker
+    from mbforge.server.ingest import worker
 
     assert not worker.is_task_active("pending-task")
     with patch(
-        "mbforge.interfaces.http.pipeline.pipeline.resolve_library_root",
+        "mbforge.api.http.pipeline.pipeline.resolve_library_root",
         return_value=library_root,
     ):
         result = asyncio.run(pipeline_router.pipeline_cancel_batch(body))
@@ -262,8 +260,8 @@ def test_router_cancel_pending_future_unregisters(tmp_path: Path) -> None:
 def test_router_cancel_running_future_leaves_release_to_runner(
     tmp_path: Path,
 ) -> None:
-    from mbforge.application.dto.pipeline import PipelineTaskBatchRequest
-    from mbforge.interfaces.http.pipeline import pipeline as pipeline_router
+    from mbforge.api.http.pipeline import pipeline as pipeline_router
+    from mbforge.service.dto.pipeline import PipelineTaskBatchRequest
 
     library_root = tmp_path / "library"
     library_root.mkdir(parents=True, exist_ok=True)
@@ -273,12 +271,10 @@ def test_router_cancel_running_future_leaves_release_to_runner(
     # queue worker); the runner owns the registry cleanup, not the router.
     with (
         patch(
-            "mbforge.interfaces.http.pipeline.pipeline.resolve_library_root",
+            "mbforge.api.http.pipeline.pipeline.resolve_library_root",
             return_value=library_root,
         ),
-        patch(
-            "mbforge.adapters.runtime.ingest.worker.is_task_active", return_value=True
-        ),
+        patch("mbforge.server.ingest.worker.is_task_active", return_value=True),
     ):
         body = PipelineTaskBatchRequest(
             library_root=str(library_root), run_ids=["running-task"]
@@ -294,7 +290,7 @@ def test_router_cancel_running_future_leaves_release_to_runner(
 
 def test_retry_skips_task_until_active_runner_wrapper_exits(tmp_path: Path) -> None:
     """Retry must not revive a terminal row still owned by its runner task."""
-    from mbforge.application.use_cases.pipeline import ingest
+    from mbforge.service.use_cases.pipeline import ingest
 
     library_root = tmp_path / "library"
     library_root.mkdir(parents=True, exist_ok=True)
@@ -306,9 +302,7 @@ def test_retry_skips_task_until_active_runner_wrapper_exits(tmp_path: Path) -> N
             ("retry-race",),
         )
 
-    with patch(
-        "mbforge.adapters.runtime.ingest.worker.is_task_active", return_value=True
-    ):
+    with patch("mbforge.server.ingest.worker.is_task_active", return_value=True):
         result = asyncio.run(ingest.retry_batch(str(library_root), ["retry-race"]))
 
     assert result.updated == 0

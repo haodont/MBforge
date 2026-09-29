@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-from mbforge.application.use_cases.review_queue import (
+from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.service.use_cases.review_queue import (
     clear_all,
     decide,
     insert_review_item,

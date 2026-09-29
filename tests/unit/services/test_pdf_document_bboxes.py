@@ -7,17 +7,18 @@ and assert the per-kind split of the single overlay read.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-from mbforge.application.pipeline.extract.text import (
+from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import DetectionSource
+from mbforge.service.pipeline.extract.text import (
     ExtractedDocument,
     PageContent,
     TextSpan,
 )
-from mbforge.application.use_cases.documents.pdf_layout import build_document_overlay
-from mbforge.domain.molecule import Molecule
-from mbforge.domain.types import DetectionSource
+from mbforge.service.use_cases.documents.pdf_layout import build_document_overlay
 from tests.unit.v2_artifact_helpers import publish_v2_run
 
 DOC = "doc-1"
@@ -30,11 +31,13 @@ def _insert_evidence_row(
     box: tuple[float, float, float, float],
     *,
     kind: str = "molecule",
-    coref: str = CROP,
+    mol_img_path: str | None = None,
     raw_text: str = "",
     doc_id: str = DOC,
 ) -> None:
     """Seed one ``source_evidence`` row (the overlay's only read source)."""
+    if mol_img_path is not None and not raw_text:
+        raw_text = json.dumps({"mol_img_path": mol_img_path})
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
     with db.mol_conn() as conn:
@@ -43,8 +46,8 @@ def _insert_evidence_row(
             INSERT INTO source_evidence
                 (evidence_id, doc_id, page,
                  bbox_x0, bbox_y0, bbox_x1, bbox_y1,
-                 raw_text, coref, kind)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 raw_text, kind)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"{doc_id}-{page}-{box[0]}-{box[1]}-{kind}",
@@ -52,7 +55,6 @@ def _insert_evidence_row(
                 page,
                 *box,
                 raw_text,
-                coref,
                 kind,
             ),
         )
@@ -80,10 +82,8 @@ def test_overlay_groups_molecule_pages_in_one_read(tmp_path: Path) -> None:
 
 
 def test_overlay_molecule_entries_carry_crop_or_context(tmp_path: Path) -> None:
-    _insert_evidence_row(tmp_path, 1, (10.0, 20.0, 110.0, 120.0))
-    _insert_evidence_row(
-        tmp_path, 1, (50.0, 60.0, 90.0, 99.0), coref="", raw_text="Compound 7"
-    )
+    _insert_evidence_row(tmp_path, 1, (10.0, 20.0, 110.0, 120.0), mol_img_path=CROP)
+    _insert_evidence_row(tmp_path, 1, (50.0, 60.0, 90.0, 99.0), raw_text="Compound 7")
 
     entries = _overlay(tmp_path)["pages"]["1"]
 
@@ -102,12 +102,10 @@ def test_overlay_molecule_entries_carry_crop_or_context(tmp_path: Path) -> None:
 def test_overlay_molecule_pages_exclude_layout_rows(tmp_path: Path) -> None:
     _insert_evidence_row(tmp_path, 1, (10.0, 20.0, 110.0, 120.0))
     _insert_evidence_row(
-        tmp_path, 1, (1.0, 1.0, 9.0, 9.0), kind="text_span", coref="", raw_text="text"
+        tmp_path, 1, (1.0, 1.0, 9.0, 9.0), kind="text", raw_text="text"
     )
-    _insert_evidence_row(
-        tmp_path, 1, (2.0, 2.0, 8.0, 8.0), kind="table_span", coref="", raw_text="cell"
-    )
-    _insert_evidence_row(tmp_path, 1, (3.0, 3.0, 7.0, 7.0), kind="image_region")
+    _insert_evidence_row(tmp_path, 1, (2.0, 2.0, 8.0, 8.0), kind="tab", raw_text="cell")
+    _insert_evidence_row(tmp_path, 1, (3.0, 3.0, 7.0, 7.0), kind="figcx")
 
     result = _overlay(tmp_path)
 
@@ -127,7 +125,7 @@ def test_overlay_empty_document_reports_empty(tmp_path: Path) -> None:
 
 
 def test_overlay_serves_blocks_and_molecules_from_one_read(tmp_path: Path) -> None:
-    """A joined run populates both sides of the payload."""
+    """A published run populates both sides of the payload."""
     extracted = ExtractedDocument(
         raw_text="text",
         page_count=1,

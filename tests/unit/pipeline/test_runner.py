@@ -12,12 +12,36 @@ from unittest.mock import patch
 
 import pytest
 
-from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.application.pipeline.runner import PipelineResult, run_pipeline
-from mbforge.application.pipeline.stage import PipelineErrorCode, StageResult
 from mbforge.domain.types import ExtractionResult
+from mbforge.service.pipeline.extract.text import (
+    ExtractedDocument,
+    PageContent,
+    TextSpan,
+)
+from mbforge.service.pipeline.runner import PipelineResult, run_pipeline
+from mbforge.service.pipeline.stage import PipelineErrorCode, StageResult
 
 RUN_ID = "20260909123456"
+
+
+def _fake_layout_page(num: int, text: str) -> PageContent:
+    """One page with a single typed text region, as the layout producer emits."""
+    bbox = (1.0, 1.0, 5.0, 5.0)
+    return PageContent(
+        page_num=num,
+        text=text,
+        regions=[
+            {
+                "region_id": f"r{num}",
+                "kind": "text",
+                "type": "text",
+                "bbox": list(bbox),
+                "reading_order": 0,
+                "text": text,
+            }
+        ],
+        text_spans=[TextSpan(text, bbox, 0)],
+    )
 
 
 def _fake_layout_extract(*_args: Any, **_kwargs: Any) -> ExtractedDocument:
@@ -27,15 +51,15 @@ def _fake_layout_extract(*_args: Any, **_kwargs: Any) -> ExtractedDocument:
         page_count=2,
         parser="layout",
         pages=[
-            PageContent(page_num=1, text="page one text"),
-            PageContent(page_num=2, text="page two text"),
+            _fake_layout_page(1, "page one text"),
+            _fake_layout_page(2, "page two text"),
         ],
     )
 
 
 def _dag_order() -> list[str]:
     """Topological order of the stage DAG (deterministic for the fixed graph)."""
-    from mbforge.application.pipeline.composition import stage_dependencies
+    from mbforge.service.pipeline.composition import stage_dependencies
 
     deps = stage_dependencies()
     order: list[str] = []
@@ -74,12 +98,11 @@ def _drive_all(
 
 def test_stage_dag_shape() -> None:
     """Extract is the root; the rest of the pipeline is a linear tail."""
-    from mbforge.application.pipeline.composition import stage_dependencies
+    from mbforge.service.pipeline.composition import stage_dependencies
 
     deps = stage_dependencies()
     assert deps["extract"] == ()
-    assert deps["join"] == ("extract",)
-    assert deps["markdown"] == ("join",)
+    assert deps["markdown"] == ("extract",)
     assert deps["patent"] == ("markdown",)
 
 
@@ -102,7 +125,7 @@ def test_run_pipeline_executes_only_the_named_stage(tmp_path: Path) -> None:
             return StageResult(stage="markdown", status="success", message="ok")
 
     with patch(
-        "mbforge.application.pipeline.runner._effective_stages",
+        "mbforge.service.pipeline.runner._effective_stages",
         return_value=[ExtractProbe(), MarkdownProbe()],
     ):
         result = run_pipeline(
@@ -141,11 +164,11 @@ def test_drive_all_nodes_persists_markdown(sample_pdf: Path, tmp_path: Path) -> 
 
     with (
         patch(
-            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.service.pipeline.detection.extraction.extract_molecules_from_pdf",
             return_value=[],
         ),
         patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            "mbforge.service.pipeline.extract.text.extract_layout_text",
             side_effect=_fake_layout_extract,
         ),
     ):
@@ -155,44 +178,49 @@ def test_drive_all_nodes_persists_markdown(sample_pdf: Path, tmp_path: Path) -> 
     assert (library_root / "storage" / "sample_doc" / "document.md").exists()
 
 
-def test_join_failure_does_not_run_downstream_stages(
+def test_extract_evidence_failure_does_not_run_downstream_stages(
     sample_pdf: Path, tmp_path: Path
 ) -> None:
-    """A failed Join stage aborts before Markdown/Patent run."""
-    from mbforge.application.pipeline.stages.markdown_stage import MarkdownStage
+    """A failed evidence persist in Extract aborts before Markdown/Patent run."""
+    from mbforge.service.pipeline.stages.markdown_stage import MarkdownStage
 
     library_root = tmp_path / "library"
     library_root.mkdir(parents=True, exist_ok=True)
 
     def forbidden_markdown(_stage, _ctx) -> StageResult:  # noqa: ANN001
-        raise AssertionError("Markdown ran after a failed Join")
+        raise AssertionError("Markdown ran after a failed Extract")
+
+    events: list[dict] = []
+
+    def _capture(event) -> None:  # noqa: ANN001
+        events.append({"stage": event.stage, "event": event.event, "data": event.data})
 
     with (
         patch(
-            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.service.pipeline.detection.extraction.extract_molecules_from_pdf",
             return_value=[],
         ),
         patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            "mbforge.service.pipeline.extract.text.extract_layout_text",
             side_effect=_fake_layout_extract,
         ),
         patch(
-            "mbforge.adapters.persistence.source_evidence.persist_source_evidence",
+            "mbforge.db.source_evidence.persist_source_evidence",
             side_effect=RuntimeError("sqlite unavailable"),
         ),
         patch.object(MarkdownStage, "execute", forbidden_markdown),
         pytest.raises(RuntimeError, match="sqlite unavailable"),
     ):
-        _drive_all(str(sample_pdf), str(library_root), doc_id="join-fail")
+        _drive_all(
+            str(sample_pdf),
+            str(library_root),
+            doc_id="extract-fail",
+            on_progress=_capture,
+        )
 
-    # The join stage recorded a hard error for the queue node.
-    from mbforge.application.pipeline.run.checkpoint import load_stage_summary
-
-    staging = library_root / "storage" / "join-fail" / ".staging"
-    summary = load_stage_summary(staging, "join")
-    assert summary is not None
-    assert summary["status"] == "error"
-    assert summary["error_code"] == PipelineErrorCode.EVIDENCE_JOIN_FAILED
+    # The Extract stage emitted a hard error for the queue node and the
+    # downstream stages never ran (the markdown probe would have raised).
+    assert any(e["event"] == "error" and e["stage"] == "extract" for e in events)
 
 
 def test_pipeline_aborts_on_fatal_patent_publish_error(
@@ -209,7 +237,6 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
         smiles="CCO",
         esmiles="CCO",
         name="",
-        source="image",
         bbox_pdf=(0, 0, 1, 1),
         page_idx=0,
         mol_img_path=str(crop_path),
@@ -223,11 +250,11 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
 
     with (
         patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            "mbforge.service.pipeline.extract.text.extract_layout_text",
             side_effect=_fake_layout_extract,
         ),
         patch(
-            "mbforge.application.pipeline.stages.extract_stage._detect_molecules",
+            "mbforge.service.pipeline.stages.extract_stage._detect_molecules",
             return_value={
                 "molecule_count": 1,
                 "rejected_count": 0,
@@ -236,7 +263,7 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
             },
         ),
         patch(
-            "mbforge.application.pipeline.artifacts.staging.publish_run",
+            "mbforge.service.pipeline.artifacts.staging.publish_run",
             side_effect=RuntimeError("disk full"),
         ),
         pytest.raises(RuntimeError, match="disk full"),
@@ -270,7 +297,7 @@ def test_progress_callback_failure_does_not_abort_stage(tmp_path: Path) -> None:
         raise OSError("stdout pipe closed")
 
     with patch(
-        "mbforge.application.pipeline.runner._effective_stages",
+        "mbforge.service.pipeline.runner._effective_stages",
         return_value=[ExtractProbe()],
     ):
         result = run_pipeline(

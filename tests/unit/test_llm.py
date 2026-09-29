@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from mbforge.adapters.runtime import llm
-from mbforge.adapters.runtime.llm import to_litellm_config, to_litellm_model
 from mbforge.foundation.config import LLMConfig
+from mbforge.server import llm
+from mbforge.server.llm import to_litellm_config, to_litellm_model
 
 
 @pytest.mark.parametrize(

@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 
 from mbforge import __version__
-from mbforge.app import create_app
+from mbforge.server.app import create_app
 
 ROOT = Path(__file__).parents[2]
 

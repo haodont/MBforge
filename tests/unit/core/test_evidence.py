@@ -42,9 +42,6 @@ def test_source_evidence_requires_content_and_valid_bbox() -> None:
             raw_text="text",  # type: ignore[arg-type]
         )
 
-    with pytest.raises(ValueError, match="raw_text or coref"):
-        SourceEvidence.create(doc_id="doc", page=1, bbox=(0.0, 0.0, 1.0, 1.0))
-
     with pytest.raises(ValueError, match="bbox"):
         SourceEvidence.from_dict({"doc_id": "doc", "page": 1, "raw_text": "legacy"})
 

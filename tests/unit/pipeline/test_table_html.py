@@ -7,7 +7,7 @@ the conversion shape is a public cross-module contract.
 
 from __future__ import annotations
 
-from mbforge.application.pipeline.layout.table_html import html_table_to_markdown
+from mbforge.service.pipeline.layout.table_html import html_table_to_markdown
 
 
 def test_html_table_to_markdown_converts_fragment() -> None:

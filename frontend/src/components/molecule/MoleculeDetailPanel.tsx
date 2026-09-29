@@ -15,7 +15,12 @@ import TextArea from '@/components/ui/TextArea'
 
 interface BaseProps {
   libraryRoot?: string | null
-  onOpenPdf?: (docId: string, page: number | null, bbox: EvidenceItem['bbox']) => void
+  onOpenPdf?: (
+    docId: string,
+    page: number | null,
+    bbox: EvidenceItem['bbox'],
+    evidenceId?: string | null,
+  ) => void
 }
 interface DetectionProps extends BaseProps {
   detection: ExtractionResult
@@ -173,7 +178,7 @@ export default function MoleculeDetailPanel(props: MoleculeDetailPanelProps) {
                   libraryRoot={libraryRoot ?? null}
                   molId={molecule.mol_id}
                   evidenceTotal={molecule.evidence_total}
-                  onOpenPdf={(docId, page, bbox) => props.onOpenPdf?.(docId, page, bbox)}
+                  onOpenPdf={(docId, page, bbox, evidenceId) => props.onOpenPdf?.(docId, page, bbox, evidenceId)}
                 />
               ) : null
             }

@@ -26,9 +26,6 @@ Document-level (under ``storage/{doc_id}/``):
 * ``images/{filename}``           — figures extracted by OCR
 
 No module is allowed to inline-construct these paths.
-
-See ``docs/adr/0001-canonical-library-layout.md`` §2 + §3 for the
-authoritative layout decision.
 """
 
 from __future__ import annotations

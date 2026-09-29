@@ -7,26 +7,23 @@ from unittest.mock import patch
 
 import pytest
 
-from mbforge.adapters.persistence.source_evidence import persist_source_evidence
-from mbforge.application.pipeline.artifacts.evidence_models import (
-    DocumentEvidenceArtifact,
-    PageFrame,
-)
-from mbforge.application.pipeline.run.context import PipelineContext
-from mbforge.application.pipeline.runner import STAGES, run_pipeline
-from mbforge.application.pipeline.stage import (
+from mbforge.db.source_evidence import persist_source_evidence
+from mbforge.domain.evidence import SourceEvidence
+from mbforge.domain.types import ExtractionResult
+from mbforge.service.pipeline.artifacts.evidence_models import PageFrame
+from mbforge.service.pipeline.run.context import PipelineContext
+from mbforge.service.pipeline.runner import STAGES, run_pipeline
+from mbforge.service.pipeline.stage import (
     PipelineErrorCode,
     StageExecutor,
     StageResult,
 )
-from mbforge.application.pipeline.stages import ExtractStage, MarkdownStage
-from mbforge.domain.evidence import SourceEvidence
-from mbforge.domain.types import ExtractionResult
+from mbforge.service.pipeline.stages import ExtractStage, MarkdownStage
 
 #: The molecule pass lives inside ExtractStage; every ExtractStage test must
 #: stub it so the suite never loads real detector/recognizer weights.
 _MOLECULE_PASS = (
-    "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf"
+    "mbforge.service.pipeline.detection.extraction.extract_molecules_from_pdf"
 )
 
 
@@ -36,11 +33,9 @@ def _molecule_result() -> ExtractionResult:
         esmiles="CCO<sep>",
         smiles="CCO",
         name="EtOH",
-        source="text",
         moldet_conf=0.9,
         bbox_pdf=(10.0, 20.0, 30.0, 40.0),
         page_idx=0,
-        status="pending",
     )
 
 
@@ -57,7 +52,6 @@ class TestStageExecutors:
     def test_stage_registry_runs_in_document_order(self):
         assert [type(stage).__name__ for stage in STAGES] == [
             "ExtractStage",
-            "JoinStage",
             "MarkdownStage",
             "PatentStage",
         ]
@@ -112,7 +106,7 @@ class TestStageNullChecks:
         assert result.error_code == PipelineErrorCode.MISSING_CONTEXT
 
     def test_markdown_stage_persists_canonical_markdown(self, tmp_path):
-        from mbforge.application.pipeline.extract.text import (
+        from mbforge.service.pipeline.extract.text import (
             ExtractedDocument,
             PageContent,
         )
@@ -123,13 +117,7 @@ class TestStageNullChecks:
             bbox=(10.0, 70.0, 50.0, 80.0),
             raw_text="Source text",
         )
-        evidence = DocumentEvidenceArtifact(
-            doc_id="t-markdown-persist",
-            run_id="run-1",
-            conventions={"origin": "bottom-left"},
-            pages=[PageFrame(page=1, width=100.0, height=100.0)],
-            evidence=[source],
-        )
+        evidence = [source]
         persist_source_evidence(tmp_path, evidence)
         ctx = PipelineContext(
             pdf_path=tmp_path / "x.pdf",
@@ -155,7 +143,7 @@ class TestStageNullChecks:
 
     def test_extract_stage_produces_and_reports_molecules(self, tmp_path):
         """Extract owns the molecule pass, so its results land in the context."""
-        from mbforge.application.pipeline.extract.text import (
+        from mbforge.service.pipeline.extract.text import (
             ExtractedDocument,
             PageContent,
         )
@@ -176,12 +164,12 @@ class TestStageNullChecks:
 
         with (
             patch(
-                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                "mbforge.service.pipeline.extract.text.extract_layout_text",
                 return_value=fake_doc,
             ),
             patch(_MOLECULE_PASS, return_value=molecules),
             patch(
-                "mbforge.application.pipeline.artifacts.branch_io.page_frames_from_pdf",
+                "mbforge.service.pipeline.artifacts.evidence_join.page_frames_from_pdf",
                 return_value=[PageFrame(page=1, width=100.0, height=100.0)],
             ),
         ):
@@ -196,7 +184,7 @@ class TestStageNullChecks:
 
     def test_molecule_pass_failure_does_not_fail_the_document(self, tmp_path):
         """A molecule-side failure keeps the page text evidence alive."""
-        from mbforge.application.pipeline.extract.text import (
+        from mbforge.service.pipeline.extract.text import (
             ExtractedDocument,
             PageContent,
         )
@@ -216,12 +204,12 @@ class TestStageNullChecks:
 
         with (
             patch(
-                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                "mbforge.service.pipeline.extract.text.extract_layout_text",
                 return_value=fake_doc,
             ),
             patch(_MOLECULE_PASS, side_effect=RuntimeError("crop archive missing")),
             patch(
-                "mbforge.application.pipeline.artifacts.branch_io.page_frames_from_pdf",
+                "mbforge.service.pipeline.artifacts.evidence_join.page_frames_from_pdf",
                 return_value=[PageFrame(page=1, width=100.0, height=100.0)],
             ),
         ):
@@ -239,7 +227,7 @@ class TestExtractStage:
 
     def test_execute_success(self, tmp_path):
         """Mock extract_layout_text to return a fake ExtractedDocument."""
-        from mbforge.application.pipeline.extract.text import (
+        from mbforge.service.pipeline.extract.text import (
             ExtractedDocument,
             PageContent,
         )
@@ -259,12 +247,12 @@ class TestExtractStage:
 
         with (
             patch(
-                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                "mbforge.service.pipeline.extract.text.extract_layout_text",
                 return_value=fake_doc,
             ),
             patch(_MOLECULE_PASS, return_value=[]),
             patch(
-                "mbforge.application.pipeline.artifacts.branch_io.page_frames_from_pdf",
+                "mbforge.service.pipeline.artifacts.evidence_join.page_frames_from_pdf",
                 return_value=[PageFrame(page=1, width=100.0, height=100.0)],
             ),
         ):
@@ -287,7 +275,7 @@ class TestExtractStage:
 
         with (
             patch(
-                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                "mbforge.service.pipeline.extract.text.extract_layout_text",
                 side_effect=ValueError("corrupt pdf"),
             ),
             patch(_MOLECULE_PASS, return_value=[]),
@@ -301,7 +289,7 @@ class TestExtractStage:
 
     def test_execute_reports_layout_unavailable_separately(self, tmp_path):
         """A missing local layout model is actionable, not PDF corruption."""
-        from mbforge.application.pipeline.layout.parse import LayoutUnavailableError
+        from mbforge.service.pipeline.layout.parse import LayoutUnavailableError
 
         ctx = PipelineContext(
             pdf_path=tmp_path / "scan.pdf",
@@ -312,7 +300,7 @@ class TestExtractStage:
 
         with (
             patch(
-                "mbforge.application.pipeline.extract.text.extract_layout_text",
+                "mbforge.service.pipeline.extract.text.extract_layout_text",
                 side_effect=LayoutUnavailableError(
                     "Hiro-Layout model is not available; cannot produce a local layout"
                 ),
@@ -329,7 +317,7 @@ class TestExtractStage:
 
 def test_write_rough_markdown_keeps_page_text_verbatim(tmp_path: Path) -> None:
     """The rough markdown copies page text as-is and marks each page boundary."""
-    from mbforge.application.pipeline.stages.markdown_stage import write_rough_markdown
+    from mbforge.service.pipeline.stages.markdown_stage import write_rough_markdown
 
     class FakePage:
         def __init__(self, num: int, text: str) -> None:

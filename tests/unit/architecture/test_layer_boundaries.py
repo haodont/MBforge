@@ -1,4 +1,10 @@
-"""Guard the dependency direction of the reorganized source tree."""
+"""Guard the dependency direction of the five-layer source tree.
+
+Layers: ``api -> service``; ``service``/``db``/``api`` may depend on the
+``foundation`` support package but never on a layer above them. ``domain`` is
+pure and may not import any other business layer (nor the model inference
+subpackage).
+"""
 
 from __future__ import annotations
 
@@ -7,9 +13,16 @@ from pathlib import Path
 
 _SOURCE_ROOT = Path(__file__).parents[3] / "src" / "mbforge"
 _FORBIDDEN_IMPORTS = {
-    "domain": ("mbforge.application", "mbforge.adapters", "mbforge.interfaces"),
-    "application": ("mbforge.adapters", "mbforge.interfaces"),
-    "interfaces": ("mbforge.adapters",),
+    "domain": (
+        "mbforge.service",
+        "mbforge.db",
+        "mbforge.api",
+        "mbforge.server",
+        "mbforge.foundation.inference",
+    ),
+    "db": ("mbforge.api", "mbforge.server"),
+    "service": ("mbforge.db", "mbforge.api", "mbforge.server"),
+    "api": ("mbforge.db", "mbforge.server"),
 }
 
 
@@ -24,7 +37,7 @@ def _imports(path: Path) -> list[str]:
     return names
 
 
-def test_layer_boundaries_do_not_import_outward_adapters() -> None:
+def test_layer_boundaries_respect_dependency_direction() -> None:
     violations: list[str] = []
     for layer, forbidden in _FORBIDDEN_IMPORTS.items():
         for path in (_SOURCE_ROOT / layer).rglob("*.py"):

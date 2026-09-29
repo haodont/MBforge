@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.db.sqlite.database import DatabaseManager
 
 
 def _assert_error(response, expected_status: int, expected_error_code: str) -> dict:

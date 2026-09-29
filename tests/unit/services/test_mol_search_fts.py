@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-from mbforge.application.use_cases.molecule.queries import search_molecules
+from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.service.use_cases.molecule.queries import search_molecules
 
 
 def test_mol_search_populated_after_insert(tmp_path: pytest.TempPathFactory) -> None:

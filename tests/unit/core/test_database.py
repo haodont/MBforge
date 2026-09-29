@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.adapters.persistence.sqlite.database import (
+from mbforge.db.sqlite.database import (
     DatabaseManager,
     record_ingest_event,
 )
@@ -178,7 +178,7 @@ def test_record_ingest_event_swallows_exception(tmp_path: Path) -> None:
         db,
         task_id="task-3",
         doc_id="doc-3",
-        stage="persist",
+        stage="extract",
         level="error",
         message="Disk full",
         data={"error_code": "PERSIST_FAILED"},

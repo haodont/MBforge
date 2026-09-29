@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from mbforge.application.pipeline.layout.parse import parse_page_image
+from mbforge.service.pipeline.layout.parse import parse_page_image
 
 _HTML_TABLE = (
     "<html><body><table><thead><tr><td>Compound</td><td>IC50 (nM)</td>"
@@ -48,7 +48,7 @@ class _FakeRuntime:
 
 
 def _parse(runtime: _FakeRuntime, monkeypatch, **kwargs) -> SimpleNamespace:
-    monkeypatch.setattr("mbforge.application.ports.get_runtime", lambda: runtime)
+    monkeypatch.setattr("mbforge.service.ports.get_runtime", lambda: runtime)
     image = np.zeros((120, 220, 3), dtype=np.uint8)
     return parse_page_image(image, doc_id="doc", page_num=1, **kwargs)
 

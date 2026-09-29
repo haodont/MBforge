@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from mbforge.app import create_app
+from mbforge.server.app import create_app
 
 
 def test_client_side_route_serves_react_entrypoint(tmp_path: Path) -> None:

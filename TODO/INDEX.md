@@ -4,22 +4,25 @@ This directory records active architecture and implementation plans.
 
 ## Current pipeline
 
-`Extract → Join → Markdown → Patent` is the registered pipeline. Extract is the
-single producer — the layout/text/table producer and the molecule pass
-(MolDet + MolParser) both run inside it — and publishes one run-scoped branch
-artifact; Join validates it and writes canonical `SourceEvidence` rows to
-SQLite. Link is removed from the active path, and Persist remains unregistered
-pending redesign.
+`Extract → Markdown → Patent` is the registered pipeline. Extract is the single
+producer — the layout/text/table producer and the molecule pass
+(MolDet + MolParser) both run inside it — and mints and persists the canonical
+`SourceEvidence` rows to SQLite itself. SQL is the only evidence store (there is
+no branch artifact); Markdown assembles the readable document from that
+evidence, and Patent publishes the unified facts artifact. Link and Persist are
+removed from the active path.
 
 ## Known gaps
 
-- `patent/sections.py:parse_source_evidence_sections` treats only
-  `kind in {"text_span", "table_span"}` as heading-eligible, but the local
-  Hiro-Layout producer mints every region under its own label (`text`, `sec`,
-  `head`, `tab`, …). A scanned document therefore reports 0 sections / 0
-  entries even though its `source_evidence` rows hold the full text. Either the
-  parser must classify through `evidence_kind.category_of`, or the join must
-  mint the producer's labels into the text category.
+- `report.json` and `storage/{doc_id}/pages/` have no writer in the active
+  path: the removed Persist stage produced them, while the document report and
+  page readers still consume them.
+- `markush_scaffolds` and `markush_fragments` also have no writer — their only
+  producer module was removed with the Persist stage — yet the Markush
+  enumeration/review readers still read them.
+- The molecule↔evidence association is now persisted in `evidence.evidence_id`
+  (pointing at the canonical `source_evidence` row); the legacy
+  `text_molecule_links` table was dropped.
 
 ## Active plans
 
@@ -31,8 +34,8 @@ pending redesign.
 ## Conventions
 
 - Treat `docs/wiki/pipeline.md` as the per-stage contract.
-- Keep raw branch data and SQL source evidence separate from the shared
-  `domain.molecule.Molecule` entity and inferred facts.
+- Keep SQL source evidence separate from the shared `domain.molecule.Molecule`
+  entity and inferred facts.
 - `Molecule` is the only structure-bearing molecule domain object across
   detection normalization, correction, Markush handling, hydration, query,
   and future persistence. `ExtractionResult`/`DetectionSource` remain raw

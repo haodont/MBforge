@@ -18,7 +18,15 @@ import {
   TrashIcon,
   RefreshCwIcon,
 } from '../icons'
+import { PIPELINE_STAGES, type PipelineStage } from '@/api/query/stages'
 import type { IngestTask, IngestLogEvent } from '@/api/http/ingest_queue'
+
+/** i18n keys for the "retry from stage" menu, keyed by pipeline stage. */
+const RETRY_STAGE_LABEL_KEYS: Record<PipelineStage, string> = {
+  extract: 'queue.retryFromExtract',
+  markdown: 'queue.retryFromMarkdown',
+  patent: 'queue.retryFromPatent',
+}
 
 // ---------------------------------------------------------------------------
 // Formatting helpers (shared across the queue module)
@@ -117,9 +125,10 @@ export const TaskRow = memo(function TaskRow({
 
   const STAGE_OPTIONS: { value: string | null; label: string }[] = [
     { value: null, label: t('queue.retryFromCheckpoint') },
-    { value: 'extract', label: t('queue.retryFromExtract') },
-    { value: 'markdown', label: t('queue.retryFromMarkdown') },
-    { value: 'patent', label: t('queue.retryFromPatent') },
+    ...PIPELINE_STAGES.map((stage) => ({
+      value: stage,
+      label: t(RETRY_STAGE_LABEL_KEYS[stage]),
+    })),
   ]
 
   const fileName = basename(task.file_path) || task.doc_id

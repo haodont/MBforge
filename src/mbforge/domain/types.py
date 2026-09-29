@@ -23,8 +23,9 @@ class DetectionSource:
         confidence: MolDet detection confidence, normalized to [0, 1]. Used
             for ranking detections.
         conf_moldet: MolDet detection confidence for image detections.
-        evidence_id: Runtime-only ID assigned after Join has canonicalized the
-            page bbox. It is never written to the raw Detection artifact.
+        evidence_id: Runtime-only ID assigned when the page bbox is
+            canonicalized into evidence. It is never written to the raw
+            Detection record.
     """
 
     source: Literal["image", "text", "manual"]

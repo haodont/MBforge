@@ -32,7 +32,7 @@ def measurement_id(
     """Deterministic measurement ID from doc + evidence position + value.
 
     Includes the raw value text so two different numbers in the same
-    cell/row never collide; re-runs reproduce the same ID (spec §3.5.3).
+    cell/row never collide; re-runs reproduce the same ID.
     """
     return stable_id(
         "measurement", doc_id, str(page or ""), metric, raw_value, row_label
@@ -55,8 +55,8 @@ class MeasurementValue:
     """Original and canonical readings of one activity number.
 
     Decimal in the domain layer; JSON stores the raw string plus numeric
-    fields — Decimal↔float conversion only happens at the file boundary
-    (spec §5.3). ``raw_text`` keeps the printed form verbatim.
+    fields — Decimal↔float conversion only happens at the file boundary.
+    ``raw_text`` keeps the printed form verbatim.
     """
 
     raw_text: str = ""
@@ -103,7 +103,7 @@ class AssayMethod:
 
     ``comparison_key`` stays ``None`` until a human confirms it or (M5)
     (target, system, endpoint, unit) match exactly — never auto-generated
-    before then (spec §5.5).
+    before then.
     """
 
     assay_method_id: str
@@ -161,7 +161,7 @@ class ActivityMeasurement:
     """One measured value tied to (optionally) an entry and an assay.
 
     ``compound_entry_id``/``assay_method_id``/``mol_id`` are all nullable:
-    an unlinked measurement is valid data, never dropped (spec §3.4).
+    an unlinked measurement is valid data, never dropped.
     """
 
     measurement_id: str

@@ -37,8 +37,8 @@ def _replace_existing(host: str, port: int) -> None:
     the strict A1-A5/B1-B2 criteria (registry-confirmed MBForge instances
     holding the queue lock or listening on our port).
     """
-    from mbforge.adapters.runtime.process import find_orphans, reap
     from mbforge.foundation.config import load_global_config
+    from mbforge.server.process import find_orphans, reap
 
     cfg = load_global_config()
     library_root = cfg.library_root
@@ -65,13 +65,13 @@ def _run_doctor(options) -> None:
     """Run the diagnostic doctor command."""
     import json as _json
 
-    from mbforge.adapters.runtime.process import (
+    from mbforge.foundation.config import load_global_config
+    from mbforge.server.process import (
         ProcessRegistry,
         find_orphans,
         port_listeners,
         read_lock_holder,
     )
-    from mbforge.foundation.config import load_global_config
 
     library_root = options.library_root
     if library_root is None:
@@ -179,7 +179,7 @@ def _run_doctor(options) -> None:
 
     if options.fix and blocking:
         print("\nReaping blocking orphans...")
-        from mbforge.adapters.runtime.process import reap
+        from mbforge.server.process import reap
 
         for o in blocking:
             result = reap(o, dry_run=False, grace=5.0)
@@ -308,7 +308,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     import uvicorn
 
     uvicorn.run(
-        "mbforge.app:app",
+        "mbforge.server.app:app",
         host=host,
         port=port,
         reload=options.reload,

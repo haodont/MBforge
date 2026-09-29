@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from mbforge.adapters.inference import table_slanet
+from mbforge.foundation.inference import table_slanet
 
 
 def test_predict_table_returns_empty_when_model_unavailable(monkeypatch) -> None:
@@ -29,11 +29,11 @@ def test_load_reports_missing_weights_without_download(monkeypatch) -> None:
     monkeypatch.setattr(table_slanet, "_AVAILABLE", False)
     monkeypatch.setattr(table_slanet, "_ERROR", "")
     monkeypatch.setattr(
-        "mbforge.adapters.runtime.resource_manager.ResourceManager.get_slanet_path",
+        "mbforge.server.resource_manager.ResourceManager.get_slanet_path",
         lambda: None,
     )
     monkeypatch.setattr(
-        "mbforge.adapters.runtime.resource_manager.ResourceManager.ensure",
+        "mbforge.server.resource_manager.ResourceManager.ensure",
         lambda resource_id: None,
     )
 

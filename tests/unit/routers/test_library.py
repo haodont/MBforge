@@ -49,7 +49,7 @@ def test_library_import_does_not_auto_enqueue(
     app_client: TestClient, tmp_library: Path
 ) -> None:
     """Import only registers the document; enqueue is a separate step."""
-    from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+    from mbforge.db.sqlite.database import DatabaseManager
 
     resp = app_client.post(
         "/api/v1/library/import",
@@ -87,11 +87,7 @@ def test_library_get_document_file(app_client: TestClient) -> None:
 def test_library_get_document_evidence_reads_requested_sql_page(
     app_client: TestClient, tmp_library: Path
 ) -> None:
-    from mbforge.adapters.persistence.source_evidence import persist_source_evidence
-    from mbforge.application.pipeline.artifacts.evidence_models import (
-        DocumentEvidenceArtifact,
-        PageFrame,
-    )
+    from mbforge.db.source_evidence import persist_source_evidence
     from mbforge.domain.evidence import SourceEvidence
 
     rows = [
@@ -108,19 +104,7 @@ def test_library_get_document_evidence_reads_requested_sql_page(
             raw_text="other page",
         ),
     ]
-    persist_source_evidence(
-        tmp_library,
-        DocumentEvidenceArtifact(
-            doc_id="doc-evidence",
-            run_id="run-1",
-            conventions={"origin": "bottom-left"},
-            pages=[
-                PageFrame(page=1, width=100, height=100),
-                PageFrame(page=2, width=100, height=100),
-            ],
-            evidence=rows,
-        ),
-    )
+    persist_source_evidence(tmp_library, rows)
 
     resp = app_client.get(
         "/api/v1/library/documents/doc-evidence/evidence",

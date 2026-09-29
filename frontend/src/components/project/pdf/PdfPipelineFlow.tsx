@@ -1,6 +1,13 @@
 import { useTranslation } from 'react-i18next'
 import type { FC } from 'react'
-import { FileTextIcon, NetworkIcon, CheckIcon, XIcon, FlaskIcon, BookIcon } from '../../icons'
+import {
+  FileTextIcon,
+  CheckIcon,
+  XIcon,
+  FlaskIcon,
+  BookIcon,
+} from '../../icons'
+import { PIPELINE_STAGES, type PipelineStage } from '@/api/query/stages'
 import type { IngestStageStatus, IngestTask } from '@/api/http/ingest_queue'
 
 type PipelineVariant = 'compact' | 'full'
@@ -10,14 +17,22 @@ interface PdfPipelineFlowProps {
   task: IngestTask | null
 }
 
+const STAGE_META: Record<
+  PipelineStage,
+  { labelKey: string; Icon: FC<{ size?: number }> }
+> = {
+  extract: { labelKey: 'pdfPipeline.stage.extract', Icon: FileTextIcon },
+  markdown: { labelKey: 'pdfPipeline.stage.markdown', Icon: FlaskIcon },
+  patent: { labelKey: 'pdfPipeline.stage.patent', Icon: BookIcon },
+}
+
 function useStageLabels() {
   const { t } = useTranslation()
-  return [
-    { key: 'extract', label: t('pdfPipeline.stage.extract'), Icon: FileTextIcon },
-    { key: 'join', label: t('pdfPipeline.stage.join'), Icon: NetworkIcon },
-    { key: 'markdown', label: t('pdfPipeline.stage.markdown'), Icon: FlaskIcon },
-    { key: 'patent', label: t('pdfPipeline.stage.patent'), Icon: BookIcon },
-  ]
+  return PIPELINE_STAGES.map((key) => ({
+    key,
+    label: t(STAGE_META[key].labelKey),
+    Icon: STAGE_META[key].Icon,
+  }))
 }
 
 type NodeState = 'idle' | 'running' | 'done' | 'failed' | 'skipped'

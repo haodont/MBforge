@@ -6,40 +6,7 @@ import asyncio
 
 import pytest
 
-from mbforge.application.dto.chem import (
-    FingerprintPairRequest,
-    GesimAtomMappingRequest,
-    SimilaritySearchRequest,
-    SmilesImageRequest,
-    SmilesRequest,
-    SubstructureSearchRequest,
-    ValidateSmilesRequest,
-)
-from mbforge.application.use_cases.chem.chem import (
-    canonicalize_sync as _canonicalize_sync,
-)
-from mbforge.application.use_cases.chem.chem import (
-    draw_smiles_sync as _draw_smiles_sync,
-)
-from mbforge.application.use_cases.chem.chem import (
-    fingerprint_sync as _fingerprint_sync,
-)
-from mbforge.application.use_cases.chem.chem import (
-    properties_sync as _properties_sync,
-)
-from mbforge.application.use_cases.chem.chem import (
-    similarity_search_sync as _similarity_search_sync,
-)
-from mbforge.application.use_cases.chem.chem import (
-    substructure_search_sync as _substructure_search_sync,
-)
-from mbforge.application.use_cases.chem.chem import (
-    tanimoto_sync as _tanimoto_sync,
-)
-from mbforge.application.use_cases.chem.chem import (
-    validate_smiles_sync as _validate_smiles_sync,
-)
-from mbforge.interfaces.http.molecule.chem import (
+from mbforge.api.http.molecule.chem import (
     canonicalize,
     fingerprint,
     gesim_atom_mapping,
@@ -49,6 +16,39 @@ from mbforge.interfaces.http.molecule.chem import (
     substructure_search,
     tanimoto,
     validate_smiles,
+)
+from mbforge.service.dto.chem import (
+    FingerprintPairRequest,
+    GesimAtomMappingRequest,
+    SimilaritySearchRequest,
+    SmilesImageRequest,
+    SmilesRequest,
+    SubstructureSearchRequest,
+    ValidateSmilesRequest,
+)
+from mbforge.service.use_cases.chem.chem import (
+    canonicalize_sync as _canonicalize_sync,
+)
+from mbforge.service.use_cases.chem.chem import (
+    draw_smiles_sync as _draw_smiles_sync,
+)
+from mbforge.service.use_cases.chem.chem import (
+    fingerprint_sync as _fingerprint_sync,
+)
+from mbforge.service.use_cases.chem.chem import (
+    properties_sync as _properties_sync,
+)
+from mbforge.service.use_cases.chem.chem import (
+    similarity_search_sync as _similarity_search_sync,
+)
+from mbforge.service.use_cases.chem.chem import (
+    substructure_search_sync as _substructure_search_sync,
+)
+from mbforge.service.use_cases.chem.chem import (
+    tanimoto_sync as _tanimoto_sync,
+)
+from mbforge.service.use_cases.chem.chem import (
+    validate_smiles_sync as _validate_smiles_sync,
 )
 
 

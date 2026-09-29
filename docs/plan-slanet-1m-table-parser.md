@@ -24,7 +24,7 @@ tokenizer; SLANet-1M is a 7.6 MB ONNX model with zero new dependencies).
 
 - `ResourceManager` entry `slanet_table` (HF `bdatdo0601/slanet-1m-onnx`,
   exact files `slanet_1m.onnx` + `inference.yml`, MIT).
-- Adapter `mbforge/adapters/inference/table_slanet.py` — lazy onnxruntime
+- Adapter `mbforge/foundation/inference/table_slanet.py` — lazy onnxruntime
   session (CUDA EP when available, CPU fallback), `predict_table(image) -> HTML`,
   best-effort enrichment (empty on any failure, never breaks the page).
 - `table_recognizer="slanet"`; recognition is unconditional (the
@@ -58,7 +58,7 @@ tokenizer; SLANet-1M is a 7.6 MB ONNX model with zero new dependencies).
 - End-to-end (2026-09-24, `CN121270515A.pdf`, 23 scanned pages, single Extract
   branch): 8 Hiro `tab` regions, all 8 recognized into Markdown tables (e.g.
   `| 试剂和耗材 | 来源 | 批号 |`), 8 `tab` evidence rows in `source_evidence`.
-- **Provider wiring bug found by that run**: `adapters/inference/__init__.py`
+- **Provider wiring bug found by that run**: `foundation/inference/__init__.py`
   binds the submodules the runtime provider resolves by attribute, and
   `table_slanet` was missing — so `_DynamicModule` raised `AttributeError` on
   every call and recognition silently degraded to empty (the enrichment

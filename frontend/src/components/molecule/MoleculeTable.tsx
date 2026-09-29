@@ -79,6 +79,7 @@ export default function MoleculeTable({
       initialBbox: evidence?.bbox
         ? [evidence.bbox.x0, evidence.bbox.y0, evidence.bbox.x1, evidence.bbox.y1]
         : undefined,
+      initialEvidenceId: evidence?.evidence_id ?? undefined,
     })
   }, [appContext, libraryRoot])
 

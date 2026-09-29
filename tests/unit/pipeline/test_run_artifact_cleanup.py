@@ -14,14 +14,18 @@ from unittest.mock import patch
 
 import pytest
 
-from mbforge.application.pipeline.artifacts.staging import (
+from mbforge.foundation.layout import LibraryLayout
+from mbforge.service.pipeline.artifacts.staging import (
     cleanup_staging,
     staging_dir,
 )
-from mbforge.application.pipeline.cancellation import TaskCancelledError
-from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.application.pipeline.runner import cancel_task, run_pipeline
-from mbforge.foundation.layout import LibraryLayout
+from mbforge.service.pipeline.cancellation import TaskCancelledError
+from mbforge.service.pipeline.extract.text import (
+    ExtractedDocument,
+    PageContent,
+    TextSpan,
+)
+from mbforge.service.pipeline.runner import cancel_task, run_pipeline
 
 _DOC_ID = "sample_doc"
 _RUN_ID = "20260909123456"
@@ -29,7 +33,7 @@ _RUN_ID = "20260909123456"
 
 def _dag_order() -> list[str]:
     """Topological order of the stage DAG (matches the queue's node order)."""
-    from mbforge.application.pipeline.composition import stage_dependencies
+    from mbforge.service.pipeline.composition import stage_dependencies
 
     deps = stage_dependencies()
     order: list[str] = []
@@ -40,6 +44,26 @@ def _dag_order() -> list[str]:
             order.append(stage)
             remaining.pop(stage)
     return order
+
+
+def _fake_layout_page(num: int, text: str) -> PageContent:
+    """One page with a single typed text region, as the layout producer emits."""
+    bbox = (1.0, 1.0, 5.0, 5.0)
+    return PageContent(
+        page_num=num,
+        text=text,
+        regions=[
+            {
+                "region_id": f"r{num}",
+                "kind": "text",
+                "type": "text",
+                "bbox": list(bbox),
+                "reading_order": 0,
+                "text": text,
+            }
+        ],
+        text_spans=[TextSpan(text, bbox, 0)],
+    )
 
 
 def _fake_extract_layout_text(
@@ -53,8 +77,8 @@ def _fake_extract_layout_text(
         raw_text="page one text\n\npage two text",
         page_count=2,
         pages=[
-            PageContent(page_num=1, text="page one text"),
-            PageContent(page_num=2, text="page two text"),
+            _fake_layout_page(1, "page one text"),
+            _fake_layout_page(2, "page two text"),
         ],
     )
 
@@ -87,18 +111,18 @@ def _run(
 ):
     patches = [
         patch(
-            "mbforge.application.pipeline.extract.text.extract_layout_text",
+            "mbforge.service.pipeline.extract.text.extract_layout_text",
             side_effect=_fake_extract_layout_text,
         ),
         patch(
-            "mbforge.application.pipeline.detection.extraction.extract_molecules_from_pdf",
+            "mbforge.service.pipeline.detection.extraction.extract_molecules_from_pdf",
             side_effect=_fake_extract_molecules,
         ),
     ]
     if fail_patent_publish:
         patches.append(
             patch(
-                "mbforge.application.pipeline.artifacts.staging.publish_run",
+                "mbforge.service.pipeline.artifacts.staging.publish_run",
                 side_effect=RuntimeError("disk full"),
             )
         )
@@ -121,9 +145,9 @@ def _run(
             )
 
         # Simulate the worker's finalization: write merged report + promote.
-        from mbforge.application.pipeline.artifacts.staging import promote_staging
-        from mbforge.application.pipeline.artifacts.staging import staging_dir as _sd
-        from mbforge.application.pipeline.run.checkpoint import write_merged_report
+        from mbforge.service.pipeline.artifacts.staging import promote_staging
+        from mbforge.service.pipeline.artifacts.staging import staging_dir as _sd
+        from mbforge.service.pipeline.run.checkpoint import write_merged_report
 
         staging = _sd(str(library_root), _DOC_ID)
         write_merged_report(staging, doc_id=_DOC_ID, library_root=str(library_root))

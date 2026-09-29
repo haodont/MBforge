@@ -14,7 +14,12 @@ interface EvidencePanelProps {
   molId?: string
   evidenceTotal?: number
   /** Called when the user clicks "打开原文" on a row. */
-  onOpenPdf: (docId: string, page: number | null, bbox: EvidenceItem['bbox']) => void
+  onOpenPdf: (
+    docId: string,
+    page: number | null,
+    bbox: EvidenceItem['bbox'],
+    evidenceId?: string | null,
+  ) => void
 }
 
 /**
@@ -326,7 +331,7 @@ function EvidenceRow({ ev, libraryRoot, onOpenPdf }: RowProps) {
           {ev.doc_id}
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          {ev.kind === 'figure' && ev.page != null ? t('evidence.pageNumber', { page: ev.page }) : null}
+          {ev.page != null ? t('evidence.pageNumber', { page: ev.page }) : null}
           {ev.kind === 'text' ? t('evidence.textMention') : null}
           {ev.kind === 'table' ? t('evidence.tableEvidence') : null}
           {ev.confidence != null ? t('evidence.confidence', { pct: (ev.confidence * 100).toFixed(0) }) : null}
@@ -335,7 +340,7 @@ function EvidenceRow({ ev, libraryRoot, onOpenPdf }: RowProps) {
       <Button
         size="sm"
         variant="primary"
-        onClick={() => onOpenPdf(ev.doc_id, ev.page, ev.bbox)}
+        onClick={() => onOpenPdf(ev.doc_id, ev.page, ev.bbox, ev.evidence_id)}
         disabled={!libraryRoot}
         title={!libraryRoot ? t('evidence.noLibraryRoot') : t('evidence.openInPdf')}
         style={{ minHeight: 32, flexShrink: 0 }}

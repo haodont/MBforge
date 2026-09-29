@@ -35,6 +35,7 @@ export default function MoleculeDetailDrawer({
     docId: string,
     page: number | null,
     bbox: EvidenceItem['bbox'],
+    evidenceId?: string | null,
   ) => {
     if (!libraryRoot) {
       showToast('未指定 library_root', 'error')
@@ -61,6 +62,7 @@ export default function MoleculeDetailDrawer({
       initialBbox: bbox
         ? [bbox.x0, bbox.y0, bbox.x1, bbox.y1]
         : undefined,
+      initialEvidenceId: evidenceId ?? undefined,
     })
     onClose()
   }

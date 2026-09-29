@@ -61,6 +61,8 @@ export interface MoleculeRecord {
 /** One entry in a molecule's evidence chain (figure / text / table kind). */
 export interface EvidenceItem {
   id: number
+  /** Canonical `source_evidence.evidence_id`; shared id space with the page overlay. */
+  evidence_id?: string | null
   doc_id: string
   page: number | null
   /** Bounding box in PDF point units; null for text/table kind. */

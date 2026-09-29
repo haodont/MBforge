@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.application.pipeline.extract.text import (
+from mbforge.service.pipeline.extract.text import (
     _extract_title,
     extract_layout_text,
 )
-from mbforge.application.pipeline.layout.parse import (
+from mbforge.service.pipeline.layout.parse import (
     LayoutPage,
     LayoutUnavailableError,
 )
@@ -26,10 +26,10 @@ class _Detector:
 
 def _stub_layout(monkeypatch: pytest.MonkeyPatch, pages: list[LayoutPage]) -> None:
     monkeypatch.setattr(
-        "mbforge.adapters.inference.hiro_layout.get_hiro", lambda: _Detector()
+        "mbforge.foundation.inference.hiro_layout.get_hiro", lambda: _Detector()
     )
     monkeypatch.setattr(
-        "mbforge.application.pipeline.layout.parse.parse_pdf_layout",
+        "mbforge.service.pipeline.layout.parse.parse_pdf_layout",
         lambda *_args, **_kwargs: pages,
     )
 

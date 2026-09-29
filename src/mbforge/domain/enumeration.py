@@ -21,7 +21,7 @@ Markush scaffold SMILES, with three non-negotiable guarantees:
    ``/api/v1/markush/generated/decide`` with action ``confirm``.
 
 The persistence half (run rows, generated candidates, decision
-promotion) lives in :mod:`mbforge.application.use_cases.markush.enumeration`.
+promotion) lives in :mod:`mbforge.service.use_cases.markush.enumeration`.
 """
 
 from __future__ import annotations

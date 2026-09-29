@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from mbforge.adapters.inference.ocr.page_text import join_lines
-from mbforge.application.pipeline.layout.merge import merge
-from mbforge.application.pipeline.layout.reading_order import sort_boxes
+from mbforge.foundation.inference.ocr.page_text import join_lines
+from mbforge.service.pipeline.layout.merge import merge
+from mbforge.service.pipeline.layout.reading_order import sort_boxes
 
 _PAGE_HEIGHT_PT = 100.0
 _PX_PER_PT = 2.0

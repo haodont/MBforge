@@ -15,7 +15,7 @@ wraps them and converts to Pydantic responses via :func:`parse_response` /
 :func:`check_response`.
 
 The attachment-site persistence rules that need the database live in
-:mod:`mbforge.application.use_cases.markush.sites`.
+:mod:`mbforge.service.use_cases.markush.sites`.
 """
 
 from __future__ import annotations

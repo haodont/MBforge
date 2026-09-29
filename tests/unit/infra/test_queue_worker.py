@@ -10,9 +10,9 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-from mbforge.adapters.runtime.ingest import worker
-from mbforge.adapters.runtime.process.filelock import (
+from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.server.ingest import worker
+from mbforge.server.process.filelock import (
     LockMeta,
     queue_lock_path,
     try_lock_file,
@@ -135,7 +135,7 @@ def _node_id(db: DatabaseManager, stage: str) -> str:
 
 
 def _seed_dag(tmp_path: Path) -> tuple[str, DatabaseManager]:
-    from mbforge.adapters.runtime.ingest import queue
+    from mbforge.server.ingest import queue
 
     root = _library(tmp_path)
     db = DatabaseManager.get(root)
@@ -144,24 +144,24 @@ def _seed_dag(tmp_path: Path) -> tuple[str, DatabaseManager]:
     return root, db
 
 
-def test_advance_dependents_promotes_join_only_once(tmp_path: Path) -> None:
-    """Join turns pending only after its one predecessor is done, and only once."""
-    from mbforge.adapters.runtime.ingest import queue
+def test_advance_dependents_promotes_markdown_only_once(tmp_path: Path) -> None:
+    """Markdown turns pending only after its one predecessor is done, once."""
+    from mbforge.server.ingest import queue
 
     root, db = _seed_dag(tmp_path)
 
     assert _stage_status(db, "extract") == "pending"
-    assert _stage_status(db, "join") == "blocked"
+    assert _stage_status(db, "markdown") == "blocked"
 
     worker._claim_rows(root, "w", 8)
 
     queue.set_node_status(root, _node_id(db, "extract"), "done")
     assert queue.advance_dependents(
         root, doc_id="dag-doc", run_id="run-1", completed_stage="extract"
-    ) == ["join"]
-    assert _stage_status(db, "join") == "pending"
+    ) == ["markdown"]
+    assert _stage_status(db, "markdown") == "pending"
 
-    # Idempotent: a second completion of the same node never re-flips join.
+    # Idempotent: a second completion of the same node never re-flips markdown.
     assert (
         queue.advance_dependents(
             root, doc_id="dag-doc", run_id="run-1", completed_stage="extract"
@@ -211,7 +211,7 @@ def test_migration_drops_retired_detection_nodes(tmp_path: Path) -> None:
 
 def test_node_failure_cascades_and_reset_reopens_dependents(tmp_path: Path) -> None:
     """A failed branch cascades downstream; retrying it re-blocks them."""
-    from mbforge.adapters.runtime.ingest import queue
+    from mbforge.server.ingest import queue
 
     root, db = _seed_dag(tmp_path)
     worker._claim_rows(root, "w", 8)
@@ -221,13 +221,13 @@ def test_node_failure_cascades_and_reset_reopens_dependents(tmp_path: Path) -> N
     cascaded = queue.fail_cascade(
         root, doc_id="dag-doc", run_id="run-1", failed_stage="extract", error="boom"
     )
-    assert set(cascaded) == {"join", "markdown", "patent"}
-    for stage in ("join", "markdown", "patent"):
+    assert set(cascaded) == {"markdown", "patent"}
+    for stage in ("markdown", "patent"):
         assert _stage_status(db, stage) == "failed"
 
     assert queue.reset_node(root, extract_id) is True
     assert _stage_status(db, "extract") == "pending"
-    assert _stage_status(db, "join") == "blocked"
+    assert _stage_status(db, "markdown") == "blocked"
 
 
 def test_startup_reclaims_terminal_claims(tmp_path: Path) -> None:

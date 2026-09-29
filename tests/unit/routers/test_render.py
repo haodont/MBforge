@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from mbforge.application.dto.common import MoleculeRenderRequest
-from mbforge.interfaces.http.system.models import render_molecule
+from mbforge.api.http.system.models import render_molecule
+from mbforge.service.dto.common import MoleculeRenderRequest
 
 
 def test_render_molecule_rejects_empty_smiles_at_route_level() -> None:

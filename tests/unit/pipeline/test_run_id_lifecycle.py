@@ -15,15 +15,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mbforge.application.pipeline.run import ids as run_ids_module
-from mbforge.application.pipeline.run.checkpoint import (
+from mbforge.foundation.layout import LibraryLayout
+from mbforge.service.pipeline.run import ids as run_ids_module
+from mbforge.service.pipeline.run.checkpoint import (
     ensure_attempt_run,
     latest_stage_run_id,
     load_run_checkpoint,
     save_stage_summary,
 )
-from mbforge.application.pipeline.run.ids import mint_run_id
-from mbforge.foundation.layout import LibraryLayout
+from mbforge.service.pipeline.run.ids import mint_run_id
 
 DOC = "doc-runid-lifecycle"
 

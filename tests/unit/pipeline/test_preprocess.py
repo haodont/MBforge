@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import mbforge.application.pipeline.detection.image_preprocessing as preprocess_module
-from mbforge.application.pipeline.detection.image_preprocessing import (
+import mbforge.service.pipeline.detection.image_preprocessing as preprocess_module
+from mbforge.service.pipeline.detection.image_preprocessing import (
     erase_ink_region,
     preprocess_mol_image,
     split_molecule_crop,

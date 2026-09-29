@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.application.pipeline.patent.sections import parse_source_evidence_sections
 from mbforge.domain.evidence import SourceEvidence
+from mbforge.service.pipeline.patent.sections import parse_source_evidence_sections
 
 DOC = "doc-sections"
 
@@ -14,8 +14,7 @@ def _block(
     page: int,
     raw_text: str,
     *,
-    kind: str = "text_span",
-    coref: str = "",
+    kind: str = "text",
     bbox: tuple[float, float, float, float] = (10.0, 20.0, 30.0, 40.0),
 ) -> SourceEvidence:
     return SourceEvidence.create(
@@ -24,7 +23,6 @@ def _block(
         bbox=bbox,
         raw_text=raw_text,
         kind=kind,
-        coref=coref,
     )
 
 
@@ -32,7 +30,7 @@ def test_segments_sql_blocks_on_headings_and_keeps_evidence():
     blocks = [
         _block(1, "实施例1：化合物1的合成。", bbox=(10.0, 60.0, 40.0, 75.0)),
         _block(1, "将中间体加入反应瓶。", bbox=(10.0, 50.0, 40.0, 65.0)),
-        _block(1, "", kind="image_region", coref="storage/x/images/a.png"),
+        _block(1, "", kind="figcx"),
         _block(2, "实施例2：按实施例1方法制备化合物2。", bbox=(10.0, 60.0, 40.0, 75.0)),
     ]
     sections = parse_source_evidence_sections(blocks, DOC)

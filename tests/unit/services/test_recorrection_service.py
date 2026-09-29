@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-from mbforge.application.use_cases.molecule.recorrection import (
+from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.service.use_cases.molecule.recorrection import (
     RecorrectionResult,
     _rebuild_molecule,
     recorrect_molecules,
@@ -32,7 +32,7 @@ def sample_molecule(temp_library):
     db = DatabaseManager.get(temp_library)
     mol_id = "c1ccccc1"
     properties = {
-        "context_texts": ["wherein R1 is methyl"],
+        "role_contexts": ["wherein R1 is methyl"],
         "label_kind": "formula",
     }
 
@@ -99,7 +99,7 @@ class TestRebuildMolecule:
         assert nm.status == "pending"  # approved -> pending for corrector
         assert len(nm.detections) == 1
         assert nm.detections[0].page == 0
-        assert "context_texts" in nm.properties
+        assert "role_contexts" in nm.properties
 
     def test_merges_evidence_context(self, temp_library, sample_molecule):
         db = DatabaseManager.get(temp_library)
@@ -117,7 +117,7 @@ class TestRebuildMolecule:
 
         nm = _rebuild_molecule(row, detections, evidence)
 
-        contexts = nm.properties.get("context_texts", [])
+        contexts = nm.properties.get("role_contexts", [])
         assert "wherein R1 is methyl" in contexts
         assert "Formula I compound" in contexts
 

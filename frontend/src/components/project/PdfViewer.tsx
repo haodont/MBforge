@@ -37,13 +37,14 @@ interface Props {
   }) => void
   initialPage?: number
   initialBbox?: [number, number, number, number]
+  initialEvidenceId?: string
   viewerKey?: string
 }
 
 const DIRECTORY_KINDS = new Set(['title', 'head', 'sec', 'toc'])
 
 const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
-  { doc, libraryRoot, onClose: _onClose, onMoleculeClick, initialPage, initialBbox, viewerKey },
+  { doc, libraryRoot, onClose: _onClose, onMoleculeClick, initialPage, initialBbox, initialEvidenceId, viewerKey },
   ref,
 ) {
   const { t } = useTranslation()
@@ -155,6 +156,12 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
       properties: {},
     })
   }, [initialBbox, initialPage, currentPage, pageInfo, scrollToDetection, setCurrentPage])
+
+  useEffect(() => {
+    if (initialEvidenceId && initialPage && currentPage === initialPage) {
+      setSelectedEvidenceId(initialEvidenceId)
+    }
+  }, [initialEvidenceId, initialPage, currentPage])
 
   const pageOverlay = pageInfo && visibleDetections.length > 0 ? (
     <MoleculeOverlay

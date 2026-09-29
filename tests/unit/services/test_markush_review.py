@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.adapters.persistence.markush_candidates import persist_review_candidates
-from mbforge.adapters.persistence.markush_transitions import (
+from mbforge.db.markush_candidates import persist_review_candidates
+from mbforge.db.markush_transitions import (
     get_candidate_detail,
     list_candidates,
     update_candidate,
 )
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-from mbforge.application.use_cases.markush.review import apply_decision
+from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.domain.molecule import Molecule
 from mbforge.domain.review import (
     ReviewConflictError,
@@ -19,6 +18,7 @@ from mbforge.domain.review import (
     ReviewTransitionError,
 )
 from mbforge.domain.types import DetectionSource
+from mbforge.service.use_cases.markush.review import apply_decision
 
 
 @pytest.fixture

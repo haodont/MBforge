@@ -7,7 +7,7 @@ typed attributes, with JSON columns (``properties``, ``labels``,
 
 This class is a *pure value object* — it does not touch the database
 itself. Persistence is handled by a separate repository / service layer
-(e.g. :mod:`mbforge.application.use_cases.molecule.queries`). The class only knows
+(e.g. :mod:`mbforge.service.use_cases.molecule.queries`). The class only knows
 how to round-trip to/from a dict or JSON string, so it can be backed by
 either SQLite rows or JSON files without changing the entity itself.
 
@@ -274,7 +274,7 @@ class MarkushScaffold(JsonRecordMixin):
 
     This class is a *pure value object* — it does not touch the database.
     Persistence is handled by the service layer
-    (:mod:`mbforge.adapters.persistence.markush_candidates`).
+    (:mod:`mbforge.db.markush_candidates`).
     """
 
     # ── Identity ────────────────────────────────────────────────

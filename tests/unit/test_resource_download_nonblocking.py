@@ -45,14 +45,14 @@ def slow_ensure(monkeypatch: pytest.MonkeyPatch) -> None:
         time.sleep(0.1)
         return _FakeResult(status=_FakeStatus(value="ready"))
 
-    from mbforge.adapters.runtime import resource_manager
+    from mbforge.server import resource_manager
 
     monkeypatch.setattr(resource_manager.ResourceManager, "ensure", fake_ensure)
 
 
 async def test_resource_download_does_not_block_event_loop(slow_ensure: None) -> None:
     """Other coroutines make progress while ``ensure`` is sleeping."""
-    from mbforge.interfaces.http.system.resource import (
+    from mbforge.api.http.system.resource import (
         ResourceIdRequest,
         resource_download,
     )
@@ -87,7 +87,7 @@ async def test_resource_download_does_not_block_event_loop(slow_ensure: None) ->
 
 async def test_resource_download_rejects_missing_resource_id() -> None:
     """Missing ``resource_id`` returns the documented error envelope without touching ``ensure``."""
-    from mbforge.interfaces.http.system.resource import (
+    from mbforge.api.http.system.resource import (
         ResourceIdRequest,
         resource_download,
     )

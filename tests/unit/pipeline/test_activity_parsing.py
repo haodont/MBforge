@@ -1,7 +1,7 @@
-"""Unit tests for ``mbforge.application.pipeline.activity.parsing.tables``.
+"""Unit tests for ``mbforge.service.pipeline.activity.parsing.tables``.
 
 Targets the deterministic table-parsing primitives that used to live
-inside ``mbforge.application.pipeline.activity.extraction``. The existing pipeline
+inside ``mbforge.service.pipeline.activity.extraction``. The existing pipeline
 tests already cover them transitively through the orchestrator; this
 file pins the split-module surface directly.
 """
@@ -10,19 +10,19 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.application.pipeline.activity.extraction import (
+from mbforge.domain.evidence import SourceEvidence
+from mbforge.service.pipeline.activity.extraction import (
     extract_activity_measurements_from_evidence,
 )
-from mbforge.application.pipeline.activity.parsing import (
+from mbforge.service.pipeline.activity.parsing import (
     _is_activity_table,
     _parse_simple_activity_table,
 )
-from mbforge.domain.evidence import SourceEvidence
 
 DOC = "activity-evidence"
 
 
-def _evidence(raw_text: str, *, kind: str = "text_span") -> SourceEvidence:
+def _evidence(raw_text: str, *, kind: str = "text") -> SourceEvidence:
     return SourceEvidence.create(
         doc_id=DOC,
         page=1,
@@ -133,14 +133,14 @@ def test_source_evidence_prose_measurement_keeps_text_evidence_id() -> None:
     assert measurement["evidence_ids"] == [block.evidence_id]
 
 
-def test_source_evidence_table_measurements_share_table_span_id() -> None:
+def test_source_evidence_table_measurements_share_table_evidence_id() -> None:
     """Every value in one complete table points to its single table evidence."""
     block = _evidence(
         "| Compound | IC50 (nM) | EC50 (nM) |\n"
         "|---|---|---|\n"
         "| 1 | 10 | 20 |\n"
         "| 2 | 5 | 15 |",
-        kind="table_span",
+        kind="tab",
     )
 
     measurements, issues = extract_activity_measurements_from_evidence([block], DOC)
@@ -155,7 +155,7 @@ def test_source_evidence_complex_table_returns_issue_without_measurements() -> N
     """An unreadable activity cell skips the whole table instead of guessing."""
     block = _evidence(
         "| Compound | IC50 (nM) |\n|---|---|\n| 1 | 10 |\n| 2 | unreadable |",
-        kind="table_span",
+        kind="tab",
     )
 
     measurements, issues = extract_activity_measurements_from_evidence([block], DOC)

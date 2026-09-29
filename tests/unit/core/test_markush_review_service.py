@@ -16,8 +16,8 @@ import json
 
 import pytest
 
-from mbforge.adapters.persistence.markush_candidates import persist_review_candidates
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.db.markush_candidates import persist_review_candidates
+from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.domain.molecule import Molecule
 from mbforge.domain.provenance import (
     compute_content_hash,

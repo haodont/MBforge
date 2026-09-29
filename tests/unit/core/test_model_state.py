@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mbforge.adapters.runtime.models import state as model_state
+from mbforge.server.models import state as model_state
 
 
 @pytest.fixture(autouse=True)

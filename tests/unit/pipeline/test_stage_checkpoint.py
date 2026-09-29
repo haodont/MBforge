@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from mbforge.application.pipeline.composition import effective_stage_names
-from mbforge.application.pipeline.run.checkpoint import (
+from mbforge.service.pipeline.composition import effective_stage_names
+from mbforge.service.pipeline.run.checkpoint import (
     INCOMPATIBLE_CHECKPOINT,
     STAGE_ORDER,
     collect_all_summaries,
@@ -33,14 +33,13 @@ def test_next_stage_from_none() -> None:
 
 
 def test_next_stage_walks_order() -> None:
-    assert next_stage("extract") == "join"
-    assert next_stage("join") == "markdown"
+    assert next_stage("extract") == "markdown"
     assert next_stage("markdown") == "patent"
     assert next_stage("patent") is None
 
 
 def test_next_stage_unknown_stage_restarts_from_extract() -> None:
-    assert next_stage("persist") == "extract"
+    assert next_stage("__removed_stage__") == "extract"
 
 
 def test_next_stage_unknown_resets_to_extract() -> None:
@@ -99,7 +98,7 @@ def test_save_summary_with_error_code(tmp_path: Path) -> None:
 
 
 def test_load_summary_missing_file_returns_none(tmp_path: Path) -> None:
-    assert load_stage_summary(tmp_path, "persist") is None
+    assert load_stage_summary(tmp_path, "extract") is None
 
 
 def test_load_summary_none_staging_dir_returns_none() -> None:
@@ -159,7 +158,6 @@ def test_last_completed_stage_empty(tmp_path: Path) -> None:
 
 def test_last_completed_stage_partial(tmp_path: Path) -> None:
     save_stage_summary(tmp_path, "extract", status="success")
-    save_stage_summary(tmp_path, "join", status="success")
     save_stage_summary(tmp_path, "markdown", status="success")
     # patent missing → last completed is markdown
     assert last_completed_stage(tmp_path) == "markdown"
@@ -173,8 +171,8 @@ def test_last_completed_stage_all_done(tmp_path: Path) -> None:
 
 def test_last_completed_stage_stops_at_failure(tmp_path: Path) -> None:
     save_stage_summary(tmp_path, "extract", status="success")
-    save_stage_summary(tmp_path, "join", status="error")
-    # Gap at join → only the contiguous extract run counts
+    save_stage_summary(tmp_path, "markdown", status="error")
+    # Gap at markdown → only the contiguous extract run counts
     assert last_completed_stage(tmp_path) == "extract"
 
 
@@ -204,13 +202,6 @@ def _populate_all_stages(staging: Path) -> None:
         status="success",
         elapsed_ms=100,
         context={"page_count": 3, "parser": "pymupdf", "title": "Test Doc"},
-    )
-    save_stage_summary(
-        staging,
-        "join",
-        status="success",
-        elapsed_ms=0,
-        context={"source_evidence_count": 4},
     )
     save_stage_summary(
         staging,

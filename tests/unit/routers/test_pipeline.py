@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.db.sqlite.database import DatabaseManager
 
 
 @pytest.fixture
@@ -21,9 +21,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     The durable queue worker is stubbed so enqueueing never runs a real
     pipeline during router tests.
     """
-    import mbforge.adapters.runtime.environment as _environment
-    from mbforge.adapters.runtime.ingest import worker
+    import mbforge.server.environment as _environment
     from mbforge.foundation import config
+    from mbforge.server.ingest import worker
 
     monkeypatch.setattr(worker, "ensure_queue_worker", lambda _root: True)
 
@@ -50,7 +50,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(config, "load_global_config", _PatchedLoad())
 
     try:
-        from mbforge.app import create_app
+        from mbforge.server.app import create_app
 
         app = create_app()
         c = TestClient(app)
@@ -153,7 +153,7 @@ def test_pipeline_queue_logs_returns_rows_for_doc(
             (
                 ("pipeline", "start", "Processing doc.pdf"),
                 ("extract", "success", "Extracted 39 pages"),
-                ("persist", "success", "Document persisted"),
+                ("patent", "success", "Patent facts published"),
             )
         ):
             conn.execute(
@@ -183,7 +183,7 @@ def test_pipeline_queue_logs_returns_rows_for_doc(
     assert payload["success"] is True
     logs = payload["logs"]
     assert len(logs) == 3
-    assert [row["stage"] for row in logs] == ["pipeline", "extract", "persist"]
+    assert [row["stage"] for row in logs] == ["pipeline", "extract", "patent"]
     assert all(row["doc_id"] == doc_id for row in logs)
     # chronological order
     assert [row["ts_ms"] for row in logs] == sorted(row["ts_ms"] for row in logs)
@@ -233,8 +233,8 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Queue consumers receive the real fork statuses from the run checkpoint."""
-    from mbforge.application.pipeline.artifacts.staging import staging_dir
-    from mbforge.application.pipeline.run.checkpoint import (
+    from mbforge.service.pipeline.artifacts.staging import staging_dir
+    from mbforge.service.pipeline.run.checkpoint import (
         ensure_run_checkpoint,
         save_stage_summary,
     )
@@ -247,7 +247,7 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
     staging = staging_dir(root, doc_id)
     ensure_run_checkpoint(staging)
     save_stage_summary(staging, "extract", status="success")
-    save_stage_summary(staging, "detection", status="running")
+    save_stage_summary(staging, "markdown", status="running")
     with db.kb_conn() as conn:
         conn.execute(
             "INSERT INTO ingest_queue (id, file_path, doc_id, status) "
@@ -260,7 +260,7 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
     assert response.status_code == 200
     assert response.json()["tasks"][0]["stage_statuses"] == {
         "extract": "success",
-        "detection": "running",
+        "markdown": "running",
     }
 
 
@@ -339,8 +339,8 @@ def test_pipeline_queue_offloads_sqlite_to_thread(
     """The /queue route must not run SQLite queries on the event loop."""
     import asyncio
 
-    from mbforge.application.dto.pipeline import PipelineQueueRequest
-    from mbforge.interfaces.http.pipeline.pipeline import pipeline_queue
+    from mbforge.api.http.pipeline.pipeline import pipeline_queue
+    from mbforge.service.dto.pipeline import PipelineQueueRequest
 
     calls = _capture_to_thread(monkeypatch)
 
@@ -363,8 +363,8 @@ def test_pipeline_queue_stats_offloads_sqlite_to_thread(
     """The /queue/stats route must not run SQLite queries on the event loop."""
     import asyncio
 
-    from mbforge.application.dto.pipeline import PipelineQueueRequest
-    from mbforge.interfaces.http.pipeline.pipeline import pipeline_queue_stats
+    from mbforge.api.http.pipeline.pipeline import pipeline_queue_stats
+    from mbforge.service.dto.pipeline import PipelineQueueRequest
 
     calls = _capture_to_thread(monkeypatch)
 
@@ -388,8 +388,8 @@ def test_pipeline_enqueue_unresolved_offloads_scan_and_sqlite(
     import asyncio
     from unittest.mock import patch
 
-    from mbforge.application.dto.pipeline import PipelineEnqueueRequest
-    from mbforge.interfaces.http.pipeline.pipeline import pipeline_enqueue
+    from mbforge.api.http.pipeline.pipeline import pipeline_enqueue
+    from mbforge.service.dto.pipeline import PipelineEnqueueRequest
 
     calls: list[tuple[object, tuple, dict]] = []
 
@@ -408,9 +408,7 @@ def test_pipeline_enqueue_unresolved_offloads_scan_and_sqlite(
     db = DatabaseManager.get(root)
     db.initialize()
 
-    with patch(
-        "mbforge.adapters.runtime.ingest.worker.ensure_queue_worker", return_value=True
-    ):
+    with patch("mbforge.server.ingest.worker.ensure_queue_worker", return_value=True):
         result = asyncio.run(
             pipeline_enqueue(
                 PipelineEnqueueRequest(library_root=root, action="enqueue_unresolved")

@@ -4,7 +4,7 @@ Owns the ``source_key`` / ``content_hash`` derivation used to identify a
 candidate across re-imports. Pure functions: no DB I/O.
 
 The re-import protection rule lives with the persistence path in
-:mod:`mbforge.adapters.persistence.markush_candidates`:
+:mod:`mbforge.db.markush_candidates`:
 
 - same ``source_key`` + same ``content_hash`` is a no-op (preserving
   human state);

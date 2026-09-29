@@ -1,4 +1,4 @@
-from mbforge.application.pipeline.detection.formula_normalization import (
+from mbforge.service.pipeline.detection.formula_normalization import (
     normalize_patent_formulas,
 )
 

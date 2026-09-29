@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from mbforge.app import create_app
-from mbforge.interfaces.http import agent
+from mbforge.api.http import agent
+from mbforge.server.app import create_app
 
 
 def test_agent_molecule_tool_resolves_library_server_side(monkeypatch) -> None:

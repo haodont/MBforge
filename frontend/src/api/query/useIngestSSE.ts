@@ -13,14 +13,10 @@ import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { subscribeIngestEvents } from '../http/ingest_queue'
 import { queryKeys } from './keys'
+import { PIPELINE_STAGES } from './stages'
 import type { IngestTask } from '../http/ingest_queue'
 
-const PIPELINE_STAGES = new Set([
-  'extract',
-  'join',
-  'markdown',
-  'patent',
-])
+const PIPELINE_STAGE_SET = new Set<string>(PIPELINE_STAGES)
 
 interface UseIngestSSEOptions {
   libraryRoot: string
@@ -81,7 +77,7 @@ export function useIngestSSE({
                 ...t,
                 stage: 'stage' in ev ? (ev.stage as string) : t.stage,
                 stage_statuses:
-                  stageStatus !== null && PIPELINE_STAGES.has(stage)
+                  stageStatus !== null && PIPELINE_STAGE_SET.has(stage)
                     ? { ...t.stage_statuses, [stage]: stageStatus }
                     : t.stage_statuses,
                 updated_at:

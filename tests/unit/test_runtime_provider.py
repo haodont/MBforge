@@ -10,7 +10,7 @@ missing from ``adapters.inference``'s own imports.
 
 from __future__ import annotations
 
-from mbforge.adapters.runtime.provider import create_runtime_provider
+from mbforge.server.provider import create_runtime_provider
 
 #: Capability -> the callable the pipeline actually invokes on it.
 _PIPELINE_CALLABLES = {

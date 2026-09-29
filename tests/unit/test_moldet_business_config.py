@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from mbforge.adapters.inference.moldet_v2_ft import MolDetv2Detector
 from mbforge.foundation.config import AppConfig, MoldetConfig
+from mbforge.foundation.inference.moldet_v2_ft import MolDetv2Detector
 
 
 def test_moldet_device_ignores_legacy_environment_override(monkeypatch) -> None:
@@ -15,12 +15,12 @@ def test_moldet_device_ignores_legacy_environment_override(monkeypatch) -> None:
 
     with (
         patch(
-            "mbforge.adapters.inference.moldet_v2_ft._has_ultralytics",
+            "mbforge.foundation.inference.moldet_v2_ft._has_ultralytics",
             return_value=True,
         ),
         patch.object(MolDetv2Detector, "_load_model"),
         patch(
-            "mbforge.adapters.inference.moldet_v2_ft.load_global_config",
+            "mbforge.foundation.inference.moldet_v2_ft.load_global_config",
             return_value=config,
         ),
     ):

@@ -6,16 +6,16 @@ import json
 
 import pytest
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
-from mbforge.application.use_cases.markush.enumeration import (
-    apply_generated_decision,
-    list_run_results,
-    run_enumeration,
-)
+from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.domain.enumeration import (
     SiteSelection,
     preview,
     theoretical_count,
+)
+from mbforge.service.use_cases.markush.enumeration import (
+    apply_generated_decision,
+    list_run_results,
+    run_enumeration,
 )
 
 

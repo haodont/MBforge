@@ -7,14 +7,14 @@ from pathlib import Path
 import pymupdf
 from fastapi.testclient import TestClient
 
-from mbforge.application.dto.readiness import (
+from mbforge.foundation.config import AppConfig, LLMConfig
+from mbforge.service.dto.readiness import (
     DatabaseReadiness,
     LibraryReadiness,
     ModelReadiness,
     OCRReadiness,
 )
-from mbforge.application.use_cases.system import readiness as readiness_service
-from mbforge.foundation.config import AppConfig, LLMConfig
+from mbforge.service.use_cases.system import readiness as readiness_service
 
 
 def test_diagnostics_summary_returns_degraded_subsystems(
@@ -113,7 +113,7 @@ def test_demo_pdf_is_sanitized_and_registered(
     assert "Synthetic sample document" in text
     assert "caffeine C8H10N4O2" in text
     # The document is registered in library storage.
-    from mbforge.adapters.persistence.document_store import load_document
+    from mbforge.db.document_store import load_document
 
     doc = load_document(doc_id, str(tmp_path))
     assert doc is not None

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from mbforge.api.http.system.settings import _redact_secrets
 from mbforge.foundation.config import (
     AppConfig,
     IngestConfig,
@@ -17,7 +18,6 @@ from mbforge.foundation.config import (
     reset_config_cache,
     update_settings,
 )
-from mbforge.interfaces.http.system.settings import _redact_secrets
 
 # Neutral stand-ins for secret-shaped literals: the tests only assert that
 # stored values round-trip, so the stubs stay free of credential shapes.

@@ -1125,7 +1125,6 @@
   "pdfFloat.singlePage": "Switch to single page mode",
   "pdfFloat.continuous": "Switch to continuous scroll",
   "pdfPipeline.stage.extract": "Extraction",
-  "pdfPipeline.stage.join": "Evidence join",
   "pdfPipeline.stage.markdown": "Markdown generation",
   "pdfPipeline.stage.patent": "Patent facts",
   "pdfResult.ariaLabel": "Recognition results",

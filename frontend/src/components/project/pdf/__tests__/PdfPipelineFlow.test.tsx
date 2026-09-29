@@ -36,7 +36,6 @@ describe('PdfPipelineFlow', () => {
           stage: 'unknown',
           stage_statuses: {
             extract: 'success',
-            detection: 'success',
             markdown: 'running',
           },
         })}

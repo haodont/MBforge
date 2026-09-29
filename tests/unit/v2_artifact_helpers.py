@@ -1,4 +1,9 @@
-"""Small test helpers for publishing the current v2 artifact contract."""
+"""Small test helpers for publishing the current SQL source-evidence contract.
+
+A run's only artifact is the ``source_evidence`` table: tests mint it with the
+real :func:`mint_evidence` and persist it with ``persist_source_evidence`` so the
+readers under test see exactly what Extract would write.
+"""
 
 from __future__ import annotations
 
@@ -6,16 +11,52 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from mbforge.adapters.persistence.source_evidence import persist_source_evidence
-from mbforge.application.pipeline.artifacts import (
-    build_extract_artifact,
-    join_evidence_artifacts,
-    save_extract_branch,
-)
-from mbforge.application.pipeline.artifacts.evidence_models import PageFrame
-from mbforge.application.pipeline.extract.text import ExtractedDocument, PageContent
+from mbforge.db.source_evidence import persist_source_evidence
 from mbforge.domain.molecule import Molecule
 from mbforge.domain.types import ExtractionResult
+from mbforge.service.pipeline.artifacts import mint_evidence
+from mbforge.service.pipeline.artifacts.evidence_models import PageFrame
+from mbforge.service.pipeline.extract.text import ExtractedDocument, PageContent
+
+#: ``block_type`` → the layout label the evidence mint registers for it.
+_BLOCK_KIND = {0: "text", 1: "figcx", 2: "tab"}
+_BLOCK_REGION_TYPE = {0: "text", 1: "image", 2: "table"}
+
+
+def _synthesize_regions(extracted: ExtractedDocument) -> None:
+    """Give a page typed regions when it only carries the legacy span views.
+
+    The layout producer derives ``text_spans``/``figure_bboxes`` from its typed
+    regions; tests that hand-build the legacy views get regions synthesized here
+    so ``mint_evidence`` — which reads the regions — sees the same layout.
+    """
+    for page in extracted.pages:
+        if page.regions:
+            continue
+        regions: list[dict[str, Any]] = []
+        for order, span in enumerate(page.text_spans):
+            regions.append(
+                {
+                    "region_id": f"r{order}",
+                    "kind": _BLOCK_KIND.get(span.block_type, "text"),
+                    "type": _BLOCK_REGION_TYPE.get(span.block_type, "text"),
+                    "bbox": list(span.bbox),
+                    "reading_order": order,
+                    "text": span.text,
+                }
+            )
+        for offset, bbox in enumerate(page.figure_bboxes):
+            regions.append(
+                {
+                    "region_id": f"f{offset}",
+                    "kind": "figcx",
+                    "type": "image",
+                    "bbox": list(bbox),
+                    "reading_order": len(page.text_spans) + offset,
+                    "text": "",
+                }
+            )
+        page.regions = regions
 
 
 def publish_v2_run(
@@ -54,17 +95,13 @@ def publish_v2_run(
         for detection in detections:
             results.append(
                 ExtractionResult(
-                    esmiles=candidate.esmiles,
                     smiles=candidate.canonical_smiles,
+                    esmiles=candidate.esmiles,
                     name=candidate.name,
-                    source=(candidate.sources[0] if candidate.sources else "image"),
                     moldet_conf=detection.conf_moldet,
                     bbox_pdf=detection.bbox,
                     page_idx=detection.page,
-                    mol_img_path=(
-                        Path(detection.image_path) if detection.image_path else None
-                    ),
-                    status=candidate.status,
+                    mol_img_path=detection.image_path,
                     properties=dict(candidate.properties),
                 )
             )
@@ -81,20 +118,16 @@ def publish_v2_run(
             ],
             page_count=max(extracted.page_count, max(page_numbers)),
         )
+    _synthesize_regions(extracted)
     frames = [
         PageFrame(page=page, width=width, height=height)
         for page in sorted(page_numbers)
     ]
-    extract = build_extract_artifact(
-        doc_id,
-        run_id,
-        extracted,
-        frames,
-        results=results,
-        molecule_stats=molecule_stats or {},
-        library_root=library_root,
+    evidence = mint_evidence(
+        extracted, frames, results, doc_id=doc_id, library_root=library_root
     )
-    save_extract_branch(library_root, extract)
-    joined = join_evidence_artifacts(extract)
-    persist_source_evidence(library_root, joined)
+    persist_source_evidence(library_root, evidence)
     return frames
+
+
+__all__ = ["publish_v2_run"]

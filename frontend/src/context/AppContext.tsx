@@ -32,6 +32,8 @@ export interface Tab {
   initialPage?: number
   /** Optional PDF-point bbox deep-link target. */
   initialBbox?: [number, number, number, number]
+  /** Optional canonical source-evidence id to highlight on open. */
+  initialEvidenceId?: string
 }
 
 let _tabIdSeq = 0
@@ -60,7 +62,7 @@ function tabsReducer(state: TabsState, action: TabsAction): TabsState {
         tab => tab.type === action.tab.type && tab.doc.doc_id === action.tab.doc.doc_id,
       )
       if (existing) {
-        const hasLocation = action.tab.initialPage !== undefined || action.tab.initialBbox !== undefined
+        const hasLocation = action.tab.initialPage !== undefined || action.tab.initialBbox !== undefined || action.tab.initialEvidenceId !== undefined
         return {
           ...state,
           openTabs: hasLocation
@@ -69,6 +71,7 @@ function tabsReducer(state: TabsState, action: TabsAction): TabsState {
                   ...tab,
                   initialPage: action.tab.initialPage ?? tab.initialPage,
                   initialBbox: action.tab.initialBbox ?? tab.initialBbox,
+                  initialEvidenceId: action.tab.initialEvidenceId ?? tab.initialEvidenceId,
                 }
               : tab)
             : state.openTabs,

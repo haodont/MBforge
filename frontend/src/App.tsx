@@ -204,6 +204,7 @@ function TabContent({
           libraryRoot={activeTab.libraryRoot}
           initialPage={activeTab.initialPage}
           initialBbox={activeTab.initialBbox}
+          initialEvidenceId={activeTab.initialEvidenceId}
           onClose={() => {
             clearViewerSnapshot(`${activeTab.id}:${activeTab.doc.doc_id}`)
             closeTab(activeTab.id)
@@ -227,6 +228,7 @@ function TabContent({
           libraryRoot={activeTab.libraryRoot}
           initialPage={activeTab.initialPage}
           initialBbox={activeTab.initialBbox}
+          initialEvidenceId={activeTab.initialEvidenceId}
           onClose={() => {
             clearViewerSnapshot(`${activeTab.id}:${activeTab.doc.doc_id}`)
             closeTab(activeTab.id)

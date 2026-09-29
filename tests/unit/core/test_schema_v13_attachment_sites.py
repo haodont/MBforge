@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from mbforge.adapters.persistence.sqlite.database import DatabaseManager
+from mbforge.db.sqlite.database import DatabaseManager
 
 
 @pytest.fixture

@@ -2,31 +2,24 @@
 
 from __future__ import annotations
 
-from mbforge.adapters.persistence.source_evidence import persist_source_evidence
-from mbforge.application.pipeline.artifacts import (
-    build_extract_artifact,
-    save_extract_branch,
-)
-from mbforge.application.pipeline.artifacts.evidence_models import PageFrame
-from mbforge.application.pipeline.extract.text import (
+from mbforge.domain.molecule import Molecule
+from mbforge.domain.types import DetectionSource
+from mbforge.service.pipeline.extract.text import (
     ExtractedDocument,
     PageContent,
     TextSpan,
 )
-from mbforge.application.use_cases.documents.pdf_layout import (
+from mbforge.service.use_cases.documents.pdf_layout import (
     build_document_overlay,
     load_document_bboxes,
 )
-from mbforge.domain.evidence import SourceEvidence
-from mbforge.domain.molecule import Molecule
-from mbforge.domain.types import DetectionSource
 from tests.unit.v2_artifact_helpers import publish_v2_run
 
 PAGE_H = 300.0  # synthetic source-PDF page height (pt)
 
 
 def _save_synthetic(tmp_path, doc_id: str = "doc-1") -> None:
-    """Write a synthetic extract artifact whose spans are top-left origin."""
+    """Write a synthetic run whose spans are bottom-left origin points."""
     extracted = ExtractedDocument(
         raw_text="...",
         page_count=2,
@@ -94,14 +87,14 @@ def _save_detections(
 
 
 def test_overlay_blocks_read_sql_evidence_without_flip(tmp_path) -> None:
-    """Blocks come straight from SQL: no y-flip, no Extract branch rebuild."""
+    """Blocks come straight from SQL: no y-flip, no branch rebuild."""
     _save_synthetic(tmp_path)
     result = build_document_overlay(str(tmp_path), "doc-1", "/p.pdf")
     blocks = result["blocks"]
     texts = [b for b in blocks if b["block_type"] == "text"]
     tables = [b for b in blocks if b["block_type"] == "table"]
     images = [b for b in blocks if b["block_type"] == "image"]
-    # The Join already normalized coordinates, so the reader passes them through.
+    # The mint already normalized coordinates, so the reader passes them through.
     assert texts[0]["bbox"] == (71.37, 48.26, 197.03, 62.26)
     assert texts[0]["content"] == "(19)国家知识产权局"
     assert texts[0]["page"] == 1
@@ -138,48 +131,6 @@ def test_overlay_blocks_read_joined_evidence_rows(tmp_path) -> None:
     assert result["blocks"][0]["bbox"] == (10.0, 20.0, 30.0, 50.0)
 
 
-def test_overlay_registers_the_extract_branch_vocabulary(tmp_path) -> None:
-    """The overlay must learn the Extract branch's labels, not only Detection's.
-
-    With the local layout producer every text and figure row carries a layout
-    class (``bib`` / ``figcx`` / …) declared in ``extract.json``'s
-    ``meta.kind_vocab``. Registering only the Detection vocabulary leaves those
-    labels unmapped, and the reader fails closed (``UnknownKind``) — which is
-    what left the PDF viewer without any layout block.
-
-    The label is deliberately one no production module registers, so the check
-    does not depend on which tests ran before it in this process.
-    """
-    doc_id = "doc-layout-vocab"
-    frames = [PageFrame(page=1, width=600.0, height=PAGE_H)]
-    extracted = ExtractedDocument(
-        raw_text="标题",
-        page_count=1,
-        pages=[PageContent(page_num=1, text="标题")],
-        kind_vocab={"probecls": "text"},
-    )
-    save_extract_branch(
-        tmp_path, build_extract_artifact(doc_id, "run-1", extracted, frames)
-    )
-    persist_source_evidence(
-        tmp_path,
-        [
-            SourceEvidence.create(
-                doc_id=doc_id,
-                page=1,
-                bbox=(10.0, 20.0, 110.0, 120.0),
-                raw_text="标题",
-                kind="probecls",
-            )
-        ],
-    )
-
-    result = build_document_overlay(str(tmp_path), doc_id, "/p.pdf")
-
-    assert [block["block_type"] for block in result["blocks"]] == ["text"]
-    assert result["blocks"][0]["content"] == "标题"
-
-
 def test_overlay_missing_doc_yields_empty_blocks(tmp_path) -> None:
     result = build_document_overlay(str(tmp_path), "nope", "/p.pdf")
     assert result["blocks"] == []
@@ -187,8 +138,8 @@ def test_overlay_missing_doc_yields_empty_blocks(tmp_path) -> None:
 
 
 def test_load_document_bboxes_reports_stage_coverage(tmp_path) -> None:
-    # The artifact-side reader still backs the molecule reverse lookup
-    # (services.molecule.queries); the viewer overlay reads SQL instead.
+    # The SQL-backed reader restores the molecule reverse lookup
+    # (services.molecule.queries); the viewer overlay reads SQL directly.
     _save_detections(
         tmp_path,
         "doc-1",

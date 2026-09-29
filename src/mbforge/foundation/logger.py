@@ -115,12 +115,12 @@ _logger_initialized = False
 _log_level: int = logging.INFO
 
 _ERROR_ONLY_LOGGER_PREFIXES = (
-    "mbforge.application.pipeline.stages.extract",
-    "mbforge.application.pipeline.extract.text",
-    "mbforge.application.pipeline.detection",
-    "mbforge.application.pipeline.artifacts",
-    "mbforge.adapters.inference.ocr",
-    "mbforge.adapters.inference.moldet_v2_ft",
+    "mbforge.service.pipeline.stages.extract",
+    "mbforge.service.pipeline.extract.text",
+    "mbforge.service.pipeline.detection",
+    "mbforge.service.pipeline.artifacts",
+    "mbforge.foundation.inference.ocr",
+    "mbforge.foundation.inference.moldet_v2_ft",
 )
 
 # ---- 诊断环形缓冲 + 请求路径上下文 ----
