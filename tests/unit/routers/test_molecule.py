@@ -85,9 +85,10 @@ def test_molecule_list_backfills_source_doc_from_evidence(
     with db.mol_conn() as conn:
         conn.execute(
             """
-            INSERT INTO evidence
-                (canonical_smiles, mol_id, doc_id, context_text, role, kind)
-            VALUES ('CCO', 'CCO', 'doc-42', 'nearby text', 'detected', 'figure')
+            INSERT INTO molecule_detections
+                (mol_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1,
+                 conf_moldet, context_text)
+            VALUES ('CCO', 'doc-42', 0, 0, 0, 1, 1, 0.9, 'nearby text')
             """
         )
 
@@ -388,15 +389,6 @@ def test_molecule_by_location_uses_detection_cache_and_converts_page(
         )
         conn.execute(
             """
-            INSERT INTO evidence
-                (canonical_smiles, mol_id, doc_id, page, bbox_x0, bbox_y0,
-                 bbox_x1, bbox_y1, kind, confidence, crop_relpath)
-            VALUES ('CCO', 'm1', 'doc-1', 3, 10, 20, 40, 60, 'figure', 0.91,
-                    'crop.png')
-            """
-        )
-        conn.execute(
-            """
             INSERT INTO molecule_detections
                 (mol_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1,
                  conf_moldet, vlm_verified_esmiles, crop_relpath)
@@ -419,8 +411,7 @@ def test_molecule_by_location_uses_detection_cache_and_converts_page(
 
     assert response.status_code == 200
     matches = response.json()["matches"]
-    # Legacy ``evidence`` is not a location-query fallback; the interactive
-    # detection-cache row is the only match in this fixture.
+    # The interactive detection-cache row is the only match in this fixture.
     assert len(matches) == 1
     assert {match["page"] for match in matches} == {3}
     assert all(match["mol_id"] == "m1" for match in matches)

@@ -18,7 +18,6 @@ from typing import Any
 
 from mbforge.db.sqlite.schema import (
     _ACTIVITIES_SCHEMA,
-    _EVIDENCE_SCHEMA,
     _KB_SCHEMA,
     _MOL_FTS,
     _MOL_SCHEMA,
@@ -77,7 +76,6 @@ class DatabaseManager:
         return (
             _MOL_SCHEMA
             + _SOURCE_EVIDENCE_SCHEMA
-            + _EVIDENCE_SCHEMA
             + _REVIEW_V12_SCHEMA
             + _ACTIVITIES_SCHEMA
             + _MOL_FTS
@@ -111,23 +109,6 @@ class DatabaseManager:
         if not actual_ids:
             return 0
 
-        # Capture canonical SMILES before the molecules themselves are
-        # deleted. The residual-alias cleanup below runs after those rows are
-        # gone, so querying ``molecules`` at that point would be empty and
-        # silently delete nothing.
-        deleted_canons: list[str] = []
-        for start in range(0, len(actual_ids), chunk_size):
-            chunk = actual_ids[start : start + chunk_size]
-            chunk_placeholders = ",".join("?" for _ in chunk)
-            rows = conn.execute(
-                f"SELECT DISTINCT canonical_smiles FROM molecules "
-                f"WHERE mol_id IN ({chunk_placeholders})",
-                chunk,
-            ).fetchall()
-            deleted_canons.extend(row[0] for row in rows if row[0])
-        # Deduplicate and keep insertion order.
-        deleted_canons = list(dict.fromkeys(deleted_canons))
-
         def _chunked(table: str, where: str, params: list[str]) -> None:
             for start in range(0, len(params), chunk_size):
                 chunk = params[start : start + chunk_size]
@@ -156,22 +137,7 @@ class DatabaseManager:
         # this routine and works on connections that have
         # ``PRAGMA foreign_keys`` off.
         _chunked("activities", "mol_id", actual_ids)
-        _chunked("evidence", "mol_id", actual_ids)
         _chunked("molecules", "mol_id", actual_ids)
-        # Any evidence rows that share a canonical_smiles with a deleted
-        # molecule but were not anchored to that mol_id (e.g. un-anchored
-        # figure rows or aliased duplicates) go too. Evidence whose smiles is
-        # still owned by a surviving molecule is kept so it stays
-        # attributable. Chunked for the same reason.
-        for start in range(0, len(deleted_canons), chunk_size):
-            chunk = deleted_canons[start : start + chunk_size]
-            chunk_placeholders = ",".join("?" for _ in chunk)
-            conn.execute(
-                f"DELETE FROM evidence WHERE canonical_smiles IN ({chunk_placeholders}) "
-                f"AND NOT EXISTS (SELECT 1 FROM molecules m "
-                f"WHERE m.canonical_smiles = evidence.canonical_smiles)",
-                chunk,
-            )
         # This FTS table uses molecules as external content. Rebuilding after
         # the base rows are gone is reliable across SQLite/FTS5 versions,
         # whereas the incremental external-content delete syntax is not.
@@ -251,15 +217,12 @@ class DatabaseManager:
             """
             SELECT mol_id FROM molecules WHERE source_doc = ?
             UNION
-            SELECT mol_id FROM evidence WHERE doc_id = ? AND mol_id IS NOT NULL
-            UNION
             SELECT mol_id FROM molecule_detections WHERE doc_id = ? AND mol_id IS NOT NULL
             """,
-            (doc_id, doc_id, doc_id),
+            (doc_id, doc_id),
         ).fetchall()
         candidates = [row[0] for row in candidate_rows if row[0]]
 
-        conn.execute("DELETE FROM evidence WHERE doc_id = ?", (doc_id,))
         conn.execute("DELETE FROM source_evidence WHERE doc_id = ?", (doc_id,))
         conn.execute("DELETE FROM molecule_detections WHERE doc_id = ?", (doc_id,))
         # Capture the document's review candidate IDs before deleting the
@@ -301,7 +264,6 @@ class DatabaseManager:
             FROM molecules m
             WHERE m.mol_id IN ({placeholders})
               AND (m.source_doc = ? OR m.source_doc IS NULL)
-              AND NOT EXISTS (SELECT 1 FROM evidence e WHERE e.mol_id = m.mol_id)
               AND NOT EXISTS (
                 SELECT 1 FROM molecule_detections d WHERE d.mol_id = m.mol_id
               )
@@ -383,20 +345,28 @@ class DatabaseManager:
 
         ``CREATE TABLE IF NOT EXISTS`` cannot add a column to an existing
         table, so a pre-existing library database needs the new
-        ``evidence.evidence_id`` column added explicitly. The retired
-        ``text_molecule_links`` table (whose molecule↔evidence association now
-        lives in ``evidence.evidence_id``) is dropped outright.
+        ``molecule_detections.evidence_id`` / ``context_text`` columns added
+        explicitly. The retired ``text_molecule_links`` and ``evidence`` tables
+        (the latter's role now lives on ``molecule_detections``) are dropped
+        outright.
         """
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(evidence)").fetchall()
+        detection_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(molecule_detections)").fetchall()
         }
-        if columns and "evidence_id" not in columns:
-            conn.execute("ALTER TABLE evidence ADD COLUMN evidence_id TEXT")
+        if detection_columns and "evidence_id" not in detection_columns:
+            conn.execute("ALTER TABLE molecule_detections ADD COLUMN evidence_id TEXT")
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ev_evidence_id ON evidence(evidence_id)"
+                "CREATE INDEX IF NOT EXISTS idx_md_evidence_id "
+                "ON molecule_detections(evidence_id)"
             )
-            logger.info("Migrated molecule schema: added evidence.evidence_id")
+            logger.info(
+                "Migrated molecule schema: added molecule_detections.evidence_id"
+            )
+        if detection_columns and "context_text" not in detection_columns:
+            conn.execute("ALTER TABLE molecule_detections ADD COLUMN context_text TEXT")
         conn.execute("DROP TABLE IF EXISTS text_molecule_links")
+        conn.execute("DROP TABLE IF EXISTS evidence")
 
     def _thread_connection(self) -> sqlite3.Connection:
         """Return a per-thread SQLite connection for the unified database.

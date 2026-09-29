@@ -61,14 +61,6 @@ class EvidenceRepository(Protocol):
         self, doc_id: str, page: int, bbox: tuple[float, float, float, float]
     ) -> list[SourceEvidence]: ...
 
-    def list_molecule_evidence(
-        self, canonical_smiles: Sequence[str]
-    ) -> list[dict[str, Any]]: ...
-
-    def evidence_for_molecules(
-        self, mol_ids: Sequence[str], canonicals: Sequence[str]
-    ) -> list[dict[str, Any]]: ...
-
     def molecule_metadata(
         self, evidence_id: str, doc_id: str
     ) -> tuple[str, str] | None: ...
@@ -121,6 +113,14 @@ class MoleculeRepository(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     def identity_fields(self, mol_ids: Sequence[str]) -> dict[str, dict[str, Any]]: ...
+
+    def list_molecule_evidence(
+        self, canonical_smiles: Sequence[str]
+    ) -> list[dict[str, Any]]: ...
+
+    def evidence_for_molecules(
+        self, mol_ids: Sequence[str], canonicals: Sequence[str]
+    ) -> list[dict[str, Any]]: ...
 
     def load_detections(
         self, doc_id: str, page: int | None = None

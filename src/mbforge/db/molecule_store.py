@@ -45,9 +45,8 @@ def list_page(library_root: str | Path, request: Any) -> dict[str, Any]:
         if request.source_doc:
             where_parts.append(
                 "(source_doc = ? OR EXISTS ("
-                "SELECT 1 FROM evidence e WHERE e.doc_id = ? AND "
-                "(e.mol_id = molecules.mol_id OR "
-                "e.canonical_smiles = molecules.canonical_smiles)))"
+                "SELECT 1 FROM molecule_detections md WHERE md.doc_id = ? AND "
+                "md.mol_id = molecules.mol_id))"
             )
             params.extend([request.source_doc, request.source_doc])
         if request.activity_presence == "present":
@@ -120,7 +119,7 @@ def list_page(library_root: str | Path, request: Any) -> dict[str, Any]:
         source_docs.extend(
             row[0]
             for row in conn.execute(
-                "SELECT DISTINCT doc_id FROM evidence "
+                "SELECT DISTINCT doc_id FROM molecule_detections "
                 "WHERE doc_id IS NOT NULL AND doc_id != '' "
                 "ORDER BY doc_id LIMIT ?",
                 (_MAX_FILTER_OPTIONS,),
@@ -585,7 +584,6 @@ def apply_corrections(
 # the same canonical SMILES may be referenced by other documents.
 DOC_SCOPED_MOLECULE_TABLES: tuple[str, ...] = (
     "molecule_detections",
-    "evidence",
     "markush_fragments",
     "markush_review_candidates",
     "markush_evidence",
@@ -631,18 +629,14 @@ def _candidate_context_text(candidate: Any) -> str:
 def _persist_loop(
     active_conn: Any, db: Any, doc_id: str, candidates: Sequence[Any]
 ) -> int:
-    """Upsert molecules and insert detection/evidence rows on one connection."""
+    """Upsert molecules and detection rows on one connection."""
     persisted = 0
     for c in candidates:
         primary = c.detections[0]
         bbox = primary.bbox
         conf_moldet = primary.conf_moldet
-        # Page contract boundary: ``primary.page`` is a 0-based ``PageIndex``;
-        # evidence rows and the UI use 1-based ``PageNumber``. Convert once.
-        primary_page_number = primary.page + 1
         canonical_smiles = c.canonical_smiles
         context_text = _candidate_context_text(c)
-        evidence_kind = "figure" if primary.image_path else "text"
         evidence_source = getattr(primary, "source", "image")
         if evidence_source not in {"image", "text", "manual"}:
             evidence_source = "image"
@@ -680,8 +674,8 @@ def _persist_loop(
             INSERT INTO molecule_detections (
                 mol_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1,
                 crop_relpath, conf_moldet,
-                vlm_verified_esmiles
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                vlm_verified_esmiles, evidence_id, context_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 canonical_smiles,
@@ -694,31 +688,8 @@ def _persist_loop(
                 primary.image_path,
                 conf_moldet,
                 c.esmiles,
-            ),
-        )
-        active_conn.execute(
-            """
-            INSERT INTO evidence
-                (canonical_smiles, mol_id, evidence_id, doc_id, page,
-                 bbox_x0, bbox_y0, bbox_x1, bbox_y1,
-                 crop_relpath, context_text, role, kind, confidence, source_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'detected', ?, ?, ?)
-            """,
-            (
-                canonical_smiles,
-                canonical_smiles,
                 getattr(primary, "evidence_id", None),
-                doc_id,
-                primary_page_number,
-                bbox[0] if bbox else None,
-                bbox[1] if bbox else None,
-                bbox[2] if bbox else None,
-                bbox[3] if bbox else None,
-                primary.image_path,
                 context_text,
-                evidence_kind,
-                primary.confidence,
-                evidence_source,
             ),
         )
         persisted += 1
@@ -768,6 +739,86 @@ def replace_document_candidates(
     return persisted
 
 
+# Projection of a molecule_detections row into the flat molecule-evidence
+# contract. ``kind``/``source_type`` are derived from crop presence (preserving
+# the retired ``evidence`` table's semantics); ``page`` is converted to the
+# 1-based PageNumber the API/UI use.
+_EVIDENCE_COLUMNS = """
+    md.id AS id,
+    md.mol_id AS mol_id,
+    md.evidence_id AS evidence_id,
+    COALESCE(m.canonical_smiles, md.mol_id) AS canonical_smiles,
+    md.doc_id AS doc_id,
+    md.page + 1 AS page,
+    md.bbox_x0 AS bbox_x0, md.bbox_y0 AS bbox_y0,
+    md.bbox_x1 AS bbox_x1, md.bbox_y1 AS bbox_y1,
+    md.crop_relpath AS crop_relpath,
+    md.context_text AS context_text,
+    NULL AS code_text,
+    'detected' AS role,
+    CASE WHEN COALESCE(md.crop_relpath, '') != '' THEN 'figure' ELSE 'text' END AS kind,
+    md.conf_moldet AS confidence,
+    CASE WHEN COALESCE(md.crop_relpath, '') != '' THEN 'image' ELSE 'text' END AS source_type,
+    NULL AS created_at
+"""
+
+
+def list_molecule_evidence(
+    library_root: str | Path, canonical_smiles: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Return the molecule evidence chain for the given canonical SMILES.
+
+    The chain is derived from ``molecule_detections`` (the molecule-keyed
+    location table): each row carries page (1-based), bbox, crop, context and
+    the ``evidence_id`` that links to its canonical ``source_evidence`` row.
+    """
+    canonicals = [c for c in canonical_smiles if c]
+    if not canonicals:
+        return []
+    placeholders = ",".join("?" for _ in canonicals)
+    db = DatabaseManager.get(str(library_root))
+    with db.mol_conn() as conn:
+        rows = conn.execute(
+            f"SELECT {_EVIDENCE_COLUMNS} "
+            "FROM molecule_detections md "
+            "LEFT JOIN molecules m ON m.mol_id = md.mol_id "
+            f"WHERE m.canonical_smiles IN ({placeholders}) "
+            f"OR md.mol_id IN ({placeholders}) "
+            "ORDER BY kind, md.doc_id, md.page, md.id",
+            canonicals + canonicals,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def evidence_for_molecules(
+    library_root: str | Path,
+    mol_ids: Sequence[str],
+    canonicals: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Return chain rows matching any ``mol_id`` or canonical SMILES."""
+    mol_ids = [m for m in mol_ids if m]
+    canonicals = [c for c in canonicals if c]
+    clauses: list[str] = []
+    params: list[Any] = []
+    if mol_ids:
+        clauses.append(f"md.mol_id IN ({','.join('?' * len(mol_ids))})")
+        params.extend(mol_ids)
+    if canonicals:
+        clauses.append(f"m.canonical_smiles IN ({','.join('?' * len(canonicals))})")
+        params.extend(canonicals)
+    if not clauses:
+        return []
+    db = DatabaseManager.get(str(library_root))
+    with db.mol_conn() as conn:
+        rows = conn.execute(
+            f"SELECT {_EVIDENCE_COLUMNS} FROM molecule_detections md "
+            "LEFT JOIN molecules m ON m.mol_id = md.mol_id "
+            f"WHERE {' OR '.join(clauses)}",
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 __all__ = [
     "apply_corrections",
     "bulk_update_status",
@@ -777,10 +828,12 @@ __all__ = [
     "detection_cache_matches",
     "detection_counts",
     "detections_for_molecules",
+    "evidence_for_molecules",
     "find_row",
     "get_row",
     "identity_fields",
     "list_corrections",
+    "list_molecule_evidence",
     "list_page",
     "load_detections",
     "molecules_for_recorrection",

@@ -160,29 +160,3 @@ def test_by_location_requires_containment(tmp_path: Path) -> None:
     assert molecules_by_location(root, "doc-1", 3, (15.0, 35.0, 25.0, 61.0)) == []
     # Right page required: stored detection page is 0-based 2 → public 3.
     assert molecules_by_location(root, "doc-1", 2, QUERY) == []
-
-
-def test_by_location_ignores_legacy_sql_evidence_without_artifacts(
-    tmp_path: Path,
-) -> None:
-    root = str(tmp_path)
-    db = DatabaseManager.get(root)
-    db.initialize()
-    with db.mol_conn() as conn:
-        conn.execute(
-            "INSERT INTO molecules (mol_id, smiles, name, canonical_smiles) "
-            "VALUES ('m1', 'CCO', 'ethanol', 'CCO')"
-        )
-        conn.execute(
-            """
-            INSERT INTO evidence
-                (canonical_smiles, mol_id, doc_id, page, bbox_x0, bbox_y0,
-                 bbox_x1, bbox_y1, kind, confidence, crop_relpath)
-            VALUES ('CCO', 'm1', 'doc-1', 3, 10, 20, 40, 60, 'figure', 0.91,
-                    'crop.png')
-            """
-        )
-
-    matches = molecules_by_location(root, "doc-1", 3, QUERY)
-
-    assert matches == []

@@ -139,6 +139,8 @@ CREATE TABLE IF NOT EXISTS molecule_detections (
     conf_molscribe REAL,
     vlm_verified_esmiles TEXT,
     vlm_confidence REAL,
+    evidence_id TEXT,
+    context_text TEXT,
     UNIQUE(mol_id, doc_id, page),
     FOREIGN KEY (mol_id) REFERENCES molecules(mol_id)
 );
@@ -151,6 +153,7 @@ CREATE INDEX IF NOT EXISTS idx_mi_mol ON molecule_images(mol_id);
 CREATE INDEX IF NOT EXISTS idx_mr_type ON molecule_relations(relation_type);
 CREATE INDEX IF NOT EXISTS idx_md_doc_page ON molecule_detections(doc_id, page);
 CREATE INDEX IF NOT EXISTS idx_md_mol ON molecule_detections(mol_id);
+CREATE INDEX IF NOT EXISTS idx_md_evidence_id ON molecule_detections(evidence_id);
 CREATE TABLE IF NOT EXISTS markush_scaffolds (
     scaffold_id TEXT PRIMARY KEY,
     doc_id TEXT NOT NULL,
@@ -352,46 +355,6 @@ CREATE TABLE IF NOT EXISTS markush_generated_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_mgc_run ON markush_generated_candidates(run_id);
 CREATE INDEX IF NOT EXISTS idx_mgc_review ON markush_generated_candidates(review_status);
-"""
-
-# First-class evidence chain: every (molecule, document, page) combination where
-# the molecule was observed — figure kind (with bbox + crop), text kind (with
-# context excerpt + MoleCode block), or future table kind.
-#
-# `canonical_smiles` is the natural join key into `molecules.canonical_smiles`.
-# `evidence_id` links a molecule observation to its canonical `source_evidence`
-# row (page + bbox), so a molecule's related evidence is queryable from SQL
-# instead of only being materialized into the `patent_facts.json` artifact.
-# We do NOT add a FOREIGN KEY because the pipeline writes evidence rows first
-# (during detect / register) and only the admin router creates `molecules`
-# rows on demand. Adding a FK would block the detect path. The join is
-# enforced by application logic in api/http/molecule/molecule.py.
-_EVIDENCE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS evidence (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    canonical_smiles TEXT NOT NULL,
-    mol_id TEXT,
-    evidence_id TEXT,
-    doc_id TEXT NOT NULL,
-    page INTEGER,
-    bbox_x0 REAL, bbox_y0 REAL, bbox_x1 REAL, bbox_y1 REAL,
-    crop_relpath TEXT,
-    context_text TEXT,
-    code_text TEXT,
-    role TEXT DEFAULT 'detected',
-    kind TEXT NOT NULL,
-    confidence REAL,
-    source_type TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    row_label TEXT,
-    table_idx INTEGER,
-    row_idx INTEGER,
-    col_idx INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_ev_cs ON evidence(canonical_smiles);
-CREATE INDEX IF NOT EXISTS idx_ev_doc_page ON evidence(doc_id, page);
-CREATE INDEX IF NOT EXISTS idx_ev_kind ON evidence(kind);
-CREATE INDEX IF NOT EXISTS idx_ev_evidence_id ON evidence(evidence_id);
 """
 
 # Canonical page evidence shared by Extract, Markdown and all interpretation

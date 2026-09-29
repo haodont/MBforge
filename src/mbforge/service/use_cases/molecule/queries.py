@@ -109,7 +109,7 @@ def attach_evidence_batch(
     canonicals = sorted(
         {i.get("canonical_smiles") or i.get("mol_id") for i in items if i.get("mol_id")}
     )
-    rows = get_repositories(library_root).evidence.list_molecule_evidence(canonicals)
+    rows = get_repositories(library_root).molecules.list_molecule_evidence(canonicals)
     grouped: dict[str, list[dict[str, Any]]] = {cs: [] for cs in canonicals}
     for r in rows:
         d = _shape_evidence_row(r)

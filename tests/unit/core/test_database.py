@@ -36,7 +36,7 @@ def test_database_initializes_schema(tmp_path: Path) -> None:
         }
         assert "molecules" in tables
         assert "molecule_detections" in tables
-        assert "evidence" in tables
+        assert "evidence" not in tables
         assert "source_evidence" in tables
         assert "markush_scaffolds" in tables
         assert "markush_fragments" in tables
@@ -282,63 +282,6 @@ def test_delete_molecule_records_chunked_preselect(tmp_path: Path) -> None:
 
     assert deleted == len(mol_ids)
     assert db.count_molecules() == 0
-
-
-def test_delete_molecule_records_cleans_unanchored_alias_evidence(
-    tmp_path: Path,
-) -> None:
-    """Evidence sharing a deleted molecule's canonical smiles but anchored to no
-    mol_id is removed, even though the molecules query is now empty."""
-    db = DatabaseManager(str(tmp_path))
-    db.initialize()
-
-    with db.mol_conn() as conn:
-        conn.execute(
-            "INSERT INTO molecules (mol_id, smiles, canonical_smiles) VALUES (?, ?, ?)",
-            ("dead", "CCO", "CCO"),
-        )
-        conn.execute(
-            "INSERT INTO evidence (canonical_smiles, doc_id, kind) "
-            "VALUES ('CCO', 'doc-1', 'figure')"
-        )
-        deleted = DatabaseManager.delete_molecule_records(conn, ["dead"])
-
-    assert deleted == 1
-    with db.mol_conn() as conn:
-        assert (
-            conn.execute(
-                "SELECT 1 FROM evidence WHERE canonical_smiles = 'CCO'"
-            ).fetchone()
-            is None
-        )
-
-
-def test_delete_molecule_records_keeps_evidence_owned_by_surviving_duplicate(
-    tmp_path: Path,
-) -> None:
-    """When a duplicate molecule with the same canonical smiles survives, an
-    evidence row anchored to it must not be removed by the alias cleanup."""
-    db = DatabaseManager(str(tmp_path))
-    db.initialize()
-
-    with db.mol_conn() as conn:
-        conn.execute(
-            "INSERT INTO molecules (mol_id, smiles, canonical_smiles) "
-            "VALUES (?, ?, ?), (?, ?, ?)",
-            ("dead", "CCO", "CCO", "twin", "CCO", "CCO"),
-        )
-        conn.execute(
-            "INSERT INTO evidence (canonical_smiles, mol_id, doc_id, kind) "
-            "VALUES ('CCO', 'twin', 'doc-2', 'detected')"
-        )
-        deleted = DatabaseManager.delete_molecule_records(conn, ["dead"])
-
-    assert deleted == 1
-    with db.mol_conn() as conn:
-        assert (
-            conn.execute("SELECT 1 FROM evidence WHERE mol_id = 'twin'").fetchone()
-            is not None
-        )
 
 
 def test_delete_document_molecule_data_cleans_markush_decisions_audit_rows(

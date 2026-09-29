@@ -185,7 +185,7 @@ def recorrect_molecules(
     for det in detections_rows:
         detections_by_mol[det["mol_id"]].append(det)
 
-    evidence_rows = get_repositories(library_root).evidence.evidence_for_molecules(
+    evidence_rows = get_repositories(library_root).molecules.evidence_for_molecules(
         mol_ids, canonicals
     )
     evidence_by_mol: dict[str, list[Any]] = {mol_id: [] for mol_id in mol_ids}

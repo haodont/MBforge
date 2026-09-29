@@ -57,18 +57,21 @@ def sample_molecule(temp_library):
             """
             INSERT INTO molecule_detections
             (mol_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1,
-             conf_moldet, conf_molscribe)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             conf_moldet, conf_molscribe, context_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (mol_id, "test_doc", 0, 100.0, 100.0, 200.0, 200.0, 0.9, 0.8),
-        )
-        conn.execute(
-            """
-            INSERT INTO evidence
-            (canonical_smiles, mol_id, doc_id, page, context_text, kind)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (mol_id, mol_id, "test_doc", 1, "Formula I compound", "figure"),
+            (
+                mol_id,
+                "test_doc",
+                0,
+                100.0,
+                100.0,
+                200.0,
+                200.0,
+                0.9,
+                0.8,
+                "Formula I compound",
+            ),
         )
         conn.commit()
 
@@ -89,7 +92,9 @@ class TestRebuildMolecule:
             db="mol",
         )
         evidence = db.execute(
-            "SELECT * FROM evidence WHERE mol_id = ?", (sample_molecule,), db="mol"
+            "SELECT * FROM molecule_detections WHERE mol_id = ?",
+            (sample_molecule,),
+            db="mol",
         )
 
         nm = _rebuild_molecule(row, detections, evidence)
@@ -112,7 +117,9 @@ class TestRebuildMolecule:
             db="mol",
         )
         evidence = db.execute(
-            "SELECT * FROM evidence WHERE mol_id = ?", (sample_molecule,), db="mol"
+            "SELECT * FROM molecule_detections WHERE mol_id = ?",
+            (sample_molecule,),
+            db="mol",
         )
 
         nm = _rebuild_molecule(row, detections, evidence)

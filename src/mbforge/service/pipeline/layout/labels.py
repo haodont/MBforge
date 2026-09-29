@@ -8,20 +8,14 @@ The middle tier decouples the model's label table from the product vocabulary,
 so swapping detectors only rewrites ``HIRO_LABEL_TO_REGION_TYPE`` while every
 downstream consumer keeps reading ``RegionType`` / category.
 
-``category`` here is **not** MBForge's evidence category module
-(:mod:`mbforge.domain.evidence_kind`) — this module maps to the same four closed
-values (``text`` / ``table`` / ``image`` / ``molecule``) because that is
-MBForge's closed evidence-category set, and :func:`kind_vocab` is what the
-evidence layer registers.
+``category`` is MBForge's evidence category, imported from
+:mod:`mbforge.domain.evidence_kind` (``text`` / ``table`` / ``image`` /
+``molecule``); :func:`kind_vocab` is what the evidence layer registers.
 """
 
 from __future__ import annotations
 
-#: MBForge evidence categories (the closed set in ``mbforge.domain.evidence_kind``).
-TEXT = "text"
-TABLE = "table"
-IMAGE = "image"
-MOLECULE = "molecule"
+from mbforge.domain.evidence_kind import IMAGE, MOLECULE, TABLE, TEXT
 
 #: Hiro-Layout label → RegionType.
 #:

@@ -79,7 +79,8 @@ def test_persist_stores_source_evidence_link(database, tmp_path) -> None:
     persist_molecule_candidates(str(tmp_path), "doc-1", [candidate])
     with database.mol_conn() as conn:
         row = conn.execute(
-            "SELECT evidence_id FROM evidence WHERE canonical_smiles = 'CCO'"
+            "SELECT evidence_id, context_text FROM molecule_detections "
+            "WHERE mol_id = 'CCO'"
         ).fetchone()
     assert row is not None
     assert row["evidence_id"] == "ev-1"

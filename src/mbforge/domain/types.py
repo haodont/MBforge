@@ -37,17 +37,6 @@ class DetectionSource:
     evidence_id: str | None = None
 
 
-def strip_esmiles_tags(esmiles: str) -> str:
-    """从 E-SMILES 提取 Layer 1 纯 SMILES（去掉 ``<sep>`` 及其后的扩展标签）.
-
-    MolParser 输出 ``SMILES<sep>EXTENSION``；RDKit 只能解析 ``<sep>`` 之前的
-    部分。无标签时原样返回。
-    """
-    if not esmiles:
-        return ""
-    return esmiles.split("<sep>", 1)[0]
-
-
 @dataclass
 class ExtractionResult:
     """一次分子观测（分子链路的原始产物）.
@@ -109,5 +98,4 @@ class ExtractionResult:
 __all__ = [
     "DetectionSource",
     "ExtractionResult",
-    "strip_esmiles_tags",
 ]

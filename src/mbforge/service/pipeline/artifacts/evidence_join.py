@@ -18,7 +18,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from mbforge.domain.evidence import SourceEvidence
+from mbforge.domain.evidence import SourceEvidence, _normalise_bbox
 from mbforge.domain.evidence_kind import (
     IMAGE,
     MOLECULE,
@@ -74,14 +74,12 @@ def _frame_map(pages: Sequence[PageFrame]) -> dict[int, PageFrame]:
 def _validated_bbox(
     bbox: Iterable[float], width: float, height: float
 ) -> tuple[float, float, float, float]:
-    raw_values = list(bbox)
-    if len(raw_values) != 4:
-        raise ValueError("bbox must contain exactly four coordinates")
-    x0, y0, x1, y1 = (float(value) for value in raw_values)
-    values = (x0, y0, x1, y1)
-    if not (0 <= x0 <= x1 <= width and 0 <= y0 <= y1 <= height):
+    # The shared geometric checks (length, finiteness, non-negative, ordered)
+    # live in the domain; this only adds the page-frame upper bound.
+    x0, y0, x1, y1 = _normalise_bbox(list(bbox))
+    if x1 > width or y1 > height:
         raise ValueError("bbox is outside page frame")
-    return values
+    return (x0, y0, x1, y1)
 
 
 def _bbox_in_frame(

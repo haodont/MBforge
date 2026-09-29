@@ -17,7 +17,6 @@ from mbforge.db import (
     activity_store,
     collection_store,
     document_backup,
-    evidence,
     markush_transitions,
     molecule_store,
     source_evidence,
@@ -120,16 +119,6 @@ class SqliteEvidenceRepository:
     ) -> list[SourceEvidence]:
         return source_evidence.source_evidence_at(self.library_root, doc_id, page, bbox)
 
-    def list_molecule_evidence(
-        self, canonical_smiles: Sequence[str]
-    ) -> list[dict[str, Any]]:
-        return evidence.list_molecule_evidence(self.library_root, canonical_smiles)
-
-    def evidence_for_molecules(
-        self, mol_ids: Sequence[str], canonicals: Sequence[str]
-    ) -> list[dict[str, Any]]:
-        return evidence.evidence_for_molecules(self.library_root, mol_ids, canonicals)
-
     def molecule_metadata(
         self, evidence_id: str, doc_id: str
     ) -> tuple[str, str] | None:
@@ -211,6 +200,20 @@ class SqliteMoleculeRepository:
 
     def identity_fields(self, mol_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
         return molecule_store.identity_fields(self.library_root, mol_ids)
+
+    def list_molecule_evidence(
+        self, canonical_smiles: Sequence[str]
+    ) -> list[dict[str, Any]]:
+        return molecule_store.list_molecule_evidence(
+            self.library_root, canonical_smiles
+        )
+
+    def evidence_for_molecules(
+        self, mol_ids: Sequence[str], canonicals: Sequence[str]
+    ) -> list[dict[str, Any]]:
+        return molecule_store.evidence_for_molecules(
+            self.library_root, mol_ids, canonicals
+        )
 
     def load_detections(
         self, doc_id: str, page: int | None = None

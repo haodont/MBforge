@@ -22,7 +22,6 @@ _DOC_TABLES = (
     "markush_fragments",
     "markush_review_candidates",
     "markush_evidence",
-    "evidence",
     "source_evidence",
     "review_items",
     "activities",
