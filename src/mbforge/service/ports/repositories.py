@@ -220,6 +220,43 @@ class ReviewRepository(Protocol):
         self, conn: Any, row: Any, entity_type: str, entity_id: str, doc_id: str
     ) -> None: ...
 
+    def list_queue(
+        self,
+        conn: Any,
+        *,
+        kind: str | None = None,
+        status: str | None = None,
+        doc_id: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[dict[str, Any]], int]: ...
+
+    def get_item(self, conn: Any, kind: str, item_id: str) -> dict[str, Any]: ...
+
+    def stats(self, conn: Any) -> dict[str, Any]: ...
+
+    def history(
+        self, conn: Any, entity_id: str
+    ) -> tuple[str, list[dict[str, Any]]]: ...
+
+    def markush_candidate_version(self, conn: Any, item_id: str) -> int | None: ...
+
+    def review_item_status_payload(
+        self, conn: Any, item_id: str, kind: str
+    ) -> dict[str, Any] | None: ...
+
+    def set_review_item_status(
+        self, conn: Any, item_id: str, kind: str, new_status: str
+    ) -> None: ...
+
+    def set_molecule_review_status(
+        self, conn: Any, mol_id: str, status: str
+    ) -> None: ...
+
+    def set_molecule_name(self, conn: Any, mol_id: str, name: str) -> None: ...
+
+    def clear_all(self, conn: Any) -> dict[str, int]: ...
+
 
 class ArtifactStore(Protocol):
     """Filesystem artifact contract for document records and PDF caches."""

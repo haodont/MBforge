@@ -6,16 +6,17 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.documents.activity_queries import (
     list_activities,
     list_activity_records,
 )
-from mbforge.service.use_cases.review_queue import insert_review_item
 
 
 def _seed_activity_data(library_root: Path) -> None:
     db = DatabaseManager.get(str(library_root))
     db.initialize()
+    repo = get_repositories(str(library_root)).review
     with db.mol_conn() as conn:
         conn.execute(
             """
@@ -43,7 +44,7 @@ def _seed_activity_data(library_root: Path) -> None:
             )
             """
         )
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="review-activity-1",
             kind="activity_match",

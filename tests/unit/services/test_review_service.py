@@ -1,20 +1,16 @@
 from __future__ import annotations
 
 from mbforge.db.sqlite.database import DatabaseManager
-from mbforge.service.use_cases.review_queue import (
-    clear_all,
-    decide,
-    insert_review_item,
-    list_queue,
-    stats,
-)
+from mbforge.service.ports import get_repositories
+from mbforge.service.use_cases.review_queue import decide
 
 
 def test_unified_queue_maps_native_and_markush_rows(tmp_path) -> None:
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="low-1",
             kind="low_conf_molecule",
@@ -35,18 +31,19 @@ def test_unified_queue_maps_native_and_markush_rows(tmp_path) -> None:
                     '*CCO', 0, '["markush_context"]', '{"x": 1}')
             """
         )
-        items, total = list_queue(conn, page=1, page_size=10)
+        items, total = repo.list_queue(conn, page=1, page_size=10)
         assert total == 2
         assert {item["kind"] for item in items} == {"low_conf_molecule", "markush_link"}
         assert next(item for item in items if item["id"] == "mark-1")["page"] == 1
-        assert stats(conn)["pending"] == 2
+        assert repo.stats(conn)["pending"] == 2
 
 
 def test_native_decision_updates_status_and_audit(tmp_path) -> None:
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="activity-1",
             kind="activity_match",
@@ -54,6 +51,7 @@ def test_native_decision_updates_status_and_audit(tmp_path) -> None:
             payload={"activity_id": "a1"},
         )
         result = decide(
+            repo,
             conn,
             kind="activity_match",
             item_id="activity-1",
@@ -76,11 +74,12 @@ def test_ambiguous_coref_confirm_adopts_chosen_label(tmp_path) -> None:
     """confirm adopts the reviewer-chosen identifier as the molecule name."""
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name) VALUES ('mol-1', 'CCO', '')"
         )
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="coref-1",
             kind="ambiguous_coref",
@@ -93,6 +92,7 @@ def test_ambiguous_coref_confirm_adopts_chosen_label(tmp_path) -> None:
             },
         )
         result = decide(
+            repo,
             conn,
             kind="ambiguous_coref",
             item_id="coref-1",
@@ -109,11 +109,12 @@ def test_ambiguous_coref_confirm_adopts_chosen_label(tmp_path) -> None:
 def test_ambiguous_coref_confirm_without_choice_falls_back_to_primary(tmp_path) -> None:
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name) VALUES ('mol-2', 'CCO', '')"
         )
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="coref-2",
             kind="ambiguous_coref",
@@ -124,7 +125,7 @@ def test_ambiguous_coref_confirm_without_choice_falls_back_to_primary(tmp_path) 
                 "coref_primary": "21",
             },
         )
-        decide(conn, kind="ambiguous_coref", item_id="coref-2", action="confirm")
+        decide(repo, conn, kind="ambiguous_coref", item_id="coref-2", action="confirm")
         name = conn.execute(
             "SELECT name FROM molecules WHERE mol_id = 'mol-2'"
         ).fetchone()[0]
@@ -135,11 +136,12 @@ def test_ambiguous_coref_reject_only_marks_item(tmp_path) -> None:
     """reject flips the review item; the molecule keeps its current name."""
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name) VALUES ('mol-3', 'CCO', '')"
         )
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="coref-3",
             kind="ambiguous_coref",
@@ -150,7 +152,7 @@ def test_ambiguous_coref_reject_only_marks_item(tmp_path) -> None:
                 "coref_primary": "21",
             },
         )
-        decide(conn, kind="ambiguous_coref", item_id="coref-3", action="reject")
+        decide(repo, conn, kind="ambiguous_coref", item_id="coref-3", action="reject")
         assert (
             conn.execute(
                 "SELECT status FROM review_items WHERE item_id = 'coref-3'"
@@ -168,6 +170,7 @@ def test_ambiguous_coref_reject_only_marks_item(tmp_path) -> None:
 def test_unified_markush_decision_uses_markush_lifecycle(tmp_path) -> None:
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         conn.execute(
             """
@@ -178,12 +181,14 @@ def test_unified_markush_decision_uses_markush_lifecycle(tmp_path) -> None:
         )
 
         rejected = decide(
+            repo,
             conn,
             kind="markush_link",
             item_id="mark-1",
             action="reject",
         )
         reopened = decide(
+            repo,
             conn,
             kind="markush_link",
             item_id="mark-1",
@@ -197,17 +202,20 @@ def test_unified_markush_decision_uses_markush_lifecycle(tmp_path) -> None:
 def test_reimport_preserves_native_human_decision(tmp_path) -> None:
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="stable-1",
             kind="low_conf_molecule",
             doc_id="doc-1",
             smiles="CCO",
         )
-        decide(conn, kind="low_conf_molecule", item_id="stable-1", action="reject")
+        decide(
+            repo, conn, kind="low_conf_molecule", item_id="stable-1", action="reject"
+        )
 
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="stable-1",
             kind="low_conf_molecule",
@@ -228,15 +236,16 @@ def test_clear_all_empties_review_items_candidates_and_audit(tmp_path) -> None:
     and the audit rows keyed on those entities, leaving no orphans."""
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="pending-1",
             kind="low_conf_molecule",
             doc_id="doc-1",
             smiles="CCO",
         )
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="resolved-1",
             kind="activity_match",
@@ -275,7 +284,7 @@ def test_clear_all_empties_review_items_candidates_and_audit(tmp_path) -> None:
             "VALUES ('dec-mark', 'review_candidate', 'mark-active', 'approve', '{}')"
         )
 
-        result = clear_all(conn)
+        result = repo.clear_all(conn)
 
         assert result == {"deleted_items": 2, "deleted_candidates": 2}
         assert conn.execute("SELECT COUNT(*) FROM review_items").fetchone()[0] == 0
@@ -296,6 +305,7 @@ def test_clear_all_keeps_promoted_artifacts(tmp_path) -> None:
     """Clearing the review center must not delete confirmed molecules/scaffolds."""
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
+    repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name) VALUES ('mol-1', 'CCO', 'x')"
@@ -305,7 +315,7 @@ def test_clear_all_keeps_promoted_artifacts(tmp_path) -> None:
             "(candidate_id, source_key, doc_id, predicted_role, smiles) "
             "VALUES ('mark-1', 'src-1', 'doc-1', 'scaffold', '*CCO')"
         )
-        clear_all(conn)
+        repo.clear_all(conn)
 
         assert (
             conn.execute("SELECT 1 FROM molecules WHERE mol_id = 'mol-1'").fetchone()

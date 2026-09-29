@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from mbforge.db.sqlite.database import DatabaseManager
-from mbforge.service.use_cases.review_queue import insert_review_item
+from mbforge.service.ports import get_repositories
 
 
 def test_review_queue_stats_and_batch_decision(
@@ -12,8 +12,9 @@ def test_review_queue_stats_and_batch_decision(
     root = str(tmp_library)
     db = DatabaseManager.get(root)
     db.initialize()
+    repo = get_repositories(root).review
     with db.mol_conn() as conn:
-        insert_review_item(
+        repo.insert_review_item(
             conn,
             item_id="native-1",
             kind="missing_evidence",

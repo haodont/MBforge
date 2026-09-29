@@ -19,6 +19,7 @@ from mbforge.db import (
     document_backup,
     markush_transitions,
     molecule_store,
+    review_store,
     source_evidence,
 )
 from mbforge.db.markush_candidates import persist_review_candidates
@@ -299,6 +300,56 @@ class SqliteReviewRepository:
         self, conn: Any, row: Any, entity_type: str, entity_id: str, doc_id: str
     ) -> None:
         _copy_evidence(conn, row, entity_type, entity_id, doc_id)
+
+    def list_queue(
+        self,
+        conn: Any,
+        *,
+        kind: str | None = None,
+        status: str | None = None,
+        doc_id: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[dict[str, Any]], int]:
+        return review_store.list_queue(
+            conn,
+            kind=kind,
+            status=status,
+            doc_id=doc_id,
+            page=page,
+            page_size=page_size,
+        )
+
+    def get_item(self, conn: Any, kind: str, item_id: str) -> dict[str, Any]:
+        return review_store.get_item(conn, kind, item_id)
+
+    def stats(self, conn: Any) -> dict[str, Any]:
+        return review_store.stats(conn)
+
+    def history(self, conn: Any, entity_id: str) -> tuple[str, list[dict[str, Any]]]:
+        return review_store.history(conn, entity_id)
+
+    def markush_candidate_version(self, conn: Any, item_id: str) -> int | None:
+        return review_store.markush_candidate_version(conn, item_id)
+
+    def review_item_status_payload(
+        self, conn: Any, item_id: str, kind: str
+    ) -> dict[str, Any] | None:
+        return review_store.review_item_status_payload(conn, item_id, kind)
+
+    def set_review_item_status(
+        self, conn: Any, item_id: str, kind: str, new_status: str
+    ) -> None:
+        review_store.set_review_item_status(conn, item_id, kind, new_status)
+
+    def set_molecule_review_status(self, conn: Any, mol_id: str, status: str) -> None:
+        review_store.set_molecule_review_status(conn, mol_id, status)
+
+    def set_molecule_name(self, conn: Any, mol_id: str, name: str) -> None:
+        review_store.set_molecule_name(conn, mol_id, name)
+
+    def clear_all(self, conn: Any) -> dict[str, int]:
+        return review_store.clear_all(conn)
 
 
 @dataclass
