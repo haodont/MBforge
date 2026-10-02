@@ -154,7 +154,7 @@ def setup_logging(
 
     Args:
         level: 日志级别 (logging.DEBUG/INFO/WARNING/ERROR)
-        log_dir: 日志文件目录，默认 ~/MBForge/logs
+        log_dir: 日志文件目录，默认 <GLOBAL_APP_DIR>/logs
         console: 是否输出到控制台
         file: 是否输出到文件
         json_mode: 文件输出用 JSON 行格式 (结构化聚合; 默认关闭, 沿用人类可读)

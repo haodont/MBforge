@@ -259,13 +259,32 @@ class ReviewRepository(Protocol):
 
 
 class ArtifactStore(Protocol):
-    """Filesystem artifact contract for document records and PDF caches."""
+    """Filesystem artifact contract for document source files."""
 
-    def load_document(self, doc_id: str, library_root: str | Path) -> Any: ...
+    def read_pdf_page_count(self, document: Any) -> int: ...
 
-    def save_document(self, document: Any) -> None: ...
 
-    def extract_pdf_text(self, document: Any) -> str: ...
+class DocumentRepository(Protocol):
+    """Document-registry contract: one row per stored document.
+
+    ``doc_id`` is the content address (SHA-256 of the file bytes) and
+    ``file_name`` is unique, so the registry itself enforces both dedup by
+    content and rejection of duplicate names.
+    """
+
+    def insert(self, record: dict[str, Any]) -> None: ...
+
+    def get(self, doc_id: str) -> dict[str, Any] | None: ...
+
+    def find_by_filename(self, file_name: str) -> dict[str, Any] | None: ...
+
+    def list_rows(self) -> list[dict[str, Any]]: ...
+
+    def count(self) -> int: ...
+
+    def update_status(self, doc_id: str, status: str) -> None: ...
+
+    def delete(self, doc_id: str) -> None: ...
 
 
 class LibraryRepositories(Protocol):
@@ -273,6 +292,9 @@ class LibraryRepositories(Protocol):
 
     @property
     def database(self) -> DatabaseRepository: ...
+
+    @property
+    def documents(self) -> DocumentRepository: ...
 
     @property
     def evidence(self) -> EvidenceRepository: ...
@@ -332,6 +354,7 @@ def get_database(library_root: str | Path) -> DatabaseRepository:
 __all__ = [
     "DatabaseRepository",
     "ArtifactStore",
+    "DocumentRepository",
     "EvidenceRepository",
     "LibraryRepositories",
     "MarkushRepository",

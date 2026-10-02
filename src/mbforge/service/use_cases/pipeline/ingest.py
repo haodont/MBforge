@@ -2,8 +2,8 @@
 
 All paths that need to submit a document for pipeline processing go
 through :func:`enqueue`.  The caller provides a ``doc_id`` and a
-``library_root``; the facade loads ``document.json`` to resolve the
-source file path, creates an ``ingest_queue`` row (via the infra queue
+``library_root``; the facade loads the document's registry row to resolve
+the source file path, creates an ``ingest_queue`` row (via the infra queue
 DAO), and wakes the per-library queue worker.
 
 Use-case orchestration lives here (file resolution, worker wake-up,
@@ -73,16 +73,16 @@ class BatchActionResult:
 async def enqueue(library_root: str, doc_id: str) -> str:
     """Enqueue a registered document for pipeline processing.
 
-    Reads ``document.json`` to resolve the source file path, inserts a
-    ``pending`` row into ``ingest_queue``, and ensures the queue worker
+    Reads the document's registry row to resolve the source file path, inserts
+    a ``pending`` row into ``ingest_queue``, and ensures the queue worker
     is running for *library_root*.
 
     Returns the newly created ``run_id``.
 
     Raises:
         ValidationError: if *doc_id* or *library_root* is empty.
-        NotFoundError: if no ``document.json`` exists for *doc_id* or
-            the source file cannot be found on disk.
+        NotFoundError: if *doc_id* is not registered or the source file
+            cannot be found on disk.
     """
     if not doc_id:
         raise ValidationError("doc_id is required")

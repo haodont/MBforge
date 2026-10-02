@@ -63,8 +63,8 @@ CREATE INDEX IF NOT EXISTS idx_isd_stage ON ingest_stage_deps(doc_id, run_id, st
 CREATE INDEX IF NOT EXISTS idx_il_doc ON ingest_logs(doc_id);
 -- User-defined collections (visible as library "Groups"). A parent delete
 -- cascades to its whole subtree; a collection delete also drops membership.
--- Documents live on disk (JSON), so collection_documents only references
--- doc_id by application contract, not a SQL foreign key.
+-- collection_documents references doc_id by application contract, not a SQL
+-- foreign key.
 CREATE TABLE IF NOT EXISTS collections (
     collection_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -81,6 +81,19 @@ CREATE TABLE IF NOT EXISTS collection_documents (
     FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_collection_documents_doc ON collection_documents(doc_id);
+-- Library documents. doc_id is the SHA-256 hex digest of the document's bytes,
+-- so the primary key doubles as the content address: identical bytes always
+-- map to one row. file_name is UNIQUE — the library rejects two documents that
+-- share a name — which is why no filename scan is needed to enforce it.
+CREATE TABLE IF NOT EXISTS documents (
+    doc_id TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL DEFAULT '',
+    page_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_documents_created ON documents(created_at);
 """
 
 _MOL_SCHEMA = """

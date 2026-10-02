@@ -1,6 +1,6 @@
 """On-disk registry of MBForge processes for a library root.
 
-Each running process writes a JSON record at ``{root}/.mbforge/proc-{pid}.json`` so
+Each running process writes a JSON record at ``{root}/procs/proc-{pid}.json`` so
 that other processes can enumerate live instances, detect orphans, and report
 who holds the queue lock.
 """
@@ -81,8 +81,9 @@ class ProcessRegistry:
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(self, library_root: str) -> None:
-        self._root = LibraryLayout(library_root).library_root
-        self._registry_dir = self._root / ".mbforge"
+        layout = LibraryLayout(library_root)
+        self._root = layout.library_root
+        self._registry_dir = layout.process_registry_dir
         self._identity: ProcessIdentity | None = None
         self._atexit_registered = False
 

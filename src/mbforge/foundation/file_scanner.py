@@ -15,8 +15,6 @@ from mbforge.foundation.logger import get_logger
 
 logger = get_logger("mbforge.foundation.file_scanner")
 
-MBFORGE_DIR = ".mbforge"
-
 SUPPORTED_EXTS: frozenset[str] = frozenset(
     {".pdf", ".md", ".txt", ".sdf", ".mol", ".mol2", ".pdb", ".smi"}
 )
@@ -43,6 +41,12 @@ _SKIP_DIRS: frozenset[str] = frozenset(
         "tools",
     }
 )
+
+# Library-internal directories holding runtime state rather than documents.
+# They live directly under the library root, so a recursive scan has to skip
+# them explicitly — `backups/` in particular mirrors `storage/` trees and
+# would otherwise surface PDFs that are not library documents.
+_INTERNAL_DIRS: frozenset[str] = frozenset({"backups", "procs"})
 
 
 class FileNode:
@@ -92,8 +96,8 @@ def scan_library_files(
 
     Returns:
         Sorted list of POSIX-style relative paths (forward slashes even on
-        Windows). Paths starting with `.mbforge` or `.` are skipped so we
-        never surface internal state to the UI.
+        Windows). Hidden paths and library-internal directories are skipped
+        so we never surface internal state to the UI.
     """
     p = Path(root)
     if not p.exists():
@@ -104,11 +108,14 @@ def scan_library_files(
         for f in p.rglob("*"):
             parts = f.relative_to(p).parts
             # Drop if any directory component is a skip target or starts with `.`
-            if any(part in _SKIP_DIRS or part.startswith(".") for part in parts[:-1]):
+            if any(
+                part in _SKIP_DIRS or part in _INTERNAL_DIRS or part.startswith(".")
+                for part in parts[:-1]
+            ):
                 continue
             if f.is_file() and f.suffix.lower() in SUPPORTED_EXTS:
                 rel = f.relative_to(p).as_posix()
-                if rel.startswith(MBFORGE_DIR) or rel.startswith("."):
+                if rel.startswith("."):
                     continue
                 files.append(rel)
         return sorted(files)
@@ -124,7 +131,7 @@ def scan_library_files(
 def build_file_tree(root: str | Path) -> list[FileNode]:
     """Walk `root` recursively, returning a UI-renderable file tree.
 
-    Hidden directories, the `.mbforge/` metadata directory, and entries with
+    Hidden directories, library-internal directories, and entries with
     non-supported extensions are omitted. Permission errors are swallowed per
     directory so one unreadable folder doesn't blank the tree.
     """
@@ -144,7 +151,7 @@ def build_file_tree(root: str | Path) -> list[FileNode]:
 
         nodes: list[FileNode] = []
         for entry in entries:
-            if entry.name.startswith(".") or entry.name == MBFORGE_DIR:
+            if entry.name.startswith(".") or entry.name in _INTERNAL_DIRS:
                 continue
             rel = str(entry.relative_to(p))
             if entry.is_dir():
@@ -170,7 +177,6 @@ def build_file_tree(root: str | Path) -> list[FileNode]:
 
 
 __all__ = [
-    "MBFORGE_DIR",
     "SUPPORTED_EXTS",
     "FileNode",
     "scan_library_files",

@@ -74,12 +74,14 @@ def load(device: str | None = None) -> None:
                 ResourceManager.ensure("molparser")
                 path = ResourceManager.get_molparser_path()
             if path is None:
+                from mbforge.foundation.paths import get_model_cache_dir
+
                 _AVAILABLE = False
                 _ERROR = (
                     "MolParser-Mobile model not found after auto-download "
                     "(check network / ModelScope). Place model files in "
-                    "~/MBForge/models/MolParser-Mobile/ or retry download "
-                    "from Settings."
+                    f"{get_model_cache_dir()}/MolParser-Mobile/ or retry "
+                    "download from Settings."
                 )
                 logger.warning(_ERROR)
                 return

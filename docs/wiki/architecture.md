@@ -26,4 +26,4 @@ modules independent of SQLite and heavyweight model imports.
 
 Paths have one authority: `LibraryLayout` for library paths and the artifact
 store for document records and cached PDF text. The database remains a single
-SQLite file under `.mbforge`.
+SQLite file at the library root.

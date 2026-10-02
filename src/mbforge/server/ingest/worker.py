@@ -15,7 +15,7 @@ root:
   on the next drain pass. Rows executing inside this process are never
   reclaimed, even when a heartbeat write is delayed.
 
-A per-root file lock (``{root}/.mbforge/queue.lock``) enforces the
+A per-root file lock (``{root}/queue.lock``) enforces the
 single-owner decision: exactly one process may drain a library's queue.
 A second MBForge process still enqueues rows normally (they land in the
 shared SQLite database) and the lock-holding worker picks them up. If the
@@ -594,7 +594,7 @@ def _library_lock(library_root: str) -> Iterator[bool]:
     )
 
     layout = LibraryLayout(library_root)
-    layout.ensure_metadata_dir()
+    layout.ensure_library_root()
     lock_path = queue_lock_path(library_root)
     lock_file = try_lock_file(
         lock_path,
@@ -621,8 +621,8 @@ def is_library_drained(library_root: str | Path) -> bool:
 def is_library_locked(library_root: str | Path) -> bool:
     """Return True when another process holds the library lock.
 
-    Read-only probe: unlike ``_library_lock`` it never creates the metadata
-    dir or the lock file, so ``GET /worker/status`` has no filesystem
+    Read-only probe: unlike ``_library_lock`` it never creates the library
+    root or the lock file, so ``GET /worker/status`` has no filesystem
     side effects when no worker has ever started for the library.
     """
     from mbforge.server.process.filelock import (

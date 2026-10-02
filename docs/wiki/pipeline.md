@@ -8,7 +8,7 @@ Extract ─> Markdown ─> Patent
 
 Extract is the single producer: the layout/text/table producer and the molecule
 pass (MolDet + MolParser) both run inside it, and it mints and persists the
-canonical `SourceEvidence` rows in `{library_root}/.mbforge/library.db` itself.
+canonical `SourceEvidence` rows in `{library_root}/library.db` itself.
 SQL is the only evidence store — there is no branch artifact — and crops are
 staged in `storage/{doc_id}/.staging/` then promoted into
 `storage/{doc_id}/crops/` only after every stage succeeds. Downstream artifacts

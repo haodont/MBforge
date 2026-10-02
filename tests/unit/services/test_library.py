@@ -33,7 +33,7 @@ def test_delete_document(tmp_path: Path) -> None:
     doc = store.add_document(src)
     store.delete_document(doc.doc_id)
     assert store.get_document(doc.doc_id) is None
-    backups = list((tmp_path / ".mbforge" / "backups").iterdir())
+    backups = list((tmp_path / "backups").iterdir())
     assert len(backups) == 1
     assert (backups[0] / "storage" / doc.doc_id / "input.pdf").read_bytes() == b"pdf"
     assert (backups[0] / "database.json").is_file()
@@ -42,8 +42,16 @@ def test_delete_document(tmp_path: Path) -> None:
 def test_search_documents_substring(tmp_path: Path) -> None:
     """Search matches literal substrings in title and file_name."""
     store = LibraryStore.get(tmp_path)
-    store.add_uploaded_file(b"a", "a.pdf", title="100% solution")
-    store.add_uploaded_file(b"b", "b.pdf", title="100 percent solution")
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+
+    def upload(name: str, content: bytes, title: str) -> None:
+        src = src_dir / name
+        src.write_bytes(content)
+        store.add_uploaded_file_from_path(src, name, title)
+
+    upload("a.pdf", b"a", "100% solution")
+    upload("b.pdf", b"b", "100 percent solution")
     assert len(store.list_documents()) == 2
 
     matches = store.search_documents("100%")
@@ -52,7 +60,7 @@ def test_search_documents_substring(tmp_path: Path) -> None:
 
     matches = store.search_documents("Alpha")
     assert len(matches) == 0
-    store.add_uploaded_file(b"c", "c.pdf", title="Alpha Paper")
+    upload("c.pdf", b"c", "Alpha Paper")
     matches = store.search_documents("Alpha")
     assert len(matches) == 1
     assert matches[0].title == "Alpha Paper"

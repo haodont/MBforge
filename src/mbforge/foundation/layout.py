@@ -1,6 +1,6 @@
 """LibraryLayout — single authority for all library paths.
 
-Resolves both **library-level** paths (``.mbforge/``, ``storage/``, ``notes/``)
+Resolves both **library-level** paths (``library.db``, ``storage/``, ``notes/``)
 and **document-level** artifact paths (``storage/{doc_id}/source.pdf``, etc.).
 All file reads / writes that touch a path under the library root go through
 this class so the storage layout is defined in one place and path traversal
@@ -10,8 +10,10 @@ Layout (under ``{library_root}``):
 
 Library-level:
 
-* ``.mbforge/``                   — internal metadata root; never user-edited.
-* ``.mbforge/library.db``         — unified business + molecule database.
+* ``library.db``                  — unified business + molecule database.
+* ``queue.lock``                  — ingest-worker ownership lock (internal).
+* ``procs/``                      — runtime process registry (internal).
+* ``backups/``                    — pre-mutation document snapshots (internal).
 * ``notes/``                      — user-editable notes.
 * ``storage/``                    — document artifact root.
 
@@ -19,7 +21,6 @@ Document-level (under ``storage/{doc_id}/``):
 
 * ``source.pdf``                  — original imported PDF bytes
 * ``document.md``                 — canonical document Markdown
-* ``document.json``               — document record (JSON)
 * ``report.json``                 — pipeline report
 * ``pages/page_{n:04d}.json``     — per-page OCR result (text + metadata)
 * ``crops/{filename}``            — molecule crop images
@@ -81,7 +82,7 @@ def probe_library_root(library_root: str | Path | None) -> LibraryWriteProbe:
             error="directory does not exist",
         )
     try:
-        layout.ensure_metadata_dir()
+        layout.ensure_library_root()
         layout.write_test_path.write_text("ok", encoding="utf-8")
         layout.write_test_path.unlink()
     except OSError as exc:
@@ -158,15 +159,6 @@ class LibraryLayout:
     # -- Library-level paths -------------------------------------------
 
     @property
-    def metadata_dir(self) -> Path:
-        """``{root}/.mbforge/`` — internal metadata root.
-
-        Users do not edit this directly. Library-level bookkeeping
-        (unified database, knowledge index) lives here.
-        """
-        return self._root / ".mbforge"
-
-    @property
     def storage_root(self) -> Path:
         """``{root}/storage/`` — canonical document artifact root."""
         return self._root / "storage"
@@ -174,26 +166,40 @@ class LibraryLayout:
     @property
     def write_test_path(self) -> Path:
         """Temporary marker used to verify that a library is writable."""
-        return self.metadata_dir / ".write_test"
+        return self._root / "write_test.tmp"
 
     @property
     def database_path(self) -> Path:
-        """``{root}/.mbforge/library.db`` — unified business + molecule db."""
-        return self.metadata_dir / "library.db"
+        """``{root}/library.db`` — unified business + molecule db."""
+        return self._root / "library.db"
+
+    @property
+    def queue_lock_path(self) -> Path:
+        """``{root}/queue.lock`` — ingest-worker ownership lock."""
+        return self._root / "queue.lock"
+
+    @property
+    def process_registry_dir(self) -> Path:
+        """``{root}/procs/`` — runtime process identity records."""
+        return self._root / "procs"
+
+    @property
+    def backups_dir(self) -> Path:
+        """``{root}/backups/`` — pre-mutation document snapshots."""
+        return self._root / "backups"
 
     @property
     def notes_dir(self) -> Path:
         """``{root}/notes/`` — user-editable notes.
 
-        This is the *only* library-level path users are expected to
-        hand-edit or back up themselves. Everything else under
-        ``.mbforge/`` is internal state.
+        This is the only library-level path users are expected to
+        hand-edit or back up themselves.
         """
         return self._root / "notes"
 
-    def ensure_metadata_dir(self) -> Path:
-        """Create ``.mbforge/`` if missing and return the path."""
-        return self._ensure_dir(self.metadata_dir)
+    def ensure_library_root(self) -> Path:
+        """Create the library root directory if missing and return it."""
+        return self._ensure_dir(self._root)
 
     def ensure_notes_dir(self) -> Path:
         """Create ``notes/`` if missing and return the path."""

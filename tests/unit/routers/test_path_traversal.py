@@ -175,9 +175,14 @@ def test_endpoints_reject_mismatched_library_root(
 
 
 @pytest.mark.parametrize("library_root", _MALICIOUS_LIBRARY_ROOTS)
-def test_library_import_rejects_mismatched_library_root(
-    app_client: TestClient, sample_pdf: Path, library_root: str
+def test_library_import_ignores_client_library_root(
+    app_client: TestClient, sample_pdf: Path, library_root: str, tmp_library: Path
 ) -> None:
+    """A client-supplied root cannot redirect where an import is written.
+
+    ``/library/import`` takes no ``library_root`` at all — unknown form fields
+    are ignored — so the file always lands in the configured library.
+    """
     with sample_pdf.open("rb") as f:
         response = app_client.post(
             "/api/v1/library/import",
@@ -185,10 +190,9 @@ def test_library_import_rejects_mismatched_library_root(
             data={"library_root": library_root},
         )
 
-    assert response.status_code == 400
-    data = response.json()
-    assert data["success"] is False
-    assert data["error_code"] == "invalid_path"
+    assert response.status_code == 200, response.text
+    doc_id = response.json()["document"]["doc_id"]
+    assert (tmp_library / "storage" / doc_id / "sample.pdf").is_file()
 
 
 _NOTE_PAYLOAD = {

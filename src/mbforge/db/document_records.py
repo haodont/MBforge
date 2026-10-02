@@ -1,0 +1,122 @@
+"""SQLite data access for library document records.
+
+Documents live in the library database (``documents``) keyed by the SHA-256 of
+their bytes, so identical content maps to exactly one row — the primary key *is*
+the content address. ``file_name`` is UNIQUE, so two documents may not share a
+name; that constraint replaces the filename scan the JSON store used to need.
+
+The stored PDF itself stays on disk at ``storage/{doc_id}/{file_name}``.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+from mbforge.db.sqlite.database import DatabaseManager
+
+_COLUMNS = "doc_id, file_name, title, page_count, status, created_at"
+
+
+def insert(library_root: str | Path, record: dict[str, Any]) -> None:
+    """Insert a document row.
+
+    Raises:
+        ConflictError: if ``file_name`` is already registered. A ``doc_id``
+            clash is not an error — it means the same bytes are already stored.
+    """
+    db = DatabaseManager.get(str(library_root))
+    with db.transaction() as (kb, _):
+        try:
+            kb.execute(
+                f"INSERT INTO documents ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    record["doc_id"],
+                    record["file_name"],
+                    record.get("title", ""),
+                    int(record.get("page_count", 0)),
+                    record.get("status", "pending"),
+                    record["created_at"],
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            _raise_conflict(kb, record, exc)
+
+
+def _raise_conflict(kb: Any, record: dict[str, Any], exc: Exception) -> None:
+    """Turn a UNIQUE violation into the duplicate-name error the API reports."""
+    from mbforge.service.use_cases.documents.library import DuplicateDocumentNameError
+
+    taken = kb.execute(
+        "SELECT doc_id FROM documents WHERE file_name = ?", (record["file_name"],)
+    ).fetchone()
+    if taken is not None and taken["doc_id"] != record["doc_id"]:
+        raise DuplicateDocumentNameError(
+            f"A PDF named {record['file_name']!r} already exists in the library",
+            detail=record["file_name"],
+        ) from exc
+    raise exc
+
+
+def get(library_root: str | Path, doc_id: str) -> dict[str, Any] | None:
+    """Return one document row, or ``None`` when it is not registered."""
+    db = DatabaseManager.get(str(library_root))
+    with db.transaction() as (kb, _):
+        row = kb.execute(
+            f"SELECT {_COLUMNS} FROM documents WHERE doc_id = ?", (doc_id,)
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def find_by_filename(library_root: str | Path, file_name: str) -> dict[str, Any] | None:
+    """Return the document registered under *file_name*, or ``None``."""
+    db = DatabaseManager.get(str(library_root))
+    with db.transaction() as (kb, _):
+        row = kb.execute(
+            f"SELECT {_COLUMNS} FROM documents WHERE file_name = ?", (file_name,)
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def list_rows(library_root: str | Path) -> list[dict[str, Any]]:
+    """Return every document row, newest first."""
+    db = DatabaseManager.get(str(library_root))
+    with db.transaction() as (kb, _):
+        rows = kb.execute(
+            f"SELECT {_COLUMNS} FROM documents ORDER BY created_at DESC, doc_id"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def count(library_root: str | Path) -> int:
+    """Return the number of registered documents."""
+    db = DatabaseManager.get(str(library_root))
+    with db.transaction() as (kb, _):
+        row = kb.execute("SELECT COUNT(*) AS cnt FROM documents").fetchone()
+    return int(row["cnt"]) if row is not None else 0
+
+
+def update_status(library_root: str | Path, doc_id: str, status: str) -> None:
+    """Overwrite one document's status (no-op when the row is absent)."""
+    db = DatabaseManager.get(str(library_root))
+    with db.transaction() as (kb, _):
+        kb.execute("UPDATE documents SET status = ? WHERE doc_id = ?", (status, doc_id))
+
+
+def delete(library_root: str | Path, doc_id: str) -> None:
+    """Remove one document row (idempotent)."""
+    db = DatabaseManager.get(str(library_root))
+    with db.transaction() as (kb, _):
+        kb.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+
+
+__all__ = [
+    "count",
+    "delete",
+    "find_by_filename",
+    "get",
+    "insert",
+    "list_rows",
+    "update_status",
+]

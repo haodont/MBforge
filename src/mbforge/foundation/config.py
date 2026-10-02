@@ -1,7 +1,7 @@
 """MBForge global configuration — single JSON file with Pydantic schema.
 
 Loads, validates, and persists application settings from
-``~/MBForge/settings.json``.  All runtime and business configuration
+``<GLOBAL_APP_DIR>/settings.json``.  All runtime and business configuration
 (LLM, OCR, molecule detection, ingestion) flows through the ``AppConfig``
 model exposed here; direct ``os.environ`` reads are limited to pure
 runtime toggles such as ``MBFORGE_FORCE_CPU``.

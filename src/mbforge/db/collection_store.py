@@ -1,9 +1,8 @@
 """SQLite data access for user collections ("Groups").
 
 Collections live in the library database (``collections`` +
-``collection_documents``) deliberately separate from the JSON document store:
-a collection references a ``doc_id`` by application contract, not a foreign
-key.
+``collection_documents``): a collection references a ``doc_id`` by application
+contract, not a foreign key, so a collection outlives any single document row.
 """
 
 from __future__ import annotations

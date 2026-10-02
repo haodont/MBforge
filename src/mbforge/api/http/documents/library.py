@@ -58,9 +58,10 @@ router = APIRouter()
 
 
 def _resolve_library_root(body: dict | None = None) -> str:
-    r"""Resolve library_root from body, config, or default (~\/MBForge).
+    r"""Resolve library_root from body, config, or the default app directory.
 
-    Priority: explicit body param > stored settings.json value > ~/MBForge.
+    Priority: explicit body param > stored settings.json value > the default
+    app data directory (`<source_root>/library`).
     The returned path is validated through ``resolve_library_root`` so callers
     never receive an empty or relative root.
     """
@@ -78,7 +79,8 @@ async def library_status() -> LibraryStatus:
     """Get library configuration status.
 
     Reports `configured: true` whenever the resolved library root either was
-    explicitly configured OR can be auto-created from the default (~/MBForge).
+    explicitly configured OR can be auto-created from the default app data
+    directory (`<source_root>/library`).
     """
     root = _resolve_library_root()
 
@@ -98,7 +100,6 @@ async def library_status() -> LibraryStatus:
 async def library_import(
     file: UploadFile | None = None,
     title: str = Form(""),
-    library_root: str | None = Form(None),
 ) -> LibraryImportResponse:
     """Import a PDF (or other document) into the library via multipart upload.
 
@@ -112,9 +113,7 @@ async def library_import(
         raise _MissingUploadError(
             "No file provided", detail="multipart file field is required"
         )
-    root = _resolve_library_root(
-        {"library_root": library_root} if library_root else None
-    )
+    root = _resolve_library_root()
 
     # Validate filename before reading potentially malicious payloads.
     safe_name = sanitize_upload_filename(file.filename or "")
@@ -296,7 +295,7 @@ async def library_get_crop(
 ) -> FileResponse:
     """Serve a single cropped molecule image.
 
-    `rel_path` is the filename relative to `.mbforge/crops/{doc_id}/`
+    `rel_path` is the filename relative to `storage/{doc_id}/crops/`
     (e.g. ``WO2026035726A1_20pg_page_0003_mol_0002.png``).
     """
     root = _resolve_library_root(
@@ -401,7 +400,7 @@ async def library_configure(body: LibraryConfigureRequest) -> LibraryConfigureRe
     layout = library_service.LibraryLayout(root)
 
     def _ensure_writable() -> None:
-        layout.ensure_metadata_dir()
+        layout.ensure_library_root()
         layout.write_test_path.write_text("ok")
         layout.write_test_path.unlink()
 

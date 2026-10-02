@@ -108,8 +108,8 @@ def test_list_activities_projects_rows_from_legacy_schema_without_optional_colum
     app_client: TestClient, tmp_library: Path
 ) -> None:
     library_root = tmp_library
-    db_path = library_root / ".mbforge" / "library.db"
-    db_path.parent.mkdir(parents=True)
+    db_path = library_root / "library.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """

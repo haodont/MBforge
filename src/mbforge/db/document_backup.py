@@ -13,6 +13,7 @@ from mbforge.db.sqlite.database import DatabaseManager
 
 # Tables that expose a ``doc_id`` column and are scoped per document.
 _DOC_TABLES = (
+    "documents",
     "ingest_queue",
     "ingest_stage_deps",
     "ingest_runs",

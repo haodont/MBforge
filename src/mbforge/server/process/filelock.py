@@ -19,7 +19,6 @@ from typing import IO
 
 from mbforge.foundation.layout import LibraryLayout
 
-_LOCK_FILENAME = "queue.lock"
 _META_OFFSET = 1
 
 
@@ -51,7 +50,7 @@ class LockHolder:
 
 def queue_lock_path(library_root: str | Path) -> Path:
     """Return the lock file path for a library root (no I/O)."""
-    return LibraryLayout(library_root).metadata_dir / _LOCK_FILENAME
+    return LibraryLayout(library_root).queue_lock_path
 
 
 def try_lock_existing(lock_path: Path) -> IO[bytes] | None:

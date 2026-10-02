@@ -18,16 +18,20 @@ logger = logging.getLogger(__name__)
 APP_NAME = "MBForge"
 APP_VERSION = "0.3.0"
 
-# 统一应用根目录.所有全局状态(config/logs)和默认库数据都落在同一个目录下,
-# 避免 Windows 上 %APPDATA% 与 %LOCALAPPDATA% 分裂导致的混乱.
-GLOBAL_APP_DIR = Path.home() / "MBForge"
+# 源码根目录 — 本项目以源码文件夹分发,运行时数据(config/logs/模型/库数据)统一
+# 落在源码文件夹内的 library/ 下:整个文件夹拷走即可迁移,也避免 Windows 上
+# %APPDATA% 与 %LOCALAPPDATA% 分裂导致的混乱.安装成 wheel 时本文件位于
+# site-packages 内,没有可写的源码目录,回退到 ~/MBForge,避免污染 site-packages.
+_SOURCE_ROOT = Path(__file__).resolve().parents[3]
+GLOBAL_APP_DIR = (
+    _SOURCE_ROOT / "library"
+    if (_SOURCE_ROOT / "pyproject.toml").is_file()
+    else Path.home() / "MBForge"
+)
 GLOBAL_SETTINGS_PATH = GLOBAL_APP_DIR / "settings.json"
 
 # 后端 sidecar 端口 — __main__ 启动参数 fallback
 DEFAULT_SIDECAR_PORT = 18792
-
-# 模型缓存默认路径 — get_model_cache_dir() 在 settings.json 未配置时使用
-DEFAULT_MODEL_CACHE_DIR = "MBForge/models"
 
 # HF 镜像 endpoint — ensure_hf_mirror() 在 HF_ENDPOINT 未设置时使用
 DEFAULT_HF_ENDPOINT = "https://hf-mirror.com"
@@ -51,7 +55,7 @@ def get_model_cache_dir() -> str:
             return str(Path(raw).expanduser().resolve())
     except Exception as exc:
         logger.debug("Failed to read model_cache_dir from settings: %s", exc)
-    return str(Path.home() / DEFAULT_MODEL_CACHE_DIR)
+    return str(GLOBAL_APP_DIR / "models")
 
 
 def is_within_global_app_dir(path: str | Path) -> bool:

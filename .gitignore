@@ -22,9 +22,11 @@ node_modules/
 # Local scratch / runtime
 .tmp/
 .tmp-codex/
-.mbforge/
+library/
+file/
 models/
 .vitest/
+torchinductor_*/
 *.log
 
 # OS

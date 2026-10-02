@@ -1,6 +1,6 @@
 """SQLite database manager — schema creation and connection management.
 
-A single unified database per library (``{root}/.mbforge/library.db``)
+A single unified database per library (``{root}/library.db``)
 holds all business tables: ingest queue,
 semantic cache, molecules, images, relations, detections, evidence, and
 the FTS5 search index.
@@ -55,7 +55,7 @@ class DatabaseManager:
 
         self._root = Path(library_root).expanduser().resolve()
         self._layout = LibraryLayout(library_root)
-        self._layout.ensure_metadata_dir()
+        self._layout.ensure_library_root()
         self._db_path = self._layout.database_path
         self._kb_path = self._db_path
         self._mol_path = self._db_path

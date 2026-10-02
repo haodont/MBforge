@@ -23,17 +23,17 @@ export function useDocuments(collectionId?: string) {
   })
 }
 
-/** Upload a PDF and enqueue it for pipeline processing. */
+/**
+ * Upload a PDF and enqueue it for pipeline processing.
+ *
+ * Intentionally does not invalidate the document list: a batch import calls
+ * this once per file, and refetching the whole list after every file dominates
+ * upload time. Batch callers invalidate the same keys once the batch settles.
+ */
 export function useImportDocument() {
-  const qc = useQueryClient()
-
   return useMutation({
     mutationFn: ({ file, title, onProgress }: { file: File; title?: string; onProgress?: (percent: number) => void }) =>
       importDocument(file, title, onProgress),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
   })
 }
 

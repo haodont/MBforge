@@ -27,7 +27,7 @@ MAX_BACKUPS = 20
 
 def _prune_old_backups(layout: LibraryLayout) -> None:
     """Delete oldest snapshots beyond ``MAX_BACKUPS``."""
-    backups_dir = layout.metadata_dir / "backups"
+    backups_dir = layout.backups_dir
     if not backups_dir.is_dir():
         return
     ordered = sorted(backups_dir.iterdir(), key=lambda p: p.name)
@@ -52,7 +52,7 @@ def create_backup(
     """
     layout = LibraryLayout(library_root)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    backup_root = layout.metadata_dir / "backups" / f"{timestamp}_{operation}_{doc_id}"
+    backup_root = layout.backups_dir / f"{timestamp}_{operation}_{doc_id}"
     backup_root.mkdir(parents=True, exist_ok=False)
 
     storage_dir = layout.storage_dir(doc_id)

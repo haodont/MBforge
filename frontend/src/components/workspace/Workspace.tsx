@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { fadeUp } from '@/hooks/useAnimations'
 import { useAppContext } from '@/context/AppContext'
@@ -12,6 +13,7 @@ import {
   useImportDocument,
   useMoveDocument,
 } from '@/api/query/hooks'
+import { queryKeys } from '@/api/query/keys'
 import { clearViewerSnapshotsForDoc } from '@/components/project/pdf/viewerSnapshots'
 import { showToast } from '@/hooks/useToast'
 import { useTranslation } from 'react-i18next'
@@ -75,7 +77,7 @@ function DocumentActionMenu({
     if (!libraryRoot) return
     setEnqueuePending(true)
     try {
-      // Backend resolves file path from document.json; only doc_id is needed.
+      // Backend resolves the file path from the document registry; only doc_id is needed.
       await enqueueMutation.mutateAsync({ libraryRoot, filePath: '', docId: doc.doc_id })
       showToast(t('doc.enqueueSuccess', { filename: doc.file_name }), 'success')
     } catch (e) {
@@ -305,6 +307,29 @@ function DocumentRow({
   )
 }
 
+/** PDFs uploaded at once; more only queue on the server's per-library lock. */
+const UPLOAD_CONCURRENCY = 3
+
+/** Run `worker` over `items` with at most `limit` calls in flight at a time. */
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let next = 0
+  const runners = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (next < items.length) {
+        const index = next
+        next += 1
+        await worker(items[index], index)
+      }
+    },
+  )
+  await Promise.all(runners)
+}
+
 export default function Workspace() {
   const { t } = useTranslation()
   const {
@@ -313,6 +338,7 @@ export default function Workspace() {
     openTab,
   } = useAppContext()
   const { data, isLoading, isError } = useDocuments(activeCollectionId ?? undefined)
+  const queryClient = useQueryClient()
   const importMutation = useImportDocument()
   const deleteMutation = useDeleteDocument()
   const bulkEnqueueMutation = useEnqueueTask()
@@ -382,16 +408,24 @@ export default function Workspace() {
     setIsImporting(true)
     let successCount = 0
     let completedCount = 0
+    // One fraction per file: the aggregate bar is their mean, so one file
+    // finishing while another is mid-flight cannot make the bar jump back.
+    const perFileProgress = pdfFiles.map(() => 0)
+    const publishProgress = () => {
+      const total = perFileProgress.reduce((sum, value) => sum + value, 0)
+      setUploadProgress(Math.round((total / pdfFiles.length) * 100))
+    }
     try {
       if (pdfFiles.length > 0) setUploadProgress(0)
-      for (const [index, file] of pdfFiles.entries()) {
-        setUploadBatch(files.length > 1 ? { current: index + 1, total: pdfFiles.length } : null)
+      if (files.length > 1) setUploadBatch({ current: 0, total: pdfFiles.length })
+      await runWithConcurrency(pdfFiles, UPLOAD_CONCURRENCY, async (file, index) => {
         try {
           await importMutation.mutateAsync({
             file,
-            onProgress: (percent) => setUploadProgress(
-              Math.round(((completedCount + percent / 100) / pdfFiles.length) * 100),
-            ),
+            onProgress: (percent) => {
+              perFileProgress[index] = percent / 100
+              publishProgress()
+            },
           })
           successCount += 1
         } catch (error) {
@@ -401,8 +435,13 @@ export default function Workspace() {
           failures.push({ file, message })
         }
         completedCount += 1
-        setUploadProgress(Math.round((completedCount / pdfFiles.length) * 100))
-      }
+        perFileProgress[index] = 1
+        publishProgress()
+        if (files.length > 1) setUploadBatch({ current: completedCount, total: pdfFiles.length })
+      })
+      // One refetch for the whole batch, instead of one per uploaded file.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.documents.all })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.ingest.all })
     } finally {
       importInProgressRef.current = false
       setIsImporting(false)
@@ -426,7 +465,7 @@ export default function Workspace() {
     } else {
       showToast(t('library.importBatchSuccess', { count: successCount }), 'success')
     }
-  }, [importMutation, t])
+  }, [importMutation, queryClient, t])
 
   const handleImport = useCallback(() => {
     const input = document.createElement('input')

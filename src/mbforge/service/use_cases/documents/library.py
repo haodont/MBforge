@@ -1,20 +1,22 @@
 """LibraryStore — unified data store for the document library.
 
-Document records live in ``storage/{doc_id}/document.json`` (JSON-only).
-The SQLite database still holds molecules, evidence, and the ingest queue,
-but no longer tracks documents.
+Document records live in the SQLite ``documents`` table; the source PDFs live at
+``storage/{doc_id}/{file_name}``. ``doc_id`` is the SHA-256 hex digest of the
+file bytes, so identical content always maps to one document, and ``file_name``
+is unique, so two documents may not share a name.
 """
 
 from __future__ import annotations
 
 import functools
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
 from mbforge.domain.document import Document
 from mbforge.foundation.errors import ConflictError, MBForgeError, NotFoundError
-from mbforge.foundation.files import ensure_dir, sha256_bytes, sha256_file
+from mbforge.foundation.files import ensure_dir, sha256_file
 from mbforge.foundation.layout import LibraryLayout, sanitize_upload_filename
 from mbforge.foundation.logger import get_logger
 from mbforge.service.ports import get_repositories
@@ -25,6 +27,11 @@ logger = get_logger("mbforge.service.use_cases.documents.library")
 
 class DuplicateDocumentNameError(ConflictError):
     error_code = "duplicate_filename"
+
+
+def _now() -> str:
+    """Return the timestamp format the rest of the schema uses."""
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class LibraryStore:
@@ -55,149 +62,111 @@ class LibraryStore:
         if not src.is_file():
             raise NotFoundError("File not found", detail=str(src))
         with self._registration_lock:
-            return self._register(src, title)
+            return self._register(src, src.name, title, move=False)
 
-    def add_uploaded_file(
-        self, content: bytes, filename: str, title: str = ""
+    def add_uploaded_file_from_path(
+        self, src_path: str | Path, filename: str, title: str = ""
     ) -> Document:
-        """Persist a browser-uploaded file payload and register it as a document.
+        """Register a browser upload already streamed to ``src_path``.
 
-        Rejects empty content; raises MBForgeError if disk write fails.
+        When the bytes are new the file is *moved* into storage, so ``src_path``
+        is gone once this returns and the caller's cleanup becomes a no-op; on
+        the duplicate-content path the file is left for the caller to remove.
+        The content is never held in memory: the document id comes from hashing
+        the streamed file.
         """
+        src = Path(src_path)
+        if not src.is_file():
+            raise NotFoundError("Source file not found", detail=str(src))
         with self._registration_lock:
-            return self._add_uploaded_file(content, filename, title)
+            return self._register(src, filename, title, move=True)
 
-    def _add_uploaded_file(self, content: bytes, filename: str, title: str) -> Document:
-        if not content:
-            raise MBForgeError("Empty file", detail=filename)
-        if not filename:
-            raise MBForgeError("Missing filename")
+    def _register(
+        self, src: Path, filename: str, title: str, *, move: bool
+    ) -> Document:
+        """Hash ``src``, store it under ``storage/{doc_id}/`` and register it.
 
+        ``doc_id`` is the content address, so identical bytes that are already
+        registered are returned as-is instead of being stored a second time.
+        """
         safe_filename = sanitize_upload_filename(filename)
-        self._ensure_pdf_filename_available(safe_filename)
-        # Content-addressed doc_id: identical bytes always map to one document.
-        doc_id = sha256_bytes(content)[:32]
-        existing = get_repositories(self._root).artifacts.load_document(
-            doc_id, self._root
-        )
+        doc_id = sha256_file(src)
+        documents = get_repositories(self._root).documents
+        existing = documents.get(doc_id)
         if existing is not None:
             logger.info(
                 "Duplicate content; returning existing document %s (id=%s)",
-                existing.file_name,
+                existing["file_name"],
                 doc_id,
             )
-            return existing
+            return Document.from_dict(existing, self._root)
+
+        # Report a duplicate name with the API's error before touching disk;
+        # the UNIQUE(file_name) constraint remains the authoritative guard.
+        self._ensure_pdf_filename_available(safe_filename)
+
         safe_title = title.strip() if title else Path(safe_filename).stem
         storage_subdir = self._layout.storage_dir(doc_id)
         dest = storage_subdir / safe_filename
-
         try:
             ensure_dir(storage_subdir)
-            dest.write_bytes(content)
+            if move:
+                shutil.move(str(src), str(dest))
+            else:
+                shutil.copy2(str(src), str(dest))
         except (OSError, PermissionError) as e:
-            if dest.exists():
-                dest.unlink(missing_ok=True)
-            if storage_subdir.exists() and not any(storage_subdir.iterdir()):
-                storage_subdir.rmdir()
+            self._discard_stored_file(dest, storage_subdir)
             raise MBForgeError("Failed to store file", detail=str(e)) from e
 
-        logger.info("Uploaded document registered: %s (id=%s)", safe_title, doc_id)
         doc = Document(
             doc_id=doc_id,
             library_root=self._root,
             title=safe_title,
             file_name=safe_filename,
             status="pending",
+            created_at=_now(),
         )
-        # Extract and cache text + spans at import time so the pipeline can
-        # reuse them without re-parsing the PDF.  The extraction result is
-        # persisted to storage/{doc_id}/document.json via save_document().
-        artifacts = get_repositories(self._root).artifacts
-        artifacts.extract_pdf_text(doc)
-        artifacts.save_document(doc)
-        return doc
-
-    def add_uploaded_file_from_path(
-        self, src_path: str | Path, filename: str, title: str = ""
-    ) -> Document:
-        """Read an on-disk file and register it as a document.
-
-        The caller owns ``src_path`` and is responsible for removing it once
-        this call returns.
-        """
-        src = Path(src_path)
-        if not src.is_file():
-            raise NotFoundError("Source file not found", detail=str(src))
-        return self.add_uploaded_file(src.read_bytes(), filename, title)
-
-    def _register(self, src: Path, title: str) -> Document:
-        """Copy ``src`` into storage and save the JSON record.
-
-        If the copy fails the JSON is never written so the library stays clean.
-        """
-        self._ensure_pdf_filename_available(src.name)
-        # Content-addressed doc_id: identical bytes always map to one document.
-        doc_id = sha256_file(src)[:32]
-        existing = get_repositories(self._root).artifacts.load_document(
-            doc_id, self._root
-        )
-        if existing is not None:
-            logger.info(
-                "Duplicate content; returning existing document %s (id=%s)",
-                existing.file_name,
-                doc_id,
-            )
-            return existing
-        safe_title = title.strip() if title else src.stem
-        storage_subdir = self._layout.storage_dir(doc_id)
-        dest = storage_subdir / src.name
-
+        # Probe only the page count: an xref-only read, cheap enough for the
+        # import path, and the document list renders it. Text, spans and layout
+        # are produced by the Extract stage.
+        get_repositories(self._root).artifacts.read_pdf_page_count(doc)
         try:
-            ensure_dir(storage_subdir)
-            shutil.copy2(str(src), str(dest))
-        except (OSError, PermissionError) as e:
-            if storage_subdir.exists() and not any(storage_subdir.iterdir()):
-                storage_subdir.rmdir()
-            raise MBForgeError("Failed to store file", detail=str(e)) from e
-
+            documents.insert(doc.to_dict())
+        except ConflictError:
+            # Lost a race on file_name: drop the copy we just stored.
+            self._discard_stored_file(dest, storage_subdir)
+            raise
         logger.info("Document added: %s (id=%s)", safe_title, doc_id)
-        doc = Document(
-            doc_id=doc_id,
-            library_root=self._root,
-            title=safe_title,
-            file_name=src.name,
-            status="pending",
-        )
-        # Extract and cache text + spans at import time so the pipeline can
-        # reuse them without re-parsing the PDF.  The extraction result is
-        # persisted to storage/{doc_id}/document.json via save_document().
-        artifacts = get_repositories(self._root).artifacts
-        artifacts.extract_pdf_text(doc)
-        artifacts.save_document(doc)
         return doc
+
+    @staticmethod
+    def _discard_stored_file(dest: Path, storage_subdir: Path) -> None:
+        """Remove a partially stored file and its now-empty document dir."""
+        if dest.exists():
+            dest.unlink(missing_ok=True)
+        if storage_subdir.exists() and not any(storage_subdir.iterdir()):
+            storage_subdir.rmdir()
 
     def _ensure_pdf_filename_available(self, filename: str) -> None:
         if Path(filename).suffix.casefold() != ".pdf":
             return
-        normalized_name = filename.casefold()
-        if any(
-            doc.file_name.casefold() == normalized_name for doc in self.list_documents()
-        ):
+        if get_repositories(self._root).documents.find_by_filename(filename):
             raise DuplicateDocumentNameError(
                 f"A PDF named {filename!r} already exists in the library",
                 detail=filename,
             )
 
     def load_document(self, doc_id: str) -> Document | None:
-        """Load a Document from ``document.json``.  ``None`` if absent."""
-        return get_repositories(self._root).artifacts.load_document(doc_id, self._root)
+        """Load a Document from the registry.  ``None`` if absent."""
+        row = get_repositories(self._root).documents.get(doc_id)
+        return Document.from_dict(row, self._root) if row is not None else None
 
     def get_document(self, doc_id: str) -> Document | None:
         """Return the :class:`Document` entity for ``doc_id`` (``None`` if absent)."""
         return self.load_document(doc_id)
 
     def delete_document(self, doc_id: str) -> None:
-        """Remove storage dir + JSON record + molecule data."""
+        """Remove storage dir + registry row + molecule data."""
         backup_path = create_backup(self._root, doc_id, "document_delete")
         storage_subdir = self._layout.storage_dir(doc_id)
         if storage_subdir.exists():
@@ -208,24 +177,15 @@ class LibraryStore:
         db = get_database(str(self._root))
         with db.transaction() as (_kb_conn, mol_conn):
             db.delete_document_molecule_data(mol_conn, doc_id)
+        get_repositories(self._root).documents.delete(doc_id)
         logger.info("Document deleted: %s (backup=%s)", doc_id, backup_path)
 
     def list_documents(self) -> list[Document]:
-        """Scan ``storage/*/document.json`` and return all documents."""
-        storage_root = self._layout.storage_root
-        if not storage_root.is_dir():
-            return []
-        docs: list[Document] = []
-        for entry in storage_root.iterdir():
-            if not entry.is_dir():
-                continue
-            doc = get_repositories(self._root).artifacts.load_document(
-                entry.name, self._root
-            )
-            if doc is not None:
-                docs.append(doc)
-        docs.sort(key=lambda d: d.created_at or "", reverse=True)
-        return docs
+        """Return every registered document, newest first."""
+        return [
+            Document.from_dict(row, self._root)
+            for row in get_repositories(self._root).documents.list_rows()
+        ]
 
     def search_documents(self, query: str) -> list[Document]:
         """Case-insensitive substring search over title and file_name."""
@@ -282,37 +242,21 @@ class LibraryStore:
         logger.info("Pipeline data cleared: %s (backup=%s)", doc_id, backup_path)
 
     def update_document_status(self, doc_id: str, status: str) -> None:
-        """Update the document status in its JSON record."""
-        doc = get_repositories(self._root).artifacts.load_document(doc_id, self._root)
-        if doc is not None:
-            doc._status = status
-            get_repositories(self._root).artifacts.save_document(doc)
+        """Update the document status in the registry."""
+        get_repositories(self._root).documents.update_status(doc_id, status)
 
     # ── File resolution ──────────────────────────────────────────
 
     def resolve_file(self, doc_id: str) -> str | None:
         """Resolve the original source file path for a document."""
-        doc = get_repositories(self._root).artifacts.load_document(doc_id, self._root)
+        doc = self.load_document(doc_id)
         if doc is None:
             return None
         pdf_path = self._layout.storage_dir(doc_id) / doc.file_name
         return str(pdf_path) if pdf_path.exists() else None
 
     def doc_count(self) -> int:
-        return len(self.list_documents())
-
-    # ── Internals ────────────────────────────────────────────────
-
-    def _require_doc(self, doc_id: str) -> None:
-        """Raise ``NotFoundError`` if no JSON record exists for *doc_id*."""
-        if (
-            get_repositories(self._root).artifacts.load_document(doc_id, self._root)
-            is None
-        ):
-            raise NotFoundError(
-                "Document not found",
-                detail=f"doc_id={doc_id}",
-            )
+        return get_repositories(self._root).documents.count()
 
 
 # ── Upload transport limits ──────────────────────────────────────

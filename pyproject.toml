@@ -10,6 +10,14 @@ asyncio_mode = "auto"
 
 [tool.uv]
 
+# 默认包索引：清华 TUNA 镜像。声明为 default 后 uv lock/sync/run 以它为主源，
+# 不再回落到 PyPI；uv.lock 记录的 registry URL 与之一致，因此不会被每次
+# `uv run` 重写。
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"

@@ -17,6 +17,7 @@ from mbforge.db import (
     activity_store,
     collection_store,
     document_backup,
+    document_records,
     markush_transitions,
     molecule_store,
     review_store,
@@ -414,22 +415,40 @@ class SqliteCollectionRepository:
 
 @dataclass
 class FilesystemArtifactStore:
-    """Repository facade for document JSON and cached PDF extraction."""
+    """Repository facade for the PDF page-count probe."""
 
-    def load_document(self, doc_id: str, library_root: str | Path) -> Any:
-        from mbforge.db.document_store import load_document
+    def read_pdf_page_count(self, document: Any) -> int:
+        from mbforge.db.pdf_probe import read_pdf_page_count
 
-        return load_document(doc_id, library_root)
+        return read_pdf_page_count(document)
 
-    def save_document(self, document: Any) -> None:
-        from mbforge.db.document_store import save_document
 
-        save_document(document)
+@dataclass
+class SqliteDocumentRepository:
+    """Repository for the ``documents`` registry table."""
 
-    def extract_pdf_text(self, document: Any) -> str:
-        from mbforge.db.document_store import extract_pdf_text
+    library_root: Path
 
-        return extract_pdf_text(document)
+    def insert(self, record: dict[str, Any]) -> None:
+        document_records.insert(self.library_root, record)
+
+    def get(self, doc_id: str) -> dict[str, Any] | None:
+        return document_records.get(self.library_root, doc_id)
+
+    def find_by_filename(self, file_name: str) -> dict[str, Any] | None:
+        return document_records.find_by_filename(self.library_root, file_name)
+
+    def list_rows(self) -> list[dict[str, Any]]:
+        return document_records.list_rows(self.library_root)
+
+    def count(self) -> int:
+        return document_records.count(self.library_root)
+
+    def update_status(self, doc_id: str, status: str) -> None:
+        document_records.update_status(self.library_root, doc_id, status)
+
+    def delete(self, doc_id: str) -> None:
+        document_records.delete(self.library_root, doc_id)
 
 
 @dataclass
@@ -445,6 +464,10 @@ class SqliteRepositories(LibraryRepositories):
     @property
     def database(self) -> DatabaseRepository:
         return self._database
+
+    @property
+    def documents(self) -> SqliteDocumentRepository:
+        return SqliteDocumentRepository(self.library_root)
 
     @property
     def evidence(self) -> SqliteEvidenceRepository:
@@ -492,6 +515,7 @@ __all__ = [
     "SqliteActivityRepository",
     "SqliteCollectionRepository",
     "SqliteDatabaseRepository",
+    "SqliteDocumentRepository",
     "SqliteEvidenceRepository",
     "SqliteRepositories",
     "SqliteMarkushRepository",

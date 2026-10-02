@@ -43,6 +43,8 @@ import { useDeleteDocument } from '@/api/query/hooks'
 import { useCollections, useMoveDocument, useEnqueueTask } from '@/api/query/hooks'
 import { useAppContext } from '@/context/AppContext'
 import { clearViewerSnapshotsForDoc } from '@/components/project/pdf/viewerSnapshots'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from '@/api/query/client'
 import Workspace from '../Workspace'
 
 function mockAppContext(overrides?: Record<string, unknown>) {
@@ -95,7 +97,12 @@ function mockMoveDocument() {
 }
 
 function renderWorkspace() {
-  return render(<Workspace />)
+  const client = createQueryClient()
+  return render(
+    <QueryClientProvider client={client}>
+      <Workspace />
+    </QueryClientProvider>,
+  )
 }
 
 describe('Workspace', () => {

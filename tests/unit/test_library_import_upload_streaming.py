@@ -19,11 +19,33 @@ These tests pin the three observable properties of that contract:
 from __future__ import annotations
 
 import io
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.datastructures import UploadFile
+
+from mbforge.service.use_cases.documents import library as library_service
+
+
+def _patch_upload_tmpfile(monkeypatch: pytest.MonkeyPatch, library_root: Path) -> Path:
+    """Route the streaming temp file into a directory the test can inspect.
+
+    ``create_upload_tmpfile`` normally uses the OS temp directory, so asserting
+    on leftovers there is neither reachable nor hermetic.
+    """
+    tmp_dir = library_root / "tmp"
+
+    def _create(_root: str) -> Path:
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(suffix=".upload", dir=tmp_dir)
+        os.close(fd)
+        return Path(name)
+
+    monkeypatch.setattr(library_service, "create_upload_tmpfile", _create)
+    return tmp_dir
 
 
 def test_import_upload_small_succeeds(
@@ -79,6 +101,7 @@ async def test_import_upload_oversize_rejected_early(
             original_load.cache_clear()
 
     monkeypatch.setattr(config, "load_global_config", _PatchedLoad())
+    tmp_dir = _patch_upload_tmpfile(monkeypatch, tmp_library)
 
     class CountingBody:
         """Simulates a 100 MiB body that yields 1 MiB of zeros per read call.
@@ -110,7 +133,7 @@ async def test_import_upload_oversize_rejected_early(
     upload = UploadFile(filename="big.pdf", file=body)  # type: ignore[arg-type]
 
     with pytest.raises(library_service.UploadTooLargeError):
-        await library_router.library_import(file=upload, title="", library_root=None)
+        await library_router.library_import(file=upload, title="")
 
     # The handler must have stopped reading well before exhausting the body.
     # With a 5 MiB cap and 1 MiB chunks, 6 reads cross the limit (5 MiB
@@ -123,15 +146,19 @@ async def test_import_upload_oversize_rejected_early(
     assert body.read_count < body.TOTAL_CHUNKS
 
     # Temp file was cleaned up on the failure path.
-    tmp_dir = tmp_library / "tmp"
-    leftover = list(tmp_dir.iterdir()) if tmp_dir.exists() else []
+    leftover = list(tmp_dir.iterdir())
     assert leftover == [], f"temp file not cleaned after oversize: {leftover}"
 
 
-def test_import_upload_temp_file_cleaned_on_success(
-    app_client: TestClient, tmp_library: Path
+def test_import_upload_temp_file_consumed_on_success(
+    app_client: TestClient, tmp_library: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A successful upload must not leave a temp file behind."""
+    """A successful upload must not leave a streaming temp file behind.
+
+    The temp file is *moved* into storage, so the temp directory ends up empty
+    and the stored PDF holds the uploaded bytes.
+    """
+    tmp_dir = _patch_upload_tmpfile(monkeypatch, tmp_library)
     body = b"%PDF-1.4 streaming cleanup"
     resp = app_client.post(
         "/api/v1/library/import",
@@ -139,6 +166,8 @@ def test_import_upload_temp_file_cleaned_on_success(
     )
     assert resp.status_code == 200, resp.text
 
-    tmp_dir = tmp_library / "tmp"
-    leftover = list(tmp_dir.iterdir()) if tmp_dir.exists() else []
-    assert leftover == [], f"temp file not cleaned on success: {leftover}"
+    doc_id = resp.json()["document"]["doc_id"]
+    saved = tmp_library / "storage" / doc_id / "clean.pdf"
+    assert saved.is_file()
+    assert saved.read_bytes() == body
+    assert list(tmp_dir.iterdir()) == []

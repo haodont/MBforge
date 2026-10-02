@@ -1,10 +1,9 @@
 """Collection ("Groups") management.
 
 Collections are user-defined folders that group on-disk documents. They live in
-the library database (``collections`` + ``collection_documents`` tables)
-deliberately separate from the JSON document store: a collection references a
-``doc_id`` by application contract, not by a foreign key, so documents can be
-added/removed without touching their on-disk records.
+the library database (``collections`` + ``collection_documents`` tables): a
+collection references a ``doc_id`` by application contract, not by a foreign
+key, so a collection can outlive any single document row.
 
 The persistence layer owns the SQL; this module validates inputs and builds the
 collection tree.
@@ -88,7 +87,7 @@ def add_document(library_root: str, collection_id: str, doc_id: str) -> None:
     if not doc_id:
         raise ValidationError("doc_id is required")
     repository = get_repositories(library_root)
-    if repository.artifacts.load_document(doc_id, library_root) is None:
+    if repository.documents.get(doc_id) is None:
         raise NotFoundError("document not found")
     repository.collections.add_document(collection_id, doc_id)
 

@@ -144,7 +144,7 @@ def test_update_molecule_overwrites_same_evidence_id_and_backs_up_source(
     assert payload["smiles"] == "CCN"
     assert payload["esmiles"] == "CCN"
     assert payload["moldet_conf"] == 1.0
-    backups = list((tmp_path / ".mbforge" / "backups").iterdir())
+    backups = list((tmp_path / "backups").iterdir())
     assert len(backups) == 1
     assert (backups[0] / "database.json").is_file()
 

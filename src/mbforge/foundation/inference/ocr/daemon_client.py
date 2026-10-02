@@ -18,11 +18,11 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 import httpx
 
 from mbforge.foundation.logger import get_logger
+from mbforge.foundation.paths import GLOBAL_APP_DIR
 
 logger = get_logger(__name__)
 
@@ -85,7 +85,7 @@ def _spawn_daemon(
     ]
     # Keep the daemon's log next to the main app logs when possible; otherwise
     # route to DEVNULL so our subprocess does not inherit the app's stdio.
-    log_path = Path.home() / "MBForge" / "logs" / "ocr-daemon.log"
+    log_path = GLOBAL_APP_DIR / "logs" / "ocr-daemon.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         # Keep the handle open for the subprocess lifetime (Popen requires it).

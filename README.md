@@ -26,9 +26,10 @@ scope. Track active work in [TODO/INDEX.md](TODO/INDEX.md).
 ## Requirements
 
 Python 3.12, [uv](https://github.com/astral-sh/uv), Node.js 24.14.1+ and npm.
-GPU is optional, but required by local MolDet/MolParser inference. Business
-settings are stored in `~/MBForge/settings.json`; the default library root is
-`~/MBForge`.
+GPU is optional, but required by local MolDet/MolParser inference. The project
+is distributed as its source folder and keeps all runtime state inside it:
+settings, logs, model weights and the default library root all live under
+`library/` next to `src/`. Copying the folder copies the whole installation.
 
 Dependencies are split into a core install plus the `local-models` and `gpu`
 extras (heavy AI/GPU inference). `uv sync` installs the full stack through the
@@ -36,10 +37,15 @@ extras (heavy AI/GPU inference). `uv sync` installs the full stack through the
 inference support with `pip install "mbforge[gpu,local-models]"`. Startup logs
 a capability summary of which optional modules and CUDA are available.
 
+`uv` resolves packages from the Tsinghua TUNA mirror by default (declared as the
+default index in `pyproject.toml`, with `pytorch-cu128` kept as an explicit
+index for `torch`/`torchvision`). A plain `pip install` is unaffected and still
+uses the environment's own index configuration.
+
 ## Model weights
 
 Heavy models are downloaded at runtime by `ResourceManager` (ModelScope) into
-`~/MBForge/models/`; none are stored in git except the one exception below.
+`library/models/`; none are stored in git except the one exception below.
 
 - **`assets/models/moldetv2_structure_ft.pt`** — MolDetv2 structure-detection
   weights **fine-tuned on patent pages**. Source: the
@@ -51,7 +57,7 @@ Heavy models are downloaded at runtime by `ResourceManager` (ModelScope) into
   share-alike. This file is the only model weight committed to the
   repository, so a fresh clone has a working patent-aware detector out of
   the box. To use it as the active detector, copy it over the runtime model:
-  `cp assets/models/moldetv2_structure_ft.pt ~/MBForge/models/MolDetv2/moldet_v2_yolo26n_960_doc.pt`
+  `cp assets/models/moldetv2_structure_ft.pt library/models/MolDetv2/moldet_v2_yolo26n_960_doc.pt`
   (or point `DEFAULT_SUBPATH` in `src/mbforge/foundation/inference/moldet_v2_ft.py`
   at it).
 
@@ -98,7 +104,7 @@ FastAPI serves `frontend/dist/` when it exists.
 
 Extract mints the canonical `SourceEvidence` rows from page text, typed layout
 regions, recognized table content and the molecule pass' SMILES/E-SMILES, and
-persists them directly into SQLite (`{library_root}/.mbforge/library.db`) — SQL
+persists them directly into SQLite (`{library_root}/library.db`) — SQL
 is the only runtime evidence store and there is no intermediate branch artifact.
 Text spans and downstream artifacts carry the resulting `evidence_id` rather
 than duplicating the evidence payload.
@@ -120,11 +126,18 @@ npm run build
 ## Storage contract
 
 `library_root` is the Python field and `libraryRoot` is the TypeScript/wire
-field. The canonical layout is:
+field. It defaults to the source folder's `library/` directory, which is where
+settings, logs and model weights also live, so the whole installation travels
+with the folder. Document records live in the `documents` table of
+`library.db`, keyed by the SHA-256 of the file's bytes — identical content is
+one document, and `file_name` is unique. The canonical layout is:
 
 ```text
 {library_root}/
-├── .mbforge/library.db                 # unified SQLite database
+├── library.db                          # unified SQLite database
+├── queue.lock                          # ingest-worker ownership lock
+├── procs/                              # runtime process registry
+├── backups/                            # pre-mutation document snapshots
 ├── notes/                              # user-editable notes
 └── storage/{doc_id}/                   # document artifacts
     ├── source.pdf

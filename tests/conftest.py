@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -27,6 +28,16 @@ app_config.GLOBAL_APP_DIR = _TEST_APP_DIR
 app_config._SETTINGS_PATH = _TEST_APP_DIR / "settings.json"
 app_config._SETTINGS_PATH.unlink(missing_ok=True)
 app_config.load_global_config.cache_clear()
+
+# Redirect every ``tempfile`` consumer into the workspace-local scratch dir.
+# ``tempfile.mkdtemp`` directories are unwritable in the sandboxed environments
+# this suite runs in, so ``tempfile.gettempdir()`` falls back to the current
+# working directory — which drops stray ``tmp*.md`` scratch files and the
+# readiness demo PDF into the repository root. Pinning the module-level
+# override keeps all of it inside the gitignored ``.tmp/``.
+_TMP_ROOT = Path.cwd() / ".tmp"
+_TMP_ROOT.mkdir(parents=True, exist_ok=True)
+tempfile.tempdir = str(_TMP_ROOT)
 
 # Direct application-use-case tests do not import the FastAPI composition
 # root.  Configure the same concrete adapter once for the test composition

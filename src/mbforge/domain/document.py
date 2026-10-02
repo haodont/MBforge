@@ -4,15 +4,14 @@ Every imported PDF is modeled as a :class:`Document`. The class holds the
 document identity (``doc_id`` + ``library_root``) and the record fields
 (title, file_name, page_count, status, created_at) as plain attributes.
 
-The record serializes to and from plain dicts/JSON. Persistence to
-``storage/{doc_id}/document.json`` and PDF text extraction live in
-:mod:`mbforge.db.document_store`; artifact path resolution belongs to
-:class:`~mbforge.foundation.layout.LibraryLayout`.
+The record serializes to and from plain dicts (the ``documents`` table row
+shape). Persistence lives in :mod:`mbforge.db.document_records` and the PDF
+page-count probe in :mod:`mbforge.db.pdf_probe`; artifact path resolution
+belongs to :class:`~mbforge.foundation.layout.LibraryLayout`.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 
@@ -37,11 +36,6 @@ class Document:
         self._page_count = page_count
         self._status = status
         self._created_at = created_at
-        # Extraction caches, populated by
-        # :func:`mbforge.db.document_store.extract_pdf_text`.
-        self._text: str | None = None
-        self._page_texts: list[str] | None = None
-        self._page_spans: list[list[dict]] | None = None
 
     # ── Identity ────────────────────────────────────────────────
 
@@ -94,13 +88,6 @@ class Document:
             "status": self._status,
             "created_at": self._created_at,
         }
-        # Include extraction cache if available (persisted by library import).
-        if self._text is not None:
-            data["_text"] = self._text
-        if self._page_texts is not None:
-            data["_page_texts"] = self._page_texts
-        if self._page_spans is not None:
-            data["_page_spans"] = self._page_spans
         return data
 
     @classmethod
@@ -115,18 +102,4 @@ class Document:
             status=data.get("status", "pending"),
             created_at=data.get("created_at", ""),
         )
-        # Restore extraction cache if present (from import-time persistence).
-        doc._text = data.get("_text")
-        doc._page_texts = data.get("_page_texts")
-        doc._page_spans = data.get("_page_spans")
         return doc
-
-    def to_json(self) -> str:
-        """Return the record as a JSON string."""
-        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
-
-    @classmethod
-    def from_json(cls, json_str: str, library_root: str | Path) -> Document:
-        """Construct a Document from a JSON string."""
-        data = json.loads(json_str)
-        return cls.from_dict(data, library_root)

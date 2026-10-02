@@ -256,7 +256,7 @@ def test_startup_reclaims_terminal_claims(tmp_path: Path) -> None:
 
 
 def test_library_lock_is_single_owner(tmp_path: Path) -> None:
-    """Only one holder acquires ``.mbforge/queue.lock`` at a time."""
+    """Only one holder acquires ``queue.lock`` at a time."""
     root = _library(tmp_path)
     lock_path = queue_lock_path(root)
     first = try_lock_file(

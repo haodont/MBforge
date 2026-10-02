@@ -112,9 +112,9 @@ def test_demo_pdf_is_sanitized_and_registered(
         text = "\n".join(page.get_text() for page in document)
     assert "Synthetic sample document" in text
     assert "caffeine C8H10N4O2" in text
-    # The document is registered in library storage.
-    from mbforge.db.document_store import load_document
+    # The document is registered in the library registry.
+    from mbforge.db.document_records import get
 
-    doc = load_document(doc_id, str(tmp_path))
-    assert doc is not None
-    assert doc.title == "Readiness Demo"
+    record = get(str(tmp_path), doc_id)
+    assert record is not None
+    assert record["title"] == "Readiness Demo"
