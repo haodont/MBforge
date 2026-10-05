@@ -6,12 +6,12 @@ import { vi } from 'vitest'
 import { createQueryClient } from '../../client'
 import { queryKeys } from '../../keys'
 import type { DocumentInfo } from '../../../http/library'
-import { useDeleteDocument } from '../useDocuments'
+import { useDeleteDocuments } from '../useDocuments'
 
-const deleteDocumentMock = vi.fn<(docId: string) => Promise<{ success: boolean }>>()
+const deleteDocumentsMock = vi.fn<(docIds: string[]) => Promise<{ success: boolean }>>()
 
 vi.mock('../../../http/library', () => ({
-  deleteDocument: (docId: string) => deleteDocumentMock(docId),
+  deleteDocuments: (docIds: string[]) => deleteDocumentsMock(docIds),
   importDocument: vi.fn(),
   listDocuments: vi.fn(),
 }))
@@ -33,7 +33,7 @@ function makeWrapper(client: ReturnType<typeof createQueryClient>) {
   }
 }
 
-describe('useDeleteDocument', () => {
+describe('useDeleteDocuments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -47,14 +47,14 @@ describe('useDeleteDocument', () => {
       documents: [makeDocument('doc-1')],
     })
     client.setQueryData(queryKeys.review.all, { stale: 'review-cache' })
-    deleteDocumentMock.mockResolvedValue({ success: true })
+    deleteDocumentsMock.mockResolvedValue({ success: true })
 
-    const { result } = renderHook(() => useDeleteDocument(), {
+    const { result } = renderHook(() => useDeleteDocuments(), {
       wrapper: makeWrapper(client),
     })
 
     act(() => {
-      result.current.mutate('doc-1')
+      result.current.mutate(['doc-1'])
     })
 
     await waitFor(() => {
@@ -77,14 +77,14 @@ describe('useDeleteDocument', () => {
     const client = createQueryClient()
     const previous = { documents: [makeDocument('doc-1')] }
     client.setQueryData(queryKeys.documents.list(), previous)
-    deleteDocumentMock.mockRejectedValue(new Error('delete failed'))
+    deleteDocumentsMock.mockRejectedValue(new Error('delete failed'))
 
-    const { result } = renderHook(() => useDeleteDocument(), {
+    const { result } = renderHook(() => useDeleteDocuments(), {
       wrapper: makeWrapper(client),
     })
 
     act(() => {
-      result.current.mutate('doc-1')
+      result.current.mutate(['doc-1'])
     })
 
     await waitFor(() => expect(result.current.isError).toBe(true))

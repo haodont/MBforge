@@ -35,11 +35,28 @@ export interface ReadinessOcr {
   error: string | null
 }
 
+/** A required model that is blocking ingest queue claiming. */
+export interface ReadinessBlockingModel {
+  id: string
+  name: string
+  status: string
+  error: string | null
+}
+
+/** Whether the ingest queue may claim documents, and why not. */
+export interface ReadinessModelGate {
+  ready: boolean
+  required: string[]
+  missing: ReadinessBlockingModel[]
+  reason: string | null
+}
+
 export interface ReadinessSummary {
   library: ReadinessLibrary
   database: ReadinessDatabase
   models: ReadinessModel[]
   ocr: ReadinessOcr
+  model_gate: ReadinessModelGate
 }
 
 export interface ProbeLlmResult {

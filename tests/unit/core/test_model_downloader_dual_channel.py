@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mbforge.server.models.assets import downloader as md
 from mbforge.server import resource_manager as rm
+from mbforge.server.models.assets import downloader as md
 from mbforge.server.resource_manager import ResourceManager, ResourceStatus
 
 _FILES = ("moldet_v2_yolo26n_960_doc.pt", "moldet_v2_yolo26n_640_general.pt")

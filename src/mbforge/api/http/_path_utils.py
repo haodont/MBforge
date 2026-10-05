@@ -115,7 +115,11 @@ def resolve_client_pdf_path(
     if not pdf_path:
         raise InvalidPathError("pdf_path is required")
 
-    candidate = Path(pdf_path)
+    # Backslash is not a separator on POSIX, so ``..\Windows\System32`` would
+    # look like a harmless single filename here while escaping the library on
+    # Windows. Normalise it so both platforms reach the same verdict — the
+    # same treatment ``LibraryLayout.crop`` gives client-supplied relpaths.
+    candidate = Path(pdf_path.replace("\\", "/"))
     if not candidate.is_absolute():
         candidate = root / candidate
     resolved = candidate.resolve()

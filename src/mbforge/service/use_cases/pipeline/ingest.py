@@ -333,6 +333,21 @@ async def cleanup_done(library_root: str) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _model_gate_payload() -> dict[str, Any] | None:
+    """Return the model gate verdict, or ``None`` when it cannot be probed.
+
+    Best-effort: a broken probe must not take the status endpoint down, and
+    the frontend treats a missing key as "no banner".
+    """
+    from mbforge.service.use_cases.pipeline.model_gate import evaluate_model_gate
+
+    try:
+        return evaluate_model_gate().to_dict()
+    except Exception as exc:  # noqa: BLE001 — status endpoint stays up
+        logger.warning("Model gate probe failed for worker status: %s", exc)
+        return None
+
+
 async def worker_status_payload(raw_library_root: str | None) -> dict[str, Any]:
     """Return the library queue worker's real status payload.
 
@@ -340,11 +355,12 @@ async def worker_status_payload(raw_library_root: str | None) -> dict[str, Any]:
     whether a worker task is registered for the root, whether the library
     lock is held, and the current queue snapshot (active / backlog / total).
     The ``status`` / ``ts`` keys are kept for wire compatibility with the
-    frontend.
+    frontend.  ``model_gate`` reports why claiming is paused, if it is.
     """
     from mbforge.foundation.layout import LibraryLayout, resolve_library_root
 
     ts = int(time.time())
+    model_gate = _model_gate_payload()
     offline: dict[str, Any] = {
         "status": "offline",
         "ts": ts,
@@ -353,6 +369,7 @@ async def worker_status_payload(raw_library_root: str | None) -> dict[str, Any]:
         "total": 0,
         "locked": False,
         "by_status": {},
+        "model_gate": model_gate,
     }
     try:
         root_str = str(resolve_library_root(raw_library_root or None))
@@ -410,6 +427,7 @@ async def worker_status_payload(raw_library_root: str | None) -> dict[str, Any]:
         "lock_holder": lock_holder_info,
         "orphans": orphans,
         "registered_processes": registered,
+        "model_gate": model_gate,
     }
 
 

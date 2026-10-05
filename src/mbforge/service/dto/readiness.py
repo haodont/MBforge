@@ -46,6 +46,24 @@ class OCRReadiness(BaseModel):
     error: str | None = None
 
 
+class BlockingModelReadiness(BaseModel):
+    """A required model that is currently blocking queue claiming."""
+
+    id: str
+    name: str
+    status: str
+    error: str | None = None
+
+
+class ModelGateReadiness(BaseModel):
+    """Whether the ingest queue may claim documents, and why not."""
+
+    ready: bool = False
+    required: list[str] = Field(default_factory=list)
+    missing: list[BlockingModelReadiness] = Field(default_factory=list)
+    reason: str | None = None
+
+
 class ReadinessSummaryResponse(BaseModel):
     """Aggregated read-only readiness summary."""
 
@@ -53,6 +71,7 @@ class ReadinessSummaryResponse(BaseModel):
     database: DatabaseReadiness
     models: list[ModelReadiness] = Field(default_factory=list)
     ocr: OCRReadiness
+    model_gate: ModelGateReadiness = Field(default_factory=ModelGateReadiness)
 
 
 class DemoRunResponse(BaseModel):

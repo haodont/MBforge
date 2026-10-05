@@ -220,6 +220,73 @@ def test_pipeline_worker_status_reports_queue_snapshot(
     assert isinstance(body["ts"], int)
 
 
+def test_pipeline_worker_status_reports_why_claiming_is_paused(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`GET /worker/status` carries the model gate so the UI can explain the pause."""
+    from mbforge.service.use_cases.pipeline import model_gate as gate_module
+
+    root = tmp_path / "library"
+    root.mkdir(parents=True, exist_ok=True)
+    DatabaseManager.get(str(root)).initialize()
+
+    monkeypatch.setattr(
+        gate_module,
+        "evaluate_model_gate",
+        lambda: gate_module.ModelGateResult(
+            ready=False,
+            required=("moldet",),
+            missing=(
+                gate_module.BlockingModel(
+                    id="moldet", name="MolDetv2-FT", status="not_found"
+                ),
+            ),
+        ),
+    )
+
+    resp = client.get(
+        "/api/v1/pipeline/worker/status", params={"library_root": str(root)}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["model_gate"] == {
+        "ready": False,
+        "required": ["moldet"],
+        "missing": [
+            {
+                "id": "moldet",
+                "name": "MolDetv2-FT",
+                "status": "not_found",
+                "error": None,
+            }
+        ],
+        "reason": "missing models: moldet (not_found)",
+    }
+
+
+def test_pipeline_worker_status_survives_a_failing_gate_probe(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken gate probe degrades to null instead of failing the status call."""
+    from mbforge.service.use_cases.pipeline import model_gate as gate_module
+
+    root = tmp_path / "library"
+    root.mkdir(parents=True, exist_ok=True)
+    DatabaseManager.get(str(root)).initialize()
+
+    def _boom() -> None:
+        raise RuntimeError("probe exploded")
+
+    monkeypatch.setattr(gate_module, "evaluate_model_gate", _boom)
+
+    resp = client.get(
+        "/api/v1/pipeline/worker/status", params={"library_root": str(root)}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["model_gate"] is None
+
+
 def test_pipeline_queue_includes_checkpoint_stage_statuses(
     client: TestClient, tmp_path: Path
 ) -> None:

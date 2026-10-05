@@ -71,6 +71,7 @@ function makeSummary(overrides: Partial<ReadinessSummary> = {}): ReadinessSummar
       },
     ],
     ocr: { chain: ['hiro-layout'], error: null },
+    model_gate: { ready: true, required: [], missing: [], reason: null },
     ...overrides,
   }
 }

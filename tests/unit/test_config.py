@@ -198,9 +198,9 @@ class TestSecretRedaction:
                 "vlm": {"api_key": "***"},
             }
         )
-        assert (
-            new_cfg.llm["api_key"] == _DISK_VALUE
-        ), f"*** marker must preserve the disk value, but got {new_cfg.llm['api_key']!r}"
+        assert new_cfg.llm["api_key"] == _DISK_VALUE, (
+            f"*** marker must preserve the disk value, but got {new_cfg.llm['api_key']!r}"
+        )
         assert new_cfg.llm["model"] == "gpt-4o"
         # The VLM key was empty on disk → *** marker preserves that empty state
         assert new_cfg.vlm.api_key == ""

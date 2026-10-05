@@ -5,8 +5,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 vi.mock('@/api/query/hooks', () => ({
   useDocuments: vi.fn(),
   useImportDocument: vi.fn(),
-  useDeleteDocument: vi.fn(),
-  useClearDocument: vi.fn(),
+  useDeleteDocuments: vi.fn(),
   useCollections: vi.fn(),
   useMoveDocument: vi.fn(),
   useEnqueueTask: vi.fn(),
@@ -20,10 +19,6 @@ vi.mock('@/context/AppContext', () => ({
 
 vi.mock('@/components/LibraryPanel', () => ({
   default: () => <div data-testid="workspace-library-panel" />,
-}))
-
-vi.mock('@/components/project/pdf/viewerSnapshots', () => ({
-  clearViewerSnapshotsForDoc: vi.fn(),
 }))
 
 // i18n mock — return key as-is when t() is called, with English fallback for common keys.
@@ -41,11 +36,9 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-import { useDocuments, useImportDocument, useClearDocument } from '@/api/query/hooks'
-import { useDeleteDocument } from '@/api/query/hooks'
+import { useDocuments, useImportDocument, useDeleteDocuments } from '@/api/query/hooks'
 import { useCollections, useMoveDocument, useEnqueueTask, useIngestQueue } from '@/api/query/hooks'
 import { useAppContext } from '@/context/AppContext'
-import { clearViewerSnapshotsForDoc } from '@/components/project/pdf/viewerSnapshots'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createQueryClient } from '@/api/query/client'
 import Workspace from '../Workspace'
@@ -69,18 +62,11 @@ function mockDocuments(docs: { doc_id: string; title: string; status: string }[]
   } as unknown as ReturnType<typeof useDocuments>)
 }
 
-function mockDeleteDocument() {
-  vi.mocked(useDeleteDocument).mockReturnValue({
+function mockDeleteDocuments() {
+  vi.mocked(useDeleteDocuments).mockReturnValue({
     mutateAsync: vi.fn(),
     isPending: false,
-  } as unknown as ReturnType<typeof useDeleteDocument>)
-}
-
-function mockClearDocument() {
-  vi.mocked(useClearDocument).mockReturnValue({
-    mutateAsync: vi.fn(),
-    isPending: false,
-  } as unknown as ReturnType<typeof useClearDocument>)
+  } as unknown as ReturnType<typeof useDeleteDocuments>)
 }
 
 function mockCollections(collections: { collection_id: string; name: string }[] = []) {
@@ -128,8 +114,7 @@ describe('Workspace', () => {
     vi.mocked(useIngestQueue).mockReturnValue({
       data: [],
     } as unknown as ReturnType<typeof useIngestQueue>)
-    mockDeleteDocument()
-    mockClearDocument()
+    mockDeleteDocuments()
     mockCollections([])
     mockMoveDocument()
   })
@@ -247,11 +232,11 @@ describe('Workspace', () => {
   })
 
   it('deletes a document after confirmation without opening it', async () => {
-    const deleteDocument = vi.fn().mockResolvedValue({ success: true })
-    vi.mocked(useDeleteDocument).mockReturnValue({
-      mutateAsync: deleteDocument,
+    const deleteDocuments = vi.fn().mockResolvedValue({ success: true })
+    vi.mocked(useDeleteDocuments).mockReturnValue({
+      mutateAsync: deleteDocuments,
       isPending: false,
-    } as unknown as ReturnType<typeof useDeleteDocument>)
+    } as unknown as ReturnType<typeof useDeleteDocuments>)
     mockDocuments([{ doc_id: 'doc1', title: 'Deletable Doc', status: 'pending' }])
     renderWorkspace()
 
@@ -262,15 +247,15 @@ describe('Workspace', () => {
     const confirm = await screen.findByRole('button', { name: 'doc.delete' })
     confirm.click()
 
-    expect(deleteDocument).toHaveBeenCalledWith('doc1')
+    expect(deleteDocuments).toHaveBeenCalledWith(['doc1'])
   })
 
   it('keeps the document when deletion is cancelled', async () => {
-    const deleteDocument = vi.fn()
-    vi.mocked(useDeleteDocument).mockReturnValue({
-      mutateAsync: deleteDocument,
+    const deleteDocuments = vi.fn()
+    vi.mocked(useDeleteDocuments).mockReturnValue({
+      mutateAsync: deleteDocuments,
       isPending: false,
-    } as unknown as ReturnType<typeof useDeleteDocument>)
+    } as unknown as ReturnType<typeof useDeleteDocuments>)
     mockDocuments([{ doc_id: 'doc1', title: 'Kept Doc', status: 'pending' }])
     renderWorkspace()
 
@@ -281,29 +266,8 @@ describe('Workspace', () => {
     const cancel = await screen.findByRole('button', { name: /取消/ })
     cancel.click()
 
-    expect(deleteDocument).not.toHaveBeenCalled()
+    expect(deleteDocuments).not.toHaveBeenCalled()
     expect(screen.getByText('Kept Doc')).toBeInTheDocument()
-  })
-
-  it('clears the document snapshot after a successful clear action', async () => {
-    const clearDocument = vi.fn().mockResolvedValue({ success: true })
-    vi.mocked(useClearDocument).mockReturnValue({
-      mutateAsync: clearDocument,
-      isPending: false,
-    } as unknown as ReturnType<typeof useClearDocument>)
-    mockDocuments([{ doc_id: 'doc1', title: 'Clearable Doc', status: 'ready' }])
-    renderWorkspace()
-
-    screen.getByRole('button', { name: 'doc.actions' }).click()
-    const clearButton = await screen.findByRole('menuitem', { name: 'doc.clear' })
-    clearButton.click()
-    const confirm = await screen.findByRole('button', { name: 'doc.clear' })
-    confirm.click()
-
-    await vi.waitFor(() => {
-      expect(clearDocument).toHaveBeenCalledWith('doc1')
-      expect(clearViewerSnapshotsForDoc).toHaveBeenCalledWith('doc1')
-    })
   })
 
 })

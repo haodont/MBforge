@@ -453,8 +453,8 @@ class SqliteDocumentRepository:
     def update_status(self, doc_id: str, status: str) -> None:
         document_records.update_status(self.library_root, doc_id, status)
 
-    def delete(self, doc_id: str) -> None:
-        document_records.delete(self.library_root, doc_id)
+    def delete_many(self, doc_ids: Sequence[str]) -> None:
+        document_records.delete_many(self.library_root, doc_ids)
 
 
 @dataclass

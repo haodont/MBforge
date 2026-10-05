@@ -31,12 +31,13 @@ def test_delete_document(tmp_path: Path) -> None:
     src = tmp_path / "input.pdf"
     src.write_bytes(b"pdf")
     doc = store.add_document(src)
-    store.delete_document(doc.doc_id)
+    store.delete_documents([doc.doc_id])
     assert store.get_document(doc.doc_id) is None
-    backups = list((tmp_path / "backups").iterdir())
-    assert len(backups) == 1
-    assert (backups[0] / "storage" / doc.doc_id / "input.pdf").read_bytes() == b"pdf"
-    assert (backups[0] / "database.json").is_file()
+    assert not (tmp_path / "storage" / doc.doc_id).exists()
+    # Deletion leaves no snapshot behind: a batch delete must not pile up
+    # one backup per document.
+    backups = tmp_path / "backups"
+    assert not backups.exists() or not list(backups.iterdir())
 
 
 def test_search_documents_substring(tmp_path: Path) -> None:

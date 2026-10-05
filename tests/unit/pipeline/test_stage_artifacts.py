@@ -237,6 +237,30 @@ def test_mint_keeps_the_content_bearing_molecule_over_an_overlapping_bare_region
     assert molecules[0].bbox == (10.0, 20.0, 30.0, 40.0)
 
 
+def test_molecule_region_without_a_detection_is_not_an_observation(
+    tmp_path: Path,
+) -> None:
+    """A region the layout producer re-typed to molecule declares a location only.
+
+    No molecule detection backs it, so its row carries no payload — and its
+    OCR text is structure-drawing noise that must not be mistaken for one.
+    Readers have to skip it rather than try to decode it as JSON.
+    """
+    extracted = _layout_extracted()
+    extracted.pages[0].regions[1].update(
+        {"kind": "molecule", "type": "molecule", "text": "garbage ocr"}
+    )
+
+    evidence = _mint(tmp_path, extracted=extracted)
+    molecule_rows = [item for item in evidence if item.kind == "molecule"]
+    assert len(molecule_rows) == 1
+    assert molecule_rows[0].raw_text == "", "a region-only molecule row has no payload"
+
+    persist_source_evidence(tmp_path, evidence)
+
+    assert load_detections(tmp_path, DOC) is None
+
+
 def test_mint_requires_archived_molecule_crop(tmp_path: Path) -> None:
     """A molecule row may not reference a crop that was never archived."""
     with pytest.raises(ValueError, match="not archived"):

@@ -79,7 +79,7 @@ class MoleculeCrop:
 
     page_idx: int
     mol_idx: int
-    bbox_pdf: list[float]
+    bbox_pdf: tuple[float, float, float, float]
     score: float
     crop_path: Path
     nearby_text: str
@@ -383,12 +383,12 @@ class CropProcessor:
             crop, main_mask = raw_crop, None
 
         ocr_slot = self._submit_label_ocr(wide_crop, main_mask)
-        bbox_pdf = [
+        bbox_pdf = (
             round(px1 * scale_x, 2),
             round(page_h_pts - py2 * scale_y, 2),
             round(px2 * scale_x, 2),
             round(page_h_pts - py1 * scale_y, 2),
-        ]
+        )
         nearby_text = self.nearby_block_text(
             page.page.blocks,
             (

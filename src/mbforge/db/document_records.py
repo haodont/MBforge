@@ -124,16 +124,29 @@ def update_status(library_root: str | Path, doc_id: str, status: str) -> None:
         kb.execute("UPDATE documents SET status = ? WHERE doc_id = ?", (status, doc_id))
 
 
-def delete(library_root: str | Path, doc_id: str) -> None:
-    """Remove one document row (idempotent)."""
+def delete_many(library_root: str | Path, doc_ids: Sequence[str]) -> None:
+    """Remove document rows in one transaction (idempotent).
+
+    Follows ``delete_molecule_records``: chunk the ``IN (…)`` list so a large
+    selection does not exceed SQLite's ``SQLITE_MAX_VARIABLE_NUMBER``.
+    """
+    ids = [doc_id for doc_id in dict.fromkeys(doc_ids) if doc_id]
+    if not ids:
+        return
+    chunk_size = 500
     db = DatabaseManager.get(str(library_root))
     with db.transaction() as (kb, _):
-        kb.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+        for start in range(0, len(ids), chunk_size):
+            chunk = ids[start : start + chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            kb.execute(
+                f"DELETE FROM documents WHERE doc_id IN ({placeholders})", chunk
+            )
 
 
 __all__ = [
     "count",
-    "delete",
+    "delete_many",
     "find_by_filename",
     "get",
     "insert",

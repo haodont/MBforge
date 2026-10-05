@@ -18,6 +18,16 @@ from mbforge.server.process.filelock import (
     try_lock_file,
     unlock_file,
 )
+from mbforge.server.resource_manager import REQUIRED_PIPELINE_MODEL_IDS
+from mbforge.service.use_cases.pipeline.model_gate import (
+    BlockingModel,
+    ModelGateResult,
+)
+
+
+def _ready_gate() -> ModelGateResult:
+    """A gate verdict that lets the worker claim rows."""
+    return ModelGateResult(ready=True, required=REQUIRED_PIPELINE_MODEL_IDS, missing=())
 
 
 def _library(tmp_path: Path, name: str = "library") -> str:
@@ -324,6 +334,7 @@ def test_worker_claims_and_executes_pending_row(tmp_path: Path, monkeypatch) -> 
         executed.append(task_id)
 
     monkeypatch.setattr(worker, "_run_pipeline_sync", _fake_run)
+    monkeypatch.setattr(worker, "_evaluate_model_gate", _ready_gate)
 
     async def _scenario() -> None:
         worker.ensure_queue_worker(root)
@@ -339,6 +350,77 @@ def test_worker_claims_and_executes_pending_row(tmp_path: Path, monkeypatch) -> 
 
     assert executed == ["t1"]
     assert _queue_row(db, "t1")["status"] == "pending"
+
+
+def test_worker_holds_pending_rows_until_models_are_ready(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A blocked gate leaves rows queued; the same worker resumes on its own.
+
+    Protects the user-visible contract of the model gate: with a required
+    model missing, documents stay ``pending`` (not failed, not claimed) and
+    start processing without a restart once the model becomes ready.
+    """
+    root = _library(tmp_path)
+    db = DatabaseManager.get(root)
+    db.initialize()
+    _seed(db, [{"id": "t1", "file_path": str(Path(root) / "doc.pdf")}])
+
+    executed: list[str] = []
+
+    def _fake_run(
+        file_path: str,
+        library_root: str,
+        doc_id: str,
+        task_id: str,
+        stage: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        del file_path, library_root, doc_id, stage, run_id
+        executed.append(task_id)
+
+    gate_state = {"ready": False}
+    gate_calls = 0
+
+    def _gate() -> ModelGateResult:
+        nonlocal gate_calls
+        gate_calls += 1
+        if gate_state["ready"]:
+            return _ready_gate()
+        return ModelGateResult(
+            ready=False,
+            required=REQUIRED_PIPELINE_MODEL_IDS,
+            missing=(
+                BlockingModel(id="moldet", name="MolDetv2-FT", status="not_found"),
+            ),
+        )
+
+    monkeypatch.setattr(worker, "_run_pipeline_sync", _fake_run)
+    monkeypatch.setattr(worker, "_evaluate_model_gate", _gate)
+    # Spin the drain loop so the assertions below cover many gate evaluations.
+    monkeypatch.setattr(worker, "_CLAIM_POLL_S", 0.0)
+    monkeypatch.setattr(worker, "_GATE_POLL_S", 0.0)
+
+    async def _scenario() -> None:
+        worker.ensure_queue_worker(root)
+        await asyncio.sleep(0.2)
+        # Blocked: the loop kept probing but never claimed the row.
+        assert gate_calls > 3
+        assert executed == []
+        assert _queue_row(db, "t1")["status"] == "pending"
+
+        gate_state["ready"] = True
+        for _ in range(200):
+            if executed:
+                break
+            await asyncio.sleep(0.02)
+
+    try:
+        asyncio.run(_scenario())
+    finally:
+        worker.stop_queue_workers()
+
+    assert executed == ["t1"]
 
 
 def test_active_task_ids_tracking(tmp_path: Path, monkeypatch) -> None:

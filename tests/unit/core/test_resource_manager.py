@@ -121,6 +121,10 @@ def test_check_model_file_flags_size_mismatch(tmp_path: Path) -> None:
         name="MolParser",
         type=ResourceType.MODEL,
         description="",
+        # The weights live in the repo-named subdirectory, so the probe needs
+        # ``ms_repo`` to recognise it — without it the subdirectory name is
+        # not a candidate at all.
+        ms_repo="UniParser/MolParser",
         download_type="file",
         local_name="model.pth",
         expected_size=1000,

@@ -45,10 +45,13 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mbforge.foundation.ids import short_id
 from mbforge.foundation.logger import get_logger
+
+if TYPE_CHECKING:
+    from mbforge.service.use_cases.pipeline.model_gate import ModelGateResult
 
 logger = get_logger("mbforge.queue_worker")
 
@@ -60,6 +63,10 @@ _HEARTBEAT_STALE_S = 60.0
 # How long a follower (no library lock) waits before retrying to become the
 # leader.
 _LOCK_RETRY_S = 10.0
+# Model gate probe cadence.  The probe stats model directories, so it costs
+# more than a claim poll; the verdict is cached between iterations and only
+# refreshed this often.
+_GATE_POLL_S = 5.0
 
 # Task ids currently executing inside THIS process, grouped by library root
 # (event-loop thread only). Grouping by root lets a multi-library process
@@ -212,23 +219,66 @@ async def _worker_loop(library_root: str) -> None:
             registry.unregister()
 
 
+def _evaluate_model_gate() -> ModelGateResult:
+    """Probe whether the required pipeline models are ready.
+
+    Lazily imports the use case so this module keeps its ``foundation``-only
+    import surface.  Module-level name so tests can replace it, mirroring the
+    ``ensure_queue_worker`` / ``_run_pipeline_sync`` convention.
+    """
+    from mbforge.service.use_cases.pipeline.model_gate import evaluate_model_gate
+
+    return evaluate_model_gate()
+
+
 async def _drain_loop(library_root: str, worker: str) -> None:
-    """Claim tasks until cancelled, then drain and release this worker's rows."""
+    """Claim tasks until cancelled, then drain and release this worker's rows.
+
+    Claiming is gated on the required models being ready: while any is missing
+    the loop leaves rows ``pending`` and keeps polling, so tasks queue up
+    instead of failing and resume on their own once the downloads land.  The
+    gate only guards *claiming* — in-flight tasks and orphan reclaiming are
+    untouched.
+    """
     active = _active_for(library_root)
     running: set[asyncio.Task] = set()
+    gate: ModelGateResult | None = None
+    gate_missing: tuple[str, ...] | None = None
+    next_gate_check = 0.0
     try:
         while True:
             _reclaim_orphans(library_root, excluded_ids=active)
             slots = _max_concurrency() - len(running)
             if slots > 0:
-                claimed = _claim_rows(library_root, worker, slots)
-                for row in claimed:
-                    active.add(row["id"])
-                    task = asyncio.create_task(
-                        _execute_claimed(library_root, row, worker)
-                    )
-                    running.add(task)
-                    task.add_done_callback(running.discard)
+                now = time.monotonic()
+                if gate is None or now >= next_gate_check:
+                    gate = await asyncio.to_thread(_evaluate_model_gate)
+                    next_gate_check = now + _GATE_POLL_S
+                if gate.ready:
+                    if gate_missing is not None:
+                        logger.info(
+                            "Required models ready; resuming the ingest queue for %s",
+                            library_root,
+                        )
+                        gate_missing = None
+                    claimed = _claim_rows(library_root, worker, slots)
+                    for row in claimed:
+                        active.add(row["id"])
+                        task = asyncio.create_task(
+                            _execute_claimed(library_root, row, worker)
+                        )
+                        running.add(task)
+                        task.add_done_callback(running.discard)
+                else:
+                    # Log once per distinct missing set, not on every poll.
+                    missing = gate.missing_ids()
+                    if missing != gate_missing:
+                        logger.warning(
+                            "Ingest queue for %s paused: %s",
+                            library_root,
+                            gate.reason(),
+                        )
+                        gate_missing = missing
             if running:
                 _heartbeat_rows(library_root, worker)
                 await asyncio.wait(set(running), timeout=_CLAIM_POLL_S)

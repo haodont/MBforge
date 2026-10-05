@@ -113,8 +113,12 @@ def _search_in(base: Path, info: ResourceInfo) -> ResourceStatusResult | None:
         return _file_result(path, info)
 
     # 2. base/<repo_name>/（MBForge 子目录布局）
-    repo_name = info.ms_repo.split("/")[-1]
-    for subdir_name in [repo_name, local_name, info.id]:
+    repo_name = info.ms_repo.split("/")[-1] if info.ms_repo else ""
+    for subdir_name in (repo_name, local_name, info.id):
+        # 空名字会让 ``base / ""`` 退化成 ``base`` 本身，于是缓存根下的任意
+        # 权重文件都会被当成这个模型的——候选必须是非空名字。
+        if not subdir_name:
+            continue
         subdir = base / subdir_name
         if subdir.is_dir():
             for f in subdir.iterdir():

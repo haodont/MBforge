@@ -8,8 +8,10 @@ import pymupdf
 from fastapi.testclient import TestClient
 
 from mbforge.service.dto.readiness import (
+    BlockingModelReadiness,
     DatabaseReadiness,
     LibraryReadiness,
+    ModelGateReadiness,
     ModelReadiness,
     OCRReadiness,
 )
@@ -48,6 +50,20 @@ def test_diagnostics_summary_returns_degraded_subsystems(
         "_probe_layout_sync",
         lambda: OCRReadiness(chain=[], error="layout weights missing"),
     )
+    monkeypatch.setattr(
+        readiness_service,
+        "_probe_model_gate_sync",
+        lambda: ModelGateReadiness(
+            ready=False,
+            required=["moldet", "molparser"],
+            missing=[
+                BlockingModelReadiness(
+                    id="moldet", name="MolDetv2-FT", status="not_found"
+                )
+            ],
+            reason="missing models: moldet (not_found)",
+        ),
+    )
     response = app_client.get("/api/v1/diagnostics/summary")
 
     assert response.status_code == 200
@@ -64,6 +80,19 @@ def test_diagnostics_summary_returns_degraded_subsystems(
     assert body["models"][0]["last_error"] == "download failed"
     assert body["models"][0]["expected_size_mb"] == 640.0
     assert body["ocr"]["error"] == "layout weights missing"
+    assert body["model_gate"] == {
+        "ready": False,
+        "required": ["moldet", "molparser"],
+        "missing": [
+            {
+                "id": "moldet",
+                "name": "MolDetv2-FT",
+                "status": "not_found",
+                "error": None,
+            }
+        ],
+        "reason": "missing models: moldet (not_found)",
+    }
     assert "llm" not in body
 
 

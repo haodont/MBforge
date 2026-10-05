@@ -8,6 +8,7 @@ import Chip from '../ui/Chip'
 import Switch from '../ui/Switch'
 import { LoadingState } from '../ui/LoadingState'
 import EmptyState from '../ui/EmptyState'
+import InlineAlert from '../ui/InlineAlert'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { QueueIcon, RefreshCwIcon, TrashIcon, XIcon } from '../icons'
 import { WorkerStatusBadge } from './WorkerStatusBadge'
@@ -511,6 +512,15 @@ export default function ProcessingQueue() {
             </div>
           )}
         </header>
+
+        {/* ----- Model gate banner ----- */}
+        {workerData?.model_gate && !workerData.model_gate.ready && (
+          <InlineAlert tone="warning" title={t('queue.modelsBlockedTitle')}>
+            {t('queue.modelsBlockedBody', {
+              models: workerData.model_gate.missing.map((m) => m.name).join(', '),
+            })}
+          </InlineAlert>
+        )}
 
         {queueTasks.length > 0 && <>
         {/* ----- Filter chips ----- */}

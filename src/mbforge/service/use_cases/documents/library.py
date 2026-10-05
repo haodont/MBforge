@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 import shutil
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -165,20 +166,32 @@ class LibraryStore:
         """Return the :class:`Document` entity for ``doc_id`` (``None`` if absent)."""
         return self.load_document(doc_id)
 
-    def delete_document(self, doc_id: str) -> None:
-        """Remove storage dir + registry row + molecule data."""
-        backup_path = create_backup(self._root, doc_id, "document_delete")
-        storage_subdir = self._layout.storage_dir(doc_id)
-        if storage_subdir.exists():
-            shutil.rmtree(storage_subdir, ignore_errors=True)
+    def delete_documents(self, doc_ids: Sequence[str]) -> int:
+        """Remove many documents: storage dirs + registry rows + molecule data.
+
+        Deletion is not backed up: the library is disposable local data, and a
+        batch delete would otherwise leave one snapshot per document behind.
+        Ids are de-duplicated and unknown ids are ignored; returns the number
+        of ids processed.
+        """
+        ids = [doc_id for doc_id in dict.fromkeys(doc_ids) if doc_id]
+        if not ids:
+            return 0
+
+        for doc_id in ids:
+            storage_subdir = self._layout.storage_dir(doc_id)
+            if storage_subdir.exists():
+                shutil.rmtree(storage_subdir, ignore_errors=True)
 
         from mbforge.service.ports import get_database
 
         db = get_database(str(self._root))
         with db.transaction() as (_kb_conn, mol_conn):
-            db.delete_document_molecule_data(mol_conn, doc_id)
-        get_repositories(self._root).documents.delete(doc_id)
-        logger.info("Document deleted: %s (backup=%s)", doc_id, backup_path)
+            for doc_id in ids:
+                db.delete_document_molecule_data(mol_conn, doc_id)
+        get_repositories(self._root).documents.delete_many(ids)
+        logger.info("Documents deleted: %s", ids)
+        return len(ids)
 
     def list_documents(self) -> list[Document]:
         """Return documents whose processing reached an outcome, newest first.

@@ -19,9 +19,11 @@ from mbforge.foundation.layout import probe_library_root
 from mbforge.foundation.logger import get_logger
 from mbforge.foundation.paths import get_model_cache_dir
 from mbforge.service.dto.readiness import (
+    BlockingModelReadiness,
     DatabaseReadiness,
     DemoRunResponse,
     LibraryReadiness,
+    ModelGateReadiness,
     ModelReadiness,
     OCRReadiness,
     ReadinessSummaryResponse,
@@ -124,19 +126,43 @@ def _probe_layout_sync() -> OCRReadiness:
         return OCRReadiness(chain=[], error=_sanitize_error(exc))
 
 
+def _probe_model_gate_sync() -> ModelGateReadiness:
+    """Report whether the ingest queue may claim documents, and why not."""
+    from mbforge.service.use_cases.pipeline.model_gate import evaluate_model_gate
+
+    try:
+        gate = evaluate_model_gate()
+    except Exception as exc:  # noqa: BLE001 — degraded probe, never raise
+        logger.warning("readiness: model gate probe failed: %s", exc)
+        return ModelGateReadiness(ready=False, reason=_sanitize_error(exc))
+    return ModelGateReadiness(
+        ready=gate.ready,
+        required=list(gate.required),
+        missing=[
+            BlockingModelReadiness(
+                id=model.id, name=model.name, status=model.status, error=model.error
+            )
+            for model in gate.missing
+        ],
+        reason=gate.reason(),
+    )
+
+
 async def summary() -> ReadinessSummaryResponse:
     """Aggregate read-only probes for library, database, models and layout."""
     library = await asyncio.to_thread(_probe_library_sync)
-    database, models, ocr = await asyncio.gather(
+    database, models, ocr, model_gate = await asyncio.gather(
         asyncio.to_thread(_probe_database_sync, library),
         asyncio.to_thread(_probe_models_sync),
         asyncio.to_thread(_probe_layout_sync),
+        asyncio.to_thread(_probe_model_gate_sync),
     )
     return ReadinessSummaryResponse(
         library=library,
         database=database,
         models=models,
         ocr=ocr,
+        model_gate=model_gate,
     )
 
 

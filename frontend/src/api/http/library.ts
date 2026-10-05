@@ -186,20 +186,11 @@ export async function listDocuments(
   )
 }
 
-export async function deleteDocument(
-  docId: string
-): Promise<{ success: boolean }> {
+export async function deleteDocuments(
+  docIds: string[]
+): Promise<{ success: boolean; deleted: number }> {
   return invokeWithError(() =>
-    httpPost('/api/v1/library/documents/delete', { doc_id: docId })
-  )
-}
-
-/** Clear a document's pipeline outputs (restore pre-pipeline state). */
-export async function clearDocument(
-  docId: string
-): Promise<{ success: boolean }> {
-  return invokeWithError(() =>
-    httpPost('/api/v1/library/documents/clear', { doc_id: docId })
+    httpPost('/api/v1/library/documents/delete', { doc_ids: docIds })
   )
 }
 

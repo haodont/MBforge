@@ -36,6 +36,13 @@ class DetectionSource:
     conf_moldet: float = 0.0
     evidence_id: str | None = None
 
+    def __post_init__(self) -> None:
+        # 位置身份的一部分，消费方（evidence 位置索引、去重）拿它做 dict key，
+        # 所以必须可哈希。producer 常给 list（PDF 坐标是 JSON 友好形状），
+        # 在此统一成 tuple，与 ``SourceEvidence`` 的既有约定一致。
+        if self.bbox is not None:
+            self.bbox = tuple(float(value) for value in self.bbox)
+
 
 @dataclass
 class ExtractionResult:
@@ -64,6 +71,12 @@ class ExtractionResult:
     mol_img_path: str | None = None
     properties: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # 与 ``DetectionSource`` 同样的不变量：bbox 是位置身份，下游要用它做
+        # 位置索引。producer 与反序列化路径都可能给 list，统一成 tuple。
+        if self.bbox_pdf is not None:
+            self.bbox_pdf = tuple(float(value) for value in self.bbox_pdf)
+
     def to_dict(self) -> dict:
         """序列化为字典."""
         return {
@@ -87,7 +100,8 @@ class ExtractionResult:
             smiles=smiles,
             esmiles=raw_esmiles,
             moldet_conf=data.get("moldet_conf", 0.0),
-            bbox_pdf=tuple(data["bbox_pdf"]) if data.get("bbox_pdf") else None,
+            # ``__post_init__`` 负责归一化成 tuple；空列表保持 None 语义。
+            bbox_pdf=data.get("bbox_pdf") or None,
             page_idx=data.get("page_idx"),
             name=data.get("name", ""),
             mol_img_path=str(img_path) if img_path else None,

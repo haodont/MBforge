@@ -184,13 +184,20 @@ def _region_evidence(
     ``kind`` is the detector's own label (``text`` / ``sec`` / ``figcx`` …), kept
     verbatim.  Content is the recognized text when there is any; a region the
     producer located but could not read carries an empty payload.
+
+    A region the layout producer re-typed to ``molecule`` (R3/R4) only declares
+    the location: the observation itself is the molecule pass' own row.  Its OCR
+    text is structure-drawing noise, and keeping it would let the region row win
+    the same-location merge and overwrite the real payload.
     """
+    kind = str(region.get("kind") or "text")
+    text = "" if kind == MOLECULE else str(region.get("text") or "").strip()
     return SourceEvidence.create(
         doc_id=doc_id,
         page=page,
         bbox=_bbox_in_frame(region.get("bbox") or (), frame),
-        raw_text=str(region.get("text") or "").strip(),
-        kind=str(region.get("kind") or "text"),
+        raw_text=text,
+        kind=kind,
     )
 
 

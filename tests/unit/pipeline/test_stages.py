@@ -28,13 +28,18 @@ _MOLECULE_PASS = (
 
 
 def _molecule_result() -> ExtractionResult:
-    """A text-sourced molecule observation (no archived crop to resolve)."""
+    """A text-sourced molecule observation (no archived crop to resolve).
+
+    ``bbox_pdf`` is a list on purpose: that is the shape the JSON payload and the
+    producer hand over, and Extract matches it against the evidence location
+    index, so the value must be normalised to a hashable tuple on the way in.
+    """
     return ExtractionResult(
         esmiles="CCO<sep>",
         smiles="CCO",
         name="EtOH",
         moldet_conf=0.9,
-        bbox_pdf=(10.0, 20.0, 30.0, 40.0),
+        bbox_pdf=[10.0, 20.0, 30.0, 40.0],  # type: ignore[arg-type]
         page_idx=0,
     )
 

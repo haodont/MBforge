@@ -1,6 +1,7 @@
 /** Ingest queue — 文档处理队列操作 via HTTP. */
 
 import { httpPost, httpGet, invokeWithError, apiUrl } from './_utils'
+import type { ReadinessModelGate } from './readiness'
 import { ErrorCode } from '@/utils/errors'
 import { logger } from '@/utils/logger'
 
@@ -177,9 +178,16 @@ export async function ingestStats(libraryRoot: string): Promise<QueueStats> {
   )
 }
 
-export async function ingestWorkerStatus(): Promise<{ status: string; ts: number }> {
+export interface IngestWorkerStatus {
+  status: string
+  ts: number
+  /** 必需模型未就绪时解释队列为何暂停；探测失败或未上报时为 null。 */
+  model_gate?: ReadinessModelGate | null
+}
+
+export async function ingestWorkerStatus(): Promise<IngestWorkerStatus> {
   try {
-    return await httpGet<{ status: string; ts: number }>('/api/v1/pipeline/worker/status')
+    return await httpGet<IngestWorkerStatus>('/api/v1/pipeline/worker/status')
   } catch {
     return { status: 'offline', ts: 0 }
   }

@@ -36,7 +36,8 @@ from mbforge.service.dto.library import (
     LibraryCreateCollectionRequest,
     LibraryCreateCollectionResponse,
     LibraryDeleteCollectionRequest,
-    LibraryDeleteDocumentRequest,
+    LibraryDeleteDocumentsRequest,
+    LibraryDeleteDocumentsResponse,
     LibraryDocumentsResponse,
     LibraryEvidenceItem,
     LibraryImportResponse,
@@ -192,29 +193,14 @@ async def library_list_documents(
 
 
 @router.post("/documents/delete")
-async def library_delete_document(
-    body: LibraryDeleteDocumentRequest,
-) -> LibrarySuccessResponse:
-    """Delete a document by doc_id."""
+async def library_delete_documents(
+    body: LibraryDeleteDocumentsRequest,
+) -> LibraryDeleteDocumentsResponse:
+    """Delete every document in ``doc_ids`` in one request."""
     root = _resolve_library_root(body.model_dump() if body.library_root else None)
-    if not body.doc_id:
-        raise ValidationError("doc_id is required")
     store = library_service.LibraryStore.get(root)
-    await asyncio.to_thread(store.delete_document, body.doc_id)
-    return LibrarySuccessResponse()
-
-
-@router.post("/documents/clear")
-async def library_clear_document(
-    body: LibraryDeleteDocumentRequest,
-) -> LibrarySuccessResponse:
-    """Clear a document's pipeline outputs, restoring the pre-pipeline state."""
-    root = _resolve_library_root(body.model_dump() if body.library_root else None)
-    if not body.doc_id:
-        raise ValidationError("doc_id is required")
-    store = library_service.LibraryStore.get(root)
-    await asyncio.to_thread(store.clear_pipeline_data, body.doc_id)
-    return LibrarySuccessResponse()
+    deleted = await asyncio.to_thread(store.delete_documents, body.doc_ids)
+    return LibraryDeleteDocumentsResponse(deleted=deleted)
 
 
 @router.get("/documents/{doc_id}/file")

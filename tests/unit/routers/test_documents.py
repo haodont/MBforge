@@ -76,7 +76,7 @@ def test_documents_delete_and_list_roundtrip(
 
     resp = app_client.post(
         "/api/v1/documents/delete",
-        json={"doc_id": doc_id},
+        json={"doc_ids": [doc_id]},
     )
     assert resp.status_code == 200
     assert resp.json()["success"] is True

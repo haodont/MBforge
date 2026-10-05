@@ -211,7 +211,9 @@ class ExtractStage:
             # error code; never report it as a PDF parse failure.
             raise
         except Exception as e:
-            logger.error("Text extraction failed for %s: %s", ctx.doc_id, e)
+            logger.error(
+                "Text extraction failed for %s: %s", ctx.doc_id, e, exc_info=True
+            )
             from mbforge.service.pipeline.layout.parse import LayoutUnavailableError
 
             if isinstance(e, LayoutUnavailableError):

@@ -5,9 +5,8 @@ import { motion } from 'framer-motion'
 import { fadeUp } from '@/hooks/useAnimations'
 import { useAppContext } from '@/context/AppContext'
 import {
-  useClearDocument,
   useCollections,
-  useDeleteDocument,
+  useDeleteDocuments,
   useDocuments,
   useEnqueueTask,
   useImportDocument,
@@ -15,7 +14,6 @@ import {
   useMoveDocument,
 } from '@/api/query/hooks'
 import { queryKeys } from '@/api/query/keys'
-import { clearViewerSnapshotsForDoc } from '@/components/project/pdf/viewerSnapshots'
 import { showToast } from '@/hooks/useToast'
 import { useTranslation } from 'react-i18next'
 import {
@@ -24,7 +22,6 @@ import {
   PdfIcon,
   PlusIcon,
   QueueIcon,
-  RefreshCwIcon,
   TableIcon,
   TrashIcon,
 } from '@/components/icons'
@@ -44,7 +41,7 @@ import { AppError, getUserFacingError } from '@/utils/errors'
 type ViewMode = 'grid' | 'list'
 
 type DocConfirmAction =
-  | { doc: DocumentInfo; action: 'delete' | 'clear' }
+  | { doc: DocumentInfo; action: 'delete' }
   | { docs: DocumentInfo[]; action: 'delete-selected' }
 
 type DocumentActionMenuProps = {
@@ -55,7 +52,6 @@ type DocumentActionMenuProps = {
   deletePending: boolean
   movePending: boolean
   onDelete: (doc: DocumentInfo) => void
-  onClear: (doc: DocumentInfo) => void
   onMove: (doc: DocumentInfo, targetCollectionId: string | null) => void
 }
 
@@ -67,7 +63,6 @@ function DocumentActionMenu({
   deletePending,
   movePending,
   onDelete,
-  onClear,
   onMove,
 }: DocumentActionMenuProps) {
   const { t } = useTranslation()
@@ -121,14 +116,6 @@ function DocumentActionMenu({
       disabled: enqueuePending,
       onClick: handleEnqueue,
     },
-    { type: 'separator', key: 'sep-clear' },
-    {
-      key: 'clear',
-      label: t('doc.clear'),
-      icon: <RefreshCwIcon size={16} />,
-      disabled: deletePending,
-      onClick: () => onClear(doc),
-    },
     { type: 'separator', key: 'sep-delete' },
     {
       key: 'delete',
@@ -172,7 +159,6 @@ type DocumentItemProps = {
   movePending: boolean
   onOpen: (doc: DocumentInfo) => void
   onDelete: (doc: DocumentInfo) => void
-  onClear: (doc: DocumentInfo) => void
   onMove: (doc: DocumentInfo, targetCollectionId: string | null) => void
   selected: boolean
   onToggleSelect: (doc: DocumentInfo, selected: boolean) => void
@@ -188,7 +174,6 @@ function DocumentCard({
   movePending,
   onOpen,
   onDelete,
-  onClear,
   onMove,
   selected,
   onToggleSelect,
@@ -214,7 +199,6 @@ function DocumentCard({
           deletePending={deletePending}
           movePending={movePending}
           onDelete={onDelete}
-          onClear={onClear}
           onMove={onMove}
         />
       </div>
@@ -253,7 +237,6 @@ function DocumentRow({
   movePending,
   onOpen,
   onDelete,
-  onClear,
   onMove,
   selected,
   onToggleSelect,
@@ -301,7 +284,6 @@ function DocumentRow({
           deletePending={deletePending}
           movePending={movePending}
           onDelete={onDelete}
-          onClear={onClear}
           onMove={onMove}
         />
       </div>
@@ -342,9 +324,8 @@ export default function Workspace() {
   const { data, isLoading, isError } = useDocuments(activeCollectionId ?? undefined)
   const queryClient = useQueryClient()
   const importMutation = useImportDocument()
-  const deleteMutation = useDeleteDocument()
+  const deleteMutation = useDeleteDocuments()
   const bulkEnqueueMutation = useEnqueueTask()
-  const clearMutation = useClearDocument()
   const moveMutation = useMoveDocument()
   // Documents under processing are deliberately absent from the listing, so
   // the queue is what tells the user their import is being worked on. The queue
@@ -519,7 +500,7 @@ export default function Workspace() {
 
   const handleDeleteDocument = useCallback(async (doc: DocumentInfo) => {
     try {
-      await deleteMutation.mutateAsync(doc.doc_id)
+      await deleteMutation.mutateAsync([doc.doc_id])
       setSelectedDocumentIds(current => {
         if (!current.has(doc.doc_id)) return current
         const next = new Set(current)
@@ -533,26 +514,17 @@ export default function Workspace() {
   }, [deleteMutation, t])
 
   const handleDeleteSelected = useCallback(async (docs: DocumentInfo[]) => {
-    const deletedIds = new Set<string>()
-    let failed = 0
-    for (const doc of docs) {
-      try {
-        await deleteMutation.mutateAsync(doc.doc_id)
-        deletedIds.add(doc.doc_id)
-      } catch {
-        failed += 1
-      }
-    }
-    setSelectedDocumentIds(current => {
-      const next = new Set(current)
-      deletedIds.forEach(docId => next.delete(docId))
-      return next
-    })
-    const deleted = deletedIds.size
-    if (failed > 0) {
-      showToast(t('workspace.bulkDeletePartial', { deleted, failed }), 'error')
-    } else {
-      showToast(t('workspace.bulkDeleteSuccess', { count: deleted }), 'success')
+    const docIds = docs.map((doc) => doc.doc_id)
+    try {
+      await deleteMutation.mutateAsync(docIds)
+      setSelectedDocumentIds(current => {
+        const next = new Set(current)
+        docIds.forEach(docId => next.delete(docId))
+        return next
+      })
+      showToast(t('workspace.bulkDeleteSuccess', { count: docIds.length }), 'success')
+    } catch (e) {
+      showToast(t('workspace.bulkDeleteError', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
     }
   }, [deleteMutation, t])
 
@@ -600,33 +572,17 @@ export default function Workspace() {
     }
   }
 
-  const handleClearDocument = useCallback(async (doc: DocumentInfo) => {
-    try {
-      await clearMutation.mutateAsync(doc.doc_id)
-      // 清空会删除该文档全部渲染源；同会话内仍存活的 viewer 快照若不清，
-      // 重开 viewer 会把旧 bbox 重新灌回状态。这里同步清除，重开后从空快照
-      // 干净重取。
-      clearViewerSnapshotsForDoc(doc.doc_id)
-      showToast(t('doc.clearSuccess', { filename: doc.file_name }), 'success')
-    } catch (e) {
-      showToast(t('doc.clearError', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
-    }
-  }, [clearMutation, t])
-
   const confirmDocAction = useCallback(async (target: DocConfirmAction) => {
     setPendingConfirm(null)
     if (target.action === 'delete-selected') await handleDeleteSelected(target.docs)
-    else if (target.action === 'delete') await handleDeleteDocument(target.doc)
-    else await handleClearDocument(target.doc)
-  }, [handleDeleteDocument, handleDeleteSelected, handleClearDocument, setPendingConfirm])
+    else await handleDeleteDocument(target.doc)
+  }, [handleDeleteDocument, handleDeleteSelected, setPendingConfirm])
 
   const pending = pendingConfirm
-  const confirmDialogTitle = pending === null ? '' : pending.action === 'clear' ? t('doc.clear') : t('doc.delete')
+  const confirmDialogTitle = pending === null ? '' : t('doc.delete')
   const confirmDialogMessage = pending === null ? '' : pending.action === 'delete-selected'
     ? t('workspace.bulkDeleteConfirm', { count: pending.docs.length })
-    : pending.action === 'delete'
-      ? t('doc.deleteConfirm', { filename: pending.doc.file_name })
-      : t('doc.clearConfirm', { filename: pending.doc.file_name })
+    : t('doc.deleteConfirm', { filename: pending.doc.file_name })
   const confirmDialogLabel = pending?.action === 'delete-selected'
     ? t('workspace.deleteSelected', { count: pending.docs.length })
     : confirmDialogTitle
@@ -683,7 +639,6 @@ export default function Workspace() {
           movePending={moveMutation.isPending}
           onOpen={handleOpenDocument}
           onDelete={(document) => setPendingConfirm({ doc: document, action: 'delete' })}
-          onClear={(document) => setPendingConfirm({ doc: document, action: 'clear' })}
           onMove={(document, target) => void handleMoveToGroup(document, target)}
           selected={selectedDocumentIds.has(doc.doc_id)}
           onToggleSelect={handleToggleSelect}
@@ -714,7 +669,6 @@ export default function Workspace() {
           movePending={moveMutation.isPending}
           onOpen={handleOpenDocument}
           onDelete={(document) => setPendingConfirm({ doc: document, action: 'delete' })}
-          onClear={(document) => setPendingConfirm({ doc: document, action: 'clear' })}
           onMove={(document, target) => void handleMoveToGroup(document, target)}
           selected={selectedDocumentIds.has(doc.doc_id)}
           onToggleSelect={handleToggleSelect}
@@ -922,7 +876,7 @@ export default function Workspace() {
         title={confirmDialogTitle}
         message={confirmDialogMessage}
         confirmLabel={confirmDialogLabel}
-        loading={deleteMutation.isPending || clearMutation.isPending}
+        loading={deleteMutation.isPending}
         onConfirm={() => { if (pendingConfirm) void confirmDocAction(pendingConfirm) }}
         onCancel={() => setPendingConfirm(null)}
       />

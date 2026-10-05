@@ -4,8 +4,7 @@ export { useLibraryStatus } from './useLibraryStatus'
 export {
   useDocuments,
   useImportDocument,
-  useDeleteDocument,
-  useClearDocument,
+  useDeleteDocuments,
 } from './useDocuments'
 export {
   useCollections,

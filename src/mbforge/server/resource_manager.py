@@ -188,6 +188,25 @@ RESOURCE_CATALOG: dict[str, ResourceInfo] = {
 # look unhealthy when absent.
 ENVIRONMENT_CHECK_EXCLUDED: frozenset[str] = frozenset()
 
+# 入库队列开始领取文档前必须处于 READY 的模型。这是该集合的唯一真相源：
+# 门禁谓词（service.use_cases.pipeline.model_gate）经运行时端口读它，不在别处
+# 再抄一份。
+#
+# 为什么是这四个：它们都是 ResourceType.MODEL，权重缺失时 Extract 要么静默
+# 降级（MolDet 缺失时返回空检测结果）要么在深层 stage 才抛错，所以必须在入队
+# 消费前就挡住。
+#
+# 为什么不含 ppocrv6：RapidOCR 的 PP-OCRv6 权重不是 catalog 资源，而是随
+# rapidocr 包走的隐式依赖，且 OCR 读取本身有降级路径，不构成硬前置。
+# 为什么不含 rdkit / torch：它们是 PYTHON_PACKAGE，check() 只做 import 探测，
+# 与"下载完成"无关。
+REQUIRED_PIPELINE_MODEL_IDS: tuple[str, ...] = (
+    "moldet",
+    "molparser",
+    "hiro_layout",
+    "slanet_table",
+)
+
 
 # ---------------------------------------------------------------------------
 # 检查函数
@@ -491,6 +510,7 @@ class ResourceManager:
     """统一资源管理器."""
 
     catalog = RESOURCE_CATALOG
+    required_pipeline_model_ids = REQUIRED_PIPELINE_MODEL_IDS
 
     @classmethod
     def check(cls, resource_id: str) -> ResourceStatusResult:

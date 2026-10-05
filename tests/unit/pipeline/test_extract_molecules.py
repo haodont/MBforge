@@ -691,7 +691,8 @@ def test_extract_molecules_from_pdf_batches_page_rois_into_one_gpu_call(
     assert result.esmiles == "CCO"
     # ROI (0,5,5,10 px of the 10x10 page) + ROI-local (0.1,0.2,0.9,0.8)
     # → page px (0.5,6,4.5,9) → PDF-space bbox (lower-left origin).
-    assert result.bbox_pdf == [0.0, 79.2, 244.8, 316.8]
+    # A tuple, not a list: the bbox is a location identity used as a dict key.
+    assert result.bbox_pdf == (0.0, 79.2, 244.8, 316.8)
 
 
 def test_extract_molecules_from_pdf_falls_back_to_full_page_when_rois_empty(

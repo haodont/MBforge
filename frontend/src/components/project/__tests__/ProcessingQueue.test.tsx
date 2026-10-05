@@ -10,6 +10,7 @@ vi.mock('@/api/query/hooks', () => ({
   useDeleteTask: vi.fn(),
   useCancelBatch: vi.fn(),
   useRetryBatch: vi.fn(),
+  useDeleteBatch: vi.fn(),
   useCleanupTasks: vi.fn(),
   useSetTaskPriority: vi.fn(),
 }))
@@ -25,7 +26,15 @@ vi.mock('@/context/AppContext', () => ({
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => {} },
   useTranslation: () => ({
-    t: (key: string) => key,
+    // No locale bundle is loaded, so the key is the rendered text. Params are
+    // appended so assertions can still see interpolated values.
+    t: (key: string, params?: Record<string, unknown>) => {
+      if (!params) return key
+      const rendered = Object.entries(params)
+        .map(([k, v]) => `${k}=${String(v)}`)
+        .join(' ')
+      return `${key} ${rendered}`
+    },
     i18n: { language: 'en' },
   }),
 }))
@@ -47,6 +56,7 @@ import {
   useDeleteTask,
   useCancelBatch,
   useRetryBatch,
+  useDeleteBatch,
   useCleanupTasks,
   useSetTaskPriority,
 } from '@/api/query/hooks'
@@ -59,6 +69,7 @@ function mockMutationHooks() {
   vi.mocked(useDeleteTask).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useDeleteTask>)
   vi.mocked(useCancelBatch).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useCancelBatch>)
   vi.mocked(useRetryBatch).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useRetryBatch>)
+  vi.mocked(useDeleteBatch).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useDeleteBatch>)
   vi.mocked(useCleanupTasks).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useCleanupTasks>)
   vi.mocked(useSetTaskPriority).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useSetTaskPriority>)
 }
@@ -167,5 +178,44 @@ describe('ProcessingQueue', () => {
     const toggle = screen.getByText('queue.showLogs')
     act(() => toggle.click())
     await waitFor(() => expect(mockGetLogs).toHaveBeenCalledWith('/tmp/lib', 'doc1', 200))
+  })
+
+  it('explains the pause and names the models still downloading', () => {
+    mockQueue([{ id: 't1', status: 'pending', doc_id: 'doc1' }])
+    vi.mocked(useWorkerStatus).mockReturnValue({
+      data: {
+        status: 'online',
+        ts: Date.now(),
+        model_gate: {
+          ready: false,
+          required: ['moldet', 'molparser'],
+          missing: [
+            { id: 'moldet', name: 'MolDetv2-FT', status: 'not_found', error: null },
+            { id: 'molparser', name: 'MolParser-Mobile', status: 'partial', error: null },
+          ],
+          reason: 'missing models: moldet (not_found)',
+        },
+      },
+    } as unknown as ReturnType<typeof useWorkerStatus>)
+
+    render(<ProcessingQueue />)
+
+    expect(screen.getByText('queue.modelsBlockedTitle')).toBeInTheDocument()
+    expect(screen.getByText(/MolDetv2-FT, MolParser-Mobile/)).toBeInTheDocument()
+  })
+
+  it('hides the pause banner once every model is ready', () => {
+    mockQueue([{ id: 't1', status: 'pending', doc_id: 'doc1' }])
+    vi.mocked(useWorkerStatus).mockReturnValue({
+      data: {
+        status: 'online',
+        ts: Date.now(),
+        model_gate: { ready: true, required: [], missing: [], reason: null },
+      },
+    } as unknown as ReturnType<typeof useWorkerStatus>)
+
+    render(<ProcessingQueue />)
+
+    expect(screen.queryByText('queue.modelsBlockedTitle')).not.toBeInTheDocument()
   })
 })

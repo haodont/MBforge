@@ -13,7 +13,7 @@ vi.mock('@/api/http/library', () => ({
   listDocuments: vi.fn().mockResolvedValue({ documents: [] }),
   listCollections: vi.fn().mockResolvedValue({ collections: [] }),
   importDocument: vi.fn(),
-  deleteDocument: vi.fn(),
+  deleteDocuments: vi.fn(),
 }))
 
 // Mock i18n — just render children without translation context.

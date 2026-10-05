@@ -26,19 +26,24 @@ class DocumentListResponse(BaseModel):
 
 
 class DocumentDeleteRequest(BaseModel):
-    """Request body for deleting a document."""
+    """Request body for deleting one or more documents in a single call."""
 
     library_root: str | None = Field(
         default=None,
         description="Library root path. Falls back to global config when omitted.",
     )
-    doc_id: str = Field(default="", description="Document identifier to delete.")
+    doc_ids: list[str] = Field(
+        default_factory=list,
+        min_length=1,
+        description="Document identifiers to delete.",
+    )
 
 
 class DocumentDeleteResponse(BaseModel):
-    """Response body for deleting a document."""
+    """Response body for deleting documents."""
 
     success: bool = True
+    deleted: int = 0
 
 
 class DocumentReingestRequest(BaseModel):

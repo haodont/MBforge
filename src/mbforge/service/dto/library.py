@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LibraryStatus(BaseModel):
@@ -25,9 +25,11 @@ class LibraryListDocumentsRequest(BaseModel):
     library_root: str | None = None
 
 
-class LibraryDeleteDocumentRequest(BaseModel):
+class LibraryDeleteDocumentsRequest(BaseModel):
+    """Batch document deletion: one request removes every ``doc_ids`` entry."""
+
     library_root: str | None = None
-    doc_id: str = ""
+    doc_ids: list[str] = Field(default_factory=list, min_length=1)
 
 
 class LibraryMoleculeEvidenceUpdateRequest(BaseModel):
@@ -104,6 +106,11 @@ class LibraryConfigureResponse(BaseModel):
 
 class LibrarySuccessResponse(BaseModel):
     success: bool = True
+
+
+class LibraryDeleteDocumentsResponse(BaseModel):
+    success: bool = True
+    deleted: int = 0
 
 
 class LibraryMoleculeEvidenceUpdateResponse(BaseModel):

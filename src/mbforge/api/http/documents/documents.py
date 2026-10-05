@@ -43,11 +43,9 @@ async def doc_list(body: DocumentListRequest) -> DocumentListResponse:
 @router.post("/delete")
 async def doc_delete(body: DocumentDeleteRequest) -> DocumentDeleteResponse:
     root = resolve_library_root(body.library_root)
-    if not body.doc_id:
-        raise ValidationError("doc_id is required")
     store = LibraryStore.get(str(root))
-    await asyncio.to_thread(store.delete_document, body.doc_id)
-    return DocumentDeleteResponse()
+    deleted = await asyncio.to_thread(store.delete_documents, body.doc_ids)
+    return DocumentDeleteResponse(deleted=deleted)
 
 
 @router.post("/reingest")

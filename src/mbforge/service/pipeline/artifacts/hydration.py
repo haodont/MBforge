@@ -131,12 +131,23 @@ def _extract_meta(staging_dir: Path | None) -> dict[str, Any]:
 
 
 def _molecule_results(evidence: Sequence[SourceEvidence]) -> list[ExtractionResult]:
-    """Decode every molecule row's payload into a located observation."""
-    return [
-        observation_from_payload(item.raw_text, page=item.page, bbox=item.bbox)
-        for item in evidence
-        if category_of(item.kind) == MOLECULE
-    ]
+    """Decode every molecule row's payload into a located observation.
+
+    A ``molecule`` row with no payload is a layout region re-typed to molecule
+    (R3/R4) that no molecule detection backed: it marks the location, it is not
+    an observation, so it contributes nothing here.
+    """
+    results: list[ExtractionResult] = []
+    for item in evidence:
+        if category_of(item.kind) != MOLECULE:
+            continue
+        payload = (item.raw_text or "").strip()
+        if not payload:
+            continue
+        results.append(
+            observation_from_payload(payload, page=item.page, bbox=item.bbox)
+        )
+    return results
 
 
 def load_extracted(

@@ -27,6 +27,18 @@ backends keep one process-wide model instance reused by every task, and
 `foundation/inference/load_guard.py` cools down a failed load instead of
 retrying it per crop.
 
+The ingest queue does not claim a row until every model in
+`REQUIRED_PIPELINE_MODEL_IDS` (`moldet`, `molparser`, `hiro_layout`,
+`slanet_table`, defined beside `RESOURCE_CATALOG`) is `ready`. That set is the
+single source of truth: `service/use_cases/pipeline/model_gate.py` reads it
+through the runtime port, the queue worker consults the gate before
+`_claim_rows`, and both `GET /api/v1/pipeline/worker/status` and
+`/api/v1/readiness/summary` report the verdict. Blocked rows stay `pending` and
+resume automatically once the downloads land — enqueueing is never gated.
+`ppocrv6` is deliberately excluded: RapidOCR's weights ship with the
+`rapidocr` package rather than the catalog, and OCR has a degradation path, so
+gating on it would deadlock the queue.
+
 ## LLM ownership
 
 The chat LLM lives entirely in the `agent/` Node sidecar (port 18800): it owns

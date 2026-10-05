@@ -15,6 +15,8 @@ from typing import Any, Protocol
 
 class ResourceManagerCapability(Protocol):
     catalog: Any
+    #: 入库队列开始领取文档前必须 READY 的模型 id（catalog 层定义的唯一真相源）。
+    required_pipeline_model_ids: tuple[str, ...]
 
     def check(self, resource_id: str) -> Any: ...
 
