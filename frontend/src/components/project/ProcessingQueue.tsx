@@ -28,6 +28,7 @@ import {
   useDeleteTask,
   useCancelBatch,
   useRetryBatch,
+  useDeleteBatch,
   useCleanupTasks,
   useSetTaskPriority,
 } from '@/api/query/hooks'
@@ -59,6 +60,7 @@ const EMPTY_LOGS: IngestLogEvent[] = []
 type QueueConfirm =
   | { type: 'cancel-all' }
   | { type: 'cleanup' }
+  | { type: 'cleanup-failed-cancelled'; runIds: string[] }
   | { type: 'delete'; task: IngestTask }
   | null
 
@@ -72,6 +74,10 @@ export default function ProcessingQueue() {
   const { data: workerData } = useWorkerStatus()
   const workerStatus = workerData?.status === 'online' ? 'online' : 'offline' as 'online' | 'offline' | 'unknown'
   const queueTasks = useMemo(() => deduplicateTasksByDocId(tasks), [tasks])
+  const failedCancelledRunIds = useMemo(
+    () => deduplicateRunIds(queueTasks.filter((task) => task.status === 'failed' || task.status === 'cancelled')),
+    [queueTasks],
+  )
 
   // ── Local UI state ────────────────────────────────────────────
   const [actionId, setActionId] = useState<string | null>(null)
@@ -79,7 +85,7 @@ export default function ProcessingQueue() {
   const [hideDone, setHideDone] = useState(true)
   const [logMap, setLogMap] = useState<Map<string, IngestLogEvent[]>>(new Map())
   const [expandedLogDocs, setExpandedLogDocs] = useState<Set<string>>(new Set())
-  const [bulkAction, setBulkAction] = useState<'retry' | 'cancel' | null>(null)
+  const [bulkAction, setBulkAction] = useState<'retry' | 'cancel' | 'delete' | null>(null)
   const [confirm, setConfirm] = useState<QueueConfirm>(null)
 
   const refreshQueue = useCallback(() => {
@@ -172,6 +178,7 @@ export default function ProcessingQueue() {
   const deleteMutation = useDeleteTask()
   const cancelBatchMutation = useCancelBatch()
   const retryBatchMutation = useRetryBatch()
+  const deleteBatchMutation = useDeleteBatch()
   const cleanupMutation = useCleanupTasks()
   const priorityMutation = useSetTaskPriority()
 
@@ -272,6 +279,25 @@ export default function ProcessingQueue() {
       refreshQueue()
     }
   }, [libraryRoot, refreshQueue, t, cleanupMutation])
+
+  const runDeleteFailedCancelled = useCallback(async (runIds: string[]) => {
+    if (!libraryRoot) return
+    setConfirm(null)
+    setBulkAction('delete')
+    try {
+      const result = await deleteBatchMutation.mutateAsync({ libraryRoot, runIds })
+      showToast(
+        t('queue.bulkDeleteDone', { deleted: result.updated, skipped: result.skipped }),
+        result.skipped > 0 ? 'warning' : 'success',
+      )
+    } catch (error) {
+      logger.error('[ProcessingQueue] batch delete failed:', error)
+      showToast(t('queue.bulkDeleteFailed', { error: getUserFacingError(error) }), 'error')
+    } finally {
+      setBulkAction(null)
+      refreshQueue()
+    }
+  }, [libraryRoot, refreshQueue, t, deleteBatchMutation])
 
   const handleSetPriority = useCallback(
     async (task: IngestTask) => {
@@ -404,6 +430,16 @@ export default function ProcessingQueue() {
                   <Button
                     variant="secondary"
                     size="sm"
+                    icon={<TrashIcon size={14} />}
+                    onClick={() => setConfirm({ type: 'cleanup-failed-cancelled', runIds: failedCancelledRunIds })}
+                    loading={bulkAction === 'delete'}
+                    disabled={bulkAction !== null || actionId !== null || failedCancelledRunIds.length === 0}
+                  >
+                    {t('queue.cleanupFailedCancelled')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     icon={<RefreshCwIcon size={14} />}
                     onClick={() => void handleRetryAllFailed()}
                     loading={bulkAction === 'retry'}
@@ -526,15 +562,18 @@ export default function ProcessingQueue() {
 
       <ConfirmDialog
         open={confirm !== null}
-        title={confirm === null ? '' : confirm.type === 'cancel-all' ? t('queue.cancelAllPending') : confirm.type === 'cleanup' ? t('queue.cleanupDone') : t('queue.deleteTask')}
+        title={confirm === null ? '' : confirm.type === 'cancel-all' ? t('queue.cancelAllPending') : confirm.type === 'cleanup' ? t('queue.cleanupDone') : confirm.type === 'cleanup-failed-cancelled' ? t('queue.cleanupFailedCancelled') : t('queue.deleteTask')}
         message={confirm === null ? '' : confirm.type === 'cancel-all'
           ? t('queue.cancelAllConfirm', { count: queueTasks.filter((task) => task.status === 'pending').length })
-          : confirm.type === 'cleanup' ? t('queue.cleanupConfirm') : t('queue.deleteConfirm')}
+          : confirm.type === 'cleanup' ? t('queue.cleanupConfirm')
+            : confirm.type === 'cleanup-failed-cancelled' ? t('queue.cleanupFailedCancelledConfirm', { count: confirm.runIds.length })
+              : t('queue.deleteConfirm')}
         confirmLabel={confirm === null ? '' : confirm.type === 'delete' ? t('queue.deleteTask') : t('common.confirm')}
         loading={bulkAction !== null || actionId !== null}
         onConfirm={() => {
           if (confirm?.type === 'cancel-all') void runCancelAllPending()
           else if (confirm?.type === 'cleanup') void runCleanup()
+          else if (confirm?.type === 'cleanup-failed-cancelled') void runDeleteFailedCancelled(confirm.runIds)
           else if (confirm?.type === 'delete') void runDelete(confirm.task)
         }}
         onCancel={() => setConfirm(null)}

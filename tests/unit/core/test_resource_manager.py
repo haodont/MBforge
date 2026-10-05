@@ -5,14 +5,15 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from mbforge.server.models.assets.locator import (
+    _check_model_file,
+    _check_model_snapshot,
+)
 from mbforge.server.resource_manager import (
     RESOURCE_CATALOG,
     ResourceInfo,
-    ResourceManager,
     ResourceStatus,
     ResourceType,
-    _check_model_file,
-    _check_model_snapshot,
     _verify_model_path,
 )
 
@@ -220,41 +221,34 @@ def test_none_info_is_handled(tmp_path: Path) -> None:
     assert _verify_model_path(f, None) is False  # type: ignore[arg-type]
 
 
-def test_bundled_asset_takes_precedence_over_downloads(
+def test_model_status_ignores_weights_outside_the_cache_dir(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """A project-bundled weight makes the model READY without a download."""
-    import mbforge.server.model_locator as ml
+    """Only the model cache directory counts as "downloaded".
 
-    asset = tmp_path / "moldetv2_structure_ft.pt"
-    asset.write_bytes(b"fake weights")
-    monkeypatch.setattr(ml, "_project_assets_dir", lambda: tmp_path)
+    Weights left by other tools (assets/models, a repo-root models/ dir, the
+    global HF/ModelScope caches) must not make a model report READY: the cache
+    directory is both the download target and the single read source, so a
+    ready status always means the app can load the model straight from there.
+    """
+    import mbforge.server.resource_manager as rm
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    stray = tmp_path / "assets" / "models"
+    stray.mkdir(parents=True)
+    (stray / "moldetv2_structure_ft.pt").write_bytes(b"stray weights")
+    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: cache)
 
     moldet = RESOURCE_CATALOG["moldet"]
-    assert ml.bundled_model_asset(moldet) == asset
+    assert _check_model_snapshot(moldet).status == ResourceStatus.NOT_FOUND
+
+    # Placing the catalog files in the cache directory makes it READY.
+    dest = cache / moldet.local_name
+    dest.mkdir(parents=True)
+    for name in moldet.files:
+        (dest / name).write_bytes(b"weights")
     result = _check_model_snapshot(moldet)
     assert result.status == ResourceStatus.READY
-    assert Path(result.local_path) == asset
-
-    # Non-matching resources are untouched (no accidental hijack).
-    molparser = RESOURCE_CATALOG["molparser"]
-    assert ml.bundled_model_asset(molparser) is None
-
-
-def test_resolve_model_for_backend_returns_bundled_single_file(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    """resolve_model_for_backend returns the bundled file even when the
-    catalog subpath does not exist under the asset directory."""
-    import mbforge.server.model_locator as ml
-
-    asset = tmp_path / "moldetv2_structure_ft.pt"
-    asset.write_bytes(b"fake weights")
-    monkeypatch.setattr(ml, "_project_assets_dir", lambda: tmp_path)
-
-    resolved = ResourceManager.resolve_model_for_backend(
-        "moldet", subpath="moldet_v2_yolo26n_960_doc.pt"
-    )
-    assert resolved == asset
+    assert Path(result.local_path) == dest

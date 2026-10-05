@@ -1,9 +1,10 @@
 """Process governance sub-package.
 
-Public surface for the background task gateway (``tasks``), the GPU inference
-gate (``gpu_gate``), and the process governance primitives (locks, identity,
-discovery, reaping, ordered shutdown).
+Public surface for the background task gateway (``tasks``) and the process
+governance primitives (locks, identity, discovery, reaping, ordered shutdown).
 """
+
+# Tests: (none)
 
 from mbforge.server.process.discovery import (
     MatchLevel,
@@ -38,7 +39,6 @@ from mbforge.server.process.tasks import (
     TaskHandle,
     TaskManager,
     TaskPool,
-    gpu_gate,
     tasks,
 )
 
@@ -57,7 +57,6 @@ __all__ = [
     "ancestor_pids",
     "enumerate_processes",
     "find_orphans",
-    "gpu_gate",
     "is_mbforge_process",
     "orchestrate_shutdown",
     "pid_alive",

@@ -7,6 +7,8 @@ nested-tree form of `CollectionNode` and the cascade-delete of a subtree.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 
@@ -62,9 +64,15 @@ def test_collections_create_list_rename_delete_subtree(
 
 
 def test_collections_add_remove_document_tracks_doc_count(
-    app_client: TestClient,
+    app_client: TestClient, tmp_library: Path
 ) -> None:
-    """Attaching/detaching a real document updates the listed doc_count."""
+    """Attaching/detaching a real document updates the listed doc_count.
+
+    The count only includes documents the workspace shows, so the imported
+    document has to reach a processing outcome before it counts.
+    """
+    from mbforge.service.use_cases.documents.library import LibraryStore
+
     doc_id = _import_doc(app_client)
     collection_id = _create_collection(app_client, "Papers")
 
@@ -79,6 +87,10 @@ def test_collections_add_remove_document_tracks_doc_count(
         json={"collection_id": collection_id, "doc_id": doc_id},
     )
     assert resp.status_code == 200
+    # Still processing, so the group does not count it yet.
+    assert _doc_count() == 0
+
+    LibraryStore.get(str(tmp_library)).update_document_status(doc_id, "ready")
     assert _doc_count() == 1
 
     resp = app_client.post(

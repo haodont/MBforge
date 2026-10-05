@@ -5,6 +5,9 @@ This module owns the queue's data access only. Use-case orchestration
 lives in :mod:`mbforge.service.use_cases.pipeline.ingest`.
 """
 
+# Tests:
+#   tests/unit/infra/test_queue_worker.py
+
 from __future__ import annotations
 
 from typing import Any
@@ -70,18 +73,6 @@ def insert_dag(
                     "(doc_id, run_id, stage, depends_on) VALUES (?, ?, ?, ?)",
                     (doc_id, run_id, stage, prereq),
                 )
-
-
-def has_run(library_root: str, doc_id: str) -> bool:
-    """Return True when *doc_id* has any non-terminal queue node."""
-    db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM ingest_queue WHERE doc_id = ? "
-            "AND status NOT IN ('done', 'failed', 'cancelled') LIMIT 1",
-            (doc_id,),
-        ).fetchone()
-    return row is not None
 
 
 def set_node_status(
@@ -230,6 +221,20 @@ def node_ids_for_runs(library_root: str, run_ids: list[str]) -> list[str]:
             run_ids,
         ).fetchall()
         return [row["id"] for row in rows]
+
+
+def run_nodes_for_runs(library_root: str, run_ids: list[str]) -> list[tuple[str, str]]:
+    """Return ``(node_id, run_id)`` pairs belonging to *run_ids*."""
+    if not run_ids:
+        return []
+    placeholders = ",".join("?" for _ in run_ids)
+    db = DatabaseManager.get(library_root)
+    with db.kb_conn() as conn:
+        rows = conn.execute(
+            f"SELECT id, run_id FROM ingest_queue WHERE run_id IN ({placeholders})",
+            run_ids,
+        ).fetchall()
+        return [(row["id"], row["run_id"]) for row in rows]
 
 
 def doc_ids_for_runs(library_root: str, run_ids: list[str]) -> list[str]:
@@ -424,6 +429,33 @@ def delete_run(library_root: str, run_id: str) -> int:
     with db.kb_conn() as conn:
         cursor = conn.execute("DELETE FROM ingest_queue WHERE run_id = ?", (run_id,))
         return cursor.rowcount
+
+
+def delete_failed_cancelled_runs(library_root: str, run_ids: list[str]) -> int:
+    """Delete failed/cancelled runs with no pending or processing nodes."""
+    if not run_ids:
+        return 0
+    placeholders = ",".join("?" for _ in run_ids)
+    db = DatabaseManager.get(library_root)
+    with db.kb_conn() as conn:
+        rows = conn.execute(
+            f"""
+            DELETE FROM ingest_queue
+            WHERE run_id IN ({placeholders})
+              AND run_id IN (
+                  SELECT run_id
+                  FROM ingest_queue
+                  WHERE run_id IN ({placeholders})
+                  GROUP BY run_id
+                  HAVING SUM(CASE WHEN status IN ('failed', 'cancelled') THEN 1 ELSE 0 END) > 0
+                     AND SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END) = 0
+                     AND SUM(CASE WHEN status IN ('done', 'failed', 'cancelled', 'blocked') THEN 1 ELSE 0 END) = COUNT(*)
+              )
+            RETURNING run_id
+            """,
+            (*run_ids, *run_ids),
+        ).fetchall()
+        return len({row["run_id"] for row in rows})
 
 
 def cleanup_done(library_root: str) -> int:

@@ -70,13 +70,6 @@ function makeSummary(overrides: Partial<ReadinessSummary> = {}): ReadinessSummar
         last_error: null,
       },
     ],
-    llm: {
-      configured: true,
-      provider: 'openai',
-      model: 'gpt-4o',
-      base_url: 'https://api.openai.com/v1',
-      has_api_key: true,
-    },
     ocr: { chain: ['hiro-layout'], error: null },
     ...overrides,
   }
@@ -104,13 +97,12 @@ describe('ReadinessTab', () => {
     await waitFor(() => screen.getByText('settings.readiness.library'))
     expect(screen.getByText('settings.readiness.database')).toBeTruthy()
     expect(screen.getByText('settings.readiness.ocr')).toBeTruthy()
-    expect(screen.getByText('settings.readiness.llm')).toBeTruthy()
     // Model cards render per models[] entry, keyed by name.
     expect(screen.getByText('MolDet')).toBeTruthy()
     expect(screen.getByText('MolParser')).toBeTruthy()
     expect(screen.getByText('RDKit')).toBeTruthy()
-    // Ready lamps for library / database / ready models / ocr / llm.
-    expect(screen.getAllByText('settings.readiness.state.ready').length).toBeGreaterThanOrEqual(5)
+    // Ready lamps for library / database / ready models / OCR.
+    expect(screen.getAllByText('settings.readiness.state.ready').length).toBeGreaterThanOrEqual(4)
     // Missing model shows error lamp, expected size (formatted MB), cache dir, last error.
     expect(screen.getByText('settings.readiness.state.error')).toBeTruthy()
     expect(screen.getByText('20 MB')).toBeTruthy()

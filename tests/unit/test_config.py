@@ -12,7 +12,6 @@ from mbforge.api.http.system.settings import _redact_secrets
 from mbforge.foundation.config import (
     AppConfig,
     IngestConfig,
-    LLMConfig,
     MoldetConfig,
     PdfParseConfig,
     reset_config_cache,
@@ -35,17 +34,6 @@ def _clear_config_cache() -> None:
 
 class TestDefaultValues:
     """Default values must match the historical hard-coded fallbacks."""
-
-    def test_llm_defaults(self) -> None:
-        cfg = LLMConfig()
-        assert cfg.provider == "openai_compatible"
-        assert cfg.model == "gpt-4o-mini"
-        assert cfg.temperature == pytest.approx(0.7)
-        assert cfg.max_tokens == 4096
-        assert cfg.top_p == pytest.approx(1.0)
-        assert cfg.request_timeout == 60
-        assert cfg.molecule_tool_enabled is False
-        assert cfg.molecule_tool_max_chars == 16000
 
     def test_moldet_defaults(self) -> None:
         cfg = MoldetConfig()
@@ -70,16 +58,6 @@ class TestDefaultValues:
 
 class TestValidation:
     """Invalid types must raise ValidationError."""
-
-    def test_invalid_temperature_type(self) -> None:
-        with pytest.raises(ValidationError):
-            LLMConfig(temperature="hot")
-
-    def test_molecule_tool_settings_reject_invalid_ranges(self) -> None:
-        with pytest.raises(ValidationError):
-            LLMConfig(molecule_tool_max_chars=999)
-        with pytest.raises(ValidationError):
-            LLMConfig(molecule_tool_max_chars=100001)
 
     def test_invalid_detection_dpi_type(self) -> None:
         with pytest.raises(ValidationError):
@@ -209,9 +187,7 @@ class TestSecretRedaction:
         # Seed with a real key on disk.
         initial = AppConfig()
         initial.library_root = str(tmp_path)
-        initial = initial.model_copy(
-            update={"llm": initial.llm.model_copy(update={"api_key": _DISK_VALUE})}
-        )
+        initial = initial.model_copy(update={"llm": {"api_key": _DISK_VALUE}})
         config.save_global_config(initial)
 
         # Roundtrip a redacted payload (mimicking what the UI sends after
@@ -222,18 +198,18 @@ class TestSecretRedaction:
                 "vlm": {"api_key": "***"},
             }
         )
-        assert new_cfg.llm.api_key == _DISK_VALUE, (
-            f"*** marker must preserve the disk value, but got {new_cfg.llm.api_key!r}"
-        )
-        assert new_cfg.llm.model == "gpt-4o"
+        assert (
+            new_cfg.llm["api_key"] == _DISK_VALUE
+        ), f"*** marker must preserve the disk value, but got {new_cfg.llm['api_key']!r}"
+        assert new_cfg.llm["model"] == "gpt-4o"
         # The VLM key was empty on disk → *** marker preserves that empty state
         assert new_cfg.vlm.api_key == ""
         # Real PUT (e.g. user typing a new key, or empty to clear) still works.
         cleared = update_settings({"llm": {"api_key": ""}})
-        assert cleared.llm.api_key == ""
+        assert cleared.llm["api_key"] == ""
 
         cleared2 = update_settings({"llm": {"api_key": _TYPED_VALUE}})
-        assert cleared2.llm.api_key == _TYPED_VALUE
+        assert cleared2.llm["api_key"] == _TYPED_VALUE
 
 
 def test_app_config_ignores_retired_project_settings() -> None:

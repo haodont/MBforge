@@ -267,6 +267,19 @@ export async function ingestRetryBatch(
   )
 }
 
+export async function ingestDeleteBatch(
+  libraryRoot: string,
+  runIds: string[],
+): Promise<IngestBulkActionResult> {
+  return invokeWithError(
+    () => httpPost<IngestBulkActionResult>('/api/v1/pipeline/queue/batch/delete', {
+      library_root: libraryRoot,
+      run_ids: runIds,
+    }),
+    ErrorCode.ApiError,
+  )
+}
+
 /** 手动将 PDF 加入处理队列。返回 run ID。
  *
  * `force=true` 跳过同 hash 幂等检查 — 用于对已处理文件强制重新入队，

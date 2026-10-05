@@ -8,6 +8,7 @@ import {
   ingestCancel,
   ingestCancelBatch,
   ingestCleanup,
+  ingestDeleteBatch,
   ingestDeleteTask,
   ingestEnqueue,
   ingestGetLogs,
@@ -167,6 +168,23 @@ export function useRetryBatch() {
       libraryRoot: string
       runIds: string[]
     }) => ingestRetryBatch(libraryRoot, runIds),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
+    },
+  })
+}
+
+export function useDeleteBatch() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      libraryRoot,
+      runIds,
+    }: {
+      libraryRoot: string
+      runIds: string[]
+    }) => ingestDeleteBatch(libraryRoot, runIds),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },

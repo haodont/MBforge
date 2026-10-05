@@ -14,6 +14,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+#: Statuses that mean a document's processing run reached an outcome —
+#: successfully (``ready``) or not (``error``). ``pending`` means the bytes are
+#: registered but no run has produced usable results yet, so the workspace
+#: hides the document until one of these is recorded.
+TERMINAL_DOCUMENT_STATUSES: frozenset[str] = frozenset({"ready", "error"})
+
 
 class Document:
     """A single library document -- plain record fields plus JSON codec."""

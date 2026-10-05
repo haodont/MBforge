@@ -23,6 +23,7 @@ from PIL import Image
 
 from mbforge.domain.types import ExtractionResult
 from mbforge.foundation.inference.device import is_gpu_available
+from mbforge.foundation.inference.load_guard import LoadGuard
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,16 +32,13 @@ _MODEL = None
 _AVAILABLE: bool = False
 _ERROR: str = ""
 _LOAD_LOCK = threading.Lock()
-# transformers ``generate`` is not guaranteed thread-safe across asyncio worker
-# threads; serialize all calls into the recognizer. Use the shared GPU gate so
-# MolDet and MolParser do not compete for VRAM simultaneously.
-
-
-def _get_gpu_gate():
-    """Lazy import to avoid circular dependency at module load time."""
-    from mbforge.server.process import gpu_gate
-
-    return gpu_gate()
+# One process-wide model instance is reused by every task. ``transformers``
+# ``generate`` is not guaranteed thread-safe, so all inference goes through
+# this lock: the model is loaded once and calls are serialized in-process.
+_INFER_LOCK = threading.Lock()
+#: A failed load (e.g. weights missing and downloads blocked) must not be
+#: retried once per crop — see ``load_guard``.
+_GUARD = LoadGuard("MolParser-Mobile")
 
 
 def _strip_trailing_sep(esmiles: str) -> str:
@@ -50,12 +48,21 @@ def _strip_trailing_sep(esmiles: str) -> str:
 
 
 def load(device: str | None = None) -> None:
-    """Lazy-load MolParser-Mobile model (thread-safe)."""
+    """Lazy-load MolParser-Mobile model (thread-safe).
+
+    A failed attempt is remembered, so an unavailable model is not re-downloaded
+    and re-loaded on every subsequent call (see ``load_guard``). Call
+    :func:`unload` to clear that memory and force a fresh attempt.
+    """
     global _MODEL, _AVAILABLE, _ERROR
     if _MODEL is not None:
         return
+    if not _GUARD.should_attempt():
+        return
     with _LOAD_LOCK:
         if _MODEL is not None:
+            return
+        if not _GUARD.should_attempt():
             return
 
         logger.info("Loading MolParser-Mobile model...")
@@ -83,6 +90,7 @@ def load(device: str | None = None) -> None:
                     f"{get_model_cache_dir()}/MolParser-Mobile/ or retry "
                     "download from Settings."
                 )
+                _GUARD.record_failure(_ERROR)
                 logger.warning(_ERROR)
                 return
 
@@ -105,19 +113,22 @@ def load(device: str | None = None) -> None:
 
             _MODEL = MolParserRecognizer(str(path), device=dev)
             _AVAILABLE = True
+            _GUARD.record_success()
             logger.info("MolParser-Mobile loaded successfully on %s", dev)
         except Exception as exc:
             _ERROR = str(exc)
             _AVAILABLE = False
+            _GUARD.record_failure(str(exc))
             logger.error("MolParser-Mobile load failed: %s", exc, exc_info=True)
 
 
 def unload() -> None:
-    """Release model."""
+    """Release model and clear the failure cooldown (allows a fresh attempt)."""
     global _MODEL, _AVAILABLE, _ERROR
     _MODEL = None
     _AVAILABLE = False
     _ERROR = ""
+    _GUARD.reset()
 
 
 def health() -> dict[str, str]:
@@ -161,7 +172,7 @@ def predict(image: Image.Image | np.ndarray) -> ExtractionResult:
     try:
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image)
-        with _get_gpu_gate():
+        with _INFER_LOCK:
             caption = _MODEL.recognize([image])[0]
         return _result_from_caption(caption)
     except Exception as exc:
@@ -186,7 +197,7 @@ def predict_batch(
             if isinstance(image, np.ndarray):
                 image = Image.fromarray(image)
             pil_images.append(image)
-        with _get_gpu_gate():
+        with _INFER_LOCK:
             results = _MODEL.recognize(pil_images)
         return [_result_from_caption(caption) for caption in results]
     except Exception as exc:

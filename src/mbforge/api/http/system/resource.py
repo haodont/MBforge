@@ -131,10 +131,8 @@ def _model_subfiles(resource_id: str) -> list[dict]:
     info = resource_manager.catalog.get(resource_id)
     if info is None or info.type.value != "model" or not info.files:
         return []
-    # Project-bundled asset (e.g. assets/models/moldetv2_structure_ft.pt)
-    # counts as a single-file ready model: no per-file rows needed.
-    if get_runtime().model_locator.bundled_model_asset(info) is not None:
-        return []
+    # Every model is read from the one cache directory, so each catalog file
+    # gets its own readiness row.
     root = Path(get_model_cache_dir()) / (info.local_name or resource_id)
     out: list[dict] = []
     for f in info.files:

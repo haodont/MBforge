@@ -15,7 +15,9 @@ FastAPI backend.
   third-party knowledge-index runtime is required.
 - Knowledge-base search, molecule search, evidence review, and activity data.
 - Workspace document import accepts multiple PDFs at once, rejects duplicate
-  filenames, and reports partial failures; documents can be selected, queued, or
+  filenames, and reports partial failures; each imported document starts
+  processing immediately and appears in the workspace once processing finishes
+  (failures appear marked as errors), and documents can be selected, queued, or
   deleted in bulk.
 
 The project is a research baseline. Recognition and extracted data require

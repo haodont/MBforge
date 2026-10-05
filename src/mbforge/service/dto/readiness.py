@@ -1,7 +1,7 @@
 """Pydantic models for the readiness diagnostics endpoints.
 
 These schemas expose the health of the library root, SQLite database,
-downloadable models, LLM provider, and OCR fallback chain.
+downloadable models, and the local layout model.
 """
 
 from __future__ import annotations
@@ -39,18 +39,8 @@ class ModelReadiness(BaseModel):
     last_error: str | None = None
 
 
-class LLMReadiness(BaseModel):
-    """Readiness of the configured LLM provider (never leaks the API key)."""
-
-    configured: bool = False
-    provider: str | None = None
-    model: str | None = None
-    base_url: str | None = None
-    has_api_key: bool = False
-
-
 class OCRReadiness(BaseModel):
-    """Readiness of the OCR fallback chain."""
+    """Readiness of the local page-layout/text producer."""
 
     chain: list[str] = Field(default_factory=list)
     error: str | None = None
@@ -62,18 +52,7 @@ class ReadinessSummaryResponse(BaseModel):
     library: LibraryReadiness
     database: DatabaseReadiness
     models: list[ModelReadiness] = Field(default_factory=list)
-    llm: LLMReadiness
     ocr: OCRReadiness
-
-
-class LLMProbeResponse(BaseModel):
-    """Result of a live LLM probe request."""
-
-    ok: bool = False
-    latency_ms: int | None = None
-    error: str | None = None
-    provider: str = ""
-    model: str = ""
 
 
 class DemoRunResponse(BaseModel):

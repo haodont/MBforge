@@ -5,12 +5,12 @@ imported modules. A capability whose module was never bound on its package
 raises ``AttributeError`` at *call* time, which every enrichment call site
 swallows — so the feature degrades to a silent no-op instead of failing loudly.
 Table recognition did exactly that on every run because ``table_slanet`` was
-missing from ``adapters.inference``'s own imports.
+missing from ``foundation.inference``'s own imports.
 """
 
 from __future__ import annotations
 
-from mbforge.server.provider import create_runtime_provider
+from mbforge.server.runtime_provider import create_runtime_provider
 
 #: Capability -> the callable the pipeline actually invokes on it.
 _PIPELINE_CALLABLES = {

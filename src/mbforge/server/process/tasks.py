@@ -12,19 +12,22 @@ process. It owns:
   worker thread);
 - **observability** via ``tasks.stats()`` (capacity / running / queued);
 - **graceful drain** via ``tasks.shutdown(timeout)`` covering *all* registered
-  pools, plus the shared GPU inference gate (``gpu_gate``).
+  pools.
 
 Design notes
 ------------
 - Pools are process-level singletons created lazily on first use and reused
   for the life of the process. A persistent pool lets thread-local backends
   (e.g. the RapidOCR crop-label engine) pay warm-up once per worker thread.
-- The manager never inspects ``gpu_gate``: GPU concurrency stays where it
-  belongs, inside ``adapters/inference/`` (``with gpu_gate():``). The manager only runs
-  the callable it is handed.
+- The manager does not serialize inference: each backend owns its own model
+  instance and its own internal locking, so concurrency is bounded by the pool
+  size. The manager only runs the callable it is handed.
 - After ``shutdown`` the manager refuses new work (``RuntimeError``) so a late
   caller cannot spin up a fresh pool whose threads leak past process exit.
 """
+
+# Tests:
+#   tests/unit/infra/test_tasks.py
 
 from __future__ import annotations
 
@@ -252,32 +255,3 @@ class TaskManager:
 
 
 tasks = TaskManager()
-
-
-# ---------------------------------------------------------------------------
-# GPU inference gate
-# ---------------------------------------------------------------------------
-
-_gpu_gate: threading.BoundedSemaphore | None = None
-_gpu_gate_lock = threading.Lock()
-
-
-def gpu_gate() -> threading.BoundedSemaphore:
-    """Return the singleton GPU inference gate.
-
-    Capacity comes from ``cfg.process.gpu_concurrency`` (default 1). MolDet,
-    MolParser, and crop-label OCR wrap their *inference* calls (not model
-    loading) in ``with gpu_gate():`` so at most N GPU tasks run concurrently.
-    """
-    global _gpu_gate
-    if _gpu_gate is not None:
-        return _gpu_gate
-    with _gpu_gate_lock:
-        if _gpu_gate is not None:
-            return _gpu_gate
-        try:
-            capacity = load_global_config().process.gpu_concurrency
-        except Exception:
-            capacity = 1
-        _gpu_gate = threading.BoundedSemaphore(max(1, capacity))
-    return _gpu_gate

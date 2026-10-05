@@ -47,6 +47,7 @@ __all__ = [
     "BatchActionResult",
     "cancel_batch",
     "cleanup_done",
+    "delete_failed_cancelled_batch",
     "delete_task",
     "enqueue",
     "enqueue_all_unresolved",
@@ -301,6 +302,25 @@ async def retry_batch(
 async def delete_task(library_root: str, run_id: str) -> int:
     """Remove every queue node of *run_id*. Returns rows deleted."""
     return await asyncio.to_thread(_queue().delete_run, library_root, run_id)
+
+
+async def delete_failed_cancelled_batch(
+    library_root: str, run_ids: list[str]
+) -> BatchActionResult:
+    """Delete failed/cancelled runs that have no active worker nodes."""
+    run_ids = list(dict.fromkeys(run_ids))
+    if not run_ids:
+        return BatchActionResult()
+
+    nodes = await asyncio.to_thread(_queue().run_nodes_for_runs, library_root, run_ids)
+    active_run_ids = {
+        run_id for node_id, run_id in nodes if _worker().is_task_active(node_id)
+    }
+    eligible_run_ids = [run_id for run_id in run_ids if run_id not in active_run_ids]
+    deleted = await asyncio.to_thread(
+        _queue().delete_failed_cancelled_runs, library_root, eligible_run_ids
+    )
+    return BatchActionResult(updated=deleted, skipped=len(run_ids) - deleted)
 
 
 async def cleanup_done(library_root: str) -> int:

@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image
 
 from mbforge.foundation.config import load_global_config
+from mbforge.foundation.inference.load_guard import LoadGuard
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
@@ -327,10 +328,7 @@ def detect_molecules(
     if resolved is None:
         return MoleculeResult(bboxes=[])
 
-    from mbforge.server.process import gpu_gate
-
-    with gpu_gate():
-        all_boxes = resolved.detect(image)
+    all_boxes = resolved.detect(image)
 
     bboxes = _normalize_boxes(
         all_boxes, image.size[0], image.size[1], mol_conf_threshold
@@ -358,10 +356,7 @@ def detect_molecules_batch(
     if resolved is None:
         return [MoleculeResult(bboxes=[]) for _ in images]
 
-    from mbforge.server.process import gpu_gate
-
-    with gpu_gate():
-        grouped = resolved.detect_batch(images, max_per_call=max_per_call)
+    grouped = resolved.detect_batch(images, max_per_call=max_per_call)
 
     results = [
         MoleculeResult(
@@ -383,6 +378,8 @@ def detect_molecules_batch(
 
 _detector_singleton: MolDetv2Detector | None = None
 _detector_lock = threading.Lock()
+#: Suppresses repeated download+load attempts after a failure (see load_guard).
+_GUARD = LoadGuard("MolDetv2")
 
 
 def get_moldet() -> MolDetv2Detector:
@@ -390,21 +387,33 @@ def get_moldet() -> MolDetv2Detector:
 
     Before first creation, ResourceManager ensures the weights are in place
     (auto-fetched from ModelScope on first run); ``ensure`` is idempotent and
-    a fast no-op when the weights already exist.
+    a fast no-op when the weights already exist. A construction failure is
+    remembered so the next call does not re-download and re-load the model;
+    ``unload`` clears it.
     """
     global _detector_singleton
     if _detector_singleton is None:
+        if not _GUARD.should_attempt():
+            raise RuntimeError(
+                f"MolDetv2 unavailable (retry suppressed): {_GUARD.last_error()}"
+            )
         with _detector_lock:
             if _detector_singleton is None:
                 from mbforge.server.resource_manager import ResourceManager
 
-                ResourceManager.ensure("moldet")
-                _detector_singleton = MolDetv2Detector()
+                try:
+                    ResourceManager.ensure("moldet")
+                    _detector_singleton = MolDetv2Detector()
+                except Exception as exc:
+                    _GUARD.record_failure(str(exc))
+                    raise
+                _GUARD.record_success()
     return _detector_singleton
 
 
 def unload() -> None:
-    """Release the process-wide detector model, if it is loaded."""
+    """Release the process-wide detector and clear the failure cooldown."""
     global _detector_singleton
     with _detector_lock:
         _detector_singleton = None
+    _GUARD.reset()

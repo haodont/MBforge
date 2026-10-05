@@ -1,54 +1,42 @@
-"""PDF molecule extraction package.
+"""The molecule pass: PDF pages in, molecule observations out.
 
-The package keeps the historical ``mbforge.service.pipeline.detection.extraction``
-entry points while separating coordination, rendering, page detection,
-configuration, and crop processing by lifecycle.
+The public surface is deliberately small — one entry point pair, the settings
+the pass reads, and the records its stages exchange. The stages themselves
+(renderer, detector, crop worker) are wiring details of the coordinator.
+
+Stage-by-stage layout is documented in :mod:``coordinator``.
 """
 
 from mbforge.service.pipeline.detection.extraction.config import (
+    DEFAULT_MOLPARSER_BATCH_SIZE,
     DEFAULT_RENDER_DPI,
     DEFAULT_TEXT_PAGE_CHAR_THRESHOLD,
+    MAX_MOLPARSER_BATCH_SIZE,
     ExtractionConfig,
+    clamp_molparser_batch_size,
     load_extraction_config,
 )
 from mbforge.service.pipeline.detection.extraction.coordinator import (
-    DEFAULT_SCRIBE_BATCH_SIZE,
-    MAX_SCRIBE_BATCH_SIZE,
-    _clamp_scribe_batch_size,
-    _nearby_page_text,
-    candidate_id,
     extract_molecules_from_pdf,
     extract_molecules_from_pdf_async,
 )
-from mbforge.service.pipeline.detection.extraction.crop_processor import (
-    CropProcessor,
-    MolParserBatcher,
-    PreparedCrop,
-    clamp_scribe_batch_size,
-    fill_ocr_slot,
-    ocr_label_image,
+from mbforge.service.pipeline.detection.extraction.nearby_text import nearby_block_text
+from mbforge.service.pipeline.detection.extraction.records import (
+    DetectedPage,
+    RenderedPage,
 )
-from mbforge.service.pipeline.detection.extraction.page_detector import PageDetector
-from mbforge.service.pipeline.detection.extraction.page_renderer import PageRenderer
 
 __all__ = [
-    "CropProcessor",
+    "DEFAULT_MOLPARSER_BATCH_SIZE",
     "DEFAULT_RENDER_DPI",
-    "DEFAULT_SCRIBE_BATCH_SIZE",
     "DEFAULT_TEXT_PAGE_CHAR_THRESHOLD",
+    "MAX_MOLPARSER_BATCH_SIZE",
+    "DetectedPage",
     "ExtractionConfig",
-    "MAX_SCRIBE_BATCH_SIZE",
-    "MolParserBatcher",
-    "PageDetector",
-    "PageRenderer",
-    "PreparedCrop",
-    "_clamp_scribe_batch_size",
-    "_nearby_page_text",
-    "clamp_scribe_batch_size",
+    "RenderedPage",
+    "clamp_molparser_batch_size",
     "extract_molecules_from_pdf",
     "extract_molecules_from_pdf_async",
-    "fill_ocr_slot",
     "load_extraction_config",
-    "candidate_id",
-    "ocr_label_image",
+    "nearby_block_text",
 ]

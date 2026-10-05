@@ -19,16 +19,6 @@ def client() -> TestClient:
 
     Models are loaded lazily; no startup pre-warming to patch.
     """
-    # Patch heavy startup routine before importing the app.
-    import mbforge.server.environment as _environment
-
-    _orig_check_environment = getattr(_environment, "check_environment", lambda: None)
-
-    def _noop() -> None:
-        return None
-
-    _environment.check_environment = _noop
-
     from mbforge.server.ingest import worker
 
     _orig_ensure = worker.ensure_queue_worker
@@ -45,7 +35,6 @@ def client() -> TestClient:
         if c is not None:
             with suppress(CancelledError, RuntimeError):
                 c.close()
-        _environment.check_environment = _orig_check_environment
         worker.ensure_queue_worker = _orig_ensure
 
 

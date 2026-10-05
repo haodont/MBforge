@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronRightIcon, ChevronDownIcon, FolderIcon, PlusIcon, EditIcon, TrashIcon } from './icons'
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, FolderIcon, PlusIcon, EditIcon, TrashIcon } from './icons'
 import Menu, { type MenuItem } from '@/components/ui/Menu'
 import IconButton from '@/components/ui/IconButton'
 import Button from '@/components/ui/Button'
@@ -19,6 +19,7 @@ interface Props {
   onCreateGroup: (name: string) => Promise<string | undefined>
   onRenameGroup: (id: string, newName: string) => Promise<void> | void
   onDeleteGroup: (id: string, name: string) => Promise<void> | void
+  onCollapse: () => void
 }
 
 export default function GroupsPanel({
@@ -28,6 +29,7 @@ export default function GroupsPanel({
   onCreateGroup,
   onRenameGroup,
   onDeleteGroup,
+  onCollapse,
 }: Props) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -144,13 +146,25 @@ export default function GroupsPanel({
     <div className="library-groups-panel">
       <div className="library-groups-header">
         <span className="library-groups-title">{t('library.collections') || 'Groups'}</span>
-        <IconButton
-          size={32}
-          title={t('library.newCollection') || 'New Group'}
-          onClick={() => setShowCreate(!showCreate)}
-        >
-          <PlusIcon size={12} />
-        </IconButton>
+        <div className="library-groups-header-actions">
+          <IconButton
+            size={32}
+            title={t('library.newCollection') || 'New Group'}
+            ariaLabel={t('library.newCollection') || 'New Group'}
+            onClick={() => setShowCreate(!showCreate)}
+          >
+            <PlusIcon size={12} />
+          </IconButton>
+          <IconButton
+            size={32}
+            title={t('library.sidebarCollapse')}
+            ariaLabel={t('library.sidebarCollapse')}
+            ariaExpanded
+            onClick={onCollapse}
+          >
+            <ChevronLeftIcon size={16} />
+          </IconButton>
+        </div>
       </div>
 
       {showCreate && (

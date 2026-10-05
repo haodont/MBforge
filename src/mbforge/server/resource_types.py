@@ -2,11 +2,15 @@
 
 The resource catalog entries (:class:`ResourceInfo`), status enums and report
 shapes used across :mod:`mbforge.server.resource_manager`, the cache-discovery
-module (:mod:`mbforge.server.model_locator`) and the downloader
-(:mod:`mbforge.server.model_downloader`). Keeping them in a dependency-free
+module (:mod:`mbforge.server.models.assets.locator`) and the downloader
+(:mod:`mbforge.server.models.assets.downloader`). Keeping them in a dependency-free
 module lets the three implementation modules import them without forming an
 import cycle.
 """
+
+# Tests:
+#   tests/unit/core/test_model_downloader_dual_channel.py
+#   tests/unit/core/test_resource_manager.py
 
 from __future__ import annotations
 

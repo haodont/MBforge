@@ -18,7 +18,7 @@ export interface AgentChatRequest {
   config: AgentLlmConfig
 }
 
-function agentUrl(path: string): string {
+export function agentUrl(path: string): string {
   const override = String(import.meta.env.VITE_AGENT_URL ?? '').replace(/\/$/, '')
   if (override) return `${override}${path}`
   // Dev: reach the LLM agent through Vite's same-origin proxy
@@ -41,6 +41,26 @@ function parseEvent(frame: string): AgentChatEvent | null {
   } catch {
     return null
   }
+}
+
+/**
+ * POST a JSON request to the agent sidecar and decode the JSON reply.
+ *
+ * The sidecar owns every LLM provider call, so its callers live in more than
+ * one feature module (`agent.ts` chat, settings model list, readiness probe).
+ */
+export async function agentPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(agentUrl(path), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 400)
+    throw new Error(`Agent request failed (${response.status}): ${detail}`)
+  }
+  return await response.json() as T
 }
 
 export async function streamAgentChat(

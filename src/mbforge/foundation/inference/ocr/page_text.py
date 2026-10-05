@@ -40,7 +40,12 @@ DEFAULT_MODEL_TYPE = "SMALL"
 #: A detected line whose center falls inside a layout box is attributed to it.
 _MIN_BOX_SIDE_PX = 4
 
+#: Process-wide RapidOCR engine, shared by every worker thread. RapidOCR loads
+#: detection + recognition models, so a per-thread engine made an N-thread pool
+#: hold N full copies and pay the model load N times.
 _thread_engines = threading.local()
+_engine_singleton = None
+_engine_lock = threading.Lock()
 
 _CJK_MIN = 0x2E80  # CJK radicals and up; covers CJK text and full-width punctuation
 _NO_SPACE_AFTER = set("-([{/")  # don't add a space after these
@@ -108,17 +113,26 @@ def _create_engine():
 
 
 def _get_engine():
-    """Return this thread's lazy RapidOCR engine (per-thread, reused)."""
-    engine = getattr(_thread_engines, "engine", None)
-    if engine is None:
-        engine = _create_engine()
-        _thread_engines.engine = engine
-    return engine
+    """Return the process-wide RapidOCR engine, created once on first use.
+
+    One instance serves every worker thread; ``read_text_in_boxes`` holds
+    ``_engine_lock`` while using it because a RapidOCR engine is not documented
+    as thread-safe.
+    """
+    global _engine_singleton
+    if _engine_singleton is not None:
+        return _engine_singleton
+    with _engine_lock:
+        if _engine_singleton is None:
+            _engine_singleton = _create_engine()
+    return _engine_singleton
 
 
 def _clear_engines() -> None:
-    """Drop the cached per-thread engines (unload hook)."""
-    _thread_engines.engine = None
+    """Drop the cached engine (unload hook)."""
+    global _engine_singleton
+    with _engine_lock:
+        _engine_singleton = None
 
 
 def _to_bgr(image: np.ndarray) -> np.ndarray:
@@ -159,10 +173,10 @@ def read_text_in_boxes(
     arr_bgr = _to_bgr(image)
     page_h, page_w = arr_bgr.shape[:2]
 
+    # The shared engine serves every worker thread, and RapidOCR engines are not
+    # documented as thread-safe, so one page's steps hold the lock together.
     try:
-        from mbforge.server.process import gpu_gate
-
-        with gpu_gate():
+        with _engine_lock:
             prepared, operations = engine.preprocess_img(arr_bgr)
             crops, detection = engine.detect_and_crop(prepared, operations)
             if not crops:

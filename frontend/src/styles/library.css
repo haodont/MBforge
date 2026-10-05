@@ -6,6 +6,28 @@
   overflow: hidden;
 }
 
+.library-panel--collapsed {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.library-panel-collapsed-documents {
+  margin-top: auto;
+}
+
+@media (max-width: 767px) {
+  .library-panel--collapsed {
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 0 8px;
+  }
+
+  .library-panel--collapsed .library-panel-collapsed-documents {
+    margin-top: 0;
+  }
+}
+
 .library-panel-section {
   padding: 8px 8px 0;
 }
@@ -74,6 +96,12 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 14px 4px;
+}
+
+.library-groups-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .library-groups-title {

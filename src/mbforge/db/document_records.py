@@ -11,12 +11,21 @@ The stored PDF itself stays on disk at ``storage/{doc_id}/{file_name}``.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from mbforge.db.sqlite.database import DatabaseManager
 
 _COLUMNS = "doc_id, file_name, title, page_count, status, created_at"
+
+
+def _status_clause(statuses: Sequence[str] | None) -> tuple[str, tuple[str, ...]]:
+    """Build the optional ``status IN (…)`` filter for list/count queries."""
+    if not statuses:
+        return "", ()
+    placeholders = ",".join("?" for _ in statuses)
+    return f" WHERE status IN ({placeholders})", tuple(statuses)
 
 
 def insert(library_root: str | Path, record: dict[str, Any]) -> None:
@@ -79,21 +88,32 @@ def find_by_filename(library_root: str | Path, file_name: str) -> dict[str, Any]
     return dict(row) if row is not None else None
 
 
-def list_rows(library_root: str | Path) -> list[dict[str, Any]]:
-    """Return every document row, newest first."""
+def list_rows(
+    library_root: str | Path, *, statuses: Sequence[str] | None = None
+) -> list[dict[str, Any]]:
+    """Return document rows, newest first.
+
+    *statuses* restricts the result to those statuses; ``None`` returns every
+    registered row (including ones mid-processing).
+    """
+    where, params = _status_clause(statuses)
     db = DatabaseManager.get(str(library_root))
     with db.transaction() as (kb, _):
         rows = kb.execute(
-            f"SELECT {_COLUMNS} FROM documents ORDER BY created_at DESC, doc_id"
+            f"SELECT {_COLUMNS} FROM documents{where} ORDER BY created_at DESC, doc_id",
+            params,
         ).fetchall()
     return [dict(row) for row in rows]
 
 
-def count(library_root: str | Path) -> int:
-    """Return the number of registered documents."""
+def count(library_root: str | Path, *, statuses: Sequence[str] | None = None) -> int:
+    """Return the number of registered documents, optionally status-filtered."""
+    where, params = _status_clause(statuses)
     db = DatabaseManager.get(str(library_root))
     with db.transaction() as (kb, _):
-        row = kb.execute("SELECT COUNT(*) AS cnt FROM documents").fetchone()
+        row = kb.execute(
+            f"SELECT COUNT(*) AS cnt FROM documents{where}", params
+        ).fetchone()
     return int(row["cnt"]) if row is not None else 0
 
 

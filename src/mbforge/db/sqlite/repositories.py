@@ -99,8 +99,12 @@ class SqliteEvidenceRepository:
 
     library_root: Path
 
-    def persist(self, evidence: Sequence[SourceEvidence] | object) -> int:
-        return source_evidence.persist_source_evidence(self.library_root, evidence)
+    def persist(
+        self, evidence: Sequence[SourceEvidence] | object, conn: Any = None
+    ) -> int:
+        return source_evidence.persist_source_evidence(
+            self.library_root, evidence, conn=conn
+        )
 
     def get(self, evidence_id: str) -> SourceEvidence | None:
         return source_evidence.get_source_evidence(self.library_root, evidence_id)
@@ -438,11 +442,13 @@ class SqliteDocumentRepository:
     def find_by_filename(self, file_name: str) -> dict[str, Any] | None:
         return document_records.find_by_filename(self.library_root, file_name)
 
-    def list_rows(self) -> list[dict[str, Any]]:
-        return document_records.list_rows(self.library_root)
+    def list_rows(
+        self, *, statuses: Sequence[str] | None = None
+    ) -> list[dict[str, Any]]:
+        return document_records.list_rows(self.library_root, statuses=statuses)
 
-    def count(self) -> int:
-        return document_records.count(self.library_root)
+    def count(self, *, statuses: Sequence[str] | None = None) -> int:
+        return document_records.count(self.library_root, statuses=statuses)
 
     def update_status(self, doc_id: str, status: str) -> None:
         document_records.update_status(self.library_root, doc_id, status)

@@ -7,6 +7,8 @@ The ``is_mbforge_process`` classifier tightens the dangerous heuristic in
 ``__main__.py`` that treated *any* ``python.exe`` as MBForge.
 """
 
+# Tests: (none)
+
 from __future__ import annotations
 
 import json

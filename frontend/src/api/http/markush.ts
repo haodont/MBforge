@@ -30,6 +30,7 @@ export interface MarkushEvidenceItem {
   entity_type: string
   entity_id: string
   doc_id: string
+  source_evidence_id: string | null
   page: number | null
   bbox_x0: number | null
   bbox_y0: number | null
@@ -73,7 +74,7 @@ export interface MarkushCandidate {
   composite_confidence: number | null
   reasons: string[]
   context_text: string
-  properties: Record<string, string> | null
+  properties: Record<string, unknown> | null
   recognition_status: RecognitionStatus
   review_status: ReviewStatus
   review_version: number

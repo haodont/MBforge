@@ -50,7 +50,12 @@ class LabelReader:
         return self._mode
 
     def is_available(self) -> bool:
-        """Whether an engine can be created for the configured engine name."""
+        """Whether an engine can be created for the configured engine name.
+
+        Uses the cached process-wide engine: building one just to answer this
+        question loaded a full RapidOCR model pair and threw it away, which
+        every readiness poll repeated.
+        """
         if self._mode == "daemon":
             from mbforge.foundation.inference.ocr.daemon_client import get_daemon_client
 
@@ -59,13 +64,10 @@ class LabelReader:
             except Exception as exc:
                 logger.warning("OCR daemon unavailable: %s", exc)
                 return False
-        from mbforge.foundation.inference.ocr.crop_labels import (
-            _create_engine,
-            _engine_name,
-        )
+        from mbforge.foundation.inference.ocr import crop_labels
 
         try:
-            engine = _create_engine(_engine_name())
+            engine = crop_labels._get_engine()
             if engine is not None:
                 return True
             logger.warning("Crop-label OCR engine unavailable (no usable backend)")

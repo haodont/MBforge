@@ -10,7 +10,6 @@ from fastapi import APIRouter
 
 from mbforge.service.dto.readiness import (
     DemoRunResponse,
-    LLMProbeResponse,
     ReadinessSummaryResponse,
 )
 from mbforge.service.use_cases.system import readiness as readiness_service
@@ -21,14 +20,8 @@ diagnostics_router = APIRouter()
 
 @router.get("/readiness/summary")
 async def readiness_summary() -> ReadinessSummaryResponse:
-    """Aggregate read-only probes for library, database, models, LLM, OCR."""
+    """Aggregate read-only probes for library, database, models and layout."""
     return await readiness_service.summary()
-
-
-@router.post("/readiness/probe-llm")
-async def readiness_probe_llm() -> LLMProbeResponse:
-    """Live LLM probe: send a 1-token request with a 15s timeout."""
-    return await readiness_service.probe_llm()
 
 
 @router.post("/readiness/demo-run")
@@ -41,12 +34,6 @@ async def readiness_demo_run() -> DemoRunResponse:
 async def diagnostics_summary() -> ReadinessSummaryResponse:
     """Compatibility endpoint for the Settings diagnostics center."""
     return await readiness_service.summary()
-
-
-@diagnostics_router.post("/probe-llm")
-async def diagnostics_probe_llm() -> LLMProbeResponse:
-    """Compatibility endpoint for the Settings diagnostics center."""
-    return await readiness_service.probe_llm()
 
 
 @diagnostics_router.post("/demo-run")

@@ -165,3 +165,41 @@ def test_load_auto_ensures_missing_model_path(monkeypatch, _restore_state):
 
     assert ensure_calls == ["molparser"]
     assert molparser_module._AVAILABLE is True
+
+
+def test_load_failure_suppresses_repeated_download_attempts(
+    monkeypatch, _restore_state
+):
+    """A failed load must not re-attempt the download on every later call.
+
+    Without this, an unavailable model re-ran the whole ModelScope/HF download
+    sequence per crop and per document, which is what made a broken download
+    look like an endless re-download loop.
+    """
+    ensure_calls: list[str] = []
+
+    monkeypatch.setattr(molparser_module, "is_gpu_available", lambda: False)
+    monkeypatch.setattr(
+        "mbforge.server.resource_manager.ResourceManager.get_molparser_path",
+        staticmethod(lambda: None),
+    )
+    monkeypatch.setattr(
+        "mbforge.server.resource_manager.ResourceManager.ensure",
+        classmethod(
+            lambda cls, resource_id, callback=None: ensure_calls.append(resource_id)
+        ),
+    )
+    molparser_module._GUARD.reset()
+
+    for _ in range(5):
+        load()
+
+    # One attempt for the whole burst, not one per call.
+    assert ensure_calls == ["molparser"]
+    assert molparser_module._AVAILABLE is False
+    assert molparser_module._GUARD.in_cooldown()
+
+    # unload() clears the cooldown so an explicit retry is allowed.
+    molparser_module.unload()
+    load()
+    assert ensure_calls == ["molparser", "molparser"]

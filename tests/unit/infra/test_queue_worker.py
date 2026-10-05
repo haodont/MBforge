@@ -361,3 +361,130 @@ def test_active_task_ids_tracking(tmp_path: Path, monkeypatch) -> None:
     finally:
         worker._active_for(root).clear()
         worker.stop_queue_workers()
+
+
+# ── Document status writers ──────────────────────────────────────────
+#
+# The workspace listing only shows documents whose run reached an outcome, so
+# the terminal transitions of the run must write ``documents.status``. The
+# pipeline runtime is faked: these tests pin the status contract, not staging.
+
+
+class _FakeRuntime:
+    """Minimal ``PipelineRuntime`` whose single stage either succeeds or fails."""
+
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.error = error
+
+    def stage_dependencies(self) -> dict[str, list[str]]:
+        return {"extract": []}
+
+    def run_pipeline(self, *_args, **_kwargs) -> None:
+        if self.error is not None:
+            raise self.error
+
+    def staging_dir(self, _library_root: str, _doc_id: str) -> str:
+        return "staging"
+
+    def write_merged_report(self, *_args, **_kwargs) -> None:
+        return None
+
+    def promote_staging(self, *_args, **_kwargs) -> None:
+        return None
+
+    def cancel_task(self, _task_id: str) -> None:
+        return None
+
+    def release_task(self, _task_id: str) -> None:
+        return None
+
+
+def _seed_document_and_run(root: str, doc_id: str, run_id: str) -> str:
+    """Register a document and its single-stage run; return the claimed node id."""
+    from mbforge.db import document_records
+    from mbforge.server.ingest import queue
+
+    document_records.insert(
+        root,
+        {
+            "doc_id": doc_id,
+            "file_name": f"{doc_id}.pdf",
+            "title": doc_id,
+            "page_count": 1,
+            "created_at": "2026-01-01 00:00:00",
+        },
+    )
+    queue.insert_dag(root, file_path=f"{doc_id}.pdf", doc_id=doc_id, run_id=run_id)
+    return worker._claim_rows(root, "w", 8)[0]["id"]
+
+
+def _document_status(root: str, doc_id: str) -> str | None:
+    from mbforge.db import document_records
+
+    row = document_records.get(root, doc_id)
+    return None if row is None else row["status"]
+
+
+def test_run_pipeline_sync_marks_document_ready_after_final_stage(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A run whose every stage succeeded publishes the document to the workspace."""
+    import mbforge.service.ports as service_ports
+
+    root = _library(tmp_path)
+    DatabaseManager.get(root).initialize()
+    monkeypatch.setattr(service_ports, "get_pipeline_runtime", _FakeRuntime)
+    task_id = _seed_document_and_run(root, "doc-ready", "run-1")
+
+    worker._run_pipeline_sync(
+        "doc-ready.pdf", root, "doc-ready", task_id, "extract", "run-1"
+    )
+
+    assert _document_status(root, "doc-ready") == "ready"
+
+
+def test_run_pipeline_sync_marks_document_error_on_stage_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A failed stage surfaces the document as an error instead of hiding it."""
+    import mbforge.service.ports as service_ports
+
+    root = _library(tmp_path)
+    DatabaseManager.get(root).initialize()
+    monkeypatch.setattr(
+        service_ports,
+        "get_pipeline_runtime",
+        lambda: _FakeRuntime(error=RuntimeError("boom")),
+    )
+    task_id = _seed_document_and_run(root, "doc-fail", "run-1")
+
+    worker._run_pipeline_sync(
+        "doc-fail.pdf", root, "doc-fail", task_id, "extract", "run-1"
+    )
+
+    assert _document_status(root, "doc-fail") == "error"
+
+
+def test_run_pipeline_sync_returns_document_to_pending_on_cancel(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Cancelling hides the document again: no run outcome, no stale ``ready``."""
+    import mbforge.service.ports as service_ports
+    from mbforge.db import document_records
+
+    root = _library(tmp_path)
+    DatabaseManager.get(root).initialize()
+    monkeypatch.setattr(
+        service_ports,
+        "get_pipeline_runtime",
+        lambda: _FakeRuntime(error=service_ports.TaskCancelledError("stop")),
+    )
+    task_id = _seed_document_and_run(root, "doc-cancel", "run-1")
+    # A previous run had published this document; the cancel must revoke that.
+    document_records.update_status(root, "doc-cancel", "ready")
+
+    worker._run_pipeline_sync(
+        "doc-cancel.pdf", root, "doc-cancel", task_id, "extract", "run-1"
+    )
+
+    assert _document_status(root, "doc-cancel") == "pending"

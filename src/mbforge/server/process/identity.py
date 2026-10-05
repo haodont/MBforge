@@ -5,6 +5,8 @@ that other processes can enumerate live instances, detect orphans, and report
 who holds the queue lock.
 """
 
+# Tests: (none)
+
 from __future__ import annotations
 
 import atexit

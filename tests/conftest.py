@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from mbforge.db.sqlite.repositories import create_repositories
 from mbforge.foundation import config as app_config
-from mbforge.server.provider import create_runtime_provider
+from mbforge.server.runtime_provider import create_runtime_provider
 from mbforge.service.pipeline.runtime import create_pipeline_runtime
 from mbforge.service.ports import (
     configure_pipeline_runtime,
@@ -145,19 +145,6 @@ def app_client(tmp_library: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     # only affects runtime lookups inside ``mbforge.foundation.config``.
     monkeypatch.setattr(config, "load_global_config", patched)
     return TestClient(app)
-
-
-@pytest.fixture(autouse=True)
-def _disable_llm_completion_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep LLM completion cache out of tests.
-
-    ``_llm_complete`` caches successful responses on disk; tests that mock
-    ``litellm.completion`` must never read or write that shared cache
-    (a cached entry would short-circuit the mock and break call-count and
-    credential assertions). Individual cache tests re-enable it with an
-    isolated ``MBFORGE_LLM_CACHE_DIR``.
-    """
-    monkeypatch.setenv("MBFORGE_LLM_CACHE", "0")
 
 
 @pytest.fixture(autouse=True)

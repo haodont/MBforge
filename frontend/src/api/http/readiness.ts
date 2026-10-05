@@ -1,6 +1,7 @@
 /** Readiness diagnostics — subsystem health summary, LLM probe, demo run. */
 
 import { httpGet, httpPost, invokeWithError } from './_utils'
+import { agentPost } from './agent'
 import { ErrorCode } from '@/utils/errors'
 
 export interface ReadinessLibrary {
@@ -29,14 +30,6 @@ export interface ReadinessModel {
   last_error: string | null
 }
 
-export interface ReadinessLlm {
-  configured: boolean
-  provider: string | null
-  model: string | null
-  base_url: string | null
-  has_api_key: boolean
-}
-
 export interface ReadinessOcr {
   chain: string[]
   error: string | null
@@ -46,7 +39,6 @@ export interface ReadinessSummary {
   library: ReadinessLibrary
   database: ReadinessDatabase
   models: ReadinessModel[]
-  llm: ReadinessLlm
   ocr: ReadinessOcr
 }
 
@@ -65,7 +57,7 @@ export interface DemoRunResult {
   error: string | null
 }
 
-/** Aggregate readiness summary across library, DB, models, LLM and OCR. */
+/** Aggregate readiness summary across library, DB, models and OCR. */
 export async function readinessSummary(): Promise<ReadinessSummary> {
   return invokeWithError(
     () => httpGet<ReadinessSummary>('/api/v1/diagnostics/summary'),
@@ -73,10 +65,15 @@ export async function readinessSummary(): Promise<ReadinessSummary> {
   )
 }
 
-/** Probe the configured LLM endpoint and measure latency. */
+/**
+ * Probe the configured LLM endpoint and measure latency.
+ *
+ * Goes to the agent sidecar, which owns provider calls. The Python settings
+ * API persists configuration but does not probe the provider.
+ */
 export async function readinessProbeLlm(): Promise<ProbeLlmResult> {
   return invokeWithError(
-    () => httpPost<ProbeLlmResult>('/api/v1/diagnostics/probe-llm'),
+    () => agentPost<ProbeLlmResult>('/v1/probe', {}),
     ErrorCode.ApiError,
   )
 }

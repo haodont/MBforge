@@ -7,6 +7,9 @@ surface model availability without tightly coupling to the FastAPI app
 instance.
 """
 
+# Tests:
+#   tests/unit/core/test_model_state.py
+
 from __future__ import annotations
 
 from typing import Any

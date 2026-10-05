@@ -3,12 +3,12 @@
 These types are the public contract between the FastAPI router
 (``mbforge.api.http.markush``) and the frontend ``markush.ts`` HTTP
 client. Adding a new field here is a wire-format change; coordinate it
-with the matching TypeScript interface in ``frontend/src/types/index.ts``.
+with ``frontend/src/api/http/markush.ts``.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,6 +40,7 @@ class MarkushEvidenceItem(BaseModel):
     entity_type: str
     entity_id: str
     doc_id: str
+    source_evidence_id: str | None = None
     page: int | None = None
     bbox_x0: float | None = None
     bbox_y0: float | None = None
@@ -91,7 +92,7 @@ class MarkushCandidate(BaseModel):
     composite_confidence: float | None = None
     reasons: list[str] = Field(default_factory=list)
     context_text: str = ""
-    properties: dict[str, str] = Field(default_factory=dict)
+    properties: dict[str, Any] = Field(default_factory=dict)
     recognition_status: RecognitionStatus = "valid"
     review_status: ReviewStatus = "pending"
     review_version: int = 1

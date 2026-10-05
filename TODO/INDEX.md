@@ -12,17 +12,62 @@ no branch artifact); Markdown assembles the readable document from that
 evidence, and Patent publishes the unified facts artifact. Link and Persist are
 removed from the active path.
 
+## Model assets
+
+Every model is downloaded into and read from one directory: the
+`ResourceManager` cache (`library/models` by default, overridable via
+`model_cache_dir`). Weights elsewhere on the machine (a repo-root `models/`,
+`assets/models/`, the global HF/ModelScope caches) are deliberately ignored, so
+a `ready` status always means the app can load the model from that directory.
+
+Downloads are ModelScope-first with a HuggingFace fallback. The SDK channel
+verifies its snapshot and hands off to the direct-HTTP channel when it writes
+nothing, because the SDK does not raise when individual files fail. Both local
+backends keep one process-wide model instance reused by every task, and
+`foundation/inference/load_guard.py` cools down a failed load instead of
+retrying it per crop.
+
+## LLM ownership
+
+The chat LLM lives entirely in the `agent/` Node sidecar (port 18800): it owns
+chat streaming, the provider model-list probe (`POST /v1/models`) and the
+connectivity probe (`POST /v1/probe`). Python used to carry a LangChain client,
+a LiteLLM mapping module, a provider default-URL table and a model-list probe in
+`server/llm/`; that package, its `LlmCapability` port and the readiness
+`probe-llm` endpoints are gone. Python now persists `AppConfig.llm` in
+`settings.json` and readiness reports only whether those settings are complete
+(config-derived, no network).
+
+Both sides resolve `settings.json` the same way: `<source root>/library` when
+`pyproject.toml` is present, else `~/MBForge`, overridable with
+`MBFORGE_SETTINGS_PATH`. That single rule matters — the sidecar previously
+defaulted to `~/MBForge/settings.json`, which does not exist in a source
+checkout, so it read no settings at all and every saved key was silently lost.
+
 ## Known gaps
 
 - `report.json` and `storage/{doc_id}/pages/` have no writer in the active
   path: the removed Persist stage produced them, while the document report and
   page readers still consume them.
-- `markush_scaffolds` and `markush_fragments` also have no writer — their only
-  producer module was removed with the Persist stage — yet the Markush
-  enumeration/review readers still read them.
+- Extract now classifies recognized image structures and atomically queues
+  Markush scaffolds, fragments, and uncertain candidates with their canonical
+  source-evidence links. Prose-only Markush definitions still need a separate
+  text-candidate producer; they must not be fabricated as SMILES.
 - The molecule↔evidence association is now persisted in `evidence.evidence_id`
   (pointing at the canonical `source_evidence` row); the legacy
   `text_molecule_links` table was dropped.
+- Import starts processing in the same request and the workspace lists only
+  documents whose run reached an outcome (`ready`/`error`). A row left
+  `pending` by an older build stays hidden; re-import it rather than
+  back-filling a status.
+- The `agent/` sidecar has no test runner, so its provider model-list and probe
+  logic is guarded by `tsc --noEmit` alone. Those contracts used to live in
+  `tests/unit/test_llm_probe.py` and `tests/unit/routers/test_settings.py`,
+  which were deleted with the Python implementation they covered.
+- The frontend locale files carry roughly 340 keys no component references
+  (whole `sar.*`, `welcome.*`, `project.*`, `pdf.patentFacts*`,
+  `pdfToolbar.*` and `doc.*` groups among them). Only the removed-LLM cluster
+  has been pruned; the rest is untouched pending a deliberate cleanup.
 
 ## Active plans
 

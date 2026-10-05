@@ -128,9 +128,6 @@ def persist_source_evidence(
                 if stored == values[1:]:
                     count += 1
                     continue
-                # 覆写：先按 evidence_id 删除旧行，再在同一事务内写入新内容。
-                # evidence_id 保持不变，因此下游引用（molecules / activities）
-                # 无需重建。
                 active_conn.execute(
                     "DELETE FROM source_evidence WHERE evidence_id = ?",
                     (item.evidence_id,),

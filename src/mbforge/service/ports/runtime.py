@@ -23,10 +23,6 @@ class ResourceManagerCapability(Protocol):
     def ensure(self, resource_id: str) -> Any: ...
 
 
-class ModelLocatorCapability(Protocol):
-    def bundled_model_asset(self, info: Any) -> Any: ...
-
-
 class ModelStatusCapability(Protocol):
     def get_all(self) -> Any: ...
 
@@ -79,22 +75,11 @@ class OcrLabelReaderCapability(Protocol):
     def get_label_reader(self) -> Any: ...
 
 
-class LlmCapability(Protocol):
-    def default_base_url(self, provider: str) -> str: ...
-
-    def create_llm(self, **kwargs: Any) -> Any: ...
-
-    def fetch_provider_models(
-        self, provider: str, base_url: str, api_key: str | None
-    ) -> Any: ...
-
-
 @dataclass(frozen=True)
 class RuntimeProvider:
     """Runtime capabilities supplied by the adapter composition root."""
 
     resource_manager: ResourceManagerCapability
-    model_locator: ModelLocatorCapability
     model_status: ModelStatusCapability
     models: ModelsCapability
     molparser: MolparserCapability
@@ -104,7 +89,6 @@ class RuntimeProvider:
     ocr_crop_labels: OcrCropLabelsCapability
     ocr_label_reader: OcrLabelReaderCapability
     ocr_page_text: OcrPageTextCapability
-    llm: LlmCapability
     process: Any
     ingest_queue: Any
     ingest_worker: Any

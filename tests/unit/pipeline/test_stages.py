@@ -182,6 +182,62 @@ class TestStageNullChecks:
         # Candidates are always rebuilt from the artifact at Join/Patent.
         assert ctx.candidates == []
 
+    def test_extract_stage_queues_markush_with_canonical_evidence(self, tmp_path):
+        from mbforge.db.markush_transitions import get_candidate_detail
+        from mbforge.db.sqlite.database import DatabaseManager
+        from mbforge.service.pipeline.extract.text import (
+            ExtractedDocument,
+            PageContent,
+        )
+
+        fake_doc = ExtractedDocument(
+            raw_text="Formula I compounds",
+            page_count=1,
+            parser="layout",
+            pages=[PageContent(page_num=1, text="Formula I compounds")],
+        )
+        result = _molecule_result()
+        result.smiles = "*c1ccccc1"
+        result.esmiles = "*c1ccccc1<sep>R"
+        result.properties = {"markush": True, "groups": "R1"}
+        ctx = PipelineContext(
+            pdf_path=tmp_path / "fake.pdf",
+            library_root=tmp_path,
+            doc_id="t-markush-queue",
+            run_id="run-1",
+        )
+
+        with (
+            patch(
+                "mbforge.service.pipeline.extract.text.extract_layout_text",
+                return_value=fake_doc,
+            ),
+            patch(_MOLECULE_PASS, return_value=[result]),
+            patch(
+                "mbforge.service.pipeline.artifacts.evidence_join.page_frames_from_pdf",
+                return_value=[PageFrame(page=1, width=100.0, height=100.0)],
+            ),
+        ):
+            stage_result = ExtractStage().execute(ctx)
+
+        assert stage_result.status == "success"
+        assert stage_result.context["markush_review_candidate_count"] == 1
+        database = DatabaseManager.get(str(tmp_path))
+        with database.mol_conn() as conn:
+            candidate_id = conn.execute(
+                "SELECT candidate_id FROM markush_review_candidates WHERE doc_id = ?",
+                (ctx.doc_id,),
+            ).fetchone()["candidate_id"]
+            candidate = get_candidate_detail(conn, candidate_id)
+            source_id = conn.execute(
+                "SELECT evidence_id FROM source_evidence "
+                "WHERE doc_id = ? AND kind = 'molecule'",
+                (ctx.doc_id,),
+            ).fetchone()["evidence_id"]
+
+        assert candidate.predicted_role == "fragment"
+        assert candidate.evidence[0].source_evidence_id == source_id
+
     def test_molecule_pass_failure_does_not_fail_the_document(self, tmp_path):
         """A molecule-side failure keeps the page text evidence alive."""
         from mbforge.service.pipeline.extract.text import (

@@ -6,6 +6,8 @@ orphans — those that prevent the current process from starting — are eligibl
 for automatic termination. All others are reported for manual review.
 """
 
+# Tests: (none)
+
 from __future__ import annotations
 
 import time

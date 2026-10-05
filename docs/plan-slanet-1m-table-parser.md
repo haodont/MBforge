@@ -34,7 +34,7 @@ tokenizer; SLANet-1M is a 7.6 MB ONNX model with zero new dependencies).
   `runtime.table_slanet.predict_table`, stores `region["html"]` /
   `region["text"]` (Markdown) → flows into `page_text` / `SourceEvidence`
   unchanged; activity parser consumes it without changes.
-- Bonus fix: `model_locator` derived the cache repo tail from `ms_repo`
+- Bonus fix: `models.assets.locator` derived the cache repo tail from `ms_repo`
   only, so HF-only snapshot models (Hiro-Layout, SLANet-1M) were never found
   after download (`repo_name = (ms_repo or hf_repo or id)` fallback).
 

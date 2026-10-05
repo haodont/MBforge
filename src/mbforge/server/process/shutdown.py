@@ -12,6 +12,8 @@ This replaces the ad-hoc shutdown in ``app.py`` lifespan and guarantees that
 no orphaned processing rows or zombie threads survive process exit.
 """
 
+# Tests: (none)
+
 from __future__ import annotations
 
 import asyncio

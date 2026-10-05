@@ -108,8 +108,12 @@ class ExtractStage:
         try:
             from mbforge.foundation.config import load_global_config
             from mbforge.service.pipeline.artifacts.evidence_join import (
+                _candidates_from_evidence,
                 mint_evidence,
                 page_frames_from_pdf,
+            )
+            from mbforge.service.pipeline.detection.structure_role import (
+                classify_structure_role,
             )
             from mbforge.service.pipeline.extract.text import extract_layout_text
             from mbforge.service.ports import get_repositories
@@ -141,17 +145,33 @@ class ExtractStage:
                 library_root=ctx.library_root,
                 staging_dir=ctx.staging_dir,
             )
-            ctx.source_evidence_count = get_repositories(
-                ctx.library_root
-            ).evidence.persist(evidence)
+            candidates = _candidates_from_evidence(
+                list(molecule_stats.get("results", [])), evidence
+            )
+            for candidate in candidates:
+                classify_structure_role(candidate)
+
+            repositories = get_repositories(ctx.library_root)
+            with repositories.database.transaction() as (_kb_conn, conn):
+                ctx.source_evidence_count = repositories.evidence.persist(
+                    evidence, conn=conn
+                )
+                markush_candidate_count = repositories.review.persist_review_candidates(
+                    ctx.doc_id,
+                    candidates,
+                    conn=conn,
+                )
+            molecule_stats["markush_review_candidate_count"] = markush_candidate_count
 
             molecule_count = molecule_stats.get("molecule_count", 0)
             logger.info(
-                "Extracted %d pages (%d chars, %d molecules, %d evidence rows) from %s",
+                "Extracted %d pages (%d chars, %d molecules, %d evidence rows, "
+                "%d new Markush review candidates) from %s",
                 ctx.extracted.page_count,
                 len(ctx.extracted.raw_text),
                 molecule_count,
                 ctx.source_evidence_count,
+                markush_candidate_count,
                 ctx.doc_id,
             )
 
@@ -181,6 +201,7 @@ class ExtractStage:
                     "rejected_count": molecule_stats.get("rejected_count", 0),
                     "skipped": molecule_stats.get("skipped", False),
                     "source_evidence_count": ctx.source_evidence_count,
+                    "markush_review_candidate_count": markush_candidate_count,
                     "tool_stats": molecule_stats.get("tool_stats", {}),
                 },
             )

@@ -57,11 +57,6 @@ dependencies = [
     "platformdirs>=4.0.0",
     "psutil>=7.2.2",
     "pydantic>=2.2.0",
-    # LLM chat models (pipeline content-extraction fallback + readiness probe)
-    "langchain-core>=1.4.8",
-    "langchain-openai>=0.3.0",
-    "langchain-anthropic>=0.3.0",
-    "litellm>=1.87.0",
     # SSE streaming
     "sse-starlette>=2.0.0",
     # Model Server (FastAPI)
@@ -101,13 +96,19 @@ gpu = [
     # 显著快于 CPU onnx（~495ms）。依赖 torch，故归入本条 extra。
     "rapidocr>=3",
     # Hiro-Layout 版面检测（ONNX / onnxruntime）。CUDA EP 需要在建 session 前
-    # 从 nvidia-* 轮子预加载 cublasLt/cudnn DLL（见 adapters/inference/hiro_layout.py），
+    # 从 nvidia-* 轮子预加载 cublasLt/cudnn DLL（见 src/mbforge/foundation/inference/hiro_layout.py），
     # 否则会静默回落到 CPU。
+    #
+    # ⚠️ 上限锁 1.26：ORT 1.27 起 PyPI 上的 `onnxruntime-gpu` 默认改为 CUDA 13.0
+    #    构建，与本项目 torch 的 cu128 运行时不一致，加载 cublasLt64_13.dll 失败后
+    #    静默退化到 CPU（本机实测 852ms/页 → 146ms/页）。1.26.x 是最后一个默认
+    #    CUDA 12.8 构建，与 torch cu128 对齐；升级前必须先升 torch 到 cu13。
+    #    见 https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html
     #
     # ⚠️ 与 `onnx` extra 互斥：`onnxruntime-gpu` 与 `onnxruntime`（CPU 版，由
     #    `rapidocr-onnxruntime` 传递引入）提供同名模块 `onnxruntime`，装在一起
     #    会互相覆盖。生产装 `gpu`，无 GPU / CI 装 `onnx`，不要同时装。
-    "onnxruntime-gpu>=1.21",
+    "onnxruntime-gpu>=1.21,<1.27",
 ]
 # 纯 CPU 兜底：crop-label OCR 的 onnxruntime 后端。生产主用 torch（gpu extra），
 # 无 GPU / CI 环境可显式 `--extra onnx` 装此包作为降级路径；torch 引擎本身不

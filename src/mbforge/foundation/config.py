@@ -1,10 +1,10 @@
 """MBForge global configuration — single JSON file with Pydantic schema.
 
 Loads, validates, and persists application settings from
-``<GLOBAL_APP_DIR>/settings.json``.  All runtime and business configuration
-(LLM, OCR, molecule detection, ingestion) flows through the ``AppConfig``
-model exposed here; direct ``os.environ`` reads are limited to pure
-runtime toggles such as ``MBFORGE_FORCE_CPU``.
+``<GLOBAL_APP_DIR>/settings.json``. Python-owned runtime configuration flows
+through ``AppConfig``; the ``llm`` section is opaque JSON owned by the Node
+agent sidecar. Direct ``os.environ`` reads are limited to pure runtime toggles
+such as ``MBFORGE_FORCE_CPU``.
 """
 
 from __future__ import annotations
@@ -22,35 +22,6 @@ from mbforge.foundation.paths import GLOBAL_APP_DIR, GLOBAL_SETTINGS_PATH
 logger = get_logger(__name__)
 
 
-class LLMConfig(BaseModel):
-    """LLM configuration shared by pipeline and Agent tasks."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    provider: str = "openai_compatible"
-    model: str = "gpt-4o-mini"
-    api_key: str = ""
-    base_url: str = ""
-    temperature: float = 0.7
-    max_tokens: int = 4096
-    top_p: float = 1.0
-    request_timeout: int = 60
-    molecule_tool_enabled: bool = Field(
-        default=False,
-        description=(
-            "Use one cloud LLM tool-call pass as a text-only molecule fallback "
-            "when image detection returns no candidates."
-        ),
-    )
-    molecule_tool_max_chars: int = Field(
-        default=16000,
-        ge=1000,
-        le=100000,
-        description="Maximum source characters sent to the molecule registration tool.",
-    )
-    language: str = "en"
-
-
 class MoldetConfig(BaseModel):
     """Molecule detection (MolDetv2 + MolParser-Mobile) settings."""
 
@@ -62,7 +33,12 @@ class MoldetConfig(BaseModel):
     detection_dpi: float = 200.0
     detection_batch_size: int = 0
     # MolParser crops per inference batch; clamped to [1, 64] by the extractor.
-    molparser_batch_size: int = 16
+    # 64 is the measured ceiling of the extractor's clamp and the fastest
+    # setting: the recognizer resizes every crop to a fixed 224x224, so its
+    # cost is per-crop and only amortizes with batch size. Measured on a
+    # 23-page patent (63 crops, RTX 3070 Ti): 16 -> 10.8s, 32 -> 8.2s,
+    # 64 -> 6.6s for the molecule pass, with byte-identical SMILES.
+    molparser_batch_size: int = 64
     # Crop-label OCR worker threads (0 disables the dedicated pool fallback to
     # in-thread OCR). Used to run RapidOCR off the critical MolParser-feed path
     # so the GPU is not starved by serial CPU label reads; clamped to [0, 8].
@@ -129,7 +105,7 @@ class IngestConfig(BaseModel):
         ge=1,
         le=8,
         description=(
-            "同时运行的 pipeline 任务数(每库)。GPU 阶段仍由 gpu_gate 串行保护。"
+            "同时运行的 pipeline 任务数(每库)。模型每进程只加载一次并被各任务复用。"
         ),
     )
 
@@ -174,7 +150,6 @@ class ProcessConfig(BaseModel):
     auto_reap_orphans: bool = True
     reap_grace_seconds: float = 5.0
     heartbeat_interval: float = 30.0
-    gpu_concurrency: int = Field(default=1, ge=1, le=4)
 
 
 class AppConfig(BaseModel):
@@ -182,7 +157,8 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    llm: LLMConfig = Field(default_factory=LLMConfig)
+    # Opaque settings consumed and validated by the Node agent sidecar.
+    llm: dict[str, Any] = Field(default_factory=dict)
     model_cache_dir: str = ""
     theme: str = "dark"
     language: str = "zh"

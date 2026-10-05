@@ -13,43 +13,44 @@ import pytest
 from PIL import Image
 
 from mbforge.service.pipeline.detection.extraction import (
-    MAX_SCRIBE_BATCH_SIZE,
-    _clamp_scribe_batch_size,
-    _nearby_page_text,
-    candidate_id,
+    MAX_MOLPARSER_BATCH_SIZE,
+    clamp_molparser_batch_size,
     extract_molecules_from_pdf,
     extract_molecules_from_pdf_async,
+    nearby_block_text,
 )
 
 
-def test_nearby_page_text_keeps_local_markush_context() -> None:
+def test_nearby_block_text_keeps_local_markush_context() -> None:
     """Only text blocks near a molecule bbox are forwarded to classification."""
     blocks = [
         (0, 0, 15, 15, "Formula I, R1/R2"),
         (200, 200, 240, 220, "unrelated paragraph"),
     ]
 
-    context = _nearby_page_text(blocks, (10, 10, 20, 20))
+    context = nearby_block_text(blocks, (10, 10, 20, 20))
 
     assert "Formula I" in context
     assert "unrelated paragraph" not in context
 
 
-def test_nearby_page_text_tolerates_missing_or_malformed_blocks() -> None:
+def test_nearby_block_text_tolerates_missing_or_malformed_blocks() -> None:
     """Non-list block data (e.g. a failed page read) yields empty context."""
-    assert _nearby_page_text(None, (0, 0, 10, 10)) == ""
-    assert _nearby_page_text("not-blocks", (0, 0, 10, 10)) == ""
-    assert _nearby_page_text((), (0, 0, 10, 10)) == ""
+    assert nearby_block_text(None, (0, 0, 10, 10)) == ""
+    assert nearby_block_text("not-blocks", (0, 0, 10, 10)) == ""
+    assert nearby_block_text((), (0, 0, 10, 10)) == ""
 
 
-def test_clamp_scribe_batch_size_enforces_bounds() -> None:
-    """Configured batch sizes are clamped into [1, MAX_SCRIBE_BATCH_SIZE]."""
-    assert _clamp_scribe_batch_size(8) == 8
-    assert _clamp_scribe_batch_size(1) == 1
-    assert _clamp_scribe_batch_size(0) == 1
-    assert _clamp_scribe_batch_size(-5) == 1
-    assert _clamp_scribe_batch_size(MAX_SCRIBE_BATCH_SIZE) == MAX_SCRIBE_BATCH_SIZE
-    assert _clamp_scribe_batch_size(10_000) == MAX_SCRIBE_BATCH_SIZE
+def test_clamp_molparser_batch_size_enforces_bounds() -> None:
+    """Configured batch sizes are clamped into [1, MAX_MOLPARSER_BATCH_SIZE]."""
+    assert clamp_molparser_batch_size(8) == 8
+    assert clamp_molparser_batch_size(1) == 1
+    assert clamp_molparser_batch_size(0) == 1
+    assert clamp_molparser_batch_size(-5) == 1
+    assert (
+        clamp_molparser_batch_size(MAX_MOLPARSER_BATCH_SIZE) == MAX_MOLPARSER_BATCH_SIZE
+    )
+    assert clamp_molparser_batch_size(10_000) == MAX_MOLPARSER_BATCH_SIZE
 
 
 @pytest.fixture(autouse=True)
@@ -68,10 +69,10 @@ def _patch_pdf_dependencies(monkeypatch: pytest.MonkeyPatch) -> dict:
     fake_pymupdf.FileDataError = Exception
 
     fake_molparser = MagicMock()
-    fake_scribe = MagicMock()
-    fake_scribe.smiles = "CCO"
-    fake_scribe.esmiles = "CCO"
-    fake_molparser.predict_batch.return_value = [fake_scribe]
+    fake_recognition = MagicMock()
+    fake_recognition.smiles = "CCO"
+    fake_recognition.esmiles = "CCO"
+    fake_molparser.predict_batch.return_value = [fake_recognition]
 
     monkeypatch.setitem(sys.modules, "pymupdf", fake_pymupdf)
     fake_mol_bbox = MagicMock()
@@ -86,7 +87,7 @@ def _patch_pdf_dependencies(monkeypatch: pytest.MonkeyPatch) -> dict:
         "pymupdf": fake_pymupdf,
         "molparser": fake_molparser,
         "detect": fake_detect,
-        "scribe": fake_scribe,
+        "scribe": fake_recognition,
     }
 
 
@@ -235,19 +236,6 @@ def test_extract_molecules_from_pdf_async_offloads_to_thread(
     assert calls[0][0] is extract_molecules_from_pdf
 
 
-def test_candidate_id_deterministic_per_structure_and_position() -> None:
-    """IDs are stable for identical inputs and change with any component."""
-    base = candidate_id("doc-1", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
-
-    assert base == candidate_id("doc-1", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
-    assert base == candidate_id("doc-1", "CCO", 3, [10.0, 20.0, 30.0, 40.0])
-    assert base != candidate_id("doc-2", "CCO", 3, (10.0, 20.0, 30.0, 40.0))
-    assert base != candidate_id("doc-1", "CCOC", 3, (10.0, 20.0, 30.0, 40.0))
-    assert base != candidate_id("doc-1", "CCO", 4, (10.0, 20.0, 30.0, 40.0))
-    assert base != candidate_id("doc-1", "CCO", 3, None)
-    assert candidate_id("doc-1", "CCO", None, None)
-
-
 def _mol_bbox(bbox: list[float], score: float = 0.9) -> MagicMock:
     """Build a fake category-1 (molecule) detection box."""
     fake = MagicMock()
@@ -347,14 +335,14 @@ def test_extract_molecules_from_pdf_reads_page_blocks_once_per_page(
         _mol_bbox([0.5, 0.5, 1.0, 1.0]),
     ]
 
-    def _fake_scribe():
+    def _fake_recognition():
         scribe = MagicMock()
         scribe.smiles = "CCO"
         scribe.esmiles = "CCO"
         return scribe
 
     mocks["molparser"].predict_batch.side_effect = lambda images: [
-        _fake_scribe() for _ in images
+        _fake_recognition() for _ in images
     ]
 
     with (
@@ -389,7 +377,7 @@ def test_extract_molecules_from_pdf_reads_page_blocks_once_per_page(
         assert "unrelated paragraph" not in result.properties.get("role_context", "")
 
 
-def test_extract_molecules_from_pdf_bounds_scribe_batches(
+def test_extract_molecules_from_pdf_bounds_molparser_batches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Crops are inferred in bounded batches and released after each batch.
@@ -494,14 +482,14 @@ def test_extract_molecules_from_pdf_archives_expanded_moldet_crop(
     # Interior bbox on the 10x10 page -> pixel box (2,2,6,6), size (4,4).
     mocks["detect"].bboxes = [_mol_bbox([0.2, 0.2, 0.6, 0.6])]
 
-    def _fake_scribe():
+    def _fake_recognition():
         scribe = MagicMock()
         scribe.smiles = "CCO"
         scribe.esmiles = "CCO"
         return scribe
 
     mocks["molparser"].predict_batch.side_effect = lambda images: [
-        _fake_scribe() for _ in images
+        _fake_recognition() for _ in images
     ]
 
     with (

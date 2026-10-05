@@ -21,18 +21,10 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     The durable queue worker is stubbed so enqueueing never runs a real
     pipeline during router tests.
     """
-    import mbforge.server.environment as _environment
     from mbforge.foundation import config
     from mbforge.server.ingest import worker
 
     monkeypatch.setattr(worker, "ensure_queue_worker", lambda _root: True)
-
-    _orig_check_environment = getattr(_environment, "check_environment", lambda: None)
-
-    def _noop() -> None:
-        return None
-
-    _environment.check_environment = _noop
 
     lib = tmp_path / "library"
     lib.mkdir(parents=True, exist_ok=True)
@@ -58,7 +50,6 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     finally:
         if "c" in locals():
             c.close()
-        _environment.check_environment = _orig_check_environment
 
 
 def _parse_sse(body: bytes) -> list[dict]:

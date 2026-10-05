@@ -4,6 +4,19 @@ Pure-Python backend serving both the API and the React frontend.
 Replaces the Tauri/Rust shell with a standard web application.
 """
 
+# Tests:
+#   tests/conftest.py
+#   tests/unit/routers/test_agent.py
+#   tests/unit/routers/test_markush_enumeration_router.py
+#   tests/unit/routers/test_markush_router.py
+#   tests/unit/routers/test_markush_sites_router.py
+#   tests/unit/routers/test_pipeline.py
+#   tests/unit/test_app.py
+#   tests/unit/test_frontend_fallback.py
+#   tests/unit/test_lifespan.py
+#   tests/unit/test_routers_smoke.py
+#   tests/unit/test_version_consistency.py
+
 from __future__ import annotations
 
 import asyncio
@@ -307,7 +320,7 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     # implementations.  Application code consumes the repository port and
     # never constructs DatabaseManager itself.
     from mbforge.db.sqlite.repositories import create_repositories
-    from mbforge.server.provider import create_runtime_provider
+    from mbforge.server.runtime_provider import create_runtime_provider
     from mbforge.service.pipeline.runtime import create_pipeline_runtime
     from mbforge.service.ports import (
         configure_pipeline_runtime,

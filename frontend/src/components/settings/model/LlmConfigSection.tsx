@@ -3,15 +3,9 @@ import { useTranslation } from 'react-i18next'
 import Caption from '@/components/ui/Caption'
 import Button from '@/components/ui/Button'
 import SettingSection, { SettingGroup, SettingItem } from '@/components/ui/SettingSection'
-import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import { fetchLlmModels } from '@/api/http/settings'
 import { getUserFacingError } from '@/utils/errors'
-import {
-  NumberField,
-  ProviderField,
-  SelectField,
-  ToggleField,
-} from '../SettingRow'
+import { NumberField, ProviderField, SelectField } from '../SettingRow'
 import { ModelSelector } from '../ModelComponents'
 import {
   LLM_MODELS,
@@ -220,29 +214,6 @@ export default function LlmConfigSection({
           dirty={dirtyFields.llm_language}
         />
       </SettingGroup>
-
-      <CollapsibleSection title={t('settings.llmMoleculeTool')} defaultOpen={false}>
-        <SettingGroup>
-          <ToggleField
-            label={t('settings.moleculeToolEnabled')}
-            description={t('settings.moleculeToolEnabledDesc')}
-            value={settings.llm_molecule_tool_enabled}
-            onChange={v => { markDirty('llm_molecule_tool_enabled'); update('llm_molecule_tool_enabled', v) }}
-            dirty={dirtyFields.llm_molecule_tool_enabled}
-          />
-          <NumberField
-            label={t('settings.moleculeToolMaxChars')}
-            description={t('settings.moleculeToolMaxCharsDesc')}
-            value={settings.llm_molecule_tool_max_chars}
-            onChange={v => { markDirty('llm_molecule_tool_max_chars'); update('llm_molecule_tool_max_chars', v) }}
-            min={1000}
-            max={100000}
-            step={500}
-            width={120}
-            dirty={dirtyFields.llm_molecule_tool_max_chars}
-          />
-        </SettingGroup>
-      </CollapsibleSection>
     </SettingSection>
   )
 }

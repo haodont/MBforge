@@ -28,6 +28,13 @@ this module only claims rows and applies a last-resort terminal status for
 exceptions raised before the runner could record anything.
 """
 
+# Tests:
+#   tests/conftest.py
+#   tests/unit/infra/test_queue_worker.py
+#   tests/unit/pipeline/test_cancellation.py
+#   tests/unit/routers/test_pipeline.py
+#   tests/unit/test_routers_smoke.py
+
 from __future__ import annotations
 
 import asyncio
@@ -42,7 +49,6 @@ from typing import Any
 
 from mbforge.foundation.ids import short_id
 from mbforge.foundation.logger import get_logger
-from mbforge.foundation.queue_contract import INGEST_TERMINAL_STATUSES
 
 logger = get_logger("mbforge.queue_worker")
 
@@ -55,7 +61,6 @@ _HEARTBEAT_STALE_S = 60.0
 # leader.
 _LOCK_RETRY_S = 10.0
 
-_TERMINAL_STATUSES = INGEST_TERMINAL_STATUSES
 # Task ids currently executing inside THIS process, grouped by library root
 # (event-loop thread only). Grouping by root lets a multi-library process
 # stop or fail one worker without forgetting another worker's active tasks.
@@ -65,26 +70,9 @@ _active_run_ids: set[str] = set()
 _workers: dict[str, asyncio.Task] = {}
 
 
-def _normalize_stage_name(raw: str | None) -> str | None:
-    """Pass through the stage name from the database.
-
-    The canonical stage names now match what's stored in the DB, so no
-    transformation is needed. Kept as a hook for future compatibility.
-    """
-    return raw
-
-
 def _worker_id() -> str:
     """Return a stable-ish worker identity for ``claimed_by``."""
     return f"{socket.gethostname()}:{os.getpid()}:{short_id()}"
-
-
-def active_task_ids() -> frozenset[str]:
-    """Return a snapshot of tasks currently running in this process."""
-    merged: set[str] = set()
-    for ids in _active_task_ids.values():
-        merged |= ids
-    return frozenset(merged)
 
 
 def is_task_active(task_id: str) -> bool:
@@ -330,6 +318,10 @@ def _run_pipeline_sync(
     except TaskCancelledError as exc:
         logger.info("Pipeline cancelled for %s: %s", file_path, exc)
         queue_dao.set_node_status(library_root, task_id, "cancelled", str(exc))
+        # A cancelled run produced no results, so the document goes back to
+        # ``pending`` and stays hidden from the workspace listing until a run
+        # reaches an outcome. The queue page still offers a retry.
+        _set_document_status(library_root, doc_id, "pending")
         return
     except Exception as exc:  # noqa: BLE001
         logger.error("Stage %s failed for %s: %s", stage, file_path, exc, exc_info=True)
@@ -342,6 +334,8 @@ def _run_pipeline_sync(
                 failed_stage=stage,
                 error=str(exc),
             )
+        # Surface the failure in the workspace rather than hiding it forever.
+        _set_document_status(library_root, doc_id, "error")
         return
 
     queue_dao.set_node_status(library_root, task_id, "done")
@@ -353,8 +347,33 @@ def _run_pipeline_sync(
     if queue_dao.all_stages_done(
         library_root, doc_id=doc_id, run_id=run_id
     ) and queue_dao.claim_finalize(library_root, doc_id=doc_id, run_id=run_id):
-        _write_final_report(library_root, doc_id, task_id)
+        try:
+            _write_final_report(library_root, doc_id, task_id)
+        except Exception:  # noqa: BLE001 — no published output means no "ready"
+            _set_document_status(library_root, doc_id, "error")
+            raise
+        # Every stage succeeded and the run published exactly once: this is the
+        # point where the document becomes visible in the workspace.
+        _set_document_status(library_root, doc_id, "ready")
         logger.debug("Task %s: all stages complete", task_id)
+
+
+def _set_document_status(library_root: str, doc_id: str, status: str) -> None:
+    """Record a document's processing outcome for the workspace listing.
+
+    The workspace only shows documents whose run reached an outcome
+    (``ready``/``error``), so each terminal queue transition writes the
+    registry row here. Failures are logged rather than raised — the queue
+    node's own status remains the authoritative record of the run.
+    """
+    if not doc_id:
+        return
+    from mbforge.service.ports import get_repositories
+
+    try:
+        get_repositories(library_root).documents.update_status(doc_id, status)
+    except Exception as exc:  # noqa: BLE001 — status write must not mask the run
+        logger.warning("Failed to mark document %s as %s: %s", doc_id, status, exc)
 
 
 def _write_final_report(library_root: str, doc_id: str, task_id: str) -> None:
@@ -553,28 +572,6 @@ def _heartbeat_rows(library_root: str, worker: str) -> None:
         pass  # Best-effort; don't fail heartbeat
 
 
-def _set_task_terminal(
-    library_root: str, task_id: str, status: str, error: str | None = None
-) -> None:
-    """Apply a terminal queue status best-effort."""
-    if status not in _TERMINAL_STATUSES:
-        return
-    try:
-        from mbforge.db.sqlite.database import DatabaseManager
-
-        db = DatabaseManager.get(library_root)
-        with db.kb_conn() as conn:
-            conn.execute(
-                "UPDATE ingest_queue SET status = ?, error = ?, "
-                "claimed_by = NULL, heartbeat_ts = NULL, "
-                "updated_at = datetime('now') "
-                "WHERE id = ? AND claimed_by IS NOT NULL",
-                (status, error, task_id),
-            )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to mark %s as %s: %s", task_id, status, exc)
-
-
 # ---------------------------------------------------------------------------
 # Library lock: one process may drain a library's queue at a time.
 # ---------------------------------------------------------------------------
@@ -610,12 +607,6 @@ def _library_lock(library_root: str) -> Iterator[bool]:
     finally:
         if lock_file is not None:
             unlock_file(lock_file)
-
-
-def is_library_drained(library_root: str | Path) -> bool:
-    """Return True when no process currently holds the library lock."""
-    with _library_lock(str(library_root)) as held:
-        return not held
 
 
 def is_library_locked(library_root: str | Path) -> bool:

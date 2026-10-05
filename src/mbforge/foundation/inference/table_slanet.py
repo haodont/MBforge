@@ -30,6 +30,7 @@ from typing import Any
 
 import numpy as np
 
+from mbforge.foundation.inference.load_guard import LoadGuard
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
@@ -90,6 +91,8 @@ _SESSION: Any = None
 _AVAILABLE: bool = False
 _ERROR: str = ""
 _LOAD_LOCK = threading.Lock()
+#: Suppresses repeated download+load attempts after a failure (see load_guard).
+_GUARD = LoadGuard("SLANet-1M")
 
 
 def _has_onnxruntime() -> bool:
@@ -102,12 +105,20 @@ def _has_onnxruntime() -> bool:
 
 
 def load(device: str | None = None) -> None:
-    """Lazy-load the SLANet-1M ONNX session (thread-safe)."""
+    """Lazy-load the SLANet-1M ONNX session (thread-safe).
+
+    A failed attempt is remembered so a missing model is not re-downloaded and
+    re-loaded on every table crop; ``unload`` clears it.
+    """
     global _SESSION, _AVAILABLE, _ERROR
     if _SESSION is not None:
         return
+    if not _GUARD.should_attempt():
+        return
     with _LOAD_LOCK:
         if _SESSION is not None:
+            return
+        if not _GUARD.should_attempt():
             return
 
         logger.info("Loading SLANet-1M table structure recognizer...")
@@ -128,6 +139,7 @@ def load(device: str | None = None) -> None:
                     "SLANet-1M weights not found after auto-download "
                     "(check network). Hiro-Layout table regions stay empty."
                 )
+                _GUARD.record_failure(_ERROR)
                 logger.warning(_ERROR)
                 return
 
@@ -135,6 +147,7 @@ def load(device: str | None = None) -> None:
             if not onnx_path.is_file():
                 _AVAILABLE = False
                 _ERROR = f"slanet_1m.onnx missing in {path}"
+                _GUARD.record_failure(_ERROR)
                 logger.warning(_ERROR)
                 return
 
@@ -144,6 +157,7 @@ def load(device: str | None = None) -> None:
                     "onnxruntime is not installed; the SLANet-1M recognizer "
                     "cannot be used."
                 )
+                _GUARD.record_failure(_ERROR)
                 logger.warning(_ERROR)
                 return
 
@@ -174,6 +188,7 @@ def load(device: str | None = None) -> None:
                 str(onnx_path), options, providers=providers
             )
             _AVAILABLE = True
+            _GUARD.record_success()
             logger.info(
                 "SLANet-1M loaded (providers=%s)",
                 list(_SESSION.get_providers()),
@@ -181,15 +196,17 @@ def load(device: str | None = None) -> None:
         except Exception as exc:  # noqa: BLE001 — enrichment must degrade
             _ERROR = str(exc)
             _AVAILABLE = False
+            _GUARD.record_failure(str(exc))
             logger.error("SLANet-1M load failed: %s", exc, exc_info=True)
 
 
 def unload() -> None:
-    """Release model."""
+    """Release model and clear the failure cooldown (allows a fresh attempt)."""
     global _SESSION, _AVAILABLE, _ERROR
     _SESSION = None
     _AVAILABLE = False
     _ERROR = ""
+    _GUARD.reset()
 
 
 def health() -> dict[str, str]:

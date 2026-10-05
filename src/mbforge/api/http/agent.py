@@ -1,4 +1,8 @@
-"""Tool endpoints for the frontend-hosted MBForge agent."""
+"""Tool endpoints the MBForge agent sidecar calls back into.
+
+The browser streams chat from the `agent/` Node sidecar; that sidecar reaches
+these endpoints to read library facts, so nothing here talks to an LLM.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +37,7 @@ class AgentMoleculeSearchResponse(BaseModel):
 async def agent_molecule_search(
     body: AgentMoleculeSearchRequest,
 ) -> AgentMoleculeSearchResponse:
-    """Search the configured library for the frontend LLM."""
+    """Search the configured library for the agent's molecule_search tool."""
 
     results = await asyncio.to_thread(
         search_molecules,

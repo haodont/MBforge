@@ -1,7 +1,13 @@
-"""PDF page rendering for the molecule detection pipeline."""
+"""PDF page rendering for the molecule pass.
+
+The renderer owns its PyMuPDF handle exclusively — it is the only thread that
+touches the document — which is what makes rendering safe to overlap with page
+detection and crop processing downstream.
+"""
 
 from __future__ import annotations
 
+import queue
 from collections.abc import Callable
 from typing import Any
 
@@ -10,12 +16,13 @@ from PIL import Image
 
 from mbforge.foundation.logger import get_logger
 from mbforge.service.pipeline.cancellation import CancelCheck, TaskCancelledError
+from mbforge.service.pipeline.detection.extraction.records import RenderedPage
 
 logger = get_logger("mbforge.service.pipeline.detection.extraction.page_renderer")
 
 
 class PageRenderer:
-    """Render pages with a PyMuPDF handle owned exclusively by this thread."""
+    """Render pages into ``RenderedPage`` records for the detection thread."""
 
     def __init__(
         self,
@@ -25,9 +32,9 @@ class PageRenderer:
         max_pages: int | None,
         render_dpi: float,
         text_page_char_threshold: int,
-        page_q: Any,
+        page_q: queue.Queue[RenderedPage | None],
         check: CancelCheck,
-        put_bounded: Callable[[Any, object], bool],
+        put_bounded: Callable[[Any, RenderedPage], bool],
         open_errors: tuple[type[Exception], ...],
     ) -> None:
         self.pdf_path = pdf_path
@@ -55,39 +62,39 @@ class PageRenderer:
                 self.max_pages if self.max_pages is not None else self.page_count,
                 self.page_count,
             )
-            for page_idx in range(stop):
+            for page_index in range(stop):
                 self.check()
-                page = document.load_page(page_idx)
+                page = document.load_page(page_index)
 
                 native_text = page.get_text("text").strip()
                 if (
                     len(native_text) > self.text_page_char_threshold
                     and not page.get_images()
                 ):
+                    # Native prose with no images cannot hold a structure drawing.
                     self.skipped_pure_text += 1
                     continue
 
                 try:
-                    page_blocks = page.get_text("blocks")
+                    blocks = page.get_text("blocks")
                 except Exception as exc:  # noqa: BLE001 - PDF backends vary by page type
                     logger.debug("Could not read nearby PDF text: %s", exc)
-                    page_blocks = ()
+                    blocks = ()
 
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-                image_array = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+                samples = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
                     pixmap.height,
                     pixmap.width,
                     pixmap.n,
                 )
-                image = Image.fromarray(image_array)
                 if not self.put_bounded(
                     self.page_q,
-                    (
-                        page_idx,
-                        image,
-                        page_blocks,
-                        page.rect.width,
-                        page.rect.height,
+                    RenderedPage(
+                        page_index=page_index,
+                        image=Image.fromarray(samples),
+                        blocks=blocks,
+                        width_pt=page.rect.width,
+                        height_pt=page.rect.height,
                     ),
                 ):
                     return

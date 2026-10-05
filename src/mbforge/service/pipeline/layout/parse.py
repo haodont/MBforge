@@ -163,9 +163,9 @@ def _detect_molecules(
     """MolDet's molecule boxes for one page, in the shape the merge rules read.
 
     MolDet runs **after** the region detector and never nested inside it:
-    ``gpu_gate`` is a capacity-1 semaphore and each detector takes it for its
-    own forward pass. Both work off the one page render, so their boxes share a
-    coordinate space and can be compared directly.
+    each detector owns its model instance and runs its own forward pass. Both
+    work off the one page render, so their boxes share a coordinate space and
+    can be compared directly.
 
     A failed detection degrades to no molecules. Detection is still the
     authoritative molecule source, so R3/R4 stay inert rather than failing a

@@ -1,5 +1,9 @@
 """Concrete runtime capability composition."""
 
+# Tests:
+#   tests/conftest.py
+#   tests/unit/test_runtime_provider.py
+
 from __future__ import annotations
 
 import importlib
@@ -9,8 +13,6 @@ from mbforge.foundation.inference.ocr import crop_labels as ocr_crop_labels
 from mbforge.foundation.inference.ocr import label_reader as ocr_label_reader
 from mbforge.foundation.inference.ocr import page_text as ocr_page_text
 from mbforge.server import (
-    llm,
-    model_locator,
     models,
     process,
     resource_manager,
@@ -33,11 +35,14 @@ class _DynamicModule:
 
 
 def create_runtime_provider() -> RuntimeProvider:
-    """Build the lazily-used model, OCR reader, LLM and process capabilities."""
+    """Build the lazily-used model, OCR reader and process capabilities.
+
+    There is no LLM capability: the chat agent runs in its own Node sidecar
+    (agent/) and owns every provider call.
+    """
 
     return RuntimeProvider(
         resource_manager=resource_manager.ResourceManager,
-        model_locator=model_locator,
         model_status=models,
         models=models,
         molparser=_DynamicModule("mbforge.foundation.inference", "molparser"),
@@ -47,7 +52,6 @@ def create_runtime_provider() -> RuntimeProvider:
         ocr_crop_labels=ocr_crop_labels,
         ocr_label_reader=ocr_label_reader,
         ocr_page_text=ocr_page_text,
-        llm=llm,
         process=process,
         ingest_queue=ingest_queue,
         ingest_worker=ingest_worker,

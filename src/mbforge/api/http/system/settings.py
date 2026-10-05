@@ -1,8 +1,8 @@
 """Settings endpoints.
 
-Read and write the global ``settings.json`` configuration file. GET returns
-the current config with secret values redacted; PUT performs a deep merge
-and persists the new LLM settings so pipeline steps pick them up.
+Read and write the global settings.json configuration file. GET returns the
+current config with secret values redacted; PUT performs a deep merge and
+persists the new LLM settings so the Node agent sidecar (agent/) picks them up.
 """
 
 from __future__ import annotations
@@ -12,25 +12,15 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, RootModel, ValidationError
+from pydantic import RootModel, ValidationError
 
 from mbforge.foundation.config import (
     load_global_config,
     reset_settings,
     update_settings,
 )
-from mbforge.service.ports import get_runtime
 
 router = APIRouter()
-
-
-def fetch_provider_models(provider: str, base_url: str, api_key: str) -> list[dict]:
-    """Resolve the provider probe through the runtime port.
-
-    Keeping this small module-level seam preserves direct callers and lets
-    endpoint tests replace the network operation without touching adapters.
-    """
-    return get_runtime().llm.fetch_provider_models(provider, base_url, api_key)
 
 
 # Match secret-ish keys at word/end boundaries so "keyword" and "monkey"
@@ -83,38 +73,3 @@ async def settings_reset() -> dict:
     """重置全部设置为默认值."""
     cfg = await asyncio.to_thread(reset_settings)
     return {"success": True, "settings": _redact_secrets(cfg.model_dump())}
-
-
-class LlmModelsRequest(BaseModel):
-    """Body for the provider model-list probe."""
-
-    provider: str
-    base_url: str = ""
-    api_key: str = ""
-
-
-@router.post("/llm-models")
-async def settings_llm_models(body: LlmModelsRequest) -> dict:
-    """Probe the provider model-list API and return the available models.
-
-    The Settings UI sends the form values so the probe uses exactly what the
-    user configured. A redacted placeholder api_key ("***", as returned by
-    GET /settings) or an empty one falls back to the persisted key so the
-    probe works without ever exposing the stored secret to the browser.
-    """
-    api_key = body.api_key
-    if not api_key or api_key == "***":
-        cfg = await asyncio.to_thread(load_global_config)
-        api_key = cfg.llm.api_key
-    try:
-        models = await asyncio.to_thread(
-            fetch_provider_models,
-            body.provider,
-            body.base_url,
-            api_key,
-        )
-    except ValueError as exc:
-        # Expected business failure: return the provider's reason in the app
-        # success/error envelope so the Settings UI can show it verbatim.
-        return {"success": False, "error": str(exc)}
-    return {"success": True, "models": models}

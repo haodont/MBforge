@@ -1,14 +1,15 @@
-"""Components used by the PDF molecule extraction coordinator.
+"""The crop worker: each molecule box becomes an archived crop and a recognition.
 
-The public extraction entry point owns scheduling and thread lifecycle.  This
-module owns the crop worker's data lifecycle: image preprocessing, optional
-label OCR, bounded MolParser batches, crop archival, and result construction.
-Keeping these responsibilities together makes PIL ownership explicit without
-turning the extraction pipeline into a generic task framework.
+This is the last stage of the molecule pass. It owns a crop from the moment a
+box is lifted off a rendered page: preprocess the drawing, hand the label
+offcut to OCR, accumulate MolParser batches, archive the crop, and build the
+``ExtractionResult``. Every PIL image the pass opens is released here, which is
+what bounds its memory by the batch size rather than by the document.
 """
 
 from __future__ import annotations
 
+import queue
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,21 +21,18 @@ from PIL import Image
 from mbforge.domain.types import ExtractionResult
 from mbforge.foundation.logger import get_logger
 from mbforge.service.pipeline.cancellation import CancelCheck, TaskCancelledError
+from mbforge.service.pipeline.detection.extraction.records import DetectedPage
 
 if TYPE_CHECKING:
     TaskHandle = Any
 
 logger = get_logger("mbforge.service.pipeline.detection.extraction.crop_processor")
 
-DEFAULT_SCRIBE_BATCH_SIZE = 16
-MAX_SCRIBE_BATCH_SIZE = 64
+#: A drawing larger than this is passed through unsplit: clustering a crop that
+#: dense costs more than the separation is worth.
 _PREPROCESS_MAX_PIXELS = 1_000_000
+#: How far the OCR window extends past the molecule box, as a fraction of it.
 _OCR_WINDOW_EXPAND_FRACTION = 0.15
-
-
-def clamp_scribe_batch_size(configured: int) -> int:
-    """Clamp a configured MolParser batch size into a safe range."""
-    return max(1, min(configured, MAX_SCRIBE_BATCH_SIZE))
 
 
 def ocr_label_image(image: Image.Image) -> tuple[list[str], str]:
@@ -70,8 +68,14 @@ def fill_ocr_slot(slot: list[Any], handle: TaskHandle) -> None:
 
 
 @dataclass
-class PreparedCrop:
-    """A crop pair and metadata waiting for one MolParser batch."""
+class MoleculeCrop:
+    """One detected molecule, ready for a MolParser batch.
+
+        Two images, deliberately different: ``parser_image`` is the preprocessed
+        drawing (main cluster only) that the recognizer reads, while
+    ``archive_image`` is the wider window kept on disk for later inspection. Both
+        are owned here and closed once the batch is archived.
+    """
 
     page_idx: int
     mol_idx: int
@@ -99,11 +103,11 @@ class MolParserBatcher:
         self.write_dir = write_dir
         self.molparser = molparser
         self.check = check
-        self.pending: list[PreparedCrop] = []
+        self.pending: list[MoleculeCrop] = []
         self.results: list[ExtractionResult] = []
         self.ocr_bindings: list[tuple[ExtractionResult, list[Any]]] = []
 
-    def add(self, crop: PreparedCrop) -> None:
+    def add(self, crop: MoleculeCrop) -> None:
         self.pending.append(crop)
 
     def flush(self) -> None:
@@ -124,7 +128,7 @@ class MolParserBatcher:
                 len(batch),
             )
             try:
-                scribe_results = self.molparser.predict_batch(
+                recognitions = self.molparser.predict_batch(
                     [crop.parser_image for crop in batch]
                 )
             except Exception as exc:
@@ -133,17 +137,17 @@ class MolParserBatcher:
                 ) from exc
             logger.info(
                 "MolParser batch completed, got %d results",
-                len(scribe_results),
+                len(recognitions),
             )
-            if len(scribe_results) != len(batch):
+            if len(recognitions) != len(batch):
                 raise RuntimeError(
                     f"MolParser batch result count mismatch for doc {self.doc_id}: "
-                    f"expected {len(batch)} crops, got {len(scribe_results)}"
+                    f"expected {len(batch)} crops, got {len(recognitions)}"
                 )
 
-            for crop, scribe in zip(batch, scribe_results, strict=True):
+            for crop, recognition in zip(batch, recognitions, strict=True):
                 self.check()
-                result = self._archive_and_build_result(crop, scribe)
+                result = self._archive_and_build_result(crop, recognition)
                 self.results.append(result)
                 self.ocr_bindings.append((result, crop.ocr_slot))
         except TaskCancelledError:
@@ -169,22 +173,22 @@ class MolParserBatcher:
 
     def _archive_and_build_result(
         self,
-        crop: PreparedCrop,
-        scribe: Any,
+        crop: MoleculeCrop,
+        recognition: Any,
     ) -> ExtractionResult:
         ocr_labels, ocr_primary = self._ocr_values(crop.ocr_slot)
-        raw_smiles = getattr(scribe, "smiles", "")
+        raw_smiles = getattr(recognition, "smiles", "")
         smiles = raw_smiles.strip() if isinstance(raw_smiles, str) else ""
 
-        scribe_properties = getattr(scribe, "properties", {})
+        recognition_properties = getattr(recognition, "properties", {})
         markush = (
-            isinstance(scribe_properties, dict)
-            and scribe_properties.get("markush") is True
+            isinstance(recognition_properties, dict)
+            and recognition_properties.get("markush") is True
         )
         properties: dict[str, Any] = {}
         if markush:
             properties["markush"] = True
-            groups = scribe_properties.get("groups")
+            groups = recognition_properties.get("groups")
             if isinstance(groups, str):
                 properties["groups"] = groups
         if crop.nearby_text:
@@ -209,8 +213,8 @@ class MolParserBatcher:
         return ExtractionResult(
             smiles=smiles,
             esmiles=(
-                scribe.esmiles.strip()
-                if markush and isinstance(scribe.esmiles, str)
+                recognition.esmiles.strip()
+                if markush and isinstance(recognition.esmiles, str)
                 else smiles
             ),
             moldet_conf=crop.score,
@@ -232,7 +236,7 @@ class MolParserBatcher:
         return labels, primary
 
     @staticmethod
-    def _release(batch: list[PreparedCrop]) -> None:
+    def _release(batch: list[MoleculeCrop]) -> None:
         for crop in batch:
             crop.parser_image.close()
             crop.archive_image.close()
@@ -244,13 +248,13 @@ class CropProcessor:
     def __init__(
         self,
         *,
-        crop_q: Any,
+        crop_q: queue.Queue[DetectedPage | None],
         crop_dir: Path,
         write_dir: Path,
         doc_id: str,
-        scribe_batch_size: int,
+        molparser_batch_size: int,
         check: CancelCheck,
-        nearby_page_text: Callable[[object, tuple[float, float, float, float]], str],
+        nearby_block_text: Callable[[object, tuple[float, float, float, float]], str],
         molparser: Any,
         ocr_reader: Callable[[Image.Image], tuple[list[str], str]],
         ocr_slot_filler: Callable[[list[Any], TaskHandle], None],
@@ -259,7 +263,7 @@ class CropProcessor:
         self.crop_dir = crop_dir
         self.doc_id = doc_id
         self.check = check
-        self.nearby_page_text = nearby_page_text
+        self.nearby_block_text = nearby_block_text
         self.ocr_reader = ocr_reader
         self.ocr_slot_filler = ocr_slot_filler
         self.batcher = MolParserBatcher(
@@ -268,7 +272,7 @@ class CropProcessor:
             molparser=molparser,
             check=check,
         )
-        self.scribe_batch_size = scribe_batch_size
+        self.molparser_batch_size = molparser_batch_size
         self.error: BaseException | None = None
         self.ocr_futures: list[TaskHandle] = []
 
@@ -277,12 +281,13 @@ class CropProcessor:
         return self.batcher.results
 
     def run(self) -> None:
+        """Consume detected pages until the sentinel, then flush the tail."""
         try:
             while True:
-                payload = self.crop_q.get()
-                if payload is None:
+                page = self.crop_q.get()
+                if page is None:
                     break
-                self._process_page(*payload)
+                self._process_page(page)
         except TaskCancelledError as exc:
             self.error = exc
         except Exception as exc:
@@ -306,53 +311,42 @@ class CropProcessor:
             if self.error is not None:
                 self.batcher.discard()
 
-    def _process_page(
-        self,
-        page_idx: int,
-        image: Image.Image,
-        detect_result_bboxes: list[Any],
-        scale_x: float,
-        scale_y: float,
-        page_h_pts: float,
-        page_blocks: object,
-    ) -> None:
+    def _process_page(self, page: DetectedPage) -> None:
+        """Turn every molecule box on *page* into a prepared crop."""
         self.check()
-        for mol_idx, detection in enumerate(detect_result_bboxes):
+        for mol_idx, detection in enumerate(page.bboxes):
             if getattr(detection, "category_id", 1) != 1:
                 continue
             self.check()
-            prepared = self._prepare_crop(
-                page_idx,
-                mol_idx,
-                image,
-                detection,
-                scale_x,
-                scale_y,
-                page_h_pts,
-                page_blocks,
-            )
+            prepared = self._prepare_crop(page, mol_idx, detection)
             if prepared is None:
                 continue
             self.batcher.add(prepared)
-            if len(self.batcher.pending) >= self.scribe_batch_size:
+            if len(self.batcher.pending) >= self.molparser_batch_size:
                 logger.info(
                     "Batch size reached (%d), flushing for doc %s",
-                    self.scribe_batch_size,
+                    self.molparser_batch_size,
                     self.doc_id,
                 )
                 self.batcher.flush()
 
     def _prepare_crop(
         self,
-        page_idx: int,
+        page: DetectedPage,
         mol_idx: int,
-        image: Image.Image,
         detection: Any,
-        scale_x: float,
-        scale_y: float,
-        page_h_pts: float,
-        page_blocks: object,
-    ) -> PreparedCrop | None:
+    ) -> MoleculeCrop | None:
+        """Lift one detection box off *page* into an owned crop pair.
+
+        Returns None for a degenerate box. Two crops come out of one box: the
+        preprocessed drawing for the recognizer and the wider window kept as the
+        archive; the caller owns both until the batch they join is released.
+        """
+        image = page.page.image
+        page_idx = page.page.page_index
+        page_h_pts = page.page.height_pt
+        scale_x = page.page.scale_x
+        scale_y = page.page.scale_y
         px1 = int(round(detection.bbox[0] * image.width))
         py1 = int(round(detection.bbox[1] * image.height))
         px2 = int(round(detection.bbox[2] * image.width))
@@ -395,8 +389,8 @@ class CropProcessor:
             round(px2 * scale_x, 2),
             round(page_h_pts - py1 * scale_y, 2),
         ]
-        nearby_text = self.nearby_page_text(
-            page_blocks,
+        nearby_text = self.nearby_block_text(
+            page.page.blocks,
             (
                 px1 * scale_x,
                 py1 * scale_y,
@@ -404,7 +398,7 @@ class CropProcessor:
                 py2 * scale_y,
             ),
         )
-        return PreparedCrop(
+        return MoleculeCrop(
             page_idx=page_idx,
             mol_idx=mol_idx,
             bbox_pdf=bbox_pdf,

@@ -11,9 +11,9 @@ and inserts a new ``pending`` row; new ``source_key`` inserts a new
 ``pending`` row. Identity derivation lives in
 :mod:`mbforge.domain.provenance`.
 
-The pipeline runs this service inside the same transaction it uses for
-the other Markush writes so a single document persist either fully
-succeeds or fully rolls back.
+The Extract stage runs this service in the same SQLite transaction as
+canonical source-evidence persistence, so either both writes succeed or both
+roll back.
 """
 
 from __future__ import annotations
@@ -189,20 +189,21 @@ def persist_review_candidates(
     conn: sqlite3.Connection,
     recognition_version: int = _RECOGNITION_VERSION,
 ) -> int:
-    """Persist ``review_required`` molecules into the review queue.
+    """Persist Markush scaffolds, fragments, and uncertain structures for review.
 
     Returns the number of *new* rows inserted (zero when re-imports hit
     existing source_keys with the same content hash, in which case the
     existing human state is preserved).
 
-    The caller owns the transaction so this routine is safe to invoke
-    from inside the persist stage's existing connection.
+    The caller owns the transaction so evidence and queue rows can be committed
+    together by the Extract stage.
     """
     inserted = 0
     for molecule in candidates:
         if molecule.status == "rejected":
             continue
-        if molecule.properties.get("structure_role") != "review_required":
+        predicted_role = molecule.properties.get("structure_role")
+        if predicted_role not in ("review_required", "scaffold", "fragment"):
             continue
         detection = molecule.detections[0] if molecule.detections else None
         if detection is None:
@@ -248,7 +249,7 @@ def persist_review_candidates(
             candidate_id=candidate_id,
             source_key=source_key,
             doc_id=doc_id,
-            predicted_role="review_required",
+            predicted_role=predicted_role,
             molecule=molecule,
             label=str(normalized_label),
             content_hash=content_hash,

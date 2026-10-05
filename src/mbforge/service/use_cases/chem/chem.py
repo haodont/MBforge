@@ -1,8 +1,8 @@
 """Cheminformatics operations — RDKit wrappers for the chem endpoints.
 
-Business logic extracted from ``interfaces/http/molecule/chem.py``; the router
-stays a thin async shell. Functions accept/return ``application.dto.chem`` types
-so the HTTP contract is unchanged.
+Business logic extracted from ``api/http/molecule/chem.py``; the router stays a
+thin async shell. Functions accept/return ``service.dto.chem`` types so the HTTP
+contract is unchanged.
 """
 
 from __future__ import annotations

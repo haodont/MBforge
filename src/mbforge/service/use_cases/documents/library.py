@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
-from mbforge.domain.document import Document
+from mbforge.domain.document import TERMINAL_DOCUMENT_STATUSES, Document
 from mbforge.foundation.errors import ConflictError, MBForgeError, NotFoundError
 from mbforge.foundation.files import ensure_dir, sha256_file
 from mbforge.foundation.layout import LibraryLayout, sanitize_upload_filename
@@ -181,11 +181,16 @@ class LibraryStore:
         logger.info("Document deleted: %s (backup=%s)", doc_id, backup_path)
 
     def list_documents(self) -> list[Document]:
-        """Return every registered document, newest first."""
-        return [
-            Document.from_dict(row, self._root)
-            for row in get_repositories(self._root).documents.list_rows()
-        ]
+        """Return documents whose processing reached an outcome, newest first.
+
+        ``pending`` documents are hidden: their bytes are registered but no run
+        has produced usable results yet, so the workspace only shows documents
+        that are ``ready`` or ``error`` (see ``TERMINAL_DOCUMENT_STATUSES``).
+        """
+        rows = get_repositories(self._root).documents.list_rows(
+            statuses=sorted(TERMINAL_DOCUMENT_STATUSES)
+        )
+        return [Document.from_dict(row, self._root) for row in rows]
 
     def search_documents(self, query: str) -> list[Document]:
         """Case-insensitive substring search over title and file_name."""
@@ -256,7 +261,10 @@ class LibraryStore:
         return str(pdf_path) if pdf_path.exists() else None
 
     def doc_count(self) -> int:
-        return get_repositories(self._root).documents.count()
+        """Count documents visible in the workspace (``ready`` + ``error``)."""
+        return get_repositories(self._root).documents.count(
+            statuses=sorted(TERMINAL_DOCUMENT_STATUSES)
+        )
 
 
 # ── Upload transport limits ──────────────────────────────────────

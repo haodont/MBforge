@@ -30,10 +30,14 @@ from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Module-level engine, used when injected (tests) or as the legacy single
-# default. When ``None`` each thread lazily creates its own engine.
+# Process-wide RapidOCR engine. One instance is created on first use and reused
+# by every worker thread: RapidOCR loads detection + recognition models, so a
+# per-thread engine made a 4-thread pool hold four full copies and pay the
+# model load four times. ``_ENGINE_LOCK`` serializes calls into that one
+# instance, since a RapidOCR engine is not documented as thread-safe.
 _ENGINE = None
-_thread_engines = threading.local()
+_ENGINE_NAME: str | None = None
+_ENGINE_LOCK = threading.Lock()
 
 # Compound-identifier whitelist. Patent schemes usually number compounds
 # digit-leading (``1a``, ``4A``, ``10B``, ``11-a``), but some use Roman-style
@@ -151,37 +155,45 @@ def _create_engine(name: str, device_id: int = 0):
 
 
 def _get_engine():
-    """Return the injected/module engine, else this thread's lazy singleton.
+    """Return the process-wide RapidOCR engine, creating it once on demand.
 
-    An injected ``_ENGINE`` (tests, single-threaded) is honored first; when
-    it is ``None``, each caller thread lazily creates and reuses its own
-    RapidOCR engine so concurrent pool workers are independent.
+    Every worker thread shares one engine (see the module-level comment), and
+    :func:`run_engine` serializes calls into it.
     """
+    global _ENGINE, _ENGINE_NAME
     if _ENGINE is not None:
         return _ENGINE
-    engine = getattr(_thread_engines, "engine", None)
-    if engine is None:
-        name = _engine_name()
-        engine = _create_engine(name)
-        _thread_engines.engine = engine
-        _thread_engines.name = name
-    return engine
+    with _ENGINE_LOCK:
+        if _ENGINE is None:
+            name = _engine_name()
+            _ENGINE = _create_engine(name)
+            _ENGINE_NAME = name
+    return _ENGINE
+
+
+def run_engine(engine, image):
+    """Call *engine* on *image* under the shared-engine lock.
+
+    RapidOCR engines are not documented as thread-safe, and there is now one
+    shared instance, so concurrent crop-label OCR is serialized here. Returns
+    the raw RapidOCR result (the engine's tuple/object output).
+    """
+    with _ENGINE_LOCK:
+        return engine(image)
 
 
 def engine_name() -> str:
-    """The engine name in use on the calling thread (``onnx``/``torch``)."""
-    if _ENGINE is not None:
-        return "onnx"
-    name = getattr(_thread_engines, "name", None)
-    return name or _engine_name()
+    """The engine name in use (``onnx`` or ``torch``)."""
+    if _ENGINE is not None and _ENGINE_NAME:
+        return _ENGINE_NAME
+    return _engine_name()
 
 
 def _clear_engines() -> None:
-    """Drop all cached engines (module singleton + per-thread) for unload."""
-    global _ENGINE
+    """Drop the cached engine and its name (unload hook)."""
+    global _ENGINE, _ENGINE_NAME
     _ENGINE = None
-    _thread_engines.engine = None
-    _thread_engines.name = None
+    _ENGINE_NAME = None
 
 
 def _is_label(text: str, conf: float) -> bool:
@@ -346,14 +358,11 @@ def extract_label_reads(
         engine = _get_engine()
         if engine is None:
             return []
-        from mbforge.server.process import gpu_gate
-
         arr = np.asarray(image.convert("RGB"))
         if engine_name() == "torch":
-            with gpu_gate():
-                result = engine(arr)
+            result = run_engine(engine, arr)
         else:
-            result, _ = engine(arr)
+            result, _ = run_engine(engine, arr)
     except Exception as exc:  # noqa: BLE001 — OCR is enrichment; never fail the caller
         logger.warning("Crop-label OCR failed: %s", exc)
         return []

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { FileTextIcon } from './icons'
+import { ChevronRightIcon, FileTextIcon } from './icons'
 import GroupsPanel from './GroupsPanel'
 import Button from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -14,8 +14,14 @@ import {
 } from '@/api/query/hooks'
 import { showToast } from '@/hooks/useToast'
 import { getUserFacingError } from '@/utils/errors'
+import IconButton from '@/components/ui/IconButton'
 
-export default function LibraryPanel() {
+interface Props {
+  collapsed: boolean
+  onToggleCollapsed: () => void
+}
+
+export default function LibraryPanel({ collapsed, onToggleCollapsed }: Props) {
   const { t } = useTranslation()
   const { activeCollectionId, setActiveCollectionId } = useAppContext()
   const statusQuery = useLibraryStatus()
@@ -88,29 +94,57 @@ export default function LibraryPanel() {
   )
 
   return (
-    <div className="library-panel">
-      <GroupsPanel
-        collections={collections}
-        activeId={activeCollectionId}
-        onSelect={setActiveCollectionId}
-        onCreateGroup={handleCreateGroup}
-        onRenameGroup={handleRenameGroup}
-        onDeleteGroup={handleDeleteGroup}
-      />
+    <div className={`library-panel${collapsed ? ' library-panel--collapsed' : ''}`}>
+      {collapsed ? (
+        <>
+          <IconButton
+            size={32}
+            title={t('library.sidebarExpand')}
+            ariaLabel={t('library.sidebarExpand')}
+            ariaExpanded={false}
+            onClick={onToggleCollapsed}
+          >
+            <ChevronRightIcon size={16} />
+          </IconButton>
+          <IconButton
+            size={32}
+            active={activeCollectionId === null}
+            title={t('library.allDocuments')}
+            ariaLabel={t('library.allDocuments')}
+            ariaPressed={activeCollectionId === null}
+            className="library-panel-collapsed-documents"
+            onClick={() => setActiveCollectionId(null)}
+          >
+            <FileTextIcon size={14} />
+          </IconButton>
+        </>
+      ) : (
+        <>
+          <GroupsPanel
+            collections={collections}
+            activeId={activeCollectionId}
+            onSelect={setActiveCollectionId}
+            onCreateGroup={handleCreateGroup}
+            onRenameGroup={handleRenameGroup}
+            onDeleteGroup={handleDeleteGroup}
+            onCollapse={onToggleCollapsed}
+          />
 
-      <div className="library-panel-section library-panel-section--all-documents">
-        <Button
-          variant="ghost"
-          size="sm"
-          ariaPressed={activeCollectionId === null}
-          className={`library-panel-item ${activeCollectionId === null ? 'library-panel-item--active' : ''}`}
-          onClick={() => setActiveCollectionId(null)}
-        >
-          <FileTextIcon size={14} />
-          <span className="library-panel-item-label">{t('library.allDocuments')}</span>
-          <span className="library-panel-item-count">{docCount}</span>
-        </Button>
-      </div>
+          <div className="library-panel-section library-panel-section--all-documents">
+            <Button
+              variant="ghost"
+              size="sm"
+              ariaPressed={activeCollectionId === null}
+              className={`library-panel-item ${activeCollectionId === null ? 'library-panel-item--active' : ''}`}
+              onClick={() => setActiveCollectionId(null)}
+            >
+              <FileTextIcon size={14} />
+              <span className="library-panel-item-label">{t('library.allDocuments')}</span>
+              <span className="library-panel-item-count">{docCount}</span>
+            </Button>
+          </div>
+        </>
+      )}
 
       <ConfirmDialog
         open={pendingDelete !== null}

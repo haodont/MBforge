@@ -7,7 +7,6 @@ from pathlib import Path
 import pymupdf
 from fastapi.testclient import TestClient
 
-from mbforge.foundation.config import AppConfig, LLMConfig
 from mbforge.service.dto.readiness import (
     DatabaseReadiness,
     LibraryReadiness,
@@ -49,14 +48,6 @@ def test_diagnostics_summary_returns_degraded_subsystems(
         "_probe_layout_sync",
         lambda: OCRReadiness(chain=[], error="layout weights missing"),
     )
-    monkeypatch.setattr(
-        readiness_service,
-        "_load_config_safe",
-        lambda: AppConfig(
-            llm=LLMConfig(provider="openai", model="gpt-test", api_key="")
-        ),
-    )
-
     response = app_client.get("/api/v1/diagnostics/summary")
 
     assert response.status_code == 200
@@ -73,32 +64,7 @@ def test_diagnostics_summary_returns_degraded_subsystems(
     assert body["models"][0]["last_error"] == "download failed"
     assert body["models"][0]["expected_size_mb"] == 640.0
     assert body["ocr"]["error"] == "layout weights missing"
-    assert body["llm"]["configured"] is False
-    assert body["llm"]["has_api_key"] is False
-    assert body["llm"]["base_url"] == "https://api.openai.com/v1"
-
-
-def test_diagnostics_probe_llm_reports_missing_credentials(
-    app_client: TestClient, monkeypatch
-) -> None:
-    monkeypatch.setattr(
-        readiness_service,
-        "_load_config_safe",
-        lambda: AppConfig(
-            llm=LLMConfig(provider="openai", model="gpt-test", api_key="")
-        ),
-    )
-
-    response = app_client.post("/api/v1/diagnostics/probe-llm")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "ok": False,
-        "latency_ms": None,
-        "error": "not_configured",
-        "provider": "openai",
-        "model": "gpt-test",
-    }
+    assert "llm" not in body
 
 
 def test_demo_pdf_is_sanitized_and_registered(

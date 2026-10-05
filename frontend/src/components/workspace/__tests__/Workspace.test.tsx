@@ -10,6 +10,7 @@ vi.mock('@/api/query/hooks', () => ({
   useCollections: vi.fn(),
   useMoveDocument: vi.fn(),
   useEnqueueTask: vi.fn(),
+  useIngestQueue: vi.fn(),
 }))
 
 vi.mock('@/context/AppContext', () => ({
@@ -29,9 +30,11 @@ vi.mock('@/components/project/pdf/viewerSnapshots', () => ({
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => {} },
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, opts?: { count?: number }) => {
       if (key === 'workspace.loadError') return 'Failed to load documents. Please try again.'
       if (key === 'common.retry') return 'Retry'
+      // Surface the count so tests can assert what the user would read.
+      if (key === 'library.processingNote') return `library.processingNote:${opts?.count}`
       return key
     },
     i18n: { language: 'en' },
@@ -40,7 +43,7 @@ vi.mock('react-i18next', () => ({
 
 import { useDocuments, useImportDocument, useClearDocument } from '@/api/query/hooks'
 import { useDeleteDocument } from '@/api/query/hooks'
-import { useCollections, useMoveDocument, useEnqueueTask } from '@/api/query/hooks'
+import { useCollections, useMoveDocument, useEnqueueTask, useIngestQueue } from '@/api/query/hooks'
 import { useAppContext } from '@/context/AppContext'
 import { clearViewerSnapshotsForDoc } from '@/components/project/pdf/viewerSnapshots'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -122,6 +125,9 @@ describe('Workspace', () => {
     vi.mocked(useEnqueueTask).mockReturnValue({
       mutateAsync: vi.fn(),
     } as unknown as ReturnType<typeof useEnqueueTask>)
+    vi.mocked(useIngestQueue).mockReturnValue({
+      data: [],
+    } as unknown as ReturnType<typeof useIngestQueue>)
     mockDeleteDocument()
     mockClearDocument()
     mockCollections([])
@@ -139,6 +145,38 @@ describe('Workspace', () => {
     renderWorkspace()
     // i18n t() returns key "library.noDocuments" in test.
     expect(screen.getByText('library.noDocuments')).toBeInTheDocument()
+  })
+
+  it('explains the empty workspace while documents are still processing', () => {
+    // Imported documents are hidden until their run ends, so the workspace
+    // must not look like the import was lost.
+    mockDocuments([])
+    vi.mocked(useIngestQueue).mockReturnValue({
+      data: [
+        { id: 't1', doc_id: 'doc1', status: 'processing' },
+        { id: 't2', doc_id: 'doc2', status: 'pending' },
+      ],
+    } as unknown as ReturnType<typeof useIngestQueue>)
+    renderWorkspace()
+
+    expect(screen.getByText('library.processingNote:2')).toBeInTheDocument()
+    expect(screen.getByText('library.processingOnlyHint')).toBeInTheDocument()
+    // The import drop zone is replaced by the explanation.
+    expect(screen.queryByText('library.emptyImportHint')).not.toBeInTheDocument()
+  })
+
+  it('counts distinct processing documents, not queue stage rows', () => {
+    mockDocuments([])
+    vi.mocked(useIngestQueue).mockReturnValue({
+      data: [
+        { id: 't1', doc_id: 'doc1', status: 'processing' },
+        { id: 't2', doc_id: 'doc1', status: 'pending' },
+      ],
+    } as unknown as ReturnType<typeof useIngestQueue>)
+    renderWorkspace()
+
+    // One document, two stage rows: the note must not read as two documents.
+    expect(screen.getByText('library.processingNote:1')).toBeInTheDocument()
   })
 
   it('renders document list', () => {

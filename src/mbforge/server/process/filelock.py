@@ -9,6 +9,9 @@ probe the same file. Owner metadata is appended from byte 1 onward, which
 ``read_lock_holder`` reads without taking the lock.
 """
 
+# Tests:
+#   tests/unit/infra/test_queue_worker.py
+
 from __future__ import annotations
 
 import json

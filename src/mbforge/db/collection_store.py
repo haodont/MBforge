@@ -64,12 +64,19 @@ def list_rows(library_root: str | Path) -> list[dict[str, Any]]:
 
 
 def counts(library_root: str | Path) -> dict[str, int]:
-    """Return ``{collection_id: document_count}``."""
+    """Return ``{collection_id: document_count}`` for workspace-visible documents.
+
+    Counts only documents whose processing reached an outcome, matching the
+    workspace listing: a group must not claim documents the user cannot see.
+    """
     db = DatabaseManager.get(str(library_root))
     with db.transaction() as (kb, _):
         rows = kb.execute(
-            "SELECT collection_id, COUNT(*) AS cnt FROM collection_documents "
-            "GROUP BY collection_id"
+            "SELECT cd.collection_id AS collection_id, COUNT(*) AS cnt "
+            "FROM collection_documents cd "
+            "JOIN documents d ON d.doc_id = cd.doc_id "
+            "WHERE d.status IN ('ready', 'error') "
+            "GROUP BY cd.collection_id"
         ).fetchall()
     return {row["collection_id"]: row["cnt"] for row in rows}
 

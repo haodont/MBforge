@@ -3,10 +3,14 @@
 Groups the model status store (used by the SSE event stream, the readiness
 diagnostics and download/load outcome reporting) together with the lifecycle
 operations (loaded-state / unload / smoke test) that the
-``interfaces/http/system/models.py`` endpoints delegate to. Backend singletons are
+``api/http/system/models.py`` endpoints delegate to. Backend singletons are
 imported lazily inside functions so importing this package never pulls in
 torch/transformers at app startup.
 """
+
+# Tests:
+#   tests/unit/core/test_model_state.py
+#   tests/unit/routers/test_models_router.py
 
 from __future__ import annotations
 

@@ -1,8 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 
 import {
   AuthStorage,
@@ -16,16 +13,20 @@ import {
 } from '@mariozechner/pi-coding-agent'
 import type { Api, Model } from '@mariozechner/pi-ai'
 
+import {
+  asRecord,
+  fetchProviderModels,
+  loadPersistedLlmConfig,
+  probeLlm,
+  readConfig,
+  resolveProviderTarget,
+  sanitizeError,
+  settingsPath,
+  stringValue,
+  type AgentLlmConfig,
+  type LlmProbeResult,
+} from './llm.js'
 import { moleculeSearchTool } from './tool.js'
-
-interface AgentLlmConfig {
-  provider: string
-  model: string
-  apiKey: string
-  baseUrl: string
-  maxTokens: number
-  requestTimeoutMs: number
-}
 
 interface ChatRequest {
   message: string
@@ -43,92 +44,6 @@ interface SessionEntry {
 const sessions = new Map<string, SessionEntry>()
 const maxSessions = 32
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
-}
-
-function stringValue(value: unknown, fallback: string, maxLength = 512): string {
-  if (typeof value !== 'string') return fallback
-  const trimmed = value.trim()
-  return trimmed.length > 0 && trimmed.length <= maxLength ? trimmed : fallback
-}
-
-function numberValue(value: unknown, fallback: number, min: number, max: number): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.min(max, Math.max(min, value))
-    : fallback
-}
-
-function defaultBaseUrl(provider: string): string {
-  if (provider === 'deepseek') return 'https://api.deepseek.com/v1'
-  if (provider === 'ollama') return 'http://127.0.0.1:11434/v1'
-  if (provider === 'anthropic') return 'https://api.anthropic.com'
-  return 'https://api.openai.com/v1'
-}
-
-async function loadPersistedLlmConfig(): Promise<Record<string, unknown>> {
-  const settingsPath = process.env.MBFORGE_SETTINGS_PATH
-    ?? join(homedir(), 'MBForge', 'settings.json')
-  try {
-    const parsed = JSON.parse(await readFile(settingsPath, 'utf8')) as unknown
-    return asRecord(asRecord(parsed).llm)
-  } catch {
-    return {}
-  }
-}
-
-function mergeConfig(raw: unknown, persisted: Record<string, unknown>): Record<string, unknown> {
-  const value = asRecord(raw)
-  const merged = { ...persisted }
-  for (const [key, candidate] of Object.entries(value)) {
-    if (candidate !== '' && candidate !== '***') merged[key] = candidate
-  }
-  return merged
-}
-
-function readConfig(raw: unknown, persisted: Record<string, unknown>): AgentLlmConfig {
-  const value = mergeConfig(raw, persisted)
-  const provider = stringValue(
-    value.provider ?? process.env.MBFORGE_AGENT_PROVIDER,
-    'openai_compatible',
-    80,
-  ).toLowerCase()
-  const apiKey = stringValue(
-    value.api_key ?? value.apiKey ?? process.env.MBFORGE_AGENT_API_KEY,
-    provider === 'ollama' ? 'ollama' : '',
-    4096,
-  )
-  const model = stringValue(
-    value.model ?? process.env.MBFORGE_AGENT_MODEL,
-    'gpt-4o-mini',
-    256,
-  )
-  const baseUrl = stringValue(
-    value.base_url ?? value.baseUrl ?? process.env.MBFORGE_AGENT_BASE_URL,
-    defaultBaseUrl(provider),
-    2048,
-  ).replace(/\/$/, '')
-  const requestTimeoutSeconds = numberValue(
-    value.request_timeout ?? process.env.MBFORGE_AGENT_REQUEST_TIMEOUT,
-    60,
-    1,
-    600,
-  )
-
-  if (provider !== 'ollama' && !apiKey) {
-    throw new Error('An API key is required for the configured LLM provider')
-  }
-
-  return {
-    provider,
-    model,
-    apiKey,
-    baseUrl,
-    maxTokens: Math.round(numberValue(value.max_tokens ?? value.maxTokens, 4096, 256, 32768)),
-    requestTimeoutMs: Math.round(requestTimeoutSeconds * 1000),
-  }
-}
-
 function createConfiguredModel(config: AgentLlmConfig): {
   authStorage: AuthStorage
   modelRegistry: ModelRegistry
@@ -137,7 +52,7 @@ function createConfiguredModel(config: AgentLlmConfig): {
   const authStorage = AuthStorage.inMemory()
   const modelRegistry = ModelRegistry.inMemory(authStorage)
   const api: Api = config.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions'
-  const providerName = `mbforge-${config.provider}`
+  const providerName = 'mbforge-' + config.provider
 
   modelRegistry.registerProvider(providerName, {
     name: config.provider,
@@ -238,10 +153,10 @@ function corsOrigin(request: IncomingMessage): string {
   const frontendPort = process.env.MBFORGE_FRONTEND_PORT ?? '5173'
   const backendPort = process.env.MBFORGE_BACKEND_PORT ?? '18792'
   const allowed = new Set([
-    `http://127.0.0.1:${frontendPort}`,
-    `http://localhost:${frontendPort}`,
-    `http://127.0.0.1:${backendPort}`,
-    `http://localhost:${backendPort}`,
+    'http://127.0.0.1:' + frontendPort,
+    'http://localhost:' + frontendPort,
+    'http://127.0.0.1:' + backendPort,
+    'http://localhost:' + backendPort,
   ])
   return allowed.has(origin) ? origin : 'null'
 }
@@ -262,7 +177,7 @@ function sendJson(request: IncomingMessage, response: ServerResponse, status: nu
 
 function writeSse(response: ServerResponse, event: string, body: unknown): void {
   if (response.writableEnded) return
-  response.write(`event: ${event}\ndata: ${JSON.stringify(body)}\n\n`)
+  response.write('event: ' + event + '\ndata: ' + JSON.stringify(body) + '\n\n')
 }
 
 async function readBody(request: IncomingMessage): Promise<unknown> {
@@ -338,6 +253,44 @@ async function handleChat(request: IncomingMessage, response: ServerResponse, bo
   await run
 }
 
+/** Provider model-list probe. Business failures stay HTTP 200 with success:
+ *  false, matching the backend endpoint this replaced, so the Settings UI can
+ *  show the provider's own reason verbatim. */
+async function handleModels(request: IncomingMessage, response: ServerResponse, body: unknown): Promise<void> {
+  const input = asRecord(body)
+  try {
+    // Lenient resolution: listing models must work for a keyless local gateway.
+    const target = resolveProviderTarget(input, await loadPersistedLlmConfig())
+    const models = await fetchProviderModels(target.provider, target.baseUrl, target.apiKey)
+    sendJson(request, response, 200, { success: true, models })
+  } catch (error) {
+    sendJson(request, response, 200, { success: false, error: sanitizeError(error, input.api_key) })
+  }
+}
+
+/** Connectivity probe: one token against the configured endpoint. Always 200 so
+ *  the UI renders the reason instead of a transport error. */
+async function handleProbe(request: IncomingMessage, response: ServerResponse, body: unknown): Promise<void> {
+  const input = asRecord(body)
+  let result: LlmProbeResult
+  try {
+    result = await probeLlm(await readConfigAsync(input))
+  } catch (error) {
+    result = {
+      ok: false,
+      latency_ms: null,
+      error: sanitizeError(error, input.api_key),
+      provider: stringValue(input.provider, '', 80),
+      model: stringValue(input.model, '', 256),
+    }
+  }
+  sendJson(request, response, 200, result)
+}
+
+async function readConfigAsync(input: Record<string, unknown>): Promise<AgentLlmConfig> {
+  return readConfig(input, await loadPersistedLlmConfig())
+}
+
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   if (request.method === 'OPTIONS') {
     response.writeHead(204, commonHeaders(request))
@@ -345,18 +298,29 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return
   }
   if (request.url === '/health' && request.method === 'GET') {
-    sendJson(request, response, 200, { ok: true, runtime: 'pi' })
+    sendJson(request, response, 200, { ok: true, runtime: 'pi', settings_path: settingsPath() })
     return
   }
-  if (request.url !== '/v1/chat' || request.method !== 'POST') {
+  if (request.method !== 'POST') {
     sendJson(request, response, 404, { error: 'not found' })
     return
   }
 
+  let body: unknown
   try {
-    await handleChat(request, response, await readBody(request))
+    body = await readBody(request)
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error)
+    sendJson(request, response, 400, { error: sanitizeError(error, '') })
+    return
+  }
+
+  try {
+    if (request.url === '/v1/chat') await handleChat(request, response, body)
+    else if (request.url === '/v1/models') await handleModels(request, response, body)
+    else if (request.url === '/v1/probe') await handleProbe(request, response, body)
+    else sendJson(request, response, 404, { error: 'not found' })
+  } catch (error) {
+    const detail = sanitizeError(error, '')
     if (!response.headersSent) sendJson(request, response, 400, { error: detail })
     else if (!response.writableEnded) response.end()
   }
@@ -371,5 +335,5 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 createServer((request, response) => {
   void handleRequest(request, response)
 }).listen(port, host, () => {
-  console.log(`MBForge Pi agent listening on http://${host}:${port}`)
+  console.log('MBForge Pi agent listening on http://' + host + ':' + port)
 })

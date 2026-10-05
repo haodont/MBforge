@@ -11,6 +11,7 @@ import {
   useDocuments,
   useEnqueueTask,
   useImportDocument,
+  useIngestQueue,
   useMoveDocument,
 } from '@/api/query/hooks'
 import { queryKeys } from '@/api/query/keys'
@@ -29,6 +30,7 @@ import {
 } from '@/components/icons'
 import LibraryPanel from '@/components/LibraryPanel'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import InlineAlert from '@/components/ui/InlineAlert'
 import Menu, { type MenuActionItem, type MenuItem } from '@/components/ui/Menu'
 import IconButton from '@/components/ui/IconButton'
 import Button from '@/components/ui/Button'
@@ -344,9 +346,24 @@ export default function Workspace() {
   const bulkEnqueueMutation = useEnqueueTask()
   const clearMutation = useClearDocument()
   const moveMutation = useMoveDocument()
+  // Documents under processing are deliberately absent from the listing, so
+  // the queue is what tells the user their import is being worked on. The queue
+  // holds one row per stage per run, so count distinct documents (a retry can
+  // leave more than one row of a run active at once).
+  const { data: queueTasks = [] } = useIngestQueue(libraryRoot)
+  const processingCount = useMemo(() => {
+    const docIds = new Set<string>()
+    for (const task of queueTasks) {
+      if (task.doc_id && (task.status === 'pending' || task.status === 'processing')) {
+        docIds.add(task.doc_id)
+      }
+    }
+    return docIds.size
+  }, [queueTasks])
   const documents = data?.documents ?? []
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(() => new Set())
   const [isDraggingFile, setIsDraggingFile] = useState(false)
+  const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadBatch, setUploadBatch] = useState<{ current: number; total: number } | null>(null)
   const [isImporting, setIsImporting] = useState(false)
@@ -709,16 +726,19 @@ export default function Workspace() {
 
   return (
     <motion.div
-      className="workspace-page"
+      className={`workspace-page${isLibraryCollapsed ? ' workspace-page--library-collapsed' : ''}`}
       variants={fadeUp}
       initial="hidden"
       animate="visible"
     >
       <aside
-        className="workspace-library"
+        className={`workspace-library${isLibraryCollapsed ? ' workspace-library--collapsed' : ''}`}
         aria-label={t('library.title')}
       >
-        <LibraryPanel />
+        <LibraryPanel
+          collapsed={isLibraryCollapsed}
+          onToggleCollapsed={() => setIsLibraryCollapsed((collapsed) => !collapsed)}
+        />
       </aside>
       <section className="workspace-documents">
         <div className="workspace-toolbar">
@@ -823,6 +843,13 @@ export default function Workspace() {
             />
           </div>
         )}
+        {processingCount > 0 && (
+          <div className="workspace-processing-note">
+            <InlineAlert tone="info">
+              {t('library.processingNote', { count: processingCount })}
+            </InlineAlert>
+          </div>
+        )}
 
         <div className="workspace-content">
         {isLoading ? (
@@ -851,11 +878,13 @@ export default function Workspace() {
             <PdfIcon size={48} className="workspace-empty-icon" />
             <div className="workspace-empty-title">{t('library.noDocuments')}</div>
             <div className="workspace-empty-desc">
-              {activeCollectionId
-                ? t('library.emptyCollection')
-                : t('library.emptyImportHint')}
+              {processingCount > 0
+                ? t('library.processingOnlyHint')
+                : activeCollectionId
+                  ? t('library.emptyCollection')
+                  : t('library.emptyImportHint')}
             </div>
-            {!activeCollectionId && (
+            {!activeCollectionId && processingCount === 0 && (
               <div
                 className={`workspace-drop-zone${isDraggingFile ? ' is-dragging' : ''}`}
                 onDragEnter={(event) => {

@@ -2,7 +2,7 @@
 
 Owns the in-process model singletons: loaded-state reporting, unloading
 (freeing GPU memory without deleting weight files) and smoke-test
-inference. HTTP endpoints live in ``interfaces/http/system/models.py``; the
+inference. HTTP endpoints live in ``api/http/system/models.py``; the
 render endpoint stays there until the M2 chem 汇合点
 (the model lifecycle boundary).
 
@@ -10,6 +10,9 @@ The public names (:func:`loaded`, :func:`clear`, :func:`run_test`) are
 re-exported from the package ``__init__``; the underlying helpers stay
 underscore-prefixed so pytest never collects them.
 """
+
+# Tests:
+#   tests/unit/routers/test_models_router.py
 
 from __future__ import annotations
 

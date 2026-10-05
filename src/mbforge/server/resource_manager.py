@@ -5,10 +5,15 @@ and binary tools). Models default to ModelScope, Python packages default to the
 Tsinghua mirror. All runtime availability checks flow through this module so
 the CLI and server can fail fast before starting the pipeline.
 
-The heavy cache-discovery and download implementations have moved to
-``model_locator`` and ``model_downloader``; this module re-exports the names
-used by existing callers so imports remain unchanged.
+The heavy cache-discovery and download implementations live in
+``models.assets.locator`` and ``models.assets.downloader``; this module keeps
+the resource-management facade used by callers.
 """
+
+# Tests:
+#   tests/unit/core/test_model_downloader_dual_channel.py
+#   tests/unit/core/test_resource_manager.py
+#   tests/unit/test_resource_download_nonblocking.py
 
 from __future__ import annotations
 
@@ -105,7 +110,7 @@ RESOURCE_CATALOG: dict[str, ResourceInfo] = {
         hf_repo="PatSnap/Hiro-Layout",
         download_type="snapshot",
         local_name="Hiro-Layout",
-        # 精确清单优先于 allow_patterns（见 model_downloader）。
+        # 精确清单优先于 allow_patterns（见 models.assets.downloader）。
         files=[
             "layout_model/RT-DETR_25.onnx",
             "config.json",
@@ -306,50 +311,9 @@ def _verify_model_path(path: Path, info: ResourceInfo) -> bool:
     return True
 
 
-# The locator/downloader implementations are imported lazily (inside the
-# accessors below and the dispatch functions) so that ``resource_manager``
-# never forms an import cycle with them: ``model_locator``/``model_downloader``
-# reference this module only at call time via ``from . import resource_manager``.
-# The names stay module attributes so existing callers and tests that patch
-# ``mbforge.server.resource_manager._check_model_*`` / ``_download_model_from_*``
-# keep working.
-
-
-def _load_locator() -> tuple[object, object]:
-    from mbforge.server.model_locator import (
-        _check_model_file,
-        _check_model_snapshot,
-    )
-
-    return _check_model_file, _check_model_snapshot
-
-
-def _check_model_file(info: ResourceInfo | None) -> ResourceStatusResult:
-    return _load_locator()[0](info)
-
-
-def _check_model_snapshot(info: ResourceInfo | None) -> ResourceStatusResult:
-    return _load_locator()[1](info)
-
-
-def _download_model_from_modelscope(
-    info: ResourceInfo, callback: Callable[[dict], None] | None = None
-) -> bool:
-    from mbforge.server.model_downloader import (
-        _download_model_from_modelscope as _impl,
-    )
-
-    return _impl(info, callback)
-
-
-def _download_model_from_hf(
-    info: ResourceInfo, callback: Callable[[dict], None] | None = None
-) -> bool:
-    from mbforge.server.model_downloader import (
-        _download_model_from_hf as _impl,
-    )
-
-    return _impl(info, callback)
+# Discovery and download live in their own modules, and they reference this one
+# back (for the cache directory and the size/hash primitives), so they are
+# imported lazily at each call site rather than at module scope.
 
 
 def _check_python_package(info: ResourceInfo) -> ResourceStatusResult:
@@ -444,6 +408,11 @@ def _check_resource(resource_id: str) -> ResourceStatusResult:
 
         # 本地扫描
         if info.type == ResourceType.MODEL:
+            from mbforge.server.models.assets.locator import (
+                _check_model_file,
+                _check_model_snapshot,
+            )
+
             if info.download_type == "file":
                 return _check_model_file(info)
             else:
@@ -585,6 +554,11 @@ class ResourceManager:
             # 时回退 HuggingFace（HF_ENDPOINT 由 ensure_hf_mirror 指向镜像）。
             # 未配置 ms_repo 的模型（如 Hiro-Layout，ModelScope 上不存在）跳过
             # 第一通道，省掉一次注定 404 的往返。
+            from mbforge.server.models.assets.downloader import (
+                _download_model_from_hf,
+                _download_model_from_modelscope,
+            )
+
             if info.ms_repo:
                 success = _download_model_from_modelscope(info, _tracking_callback)
             if not success and info.hf_repo:

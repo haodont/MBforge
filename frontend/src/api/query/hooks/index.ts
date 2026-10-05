@@ -25,6 +25,7 @@ export {
   useEnqueueTask,
   useCancelBatch,
   useRetryBatch,
+  useDeleteBatch,
   useCleanupTasks,
   useSetTaskPriority,
 } from './useIngestQueue'

@@ -82,7 +82,7 @@ export default function ReadinessTab({ libraryRoot }: Props) {
     try {
       if (mounted.current) setProbe(await readinessProbeLlm())
     } catch (e) {
-      if (import.meta.env.DEV) console.warn('[ReadinessTab] probe-llm failed:', e)
+      if (import.meta.env.DEV) console.warn('[ReadinessTab] LLM probe failed:', e)
       if (mounted.current) {
         setProbe({ ok: false, latency_ms: null, error: getUserFacingError(e), provider: '', model: '' })
       }
@@ -178,7 +178,6 @@ export default function ReadinessTab({ libraryRoot }: Props) {
             <ModelCardView key={m.id} model={m} />
           ))}
           <OcrCard summary={summary} />
-          <LlmCard summary={summary} />
         </>
       )}
 
@@ -345,30 +344,6 @@ function OcrCard({ summary }: { summary: ReadinessSummary }) {
     <Card title={t('settings.readiness.ocr')} tone={tone}>
       <Row label={t('settings.readiness.chain')} value={ocr.chain.join(' → ') || '—'} mono />
       {ocr.error && <Row label={t('settings.readiness.error')} value={ocr.error} mono />}
-    </Card>
-  )
-}
-
-function LlmCard({ summary }: { summary: ReadinessSummary }) {
-  const { t } = useTranslation()
-  const llm = summary.llm
-  return (
-    <Card title={t('settings.readiness.llm')} tone={llm.configured ? 'ok' : 'warn'}>
-      <Row
-        label={t('settings.readiness.configured')}
-        value={t(llm.configured ? 'settings.readiness.yes' : 'settings.readiness.no')}
-      />
-      {llm.provider && <Row label={t('settings.readiness.provider')} value={llm.provider} />}
-      {llm.model && <Row label={t('settings.readiness.model')} value={llm.model} mono />}
-      {llm.base_url && <Row label={t('settings.readiness.baseUrl')} value={llm.base_url} mono />}
-      {llm.configured && (
-        <Row
-          label={t('settings.readiness.apiKey')}
-          value={t(
-            llm.has_api_key ? 'settings.readiness.apiKeySet' : 'settings.readiness.apiKeyMissing',
-          )}
-        />
-      )}
     </Card>
   )
 }

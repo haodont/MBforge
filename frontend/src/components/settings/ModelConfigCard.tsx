@@ -82,7 +82,13 @@ export default function ModelConfigCard({
       successTimerRef.current = null
     }
     try {
-      const s = await testLlmConnection()
+      // Probe the form values, not the saved ones, so Test works before Save.
+      const s = await testLlmConnection({
+        provider: settings.llm_provider,
+        base_url: settings.llm_base_url,
+        api_key: settings.llm_api_key,
+        model: settings.llm_model,
+      })
       setTestStatus(s)
       if (s.status === 'ok') {
         setSuccessMessage(t('settings.connectionSucceeded'))

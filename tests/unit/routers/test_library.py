@@ -27,7 +27,10 @@ def test_library_configure(app_client: TestClient, tmp_path: Path, monkeypatch) 
     assert resp.json()["success"] is True
 
 
-def test_library_import_and_list(app_client: TestClient) -> None:
+def test_library_import_and_list(app_client: TestClient, tmp_library: Path) -> None:
+    """An import enqueues the document and lists it only once it has an outcome."""
+    from mbforge.service.use_cases.documents.library import LibraryStore
+
     pdf_bytes = b"%PDF-1.4 fake pdf"
     resp = app_client.post(
         "/api/v1/library/import",
@@ -38,17 +41,26 @@ def test_library_import_and_list(app_client: TestClient) -> None:
     data = resp.json()
     assert data["success"] is True
     doc_id = data["document"]["doc_id"]
+    # Import started processing, so it reports the run it created.
+    assert data["run_id"]
 
+    # Mid-processing the document exists but is hidden from the workspace.
+    store = LibraryStore.get(str(tmp_library))
+    assert store.get_document(doc_id) is not None
+    assert store.list_documents() == []
+
+    # Once the run records an outcome the document becomes visible.
+    store.update_document_status(doc_id, "ready")
     resp = app_client.post("/api/v1/library/documents", json={})
     assert resp.status_code == 200
     ids = {d["doc_id"] for d in resp.json()["documents"]}
     assert doc_id in ids
 
 
-def test_library_import_does_not_auto_enqueue(
+def test_library_import_auto_enqueues_processing_run(
     app_client: TestClient, tmp_library: Path
 ) -> None:
-    """Import only registers the document; enqueue is a separate step."""
+    """Import submits the new document for processing in the same request."""
     from mbforge.db.sqlite.database import DatabaseManager
 
     resp = app_client.post(
@@ -56,13 +68,55 @@ def test_library_import_does_not_auto_enqueue(
         files={"file": ("queued.pdf", b"%PDF-1.4 fake pdf", "application/pdf")},
     )
     assert resp.status_code == 200
-    assert resp.json()["document"]["doc_id"]  # document was created
-    # No task_id in response — import no longer auto-enqueues.
-    assert resp.json().get("task_id") is None
-    # The ingest queue should be empty for this library.
+    body = resp.json()
+    doc_id = body["document"]["doc_id"]
+    assert body["run_id"]
+
     db = DatabaseManager.get(str(tmp_library))
     with db.kb_conn() as conn:
-        count = conn.execute("SELECT COUNT(*) FROM ingest_queue").fetchone()[0]
+        rows = conn.execute(
+            "SELECT doc_id, run_id, status FROM ingest_queue WHERE doc_id = ?",
+            (doc_id,),
+        ).fetchall()
+    # One DAG node per stage, all owned by the run reported to the caller.
+    assert rows
+    assert {row["run_id"] for row in rows} == {body["run_id"]}
+
+
+def test_library_import_respects_disabled_auto_enqueue(
+    app_client: TestClient, tmp_library: Path, monkeypatch
+) -> None:
+    """``ingest.auto_enqueue_on_import = false`` keeps import a register-only step."""
+    from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.foundation import config as app_config
+
+    original = app_config.load_global_config
+
+    class _NoAutoEnqueue:
+        def __call__(self):
+            cfg = original()
+            cfg.ingest.auto_enqueue_on_import = False
+            return cfg
+
+        def cache_clear(self):
+            original.cache_clear()
+
+    monkeypatch.setattr(app_config, "load_global_config", _NoAutoEnqueue())
+
+    resp = app_client.post(
+        "/api/v1/library/import",
+        files={"file": ("manual.pdf", b"%PDF-1.4 fake pdf", "application/pdf")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["run_id"] is None
+
+    db = DatabaseManager.get(str(tmp_library))
+    with db.kb_conn() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM ingest_queue WHERE doc_id = ?",
+            (body["document"]["doc_id"],),
+        ).fetchone()[0]
     assert count == 0
 
 

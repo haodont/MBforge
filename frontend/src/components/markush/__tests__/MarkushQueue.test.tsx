@@ -100,6 +100,46 @@ describe('MarkushQueue', () => {
     expect(onSelect).toHaveBeenCalledWith('c-1')
   })
 
+  it('groups candidates by explicit formula context and keeps structure roles visible', () => {
+    const formula = {
+      ...baseCandidate,
+      candidate_id: 'c-formula',
+      normalized_label: 'Formula I',
+      label_kind: 'formula' as const,
+      predicted_role: 'scaffold' as const,
+    }
+    const fragment = {
+      ...baseCandidate,
+      candidate_id: 'c-fragment',
+      predicted_role: 'fragment' as const,
+      properties: { formula_label: 'Formula (I)' },
+    }
+    const unlinked = {
+      ...baseCandidate,
+      candidate_id: 'c-unlinked',
+      doc_id: 'doc-2',
+    }
+    render(
+      <MarkushQueue
+        title="Queue"
+        loading={false}
+        error={null}
+        items={[formula, fragment, unlinked]}
+        total={3}
+        filterStatus="pending"
+        onFilterChange={() => {}}
+        selectedCandidateId={null}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('Formula I · doc-1')).toBeInTheDocument()
+    expect(screen.getByText('未关联通式 · doc-2')).toBeInTheDocument()
+    expect(screen.getByText('骨架')).toBeInTheDocument()
+    expect(screen.getByText('片段')).toBeInTheDocument()
+    expect(screen.getAllByTestId('markush-queue-row')).toHaveLength(3)
+  })
+
   it('shows loading copy when loading', () => {
     render(
       <MarkushQueue

@@ -191,6 +191,10 @@
   overflow: hidden;
 }
 
+.workspace-page--library-collapsed {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+
 .workspace-library  {
   position: relative;
   min-width: 0;
@@ -241,6 +245,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Import progress bar and the "still processing" note share one slot between
+   the toolbar and the document grid. */
+.workspace-upload-progress,
+.workspace-processing-note {
+  flex-shrink: 0;
+}
+
 .workspace-summary > span + span::before {
   content: '•';
   margin-right: 14px;
@@ -288,11 +299,19 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+  .workspace-page--library-collapsed {
+    grid-template-rows: 48px minmax(0, 1fr);
+  }
+
   .workspace-library  {
   max-height: 224px;
   border-right: 0;
   border-bottom: 1px solid var(--border);
 }
+
+  .workspace-library--collapsed {
+    max-height: 48px;
+  }
 
   .workspace-documents  {
   padding: 16px;

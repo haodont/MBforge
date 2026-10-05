@@ -165,6 +165,18 @@ async def pipeline_retry_batch(
     )
 
 
+@router.post("/queue/batch/delete")
+async def pipeline_delete_batch(
+    body: PipelineTaskBatchRequest,
+) -> PipelineTaskActionResponse:
+    root = resolve_library_root(body.library_root)
+    result = await ingest.delete_failed_cancelled_batch(str(root), body.run_ids)
+    return PipelineTaskActionResponse(
+        updated=result.updated,
+        skipped=result.skipped,
+    )
+
+
 @router.post("/queue/{run_id}/cancel")
 async def pipeline_cancel(
     run_id: str,

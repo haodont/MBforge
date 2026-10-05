@@ -101,13 +101,18 @@ async def library_import(
     file: UploadFile | None = None,
     title: str = Form(""),
 ) -> LibraryImportResponse:
-    """Import a PDF (or other document) into the library via multipart upload.
+    """Import a PDF (or other document) and start processing it.
 
     The request body is consumed in 1 MiB chunks and written to a temp file
     under an OS temp file so the server never buffers the full
     payload in memory. As soon as the running byte total exceeds
     ``MAX_UPLOAD_BYTES`` the handler aborts the stream, removes the temp
     file, and raises ``UploadTooLargeError`` (HTTP 413).
+
+    A successful import is enqueued for pipeline processing right away (unless
+    ``ingest.auto_enqueue_on_import`` is disabled), so the document only
+    becomes visible in the workspace listing once its run reaches a terminal
+    status. The returned ``run_id`` identifies that run.
     """
     if file is None:
         raise _MissingUploadError(
@@ -146,7 +151,33 @@ async def library_import(
         if tmp_path is not None:
             await asyncio.to_thread(tmp_path.unlink, missing_ok=True)
 
-    return LibraryImportResponse(document=doc.to_dict())
+    run_id = await _auto_enqueue(root, doc.doc_id)
+    return LibraryImportResponse(document=doc.to_dict(), run_id=run_id)
+
+
+async def _auto_enqueue(root: str, doc_id: str) -> str | None:
+    """Enqueue a freshly imported document, honoring the import setting.
+
+    Returns the new ``run_id``, or ``None`` when auto-enqueue is disabled or
+    the enqueue itself failed. A failed enqueue must not fail the import: the
+    bytes are already stored and registered, so the document stays importable
+    (the workspace hides it until a run reaches a terminal status).
+    """
+    from mbforge.foundation import config as app_config
+    from mbforge.service.use_cases.pipeline import ingest
+
+    try:
+        enabled = app_config.load_global_config().ingest.auto_enqueue_on_import
+    except Exception as exc:  # noqa: BLE001 — unreadable settings must not block import
+        logger.warning("Could not read auto_enqueue_on_import: %s", exc)
+        enabled = True
+    if not enabled:
+        return None
+    try:
+        return await ingest.enqueue(root, doc_id)
+    except Exception as exc:  # noqa: BLE001 — bytes are stored; import still succeeded
+        logger.warning("Auto-enqueue failed for %s: %s", doc_id, exc)
+        return None
 
 
 @router.post("/documents")

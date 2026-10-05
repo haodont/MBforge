@@ -80,6 +80,7 @@ def _row_to_evidence(row: sqlite3.Row) -> MarkushEvidenceItem:
         entity_type=row["entity_type"],
         entity_id=row["entity_id"],
         doc_id=row["doc_id"],
+        source_evidence_id=row["source_evidence_id"],
         page=row["page"],
         bbox_x0=row["bbox_x0"],
         bbox_y0=row["bbox_y0"],
@@ -248,8 +249,14 @@ def get_candidate_detail(
     if row is None:
         raise ReviewNotFoundError(candidate_id)
     evidence = conn.execute(
-        "SELECT * FROM markush_evidence WHERE entity_id = ? AND entity_type = 'review_candidate' "
-        "ORDER BY evidence_id",
+        "SELECT me.*, se.evidence_id AS source_evidence_id "
+        "FROM markush_evidence AS me "
+        "LEFT JOIN source_evidence AS se ON se.doc_id = me.doc_id "
+        "AND se.page = me.page + 1 "
+        "AND se.bbox_x0 = me.bbox_x0 AND se.bbox_y0 = me.bbox_y0 "
+        "AND se.bbox_x1 = me.bbox_x1 AND se.bbox_y1 = me.bbox_y1 "
+        "WHERE me.entity_id = ? AND me.entity_type = 'review_candidate' "
+        "ORDER BY me.evidence_id",
         (candidate_id,),
     ).fetchall()
     decisions = conn.execute(

@@ -36,6 +36,7 @@ from typing import Any
 
 import numpy as np
 
+from mbforge.foundation.inference.load_guard import LoadGuard
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
@@ -456,22 +457,34 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndar
 
 _process_singleton: HiroLayoutDetector | None = None
 _detector_lock = threading.Lock()
+#: Suppresses repeated download+load attempts after a failure (see load_guard).
+_GUARD = LoadGuard("Hiro-Layout")
 
 
 def get_hiro() -> HiroLayoutDetector:
     """Return the process-wide detector singleton (thread-safe).
 
     ``ResourceManager.ensure`` auto-fetches the weights on first use and is a
-    fast no-op afterwards.
+    fast no-op afterwards. A construction failure is remembered so the next
+    call does not re-download and re-load the model; ``unload`` clears it.
     """
     global _process_singleton
     if _process_singleton is None:
+        if not _GUARD.should_attempt():
+            raise RuntimeError(
+                f"Hiro-Layout unavailable (retry suppressed): {_GUARD.last_error()}"
+            )
         with _detector_lock:
             if _process_singleton is None:
                 from mbforge.server.resource_manager import ResourceManager
 
-                ResourceManager.ensure("hiro_layout")
-                _process_singleton = HiroLayoutDetector()
+                try:
+                    ResourceManager.ensure("hiro_layout")
+                    _process_singleton = HiroLayoutDetector()
+                except Exception as exc:
+                    _GUARD.record_failure(str(exc))
+                    raise
+                _GUARD.record_success()
     return _process_singleton
 
 
@@ -511,10 +524,7 @@ def detect_regions_batch(
     if resolved is None:
         return [[] for _ in images]
 
-    from mbforge.server.process import gpu_gate
-
-    with gpu_gate():
-        return resolved.predict_batch(images, threshold=threshold)
+    return resolved.predict_batch(images, threshold=threshold)
 
 
 def detect_regions(
@@ -528,10 +538,11 @@ def detect_regions(
 
 
 def unload() -> None:
-    """Release the process-wide detector model, if it is loaded."""
+    """Release the process-wide detector and clear the failure cooldown."""
     global _process_singleton
     with _detector_lock:
         _process_singleton = None
+    _GUARD.reset()
 
 
 __all__ = [

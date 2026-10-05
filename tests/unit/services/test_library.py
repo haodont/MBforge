@@ -40,7 +40,11 @@ def test_delete_document(tmp_path: Path) -> None:
 
 
 def test_search_documents_substring(tmp_path: Path) -> None:
-    """Search matches literal substrings in title and file_name."""
+    """Search matches literal substrings in title and file_name.
+
+    Search reads the same listing as the workspace, so a document has to have
+    a processing outcome before it can be found.
+    """
     store = LibraryStore.get(tmp_path)
     src_dir = tmp_path / "src"
     src_dir.mkdir()
@@ -48,7 +52,8 @@ def test_search_documents_substring(tmp_path: Path) -> None:
     def upload(name: str, content: bytes, title: str) -> None:
         src = src_dir / name
         src.write_bytes(content)
-        store.add_uploaded_file_from_path(src, name, title)
+        doc = store.add_uploaded_file_from_path(src, name, title)
+        store.update_document_status(doc.doc_id, "ready")
 
     upload("a.pdf", b"a", "100% solution")
     upload("b.pdf", b"b", "100 percent solution")
