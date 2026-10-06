@@ -3,7 +3,17 @@ import { useTranslation } from 'react-i18next'
 import ChatMarkdown from './chat/ChatMarkdown'
 import { getSettings } from '@/api/http/settings'
 import { streamAgentChat, type AgentChatEvent, type AgentLlmConfig } from '@/api/http/agent'
+import {
+  BeakerIcon,
+  BotIcon,
+  InfoIcon,
+  SendIcon,
+  SettingsIcon,
+  SparklesIcon,
+  UserIcon,
+} from '@/components/icons'
 import { Button, InlineAlert, Input, PageContainer, PageTitle, TextArea } from './ui'
+import './AgentChat.css'
 
 interface ChatMessage {
   id: string
@@ -22,6 +32,16 @@ function messageId(): string {
   return typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
 }
 
+function TypingDots({ label }: { label: string }) {
+  return (
+    <span className="agent-typing" role="status" aria-label={label}>
+      <span aria-hidden="true" />
+      <span aria-hidden="true" />
+      <span aria-hidden="true" />
+    </span>
+  )
+}
+
 export default function AgentChat() {
   const { t } = useTranslation()
   const [config, setConfig] = useState<AgentLlmConfig>(initialConfig)
@@ -33,6 +53,7 @@ export default function AgentChat() {
   const [activity, setActivity] = useState('')
   const [error, setError] = useState<string>()
   const abortRef = useRef<AbortController | undefined>(undefined)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -49,6 +70,12 @@ export default function AgentChat() {
     })
     return () => { cancelled = true }
   }, [])
+
+  // Keep the newest message pinned to the bottom as the reply streams in.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages, activity])
 
   const updateAssistant = (id: string, content: string) => {
     setMessages((current) => current.map((item) => item.id === id ? { ...item, content } : item))
@@ -110,63 +137,145 @@ export default function AgentChat() {
   const stop = () => abortRef.current?.abort()
 
   return (
-    <PageContainer>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-4)' }}>
-        <div>
-          <PageTitle style={{ marginBottom: 'var(--space-1)' }}>{t('agent.title')}</PageTitle>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>{t('agent.subtitle')}</p>
+    <PageContainer className="agent-page">
+      <header className="agent-header">
+        <div className="agent-header__title">
+          <span className="agent-header__icon" aria-hidden="true">
+            <BeakerIcon size={20} />
+          </span>
+          <div>
+            <PageTitle>{t('agent.title')}</PageTitle>
+            <p className="agent-header__subtitle">{t('agent.subtitle')}</p>
+          </div>
         </div>
-        <Button size="sm" variant="secondary" onClick={() => setShowConfig((value) => !value)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<SettingsIcon size={16} />}
+          ariaPressed={showConfig}
+          onClick={() => setShowConfig((value) => !value)}
+        >
           {showConfig ? t('agent.hideConfig') : t('agent.showConfig')}
         </Button>
-      </div>
+      </header>
 
       {showConfig && (
-        <div className="ui-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 'var(--space-3)', marginTop: 'var(--space-4)', padding: 'var(--space-3)' }}>
-          <label>
-            <span>{t('agent.provider')}</span>
-            <Input value={config.provider} onChange={(event) => setConfig({ ...config, provider: event.target.value })} />
-          </label>
-          <label>
-            <span>{t('agent.model')}</span>
-            <Input value={config.model} onChange={(event) => setConfig({ ...config, model: event.target.value })} />
-          </label>
-          <label>
-            <span>{t('agent.baseUrl')}</span>
-            <Input value={config.base_url} onChange={(event) => setConfig({ ...config, base_url: event.target.value })} placeholder={t('agent.baseUrlPlaceholder')} />
-          </label>
-          <label>
-            <span>{t('agent.apiKey')}</span>
-            <Input type="password" value={config.api_key} onChange={(event) => setConfig({ ...config, api_key: event.target.value })} placeholder={t('agent.apiKeyPlaceholder')} />
-          </label>
-          <p style={{ gridColumn: '1 / -1', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>{t('agent.keyHint')}</p>
-        </div>
+        <section className="agent-config ui-card" aria-label={t('agent.configTitle')}>
+          <div className="agent-config__grid">
+            <label className="agent-field" htmlFor="agent-provider">
+              <span className="agent-field__label">{t('agent.provider')}</span>
+              <Input
+                id="agent-provider"
+                value={config.provider}
+                onChange={(event) => setConfig({ ...config, provider: event.target.value })}
+              />
+            </label>
+            <label className="agent-field" htmlFor="agent-model">
+              <span className="agent-field__label">{t('agent.model')}</span>
+              <Input
+                id="agent-model"
+                value={config.model}
+                onChange={(event) => setConfig({ ...config, model: event.target.value })}
+              />
+            </label>
+            <label className="agent-field" htmlFor="agent-base-url">
+              <span className="agent-field__label">{t('agent.baseUrl')}</span>
+              <Input
+                id="agent-base-url"
+                value={config.base_url}
+                onChange={(event) => setConfig({ ...config, base_url: event.target.value })}
+                placeholder={t('agent.baseUrlPlaceholder')}
+              />
+            </label>
+            <label className="agent-field" htmlFor="agent-api-key">
+              <span className="agent-field__label">{t('agent.apiKey')}</span>
+              <Input
+                id="agent-api-key"
+                type="password"
+                value={config.api_key}
+                onChange={(event) => setConfig({ ...config, api_key: event.target.value })}
+                placeholder={t('agent.apiKeyPlaceholder')}
+              />
+            </label>
+          </div>
+          <p className="agent-config__hint">
+            <span className="agent-config__hint-icon" aria-hidden="true">
+              <InfoIcon size={14} />
+            </span>
+            <span>{t('agent.keyHint')}</span>
+          </p>
+        </section>
       )}
 
-      {error && <InlineAlert tone="danger" title={t('agent.error')} style={{ marginTop: 'var(--space-3)' }}>{error}</InlineAlert>}
+      {error && (
+        <InlineAlert tone="danger" title={t('agent.error')}>{error}</InlineAlert>
+      )}
 
-      <div className="ui-card" style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', gap: 'var(--space-3)', marginTop: 'var(--space-4)', padding: 'var(--space-4)' }}>
-        <div style={{ minHeight: 0, flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          {messages.length === 0 && <p style={{ color: 'var(--text-muted)' }}>{t('agent.empty')}</p>}
-          {messages.map((message) => (
-            <div key={message.id} style={{ alignSelf: message.role === 'user' ? 'flex-end' : 'stretch', maxWidth: message.role === 'user' ? '80%' : '100%' }}>
-              <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', marginBottom: 'var(--space-1)' }}>
-                {message.role === 'user' ? t('agent.you') : t('agent.assistant')}
-              </div>
-              {message.role === 'user' ? (
-                <div style={{ padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--accent-light)', whiteSpace: 'pre-wrap' }}>{message.content}</div>
-              ) : (
-                <ChatMarkdown content={message.content || (busy ? '…' : '')} />
-              )}
+      <section className="agent-chat ui-card">
+        <div
+          className="agent-chat__scroll"
+          ref={scrollRef}
+          role="log"
+          aria-live="polite"
+          aria-busy={busy}
+        >
+          {messages.length === 0 ? (
+            <div className="agent-empty">
+              <span className="agent-empty__icon" aria-hidden="true">
+                <SparklesIcon size={24} />
+              </span>
+              <p className="agent-empty__title">{t('agent.emptyTitle')}</p>
+              <p className="agent-empty__hint">{t('agent.empty')}</p>
             </div>
-          ))}
+          ) : (
+            messages.map((message) => (
+              <article key={message.id} className={`agent-msg agent-msg--${message.role}`}>
+                <span className="agent-msg__avatar" aria-hidden="true">
+                  {message.role === 'user' ? <UserIcon size={15} /> : <BotIcon size={15} />}
+                </span>
+                <div className="agent-msg__body">
+                  <span className="agent-msg__role">
+                    {message.role === 'user' ? t('agent.you') : t('agent.assistant')}
+                  </span>
+                  <div className="agent-msg__bubble">
+                    {message.role === 'user'
+                      ? message.content
+                      : message.content
+                        ? <ChatMarkdown content={message.content} />
+                        : busy ? <TypingDots label={t('agent.thinking')} /> : null}
+                  </div>
+                </div>
+              </article>
+            ))
+          )}
         </div>
-        {activity && <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>{activity}</div>}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-2)', padding: 'var(--space-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
-          <TextArea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder={t('agent.placeholder')} rows={2} maxHeight={160} />
-          {busy ? <Button variant="danger" onClick={stop}>{t('agent.stop')}</Button> : <Button variant="primary" onClick={() => void send()} disabled={!draft.trim()}>{t('agent.send')}</Button>}
+
+        {activity && (
+          <div className="agent-activity" aria-live="polite">
+            <span className="agent-activity__dot" aria-hidden="true" />
+            <span>{activity}</span>
+          </div>
+        )}
+
+        <div className="agent-composer">
+          <div className="agent-composer__box">
+            <TextArea
+              className="agent-composer__input"
+              ariaLabel={t('agent.composerPlaceholder')}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }}
+              placeholder={t('agent.composerPlaceholder')}
+              rows={2}
+              maxHeight={160}
+            />
+            {busy
+              ? <Button variant="danger" onClick={stop}>{t('agent.stop')}</Button>
+              : <Button variant="primary" icon={<SendIcon size={16} />} onClick={() => void send()} disabled={!draft.trim()}>{t('agent.send')}</Button>}
+          </div>
+          <span className="agent-composer__hint">{t('agent.composerHint')}</span>
         </div>
-      </div>
+      </section>
     </PageContainer>
   )
 }

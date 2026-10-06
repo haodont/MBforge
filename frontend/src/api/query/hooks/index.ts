@@ -5,14 +5,8 @@ export {
   useDocuments,
   useImportDocument,
   useDeleteDocuments,
+  usePatentAnalysis,
 } from './useDocuments'
-export {
-  useCollections,
-  useCreateCollection,
-  useRenameCollection,
-  useDeleteCollection,
-  useMoveDocument,
-} from './useCollections'
 export {
   useIngestQueue,
   useIngestStats,
@@ -24,8 +18,6 @@ export {
   useEnqueueTask,
   useCancelBatch,
   useRetryBatch,
-  useDeleteBatch,
-  useCleanupTasks,
   useSetTaskPriority,
 } from './useIngestQueue'
 export { useNotes, useNotesBacklinks, useSaveNote, useDeleteNote } from './useNotes'
@@ -36,3 +28,13 @@ export {
   useDocumentPatentFacts,
   useDocumentEvidence,
 } from './useDocumentArtifacts'
+export {
+  useDockingEngine,
+  useReceptors,
+  useDockingJobs,
+  useDockingJob,
+  useUploadReceptor,
+  useDeleteReceptor,
+  useCreateDockingJob,
+  useCancelDockingJob,
+} from './useDocking'

@@ -10,6 +10,7 @@ import {
   QueueIcon,
   CheckIcon,
   ChatIcon,
+  TargetIcon,
 } from './icons'
 import Tooltip from '@/components/ui/Tooltip'
 import { useAppContext } from '@/context/AppContext'
@@ -32,6 +33,13 @@ const PRIMARY_ITEMS: NavItem[] = [
 
 const SECONDARY_ITEMS: NavItem[] = [
   { id: 'agent', path: '/agent', icon: ChatIcon, labelKey: 'nav.agent' },
+  {
+    id: 'docking',
+    path: '/docking',
+    icon: TargetIcon,
+    labelKey: 'nav.docking',
+    preload: () => import('@/components/docking/DockingPage'),
+  },
   {
     id: 'queue',
     path: '/queue',

@@ -1,0 +1,104 @@
+/* ==========================================================================
+   Assistant Markdown typography — shared by every chat surface
+   (the /agent page and the docking agent rail). Global so a lazy route that
+   never loads AgentChat.css still renders markdown correctly.
+   ========================================================================== */
+
+.chat-markdown {
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+}
+.chat-markdown > * + * {
+  margin-top: var(--space-3);
+}
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+.chat-markdown p {
+  margin: 0;
+}
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4 {
+  font-weight: 600;
+  line-height: var(--leading-tight);
+}
+.chat-markdown h1 { font-size: var(--text-lg); }
+.chat-markdown h2 { font-size: var(--text-base); }
+.chat-markdown h3,
+.chat-markdown h4 { font-size: var(--text-base); color: var(--text-secondary); }
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-inline-start: 1.4em;
+}
+.chat-markdown li + li {
+  margin-top: var(--space-1);
+}
+.chat-markdown li::marker {
+  color: var(--text-muted);
+}
+.chat-markdown a {
+  color: var(--accent-fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-markdown a:hover {
+  color: var(--accent-hover);
+}
+.chat-markdown code {
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+}
+.chat-markdown pre {
+  padding: var(--space-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+.chat-markdown pre code {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: var(--text-sm);
+}
+.chat-markdown blockquote {
+  padding-inline-start: var(--space-3);
+  border-inline-start: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.chat-markdown hr {
+  height: 1px;
+  border: none;
+  background: var(--border);
+}
+.chat-markdown img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+}
+.chat-markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.chat-markdown th,
+.chat-markdown td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: start;
+}
+.chat-markdown th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+}

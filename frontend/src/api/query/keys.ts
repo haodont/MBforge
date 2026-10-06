@@ -13,19 +13,13 @@ export const queryKeys = {
 
   documents: {
     all: ['documents'] as const,
-    list: (collectionId?: string) =>
-      [...queryKeys.documents.all, { collectionId }] as const,
+    list: () => [...queryKeys.documents.all, 'list'] as const,
     markdown: (docId: string, libraryRoot: string) =>
       [...queryKeys.documents.all, 'markdown', docId, libraryRoot] as const,
     patentFacts: (docId: string, libraryRoot: string) =>
       [...queryKeys.documents.all, 'patent-facts', docId, libraryRoot] as const,
     evidence: (docId: string, page: number, libraryRoot: string) =>
       [...queryKeys.documents.all, 'evidence', docId, page, libraryRoot] as const,
-  },
-
-  collections: {
-    all: ['collections'] as const,
-    list: () => [...queryKeys.collections.all, 'list'] as const,
   },
 
   ingest: {
@@ -90,5 +84,13 @@ export const queryKeys = {
       [...queryKeys.review.all, 'stats', libraryRoot] as const,
     history: (libraryRoot: string, entityId: string) =>
       [...queryKeys.review.all, 'history', libraryRoot, entityId] as const,
+  },
+
+  docking: {
+    all: ['docking'] as const,
+    engine: () => [...queryKeys.docking.all, 'engine'] as const,
+    receptors: () => [...queryKeys.docking.all, 'receptors'] as const,
+    jobs: (status: string) => [...queryKeys.docking.all, 'jobs', status] as const,
+    job: (jobId: string) => [...queryKeys.docking.all, 'job', jobId] as const,
   },
 } as const

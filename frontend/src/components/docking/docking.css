@@ -1,0 +1,289 @@
+/* Docking workbench — PyMOL-inspired, borderless.
+   Flat dark surfaces, hairline separators (no card borders, no radius, no
+   shadow), a black viewport, and compact label/field rows. Tokens only. */
+
+.docking-page {
+  gap: 0;
+  padding: 0;
+  background: var(--bg-base);
+}
+
+/* ── Top toolbar ─────────────────────────────────────────────── */
+.docking-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.docking-toolbar__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+.docking-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.docking-status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+.docking-status__dot.is-ready {
+  background: var(--success);
+}
+
+/* ── Panes (borderless; separated by hairlines) ──────────────── */
+.docking-workbench {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 300px;
+  flex: 1;
+  min-height: 0;
+}
+.docking-pane {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+.docking-pane--left {
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+.docking-pane--right {
+  border-left: 1px solid var(--border);
+}
+.docking-pane--center {
+  background: #000;
+  position: relative;
+}
+
+/* ── Left rail: grouped controls ─────────────────────────────── */
+.docking-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.docking-group__title {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.docking-file {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.docking-box-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.docking-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.docking-field > span {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+/* Compact, monospace numeric fields — PyMOL reads like a console. */
+.docking-pane--left .ui-input,
+.docking-pane--left .ui-select {
+  padding: 5px 8px;
+  border-radius: 0;
+  font-size: var(--text-sm);
+  background: var(--bg-input);
+}
+.docking-pane--left input[type='number'] {
+  font-family: var(--font-mono);
+}
+
+/* Flat selection lists (no boxes) */
+.docking-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.docking-list li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.docking-list__row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.docking-list__row:hover {
+  background: var(--bg-hover);
+}
+.docking-list__row.is-active {
+  background: var(--accent-muted);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.docking-list__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.docking-list__meta {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ── Center: black viewport + pose strip ─────────────────────── */
+.docking-viewer3d {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  background: #000;
+}
+.docking-poses {
+  display: flex;
+  flex-direction: column;
+  max-height: 168px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.docking-pose {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.docking-pose:hover {
+  background: var(--bg-hover);
+}
+.docking-pose.is-active {
+  background: var(--accent-muted);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.docking-pose__affinity {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Right rail: agent (flat) ────────────────────────────────── */
+.docking-agent {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.docking-agent__log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.docking-agent__empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.docking-agent__msg {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.docking-agent__msg--user {
+  flex-direction: row-reverse;
+}
+.docking-agent__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--ai-bg);
+  color: var(--accent-fg);
+}
+.docking-agent__msg--user .docking-agent__avatar {
+  background: var(--user-bg);
+  color: var(--text-on-accent);
+}
+.docking-agent__bubble {
+  min-width: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.docking-agent__msg--user .docking-agent__bubble {
+  background: var(--accent-muted);
+  white-space: pre-wrap;
+}
+.docking-agent__activity {
+  padding: 0 var(--space-3) var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.docking-agent__composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 820px) {
+  .docking-workbench {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .docking-pane {
+    min-height: 260px;
+  }
+  .docking-pane--left,
+  .docking-pane--right {
+    border: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}

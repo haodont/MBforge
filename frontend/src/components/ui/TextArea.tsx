@@ -9,6 +9,7 @@ export interface TextAreaProps {
   rows?: number
   maxHeight?: number | string
   autoFocus?: boolean
+  ariaLabel?: string
   style?: React.CSSProperties
   className?: string
 }
@@ -22,6 +23,7 @@ export default function TextArea({
   rows = 3,
   maxHeight = 120,
   autoFocus,
+  ariaLabel,
   style,
   className,
 }: TextAreaProps) {
@@ -34,6 +36,7 @@ export default function TextArea({
       disabled={disabled}
       rows={rows}
       autoFocus={autoFocus}
+      aria-label={ariaLabel}
       className={className}
       style={{
         flex: 1,

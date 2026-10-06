@@ -1,0 +1,303 @@
+/* ==========================================================================
+   AgentChat — 智能助手页面（产品级 Configure + Operate 工作区）
+   全部取值来自 styles/theme.css 设计令牌，禁止硬编码颜色。
+   结构：页头 / 模型配置（Configure）/ 会话区（Operate）/ 输入区
+   ========================================================================== */
+
+.agent-page {
+  gap: var(--space-4);
+}
+
+/* --------------------------------------------------------------------------
+   页头
+   -------------------------------------------------------------------------- */
+.agent-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-shrink: 0;
+}
+.agent-header__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.agent-header__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent-muted);
+  color: var(--accent-fg);
+}
+.agent-header__subtitle {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+/* --------------------------------------------------------------------------
+   模型配置（Configure）
+   -------------------------------------------------------------------------- */
+.agent-config {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  flex-shrink: 0;
+  animation: slideUp var(--dur-base) var(--ease-standard) both;
+}
+.agent-config__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4) var(--space-4);
+}
+.agent-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.agent-field__label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.agent-field__label span {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.agent-config__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+}
+.agent-config__hint-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   会话区（Operate）
+   -------------------------------------------------------------------------- */
+.agent-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.agent-chat__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* 消息 */
+.agent-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  animation: messageIn var(--dur-slow) var(--ease-standard) both;
+}
+.agent-msg--user {
+  flex-direction: row-reverse;
+}
+.agent-msg__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+.agent-msg--assistant .agent-msg__avatar {
+  background: var(--ai-bg);
+  border: 1px solid var(--ai-border);
+  color: var(--accent-fg);
+}
+.agent-msg--user .agent-msg__avatar {
+  background: var(--user-bg);
+  color: var(--text-on-accent);
+}
+.agent-msg__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: min(760px, 88%);
+}
+.agent-msg--user .agent-msg__body {
+  align-items: flex-end;
+}
+.agent-msg__role {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.agent-msg__bubble {
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+.agent-msg--assistant .agent-msg__bubble {
+  padding: var(--space-3) var(--space-4);
+  background: var(--ai-bg);
+  border: 1px solid var(--ai-border);
+  box-shadow: 0 1px 2px var(--ai-shadow);
+  border-top-left-radius: var(--space-1);
+  color: var(--text-primary);
+}
+.agent-msg--user .agent-msg__bubble {
+  padding: var(--space-2) var(--space-3);
+  background: var(--user-bg);
+  color: var(--text-on-accent);
+  border-top-right-radius: var(--space-1);
+  white-space: pre-wrap;
+}
+
+/* 生成中（三点） */
+.agent-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: var(--space-1) 0;
+}
+.agent-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: agent-typing-blink 1.2s infinite ease-in-out both;
+}
+.agent-typing span:nth-child(2) { animation-delay: 0.16s; }
+.agent-typing span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes agent-typing-blink {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* 空状态（教学型空态） */
+.agent-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  text-align: center;
+}
+.agent-empty__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-card);
+  background: var(--accent-muted);
+  color: var(--accent-fg);
+}
+.agent-empty__title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.agent-empty__hint {
+  max-width: 46ch;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+/* 工具活动行 */
+.agent-activity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-5) var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.agent-activity__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1s infinite;
+}
+
+/* --------------------------------------------------------------------------
+   输入区（Composer）
+   -------------------------------------------------------------------------- */
+.agent-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.agent-composer__box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  transition: border-color var(--dur-base) var(--ease-standard),
+    box-shadow var(--dur-base) var(--ease-standard);
+}
+.agent-composer__box:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.agent-composer__input {
+  padding: var(--space-1) var(--space-2);
+}
+.agent-composer__hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+
+/* --------------------------------------------------------------------------
+   响应式：配置网格折行、消息占满、页头堆叠
+   -------------------------------------------------------------------------- */
+@media (max-width: 720px) {
+  .agent-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .agent-config {
+    padding: var(--space-4);
+  }
+  .agent-chat__scroll {
+    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+  .agent-msg__body {
+    max-width: 100%;
+  }
+  .agent-composer {
+    padding: var(--space-3) var(--space-4) var(--space-4);
+  }
+}
