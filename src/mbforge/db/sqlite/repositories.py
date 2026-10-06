@@ -16,6 +16,7 @@ from typing import Any
 from mbforge.db import (
     activity_store,
     collection_store,
+    docking_store,
     document_backup,
     document_records,
     markush_transitions,
@@ -65,6 +66,16 @@ class SqliteDatabaseRepository:
 
     def execute(self, sql: str, params: Sequence[Any] = (), *, db: str = "kb") -> Any:
         return self._manager.execute(sql, params, db=db)
+
+    def readonly_schema(self) -> list[dict[str, Any]]:
+        from mbforge.db.sqlite import readonly_sql
+
+        return readonly_sql.introspect_schema(self._manager.kb_path)
+
+    def readonly_query(self, sql: str, *, max_rows: int) -> dict[str, Any]:
+        from mbforge.db.sqlite import readonly_sql
+
+        return readonly_sql.run_query(self._manager.kb_path, sql, max_rows=max_rows)
 
     def delete_molecule_records(self, conn: Any, mol_ids: Iterable[str]) -> int:
         return DatabaseManager.delete_molecule_records(conn, mol_ids)
@@ -388,6 +399,71 @@ class SqliteActivityRepository:
 
 
 @dataclass
+class SqliteDockingRepository:
+    """Repository for receptors, docking jobs and poses."""
+
+    library_root: Path
+
+    def insert_receptor(self, receptor: dict[str, Any]) -> None:
+        docking_store.insert_receptor(self.library_root, receptor)
+
+    def list_receptors(self) -> list[dict[str, Any]]:
+        return docking_store.list_receptors(self.library_root)
+
+    def get_receptor(self, receptor_id: str) -> dict[str, Any] | None:
+        return docking_store.get_receptor(self.library_root, receptor_id)
+
+    def delete_receptor(self, receptor_id: str) -> int:
+        return docking_store.delete_receptor(self.library_root, receptor_id)
+
+    def insert_job(self, job: dict[str, Any]) -> None:
+        docking_store.insert_job(self.library_root, job)
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        return docking_store.get_job(self.library_root, job_id)
+
+    def list_jobs(
+        self, *, status: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        return docking_store.list_jobs(self.library_root, status=status, limit=limit)
+
+    def claim_next_pending(self, worker: str) -> dict[str, Any] | None:
+        return docking_store.claim_next_pending(self.library_root, worker)
+
+    def set_job_status(
+        self,
+        job_id: str,
+        status: str,
+        *,
+        progress: float | None = None,
+        message: str | None = None,
+        error: str | None = None,
+        finished: bool = False,
+    ) -> None:
+        docking_store.set_job_status(
+            self.library_root,
+            job_id,
+            status,
+            progress=progress,
+            message=message,
+            error=error,
+            finished=finished,
+        )
+
+    def reset_running_jobs(self) -> int:
+        return docking_store.reset_running_jobs(self.library_root)
+
+    def insert_pose(self, pose: dict[str, Any]) -> None:
+        docking_store.insert_pose(self.library_root, pose)
+
+    def list_poses(self, job_id: str) -> list[dict[str, Any]]:
+        return docking_store.list_poses(self.library_root, job_id)
+
+    def get_pose(self, pose_id: str) -> dict[str, Any] | None:
+        return docking_store.get_pose(self.library_root, pose_id)
+
+
+@dataclass
 class SqliteCollectionRepository:
     """Repository for user collections ("Groups")."""
 
@@ -486,6 +562,10 @@ class SqliteRepositories(LibraryRepositories):
     @property
     def activities(self) -> SqliteActivityRepository:
         return SqliteActivityRepository(self.library_root)
+
+    @property
+    def docking(self) -> SqliteDockingRepository:
+        return SqliteDockingRepository(self.library_root)
 
     @property
     def collections(self) -> SqliteCollectionRepository:

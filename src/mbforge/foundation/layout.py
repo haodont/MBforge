@@ -205,6 +205,47 @@ class LibraryLayout:
         """Create ``notes/`` if missing and return the path."""
         return self._ensure_dir(self.notes_dir)
 
+    # -- Docking paths -------------------------------------------------
+
+    @property
+    def docking_dir(self) -> Path:
+        """``{root}/docking/`` — receptor and job artifacts for docking."""
+        return self._root / "docking"
+
+    @property
+    def receptors_dir(self) -> Path:
+        """``{root}/docking/receptors/`` — one directory per receptor."""
+        return self.docking_dir / "receptors"
+
+    @property
+    def docking_jobs_dir(self) -> Path:
+        """``{root}/docking/jobs/`` — one directory per docking job."""
+        return self.docking_dir / "jobs"
+
+    def receptor_dir(self, receptor_id: str) -> Path:
+        """Return ``docking/receptors/{receptor_id}`` (validated id)."""
+        return self._validate_and_join("docking", "receptors", receptor_id)
+
+    def receptor_source(self, receptor_id: str, filename: str) -> Path:
+        """Return a source file under the receptor's directory (traversal-safe)."""
+        return self._safe_child(
+            self.receptor_dir(receptor_id), filename, label="receptor file"
+        )
+
+    def receptor_pdbqt(self, receptor_id: str) -> Path:
+        """Return the prepared ``receptor.pdbqt`` path for a receptor."""
+        return self.receptor_dir(receptor_id) / "receptor.pdbqt"
+
+    def docking_job_dir(self, job_id: str) -> Path:
+        """Return ``docking/jobs/{job_id}`` (validated id)."""
+        return self._validate_and_join("docking", "jobs", job_id)
+
+    def docking_pose_path(self, job_id: str, filename: str) -> Path:
+        """Return a pose file under the job's ``poses/`` dir (traversal-safe)."""
+        return self._safe_child(
+            self.docking_job_dir(job_id) / "poses", filename, label="pose file"
+        )
+
     def resolve_relative_path(self, relative_path: str | Path) -> Path:
         """Resolve a relative library path and enforce root containment."""
         candidate = Path(relative_path)

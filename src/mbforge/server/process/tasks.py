@@ -50,6 +50,7 @@ class TaskPool(StrEnum):
     PIPELINE = "pipeline"
     SYNC = "sync"
     OCR = "ocr"
+    DOCKING = "docking"
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,12 @@ def _ocr_workers(cfg: AppConfig) -> int:
     return max(1, min(cfg.moldet.ocr_workers, 8))
 
 
+def _docking_workers(cfg: AppConfig) -> int:
+    # Docking is GPU-bound; a single worker serializes the accelerator unless
+    # the operator raises docking.max_concurrency deliberately.
+    return max(1, min(cfg.docking.max_concurrency, 8))
+
+
 POOL_SPECS: dict[TaskPool, PoolSpec] = {
     # Heavy pipeline stages; the event loop never blocks on them.
     TaskPool.PIPELINE: PoolSpec("mbforge-pipeline", _pipeline_workers),
@@ -83,6 +90,8 @@ POOL_SPECS: dict[TaskPool, PoolSpec] = {
     TaskPool.SYNC: PoolSpec("mbforge-sync", _sync_workers),
     # Crop-label RapidOCR, kept off the MolParser-feed critical path.
     TaskPool.OCR: PoolSpec("mbforge-ocr", _ocr_workers),
+    # Molecular docking engine runs (GPU).
+    TaskPool.DOCKING: PoolSpec("mbforge-docking", _docking_workers),
 }
 
 

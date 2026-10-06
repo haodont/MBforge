@@ -18,6 +18,7 @@ from typing import Any
 
 from mbforge.db.sqlite.schema import (
     _ACTIVITIES_SCHEMA,
+    _DOCKING_SCHEMA,
     _KB_SCHEMA,
     _MOL_FTS,
     _MOL_SCHEMA,
@@ -294,6 +295,9 @@ class DatabaseManager:
                 # The activities table is defined in _ACTIVITIES_SCHEMA but not
                 # included in _KB_SCHEMA, so it is created explicitly here.
                 conn.executescript(_ACTIVITIES_SCHEMA)
+                # Docking tables (receptors / jobs / poses) are likewise created
+                # here rather than in _KB_SCHEMA.
+                conn.executescript(_DOCKING_SCHEMA)
                 self._migrate_ingest_dag(conn)
                 conn.commit()
             finally:

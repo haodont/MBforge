@@ -23,6 +23,8 @@ _EXPECTED_LABELS = {
     "modelscope",
     "molparser",
     "cairosvg",
+    "unidock_tools",
+    "meeko",
 }
 
 

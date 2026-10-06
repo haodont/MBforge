@@ -181,6 +181,29 @@ RESOURCE_CATALOG: dict[str, ResourceInfo] = {
         import_name="ultralytics",
         mirror=TSINGHUA_PIP,
     ),
+    # ──── 分子对接 ────
+    # 核心 GPU 引擎（UniDock-Pro 的 udp）是源码构建的二进制，不在包索引上，
+    # 无法登记为包资源；其可用性由 /api/v1/docking/engine/status 上报。
+    "unidock_tools": ResourceInfo(
+        id="unidock_tools",
+        name="Uni-Dock Tools",
+        type=ResourceType.PYTHON_PACKAGE,
+        description="Uni-Dock 预处理应用（受体/配体准备）",
+        license="Apache-2.0",
+        pip_name="unidock-tools",
+        import_name="unidock_tools",
+        mirror=TSINGHUA_PIP,
+    ),
+    "meeko": ResourceInfo(
+        id="meeko",
+        name="Meeko",
+        type=ResourceType.PYTHON_PACKAGE,
+        description="配体/受体 PDBQT 准备 (对接预处理)",
+        license="BSD-3",
+        pip_name="meeko",
+        import_name="meeko",
+        mirror=TSINGHUA_PIP,
+    ),
 }
 
 # Optional libraries are imported only at their call sites and have a

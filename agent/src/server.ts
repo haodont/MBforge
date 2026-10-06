@@ -26,7 +26,46 @@ import {
   type AgentLlmConfig,
   type LlmProbeResult,
 } from './llm.js'
-import { moleculeSearchTool } from './tool.js'
+import {
+  getDockingJobTool,
+  librarySqlTool,
+  libraryStatsTool,
+  listDockingJobsTool,
+  listReceptorsTool,
+  moleculeSearchTool,
+  queryActivitiesTool,
+  queryDocumentsTool,
+  queryEvidenceTool,
+  runDockingTool,
+} from './tool.js'
+
+/** The custom tools exposed to the agent, and the allow-list passed to the
+ *  session. Kept together so the two never drift. */
+const AGENT_TOOL_NAMES = [
+  'molecule_search',
+  'library_stats',
+  'query_documents',
+  'query_activities',
+  'query_evidence',
+  'library_sql',
+  'list_receptors',
+  'list_docking_jobs',
+  'get_docking_job',
+  'run_docking',
+] as const
+
+const AGENT_CUSTOM_TOOLS = [
+  moleculeSearchTool,
+  libraryStatsTool,
+  queryDocumentsTool,
+  queryActivitiesTool,
+  queryEvidenceTool,
+  librarySqlTool,
+  listReceptorsTool,
+  listDockingJobsTool,
+  getDockingJobTool,
+  runDockingTool,
+]
 
 interface ChatRequest {
   message: string
@@ -102,9 +141,16 @@ async function createSession(config: AgentLlmConfig): Promise<AgentSession> {
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
     getSystemPrompt: () =>
-      'You are the MBForge molecular-science assistant. Use molecule_search for library facts. ' +
-      'Separate source-backed facts from hypotheses, cite returned molecule identifiers when relevant, ' +
-      'and never claim that a search result is a validated design recommendation.',
+      'You are the MBForge molecular-science assistant. Use molecule_search for ' +
+      'molecule lookups, and the library tools (library_stats, query_documents, ' +
+      'query_activities, query_evidence) for structured library facts; use ' +
+      'library_sql (read-only SELECT) only for questions the structured tools do ' +
+      'not cover. For molecular docking, use list_receptors to find a receptor, ' +
+      'then run_docking (only when the user explicitly asks) and poll ' +
+      'get_docking_job for the ranked poses. ' +
+      'Separate source-backed facts from hypotheses, cite returned molecule ' +
+      'identifiers when relevant, and never claim that a search result is a ' +
+      'validated design recommendation.',
     getAppendSystemPrompt: () => [],
     extendResources: () => {},
     reload: async () => {},
@@ -118,12 +164,14 @@ async function createSession(config: AgentLlmConfig): Promise<AgentSession> {
     settingsManager,
     resourceLoader,
     sessionManager: SessionManager.inMemory(),
-    tools: ['molecule_search'],
-    customTools: [moleculeSearchTool],
+    tools: [...AGENT_TOOL_NAMES],
+    customTools: AGENT_CUSTOM_TOOLS,
   })
-  if (!session.getAllTools().some((tool) => tool.name === 'molecule_search')) {
+  const registered = new Set(session.getAllTools().map((tool) => tool.name))
+  const missing = AGENT_TOOL_NAMES.filter((name) => !registered.has(name))
+  if (missing.length > 0) {
     session.dispose()
-    throw new Error('MBForge molecule_search tool was not registered')
+    throw new Error('MBForge agent tools were not registered: ' + missing.join(', '))
   }
   return session
 }

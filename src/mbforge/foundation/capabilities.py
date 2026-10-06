@@ -28,6 +28,8 @@ _OPTIONAL_MODULES: tuple[tuple[str, str], ...] = (
     ("modelscope", "modelscope"),
     ("molparser", "molparser"),
     ("cairosvg", "cairosvg"),
+    ("unidock_tools", "unidock_tools"),
+    ("meeko", "meeko"),
 )
 
 

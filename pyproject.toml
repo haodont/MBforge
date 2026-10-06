@@ -119,11 +119,23 @@ gpu = [
 onnx = [
     "rapidocr-onnxruntime>=1.4.4",
 ]
+# 分子对接的 Python 侧依赖（可从索引安装）：
+#   meeko          —— 配体/受体 PDBQT 准备
+#   unidock-tools  —— Uni-Dock 预处理应用（unidock_prepare_receptor 等）
+# 核心 GPU 引擎（UniDock-Pro 的 udp / Uni-Dock 的 unidock）是 C++/CUDA 源码构建的
+# 二进制，不在任何包索引上，无法作为依赖安装：构建后把二进制放进 PATH，或用
+# MBFORGE_UNIDOCK_BIN 指定路径。缺失时对接功能以明确的 docking_unavailable 降级。
+docking = [
+    "meeko>=0.6",
+    # meeko's wheel metadata omits its gemmi requirement; declare it explicitly.
+    "gemmi>=0.6",
+    "unidock-tools>=1.1",
+]
 
 [dependency-groups]
 dev = [
     # 让 `uv sync` 与 `uv run`（默认安装 dev 组）保持全栈，等价于旧的统一依赖。
-    "mbforge[local-models,gpu]",
+    "mbforge[local-models,gpu,docking]",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.0.0",

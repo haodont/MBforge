@@ -37,6 +37,10 @@ class DatabaseRepository(Protocol):
         self, sql: str, params: Sequence[Any] = (), *, db: str = "kb"
     ) -> Any: ...
 
+    def readonly_schema(self) -> list[dict[str, Any]]: ...
+
+    def readonly_query(self, sql: str, *, max_rows: int) -> dict[str, Any]: ...
+
     def snapshot_document(self, doc_id: str) -> dict[str, Any]: ...
 
     def __getattr__(self, name: str) -> Any: ...
@@ -152,6 +156,47 @@ class MoleculeRepository(Protocol):
         candidates: Sequence[Any],
         activity_updates: Sequence[dict[str, Any]] | None = None,
     ) -> int: ...
+
+
+class DockingRepository(Protocol):
+    """Persistence boundary for receptors, docking jobs and poses."""
+
+    def insert_receptor(self, receptor: dict[str, Any]) -> None: ...
+
+    def list_receptors(self) -> list[dict[str, Any]]: ...
+
+    def get_receptor(self, receptor_id: str) -> dict[str, Any] | None: ...
+
+    def delete_receptor(self, receptor_id: str) -> int: ...
+
+    def insert_job(self, job: dict[str, Any]) -> None: ...
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None: ...
+
+    def list_jobs(
+        self, *, status: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]: ...
+
+    def claim_next_pending(self, worker: str) -> dict[str, Any] | None: ...
+
+    def set_job_status(
+        self,
+        job_id: str,
+        status: str,
+        *,
+        progress: float | None = None,
+        message: str | None = None,
+        error: str | None = None,
+        finished: bool = False,
+    ) -> None: ...
+
+    def reset_running_jobs(self) -> int: ...
+
+    def insert_pose(self, pose: dict[str, Any]) -> None: ...
+
+    def list_poses(self, job_id: str) -> list[dict[str, Any]]: ...
+
+    def get_pose(self, pose_id: str) -> dict[str, Any] | None: ...
 
 
 class ActivityRepository(Protocol):
@@ -312,6 +357,9 @@ class LibraryRepositories(Protocol):
     def activities(self) -> ActivityRepository: ...
 
     @property
+    def docking(self) -> DockingRepository: ...
+
+    @property
     def collections(self) -> CollectionRepository: ...
 
     @property
@@ -361,6 +409,7 @@ __all__ = [
     "DatabaseRepository",
     "ArtifactStore",
     "DocumentRepository",
+    "DockingRepository",
     "EvidenceRepository",
     "LibraryRepositories",
     "MarkushRepository",

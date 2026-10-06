@@ -152,6 +152,50 @@ class ProcessConfig(BaseModel):
     heartbeat_interval: float = 30.0
 
 
+class ReceptorPrepConfig(BaseModel):
+    """Receptor (protein) preparation settings for docking."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    remove_water: bool = True
+    add_hydrogens: bool = True
+    keep_hetero: bool = False
+
+
+class LigandPrepConfig(BaseModel):
+    """Ligand 3D preparation settings for docking."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    num_conformers: int = 1
+    random_seed: int = 42
+    minimize: bool = True
+
+
+class DockingConfig(BaseModel):
+    """Molecular docking engine and job settings (GPU-oriented)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    engine: str = "unidockpro"
+    #: "auto" uses the GPU when available; "cpu" forces the CPU path.
+    device: str = "auto"
+    gpu_device: int = 0
+    max_concurrency: int = Field(default=1, ge=1, le=8)
+    timeout_seconds: int = Field(default=300, ge=5, le=3600)
+    #: UniDock-Pro search mode (required by the CLI): fast | balance | detail.
+    search_mode: str = "balance"
+    #: Scoring function: vina | vinardo | ad4.
+    scoring: str = "vina"
+    exhaustiveness: int = Field(default=8, ge=1, le=512)
+    num_modes: int = Field(default=9, ge=1, le=100)
+    seed: int = 0
+    #: Optional default search box ({"center":[x,y,z],"size":[x,y,z]}).
+    default_box: dict[str, Any] = Field(default_factory=dict)
+    receptor_prep: ReceptorPrepConfig = Field(default_factory=ReceptorPrepConfig)
+    ligand_prep: LigandPrepConfig = Field(default_factory=LigandPrepConfig)
+
+
 class AppConfig(BaseModel):
     """全局应用配置 — 唯一 schema."""
 
@@ -172,6 +216,7 @@ class AppConfig(BaseModel):
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
+    docking: DockingConfig = Field(default_factory=DockingConfig)
 
 
 # 历史文件名（用于一次性迁移）

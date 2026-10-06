@@ -152,6 +152,10 @@ async def lifespan(app: FastAPI):
 
         worker.ensure_queue_worker(cfg.library_root)
 
+        from mbforge.server.docking import worker as docking_worker
+
+        docking_worker.ensure_docking_worker(cfg.library_root)
+
     prewarm_task: asyncio.Task[dict[str, str]] | None = None
     if os.environ.get("MBFORGE_PREWARM_MODELS") == "1":
         from mbforge.foundation.inference.prewarm import prewarm_models
@@ -358,6 +362,7 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
 
     # Register all routers
     from mbforge.api.http import agent, markush, review
+    from mbforge.api.http.docking import docking as docking_router
     from mbforge.api.http.documents import (
         activity,
         documents,
@@ -414,6 +419,9 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.include_router(markush.router, prefix="/api/v1/markush", tags=["markush"])
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
     app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent-tools"])
+    app.include_router(
+        docking_router.router, prefix="/api/v1/docking", tags=["docking"]
+    )
     app.include_router(
         diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"]
     )

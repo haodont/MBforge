@@ -492,3 +492,55 @@ CREATE VIRTUAL TABLE IF NOT EXISTS mol_search USING fts5(
     name, notes, smiles, content='molecules', content_rowid='rowid'
 );
 """
+
+# Molecular docking: prepared receptors, jobs and resulting poses. A receptor
+# is a prepared protein (PDB uploaded, PDBQT derived); a job docks one or more
+# ligands against it; each pose holds one ranked result for a ligand.
+_DOCKING_SCHEMA = """
+CREATE TABLE IF NOT EXISTS receptors (
+    receptor_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_filename TEXT NOT NULL DEFAULT '',
+    pdbqt_path TEXT NOT NULL DEFAULT '',
+    file_hash TEXT NOT NULL DEFAULT '',
+    chain TEXT NOT NULL DEFAULT '',
+    meta TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS docking_jobs (
+    job_id TEXT PRIMARY KEY,
+    receptor_id TEXT NOT NULL,
+    engine TEXT NOT NULL DEFAULT 'unidockpro',
+    params TEXT NOT NULL DEFAULT '{}',
+    box TEXT NOT NULL DEFAULT '{}',
+    ligands TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'pending',
+    progress REAL NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT '',
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT,
+    FOREIGN KEY (receptor_id) REFERENCES receptors(receptor_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_dock_jobs_status ON docking_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_dock_jobs_receptor ON docking_jobs(receptor_id);
+
+CREATE TABLE IF NOT EXISTS docking_poses (
+    pose_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    mol_id TEXT,
+    ligand_label TEXT NOT NULL DEFAULT '',
+    affinity REAL,
+    rmsd_lb REAL,
+    rmsd_ub REAL,
+    rank INTEGER NOT NULL DEFAULT 0,
+    pose_path TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (job_id) REFERENCES docking_jobs(job_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_dock_pose_job ON docking_poses(job_id);
+CREATE INDEX IF NOT EXISTS idx_dock_pose_mol ON docking_poses(mol_id);
+"""
+

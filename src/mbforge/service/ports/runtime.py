@@ -94,6 +94,9 @@ class RuntimeProvider:
     process: Any
     ingest_queue: Any
     ingest_worker: Any
+    #: Docking engine module (``get_docking_engine()``) and its worker module.
+    docking_engine: Any
+    docking_worker: Any
 
 
 _provider: RuntimeProvider | None = None
