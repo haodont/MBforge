@@ -186,21 +186,9 @@
 /* ---- 页面布局骨架（原 layout.css 并入） ---- */
 .workspace-page  {
   display: grid;
-  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
-}
-
-.workspace-page--library-collapsed {
-  grid-template-columns: 48px minmax(0, 1fr);
-}
-
-.workspace-library  {
-  position: relative;
-  min-width: 0;
-  overflow: hidden;
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border);
 }
 
 .workspace-documents  {
@@ -258,15 +246,6 @@
   color: var(--border-strong);
 }
 
-.workspace-summary__group {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--accent-fg);
-  font-weight: 500;
-}
-
 .workspace-view-label {
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -292,25 +271,6 @@
 
   .workspace-view-label {
     display: none;
-  }
-
-  .workspace-page {
-    grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-  .workspace-page--library-collapsed {
-    grid-template-rows: 48px minmax(0, 1fr);
-  }
-
-  .workspace-library  {
-  max-height: 224px;
-  border-right: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-  .workspace-library--collapsed {
-    max-height: 48px;
   }
 
   .workspace-documents  {

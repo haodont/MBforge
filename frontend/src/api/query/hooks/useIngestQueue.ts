@@ -7,8 +7,6 @@ import {
   ingestWorkerStatus,
   ingestCancel,
   ingestCancelBatch,
-  ingestCleanup,
-  ingestDeleteBatch,
   ingestDeleteTask,
   ingestEnqueue,
   ingestGetLogs,
@@ -112,6 +110,10 @@ export function useDeleteTask() {
     }) => ingestDeleteTask(libraryRoot, runId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
+      // Deleting a task also discards the document's pipeline outputs and
+      // returns it to `pending`, so the workspace listing/status changes too.
+      void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
+      void qc.invalidateQueries({ queryKey: queryKeys.review.all })
     },
   })
 }
@@ -168,35 +170,6 @@ export function useRetryBatch() {
       libraryRoot: string
       runIds: string[]
     }) => ingestRetryBatch(libraryRoot, runIds),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
-  })
-}
-
-export function useDeleteBatch() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      libraryRoot,
-      runIds,
-    }: {
-      libraryRoot: string
-      runIds: string[]
-    }) => ingestDeleteBatch(libraryRoot, runIds),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
-  })
-}
-
-/** Clean up finished tasks and free disk space. */
-export function useCleanupTasks() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: (libraryRoot: string) => ingestCleanup(libraryRoot),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },

@@ -236,14 +236,6 @@ export async function ingestRetry(
   )
 }
 
-export async function ingestCleanup(libraryRoot: string): Promise<number> {
-  return invokeWithError(
-    () => httpPost<{ cleaned?: number }>('/api/v1/pipeline/queue/cleanup', { library_root: libraryRoot })
-      .then((response) => response.cleaned ?? 0),
-    ErrorCode.ApiError,
-  )
-}
-
 export interface IngestBulkActionResult {
   updated: number
   skipped: number
@@ -268,19 +260,6 @@ export async function ingestRetryBatch(
 ): Promise<IngestBulkActionResult> {
   return invokeWithError(
     () => httpPost<IngestBulkActionResult>('/api/v1/pipeline/queue/batch/retry', {
-      library_root: libraryRoot,
-      run_ids: runIds,
-    }),
-    ErrorCode.ApiError,
-  )
-}
-
-export async function ingestDeleteBatch(
-  libraryRoot: string,
-  runIds: string[],
-): Promise<IngestBulkActionResult> {
-  return invokeWithError(
-    () => httpPost<IngestBulkActionResult>('/api/v1/pipeline/queue/batch/delete', {
       library_root: libraryRoot,
       run_ids: runIds,
     }),

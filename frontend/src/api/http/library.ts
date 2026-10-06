@@ -22,6 +22,18 @@ export interface DocumentEvidenceItem {
   raw_text: string
   kind: string
   category: string
+  /**
+   * Paragraph this row belongs to (empty when the row is not in one), the
+   * patent's own paragraph number (null when unnumbered), and whether this row
+   * contributed the paragraph's first fragment. A paragraph split across a page
+   * break shares one paragraph_id; its later rows carry paragraph_start=false.
+   */
+  paragraph_id: string
+  paragraph_number: string | null
+  paragraph_start: boolean
+  /** Line index inside the paragraph, and that line's left-edge depth. */
+  paragraph_line: number
+  indent_level: number
 }
 
 export interface PatentFactsSection {
@@ -105,17 +117,6 @@ export interface PatentFactsArtifact {
   stats: Record<string, unknown>
 }
 
-export interface CollectionInfo {
-  collection_id: string
-  name: string
-  parent_id: string | null
-  doc_count: number
-}
-
-export interface CollectionNode extends CollectionInfo {
-  children: CollectionNode[]
-}
-
 export interface LibraryStatus {
   configured: boolean
   root: string
@@ -178,11 +179,9 @@ export async function importDocument(
   return resp
 }
 
-export async function listDocuments(
-  collectionId?: string
-): Promise<{ documents: DocumentInfo[] }> {
+export async function listDocuments(): Promise<{ documents: DocumentInfo[] }> {
   return invokeWithError(() =>
-    httpPost('/api/v1/library/documents', { collection_id: collectionId })
+    httpPost('/api/v1/library/documents', {})
   )
 }
 
@@ -191,6 +190,19 @@ export async function deleteDocuments(
 ): Promise<{ success: boolean; deleted: number }> {
   return invokeWithError(() =>
     httpPost('/api/v1/library/documents/delete', { doc_ids: docIds })
+  )
+}
+
+export interface PatentAnalysisResult {
+  success: boolean
+  enqueued: number
+  skipped: number
+}
+
+/** Queue a Patent-only analysis run for each eligible document (batch). */
+export async function runPatentAnalysis(docIds: string[]): Promise<PatentAnalysisResult> {
+  return invokeWithError(() =>
+    httpPost('/api/v1/documents/patent-analysis', { doc_ids: docIds })
   )
 }
 
@@ -204,67 +216,6 @@ export async function updateMoleculeEvidence(
     httpPost(`/api/v1/library/documents/${encodeURIComponent(docId)}/evidence/${encodeURIComponent(evidenceId)}/molecule`, {
       name,
       smiles,
-    })
-  )
-}
-
-// ── Collections ─────────────────────────────────────
-
-export async function createCollection(
-  name: string,
-  parentId?: string
-): Promise<{ success: boolean; collection?: CollectionInfo; error?: string }> {
-  return invokeWithError(() =>
-    httpPost('/api/v1/library/collections/create', { name, parent_id: parentId })
-  )
-}
-
-export async function renameCollection(
-  collectionId: string,
-  name: string
-): Promise<{ success: boolean }> {
-  return invokeWithError(() =>
-    httpPost('/api/v1/library/collections/rename', {
-      collection_id: collectionId,
-      name,
-    })
-  )
-}
-
-export async function listCollections(): Promise<{ collections: CollectionNode[] }> {
-  return invokeWithError(() =>
-    httpPost('/api/v1/library/collections/list', {})
-  )
-}
-
-export async function deleteCollection(
-  collectionId: string
-): Promise<{ success: boolean }> {
-  return invokeWithError(() =>
-    httpPost('/api/v1/library/collections/delete', { collection_id: collectionId })
-  )
-}
-
-export async function addDocumentToCollection(
-  collectionId: string,
-  docId: string
-): Promise<{ success: boolean }> {
-  return invokeWithError(() =>
-    httpPost('/api/v1/library/collections/add-document', {
-      collection_id: collectionId,
-      doc_id: docId,
-    })
-  )
-}
-
-export async function removeDocumentFromCollection(
-  collectionId: string,
-  docId: string
-): Promise<{ success: boolean }> {
-  return invokeWithError(() =>
-    httpPost('/api/v1/library/collections/remove-document', {
-      collection_id: collectionId,
-      doc_id: docId,
     })
   )
 }

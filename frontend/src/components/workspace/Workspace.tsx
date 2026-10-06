@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { fadeUp } from '@/hooks/useAnimations'
 import { useAppContext } from '@/context/AppContext'
 import {
-  useCollections,
   useDeleteDocuments,
   useDocuments,
   useEnqueueTask,
   useImportDocument,
   useIngestQueue,
-  useMoveDocument,
+  usePatentAnalysis,
 } from '@/api/query/hooks'
 import { queryKeys } from '@/api/query/keys'
 import { showToast } from '@/hooks/useToast'
 import { useTranslation } from 'react-i18next'
 import {
+  FlaskIcon,
   FolderIcon,
   GridIcon,
   PdfIcon,
@@ -25,17 +25,16 @@ import {
   TableIcon,
   TrashIcon,
 } from '@/components/icons'
-import LibraryPanel from '@/components/LibraryPanel'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import InlineAlert from '@/components/ui/InlineAlert'
-import Menu, { type MenuActionItem, type MenuItem } from '@/components/ui/Menu'
+import Menu, { type MenuItem } from '@/components/ui/Menu'
 import IconButton from '@/components/ui/IconButton'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import ProgressBar from '@/components/ui/ProgressBar'
 import Skeleton from '@/components/ui/Skeleton'
 import type { DocumentInfo } from '@/api/http/library'
-import type { CollectionNode } from '@/api/http/library'
+import type { IngestTask } from '@/api/http/ingest_queue'
 import { AppError, getUserFacingError } from '@/utils/errors'
 
 type ViewMode = 'grid' | 'list'
@@ -44,26 +43,63 @@ type DocConfirmAction =
   | { doc: DocumentInfo; action: 'delete' }
   | { docs: DocumentInfo[]; action: 'delete-selected' }
 
+/** Workspace status badge presentation, keyed by the status we display. */
+const DOC_STATUS_META: Record<
+  string,
+  { tone: 'success' | 'warning' | 'danger' | 'info' | 'neutral'; cls: string; labelKey: string }
+> = {
+  pending: { tone: 'warning', cls: 'badge-pending', labelKey: 'workspace.statusPending' },
+  processing: { tone: 'info', cls: 'badge-processing', labelKey: 'workspace.statusProcessing' },
+  ready: { tone: 'success', cls: 'badge-ready', labelKey: 'workspace.statusReady' },
+  error: { tone: 'danger', cls: 'badge-error', labelKey: 'workspace.statusError' },
+  extracted: { tone: 'neutral', cls: 'badge-extracted', labelKey: 'workspace.statusExtracted' },
+}
+
+/** Queue status priority, mirroring the queue page's ordering. */
+const QUEUE_STATUS_RANK: Record<IngestTask['status'], number> = {
+  processing: 0,
+  pending: 1,
+  failed: 2,
+  cancelled: 3,
+  done: 4,
+}
+
+/** Keep the most relevant queue row per document for status overlay. */
+function buildQueueByDoc(tasks: IngestTask[]): Map<string, IngestTask> {
+  const byDoc = new Map<string, IngestTask>()
+  for (const task of tasks) {
+    if (!task.doc_id) continue
+    const current = byDoc.get(task.doc_id)
+    if (!current || QUEUE_STATUS_RANK[task.status] < QUEUE_STATUS_RANK[current.status]) {
+      byDoc.set(task.doc_id, task)
+    }
+  }
+  return byDoc
+}
+
+/** Percent of a run's stages that finished successfully (null when unknown). */
+function queueProgress(task: IngestTask | undefined): number | null {
+  if (!task) return null
+  const statuses = Object.values(task.stage_statuses)
+  if (statuses.length === 0) return null
+  const done = statuses.filter((status) => status === 'success').length
+  return Math.round((done / statuses.length) * 100)
+}
+
 type DocumentActionMenuProps = {
   doc: DocumentInfo
-  groups: CollectionNode[]
-  groupsError: boolean
-  activeCollectionId: string | null
   deletePending: boolean
-  movePending: boolean
+  patentPending: boolean
   onDelete: (doc: DocumentInfo) => void
-  onMove: (doc: DocumentInfo, targetCollectionId: string | null) => void
+  onPatentAnalyze: (doc: DocumentInfo) => void
 }
 
 function DocumentActionMenu({
   doc,
-  groups,
-  groupsError,
-  activeCollectionId,
   deletePending,
-  movePending,
+  patentPending,
   onDelete,
-  onMove,
+  onPatentAnalyze,
 }: DocumentActionMenuProps) {
   const { t } = useTranslation()
   const { libraryRoot } = useAppContext()
@@ -84,30 +120,6 @@ function DocumentActionMenu({
     }
   }
 
-  const moveItems: MenuActionItem[] = groupsError
-    ? [{ key: 'groups-error', label: t('workspace.loadGroupsFailed'), disabled: true }]
-    : groups.length === 0
-      ? [{ key: 'no-groups', label: t('doc.noGroups'), disabled: true }]
-      : [
-          {
-            key: 'move-default',
-            label: t('doc.moveToDefault'),
-            disabled: movePending || !activeCollectionId,
-            onClick: () => onMove(doc, null),
-          },
-          ...groups.map((group) => {
-            const isCurrent = activeCollectionId === group.collection_id
-            return {
-              key: group.collection_id,
-              label: group.name,
-              icon: <FolderIcon size={14} />,
-              checked: isCurrent,
-              disabled: movePending || isCurrent,
-              onClick: () => onMove(doc, group.collection_id),
-            }
-          }),
-        ]
-
   const items: MenuItem[] = [
     {
       key: 'enqueue',
@@ -115,6 +127,13 @@ function DocumentActionMenu({
       icon: <FolderIcon size={16} />,
       disabled: enqueuePending,
       onClick: handleEnqueue,
+    },
+    {
+      key: 'patent-analysis',
+      label: t('doc.patentAnalysis'),
+      icon: <FlaskIcon size={16} />,
+      disabled: patentPending,
+      onClick: () => onPatentAnalyze(doc),
     },
     { type: 'separator', key: 'sep-delete' },
     {
@@ -125,8 +144,6 @@ function DocumentActionMenu({
       disabled: deletePending,
       onClick: () => onDelete(doc),
     },
-    { type: 'separator', key: 'sep-move' },
-    { type: 'group', key: 'move-group', label: t('doc.moveToGroup'), items: moveItems },
   ]
 
   return (
@@ -152,29 +169,23 @@ function DocumentActionMenu({
 
 type DocumentItemProps = {
   doc: DocumentInfo
-  groups: CollectionNode[]
-  groupsError: boolean
-  activeCollectionId: string | null
   deletePending: boolean
-  movePending: boolean
+  patentPending: boolean
   onOpen: (doc: DocumentInfo) => void
   onDelete: (doc: DocumentInfo) => void
-  onMove: (doc: DocumentInfo, targetCollectionId: string | null) => void
+  onPatentAnalyze: (doc: DocumentInfo) => void
   selected: boolean
   onToggleSelect: (doc: DocumentInfo, selected: boolean) => void
-  statusBadge: (status: string) => ReactNode
+  statusBadge: (doc: DocumentInfo) => ReactNode
 }
 
 function DocumentCard({
   doc,
-  groups,
-  groupsError,
-  activeCollectionId,
   deletePending,
-  movePending,
+  patentPending,
   onOpen,
   onDelete,
-  onMove,
+  onPatentAnalyze,
   selected,
   onToggleSelect,
   statusBadge,
@@ -193,13 +204,10 @@ function DocumentCard({
       <div className="doc-card-menu" onClick={(event) => event.stopPropagation()}>
         <DocumentActionMenu
           doc={doc}
-          groups={groups}
-          groupsError={groupsError}
-          activeCollectionId={activeCollectionId}
           deletePending={deletePending}
-          movePending={movePending}
+          patentPending={patentPending}
           onDelete={onDelete}
-          onMove={onMove}
+          onPatentAnalyze={onPatentAnalyze}
         />
       </div>
       <button
@@ -209,7 +217,7 @@ function DocumentCard({
         onClick={() => onOpen(doc)}
       >
         <span className="doc-card-icon">
-          <PdfIcon size={32} />
+          <PdfIcon size={26} />
         </span>
         <span className="doc-card-info">
           <span className="doc-card-title" title={doc.title}>
@@ -221,7 +229,7 @@ function DocumentCard({
           </span>
         </span>
         <span className="doc-card-status">
-          {statusBadge(doc.status)}
+          {statusBadge(doc)}
         </span>
       </button>
     </article>
@@ -230,14 +238,11 @@ function DocumentCard({
 
 function DocumentRow({
   doc,
-  groups,
-  groupsError,
-  activeCollectionId,
   deletePending,
-  movePending,
+  patentPending,
   onOpen,
   onDelete,
-  onMove,
+  onPatentAnalyze,
   selected,
   onToggleSelect,
   statusBadge,
@@ -270,7 +275,7 @@ function DocumentRow({
             ? t('workspace.pages', { count: doc.page_count })
             : '—'}
         </span>
-        <span className="doc-list__status">{statusBadge(doc.status)}</span>
+        <span className="doc-list__status">{statusBadge(doc)}</span>
       </button>
       <div
         className="doc-list__menu"
@@ -278,13 +283,10 @@ function DocumentRow({
       >
         <DocumentActionMenu
           doc={doc}
-          groups={groups}
-          groupsError={groupsError}
-          activeCollectionId={activeCollectionId}
           deletePending={deletePending}
-          movePending={movePending}
+          patentPending={patentPending}
           onDelete={onDelete}
-          onMove={onMove}
+          onPatentAnalyze={onPatentAnalyze}
         />
       </div>
     </div>
@@ -318,15 +320,14 @@ export default function Workspace() {
   const { t } = useTranslation()
   const {
     libraryRoot,
-    activeCollectionId,
     openTab,
   } = useAppContext()
-  const { data, isLoading, isError } = useDocuments(activeCollectionId ?? undefined)
+  const { data, isLoading, isError } = useDocuments()
   const queryClient = useQueryClient()
   const importMutation = useImportDocument()
   const deleteMutation = useDeleteDocuments()
   const bulkEnqueueMutation = useEnqueueTask()
-  const moveMutation = useMoveDocument()
+  const patentMutation = usePatentAnalysis()
   // Documents under processing are deliberately absent from the listing, so
   // the queue is what tells the user their import is being worked on. The queue
   // holds one row per stage per run, so count distinct documents (a retry can
@@ -341,10 +342,10 @@ export default function Workspace() {
     }
     return docIds.size
   }, [queueTasks])
+  const queueByDoc = useMemo(() => buildQueueByDoc(queueTasks), [queueTasks])
   const documents = data?.documents ?? []
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(() => new Set())
   const [isDraggingFile, setIsDraggingFile] = useState(false)
-  const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadBatch, setUploadBatch] = useState<{ current: number; total: number } | null>(null)
   const [isImporting, setIsImporting] = useState(false)
@@ -364,18 +365,9 @@ export default function Workspace() {
     }
   }, [])
 
-  // All available groups, fetched once per mount. Used to populate the
-  // "Move to group" sub-menu on every doc-card.
-  const { data: groupsData, isError: groupsError } = useCollections()
-  const groups = useMemo<CollectionNode[]>(() => groupsData?.collections ?? [], [groupsData])
-  const activeGroup = groups.find(group => group.collection_id === activeCollectionId)
   const totalPages = documents.reduce((total, doc) => total + Math.max(0, doc.page_count), 0)
   const selectedDocuments = documents.filter(doc => selectedDocumentIds.has(doc.doc_id))
   const allDocumentsSelected = documents.length > 0 && selectedDocuments.length === documents.length
-
-  useEffect(() => {
-    setSelectedDocumentIds(new Set())
-  }, [activeCollectionId])
 
   const handleToggleSelect = useCallback((doc: DocumentInfo, selected: boolean) => {
     setSelectedDocumentIds(current => {
@@ -572,6 +564,19 @@ export default function Workspace() {
     }
   }
 
+  // Patent analysis is decoupled from import: the document is extensible as
+  // soon as it is extracted, and this queues a Patent-only run for each target.
+  const handlePatentAnalysis = useCallback(async (docs: DocumentInfo[]) => {
+    const docIds = docs.map((doc) => doc.doc_id)
+    if (docIds.length === 0) return
+    try {
+      const result = await patentMutation.mutateAsync(docIds)
+      showToast(t('workspace.patentAnalysisSuccess', { count: result.enqueued }), 'success')
+    } catch (e) {
+      showToast(t('workspace.patentAnalysisError', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
+    }
+  }, [patentMutation, t])
+
   const confirmDocAction = useCallback(async (target: DocConfirmAction) => {
     setPendingConfirm(null)
     if (target.action === 'delete-selected') await handleDeleteSelected(target.docs)
@@ -587,44 +592,40 @@ export default function Workspace() {
     ? t('workspace.deleteSelected', { count: pending.docs.length })
     : confirmDialogTitle
 
-  const handleMoveToGroup = useCallback(async (doc: DocumentInfo, targetCollectionId: string | null) => {
-    const groupName = targetCollectionId
-      ? groups.find(g => g.collection_id === targetCollectionId)?.name ?? ''
-      : ''
-    try {
-      await moveMutation.mutateAsync({
-        docId: doc.doc_id,
-        fromCollectionId: activeCollectionId ?? null,
-        toCollectionId: targetCollectionId,
-      })
-      if (targetCollectionId) {
-        showToast(t('doc.moveSuccess', { filename: doc.file_name, name: groupName }), 'success')
-      } else {
-        showToast(t('doc.moveUnassigned', { filename: doc.file_name }), 'success')
-      }
-    } catch (e) {
-      showToast(t('doc.moveError', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
-    }
-  }, [moveMutation, groups, activeCollectionId, t])
-
-  const statusBadge = (status: string) => {
-    const displayStatus = status === 'indexing' ? 'pending' : status
-    const tone = displayStatus === 'ready' ? 'success' : displayStatus === 'error' ? 'danger' : 'warning'
-    const cls = displayStatus === 'ready' ? 'badge-ready' :
-                displayStatus === 'error' ? 'badge-error' : 'badge-pending'
-    return <Badge tone={tone} className={`doc-status-badge ${cls}`}>{displayStatus}</Badge>
+  const statusBadge = (doc: DocumentInfo) => {
+    const task = queueByDoc.get(doc.doc_id)
+    // A live queue row ("pending"/"processing") reflects the run in progress;
+    // otherwise fall back to the document's resting status.
+    const status =
+      task && (task.status === 'processing' || task.status === 'pending')
+        ? task.status
+        : doc.status === 'indexing'
+          ? 'pending'
+          : doc.status
+    const meta = DOC_STATUS_META[status] ?? DOC_STATUS_META.pending
+    const progress = task && task.status === 'processing' ? queueProgress(task) : null
+    return (
+      <span className="doc-status">
+        <Badge tone={meta.tone} className={`doc-status-badge ${meta.cls}`}>
+          {t(meta.labelKey)}
+        </Badge>
+        {progress !== null && (
+          <span
+            className="doc-status-progress"
+            aria-label={t('workspace.processingProgress', { percent: progress })}
+          >
+            <span className="doc-status-progress__bar" aria-hidden>
+              <span
+                className="doc-status-progress__fill"
+                style={{ width: `${progress}%` }}
+              />
+            </span>
+            {progress}%
+          </span>
+        )}
+      </span>
+    )
   }
-
-  // Build a name lookup once per render for the "Move to group" menu.
-  // Reserved for future per-group badge copy; the inline menu already
-  // reads ``group.name`` directly, so the lookup is currently unused.
-  // const groupNameById = useMemo(() => {
-  //   const map = new Map<string, string>()
-  //   for (const group of groups) {
-  //     map.set(group.collection_id, group.name)
-  //   }
-  //   return map
-  // }, [groups])
 
   const renderGrid = () => (
     <div className="doc-grid">
@@ -632,14 +633,11 @@ export default function Workspace() {
         <DocumentCard
           key={doc.doc_id}
           doc={doc}
-          groups={groups}
-          groupsError={groupsError}
-          activeCollectionId={activeCollectionId}
           deletePending={deleteMutation.isPending}
-          movePending={moveMutation.isPending}
+          patentPending={patentMutation.isPending}
           onOpen={handleOpenDocument}
           onDelete={(document) => setPendingConfirm({ doc: document, action: 'delete' })}
-          onMove={(document, target) => void handleMoveToGroup(document, target)}
+          onPatentAnalyze={(document) => void handlePatentAnalysis([document])}
           selected={selectedDocumentIds.has(doc.doc_id)}
           onToggleSelect={handleToggleSelect}
           statusBadge={statusBadge}
@@ -662,14 +660,11 @@ export default function Workspace() {
         <DocumentRow
           key={doc.doc_id}
           doc={doc}
-          groups={groups}
-          groupsError={groupsError}
-          activeCollectionId={activeCollectionId}
           deletePending={deleteMutation.isPending}
-          movePending={moveMutation.isPending}
+          patentPending={patentMutation.isPending}
           onOpen={handleOpenDocument}
           onDelete={(document) => setPendingConfirm({ doc: document, action: 'delete' })}
-          onMove={(document, target) => void handleMoveToGroup(document, target)}
+          onPatentAnalyze={(document) => void handlePatentAnalysis([document])}
           selected={selectedDocumentIds.has(doc.doc_id)}
           onToggleSelect={handleToggleSelect}
           statusBadge={statusBadge}
@@ -680,28 +675,16 @@ export default function Workspace() {
 
   return (
     <motion.div
-      className={`workspace-page${isLibraryCollapsed ? ' workspace-page--library-collapsed' : ''}`}
+      className="workspace-page"
       variants={fadeUp}
       initial="hidden"
       animate="visible"
     >
-      <aside
-        className={`workspace-library${isLibraryCollapsed ? ' workspace-library--collapsed' : ''}`}
-        aria-label={t('library.title')}
-      >
-        <LibraryPanel
-          collapsed={isLibraryCollapsed}
-          onToggleCollapsed={() => setIsLibraryCollapsed((collapsed) => !collapsed)}
-        />
-      </aside>
       <section className="workspace-documents">
         <div className="workspace-toolbar">
           <div className="workspace-summary" aria-label={t('workspace.summary')}>
             <span>{t('workspace.documentCount', { count: documents.length })}</span>
             <span>{t('workspace.pageCount', { count: totalPages })}</span>
-            <span className="workspace-summary__group">
-              {activeGroup?.name ?? t('library.allDocuments')}
-            </span>
           </div>
           <div className="workspace-toolbar-actions">
             {documents.length > 0 && (
@@ -728,6 +711,19 @@ export default function Workspace() {
                     {isEnqueueingSelected
                       ? t('workspace.enqueueingSelected')
                       : t('workspace.enqueueSelected', { count: selectedDocuments.length })}
+                  </Button>
+                )}
+                {selectedDocuments.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<FlaskIcon size={16} />}
+                    onClick={() => void handlePatentAnalysis(selectedDocuments)}
+                    disabled={deleteMutation.isPending || patentMutation.isPending}
+                  >
+                    {patentMutation.isPending
+                      ? t('workspace.patentAnalyzingSelected')
+                      : t('workspace.patentAnalysisSelected', { count: selectedDocuments.length })}
                   </Button>
                 )}
                 {selectedDocuments.length > 0 && (
@@ -834,11 +830,9 @@ export default function Workspace() {
             <div className="workspace-empty-desc">
               {processingCount > 0
                 ? t('library.processingOnlyHint')
-                : activeCollectionId
-                  ? t('library.emptyCollection')
-                  : t('library.emptyImportHint')}
+                : t('library.emptyImportHint')}
             </div>
-            {!activeCollectionId && processingCount === 0 && (
+            {processingCount === 0 && (
               <div
                 className={`workspace-drop-zone${isDraggingFile ? ' is-dragging' : ''}`}
                 onDragEnter={(event) => {

@@ -11,7 +11,6 @@ import App from '@/App'
 vi.mock('@/api/http/library', () => ({
   getLibraryStatus: vi.fn().mockResolvedValue({ configured: false, root: '', doc_count: 0 }),
   listDocuments: vi.fn().mockResolvedValue({ documents: [] }),
-  listCollections: vi.fn().mockResolvedValue({ collections: [] }),
   importDocument: vi.fn(),
   deleteDocuments: vi.fn(),
 }))

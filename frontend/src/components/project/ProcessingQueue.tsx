@@ -10,7 +10,7 @@ import { LoadingState } from '../ui/LoadingState'
 import EmptyState from '../ui/EmptyState'
 import InlineAlert from '../ui/InlineAlert'
 import ConfirmDialog from '../ui/ConfirmDialog'
-import { QueueIcon, RefreshCwIcon, TrashIcon, XIcon } from '../icons'
+import { QueueIcon, RefreshCwIcon, XIcon } from '../icons'
 import { WorkerStatusBadge } from './WorkerStatusBadge'
 import { StatPill } from './StatPill'
 import { TaskRow } from './TaskRow'
@@ -29,8 +29,6 @@ import {
   useDeleteTask,
   useCancelBatch,
   useRetryBatch,
-  useDeleteBatch,
-  useCleanupTasks,
   useSetTaskPriority,
 } from '@/api/query/hooks'
 import { useIngestSSE } from '@/api/query/useIngestSSE'
@@ -60,8 +58,6 @@ const EMPTY_LOGS: IngestLogEvent[] = []
 
 type QueueConfirm =
   | { type: 'cancel-all' }
-  | { type: 'cleanup' }
-  | { type: 'cleanup-failed-cancelled'; runIds: string[] }
   | { type: 'delete'; task: IngestTask }
   | null
 
@@ -75,10 +71,6 @@ export default function ProcessingQueue() {
   const { data: workerData } = useWorkerStatus()
   const workerStatus = workerData?.status === 'online' ? 'online' : 'offline' as 'online' | 'offline' | 'unknown'
   const queueTasks = useMemo(() => deduplicateTasksByDocId(tasks), [tasks])
-  const failedCancelledRunIds = useMemo(
-    () => deduplicateRunIds(queueTasks.filter((task) => task.status === 'failed' || task.status === 'cancelled')),
-    [queueTasks],
-  )
 
   // ── Local UI state ────────────────────────────────────────────
   const [actionId, setActionId] = useState<string | null>(null)
@@ -86,7 +78,7 @@ export default function ProcessingQueue() {
   const [hideDone, setHideDone] = useState(true)
   const [logMap, setLogMap] = useState<Map<string, IngestLogEvent[]>>(new Map())
   const [expandedLogDocs, setExpandedLogDocs] = useState<Set<string>>(new Set())
-  const [bulkAction, setBulkAction] = useState<'retry' | 'cancel' | 'delete' | null>(null)
+  const [bulkAction, setBulkAction] = useState<'retry' | 'cancel' | null>(null)
   const [confirm, setConfirm] = useState<QueueConfirm>(null)
 
   const refreshQueue = useCallback(() => {
@@ -179,8 +171,6 @@ export default function ProcessingQueue() {
   const deleteMutation = useDeleteTask()
   const cancelBatchMutation = useCancelBatch()
   const retryBatchMutation = useRetryBatch()
-  const deleteBatchMutation = useDeleteBatch()
-  const cleanupMutation = useCleanupTasks()
   const priorityMutation = useSetTaskPriority()
 
   // ── Action handlers ───────────────────────────────────────────
@@ -266,39 +256,6 @@ export default function ProcessingQueue() {
       refreshQueue()
     }
   }, [libraryRoot, refreshQueue, t, queueTasks, cancelBatchMutation])
-
-  const runCleanup = useCallback(async () => {
-    if (!libraryRoot) return
-    setConfirm(null)
-    try {
-      const removed = await cleanupMutation.mutateAsync(libraryRoot)
-      showToast(t('queue.cleanedUp', { count: removed }), 'success')
-    } catch (e) {
-      logger.error('[ProcessingQueue] cleanup failed:', e)
-      showToast(t('queue.cleanupFailed', { error: getUserFacingError(e) }), 'error')
-    } finally {
-      refreshQueue()
-    }
-  }, [libraryRoot, refreshQueue, t, cleanupMutation])
-
-  const runDeleteFailedCancelled = useCallback(async (runIds: string[]) => {
-    if (!libraryRoot) return
-    setConfirm(null)
-    setBulkAction('delete')
-    try {
-      const result = await deleteBatchMutation.mutateAsync({ libraryRoot, runIds })
-      showToast(
-        t('queue.bulkDeleteDone', { deleted: result.updated, skipped: result.skipped }),
-        result.skipped > 0 ? 'warning' : 'success',
-      )
-    } catch (error) {
-      logger.error('[ProcessingQueue] batch delete failed:', error)
-      showToast(t('queue.bulkDeleteFailed', { error: getUserFacingError(error) }), 'error')
-    } finally {
-      setBulkAction(null)
-      refreshQueue()
-    }
-  }, [libraryRoot, refreshQueue, t, deleteBatchMutation])
 
   const handleSetPriority = useCallback(
     async (task: IngestTask) => {
@@ -417,27 +374,8 @@ export default function ProcessingQueue() {
                 />
                 <span className="queue-hide-done-label">{t('queue.hideDone')}</span>
               </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<TrashIcon size={14} />}
-                onClick={() => setConfirm({ type: 'cleanup' })}
-                disabled={!stats || stats.done === 0}
-              >
-                {t('queue.cleanupDone')}
-              </Button>
               {queueTasks.length > 0 && (
                 <div className="queue-bulk-actions" role="toolbar" aria-label={t('queue.bulkActions')}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={<TrashIcon size={14} />}
-                    onClick={() => setConfirm({ type: 'cleanup-failed-cancelled', runIds: failedCancelledRunIds })}
-                    loading={bulkAction === 'delete'}
-                    disabled={bulkAction !== null || actionId !== null || failedCancelledRunIds.length === 0}
-                  >
-                    {t('queue.cleanupFailedCancelled')}
-                  </Button>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -572,18 +510,14 @@ export default function ProcessingQueue() {
 
       <ConfirmDialog
         open={confirm !== null}
-        title={confirm === null ? '' : confirm.type === 'cancel-all' ? t('queue.cancelAllPending') : confirm.type === 'cleanup' ? t('queue.cleanupDone') : confirm.type === 'cleanup-failed-cancelled' ? t('queue.cleanupFailedCancelled') : t('queue.deleteTask')}
+        title={confirm === null ? '' : confirm.type === 'cancel-all' ? t('queue.cancelAllPending') : t('queue.deleteTask')}
         message={confirm === null ? '' : confirm.type === 'cancel-all'
           ? t('queue.cancelAllConfirm', { count: queueTasks.filter((task) => task.status === 'pending').length })
-          : confirm.type === 'cleanup' ? t('queue.cleanupConfirm')
-            : confirm.type === 'cleanup-failed-cancelled' ? t('queue.cleanupFailedCancelledConfirm', { count: confirm.runIds.length })
-              : t('queue.deleteConfirm')}
+          : t('queue.deleteConfirm')}
         confirmLabel={confirm === null ? '' : confirm.type === 'delete' ? t('queue.deleteTask') : t('common.confirm')}
         loading={bulkAction !== null || actionId !== null}
         onConfirm={() => {
           if (confirm?.type === 'cancel-all') void runCancelAllPending()
-          else if (confirm?.type === 'cleanup') void runCleanup()
-          else if (confirm?.type === 'cleanup-failed-cancelled') void runDeleteFailedCancelled(confirm.runIds)
           else if (confirm?.type === 'delete') void runDelete(confirm.task)
         }}
         onCancel={() => setConfirm(null)}

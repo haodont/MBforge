@@ -2,7 +2,7 @@
 
 .app-shell {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   background: var(--bg-base);
@@ -54,8 +54,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   margin-bottom: 8px;
   padding: 0;
   border: 0;
@@ -99,8 +99,8 @@
 .app-sidebar__nav-button {
   position: relative;
   display: flex;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   align-items: center;
   justify-content: center;
   padding: 0;
@@ -131,7 +131,7 @@
 .app-sidebar__nav-button.is-active::before {
   content: '';
   position: absolute;
-  left: -8px;
+  left: -6px;
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
@@ -254,7 +254,7 @@
   bottom: 0;
   z-index: 50;
   display: flex;
-  width: min(440px, calc(100vw - 56px));
+  width: min(440px, calc(100vw - 48px));
   flex-direction: column;
   background: var(--bg-base);
   border-left: 1px solid var(--border);
@@ -308,7 +308,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  left: 56px;
+  left: 48px;
   z-index: 50;
   display: flex;
   flex-direction: column;
@@ -361,7 +361,7 @@
 
 @media (max-width: 767px) {
   .app-shell__agent-panel {
-    width: min(440px, calc(100vw - 48px));
+    width: min(440px, calc(100vw - 44px));
   }
 }
 
@@ -379,7 +379,7 @@
 /* Tablet:收紧侧栏，把更多空间让给内容 */
 @media (max-width: 1023px) {
   .app-shell {
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 44px minmax(0, 1fr);
   }
 
   .app-sidebar__nav-button.is-active::before {
@@ -387,7 +387,7 @@
   }
 
   .app-shell__agent-fullscreen {
-    left: 48px;
+    left: 44px;
   }
 }
 

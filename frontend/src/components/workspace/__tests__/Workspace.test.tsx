@@ -6,19 +6,14 @@ vi.mock('@/api/query/hooks', () => ({
   useDocuments: vi.fn(),
   useImportDocument: vi.fn(),
   useDeleteDocuments: vi.fn(),
-  useCollections: vi.fn(),
-  useMoveDocument: vi.fn(),
   useEnqueueTask: vi.fn(),
   useIngestQueue: vi.fn(),
+  usePatentAnalysis: vi.fn(),
 }))
 
 vi.mock('@/context/AppContext', () => ({
   useAppContext: vi.fn(),
   AppProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
-
-vi.mock('@/components/LibraryPanel', () => ({
-  default: () => <div data-testid="workspace-library-panel" />,
 }))
 
 // i18n mock — return key as-is when t() is called, with English fallback for common keys.
@@ -37,7 +32,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 import { useDocuments, useImportDocument, useDeleteDocuments } from '@/api/query/hooks'
-import { useCollections, useMoveDocument, useEnqueueTask, useIngestQueue } from '@/api/query/hooks'
+import { useEnqueueTask, useIngestQueue, usePatentAnalysis } from '@/api/query/hooks'
 import { useAppContext } from '@/context/AppContext'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createQueryClient } from '@/api/query/client'
@@ -46,7 +41,6 @@ import Workspace from '../Workspace'
 function mockAppContext(overrides?: Record<string, unknown>) {
   vi.mocked(useAppContext).mockReturnValue({
     libraryRoot: '/tmp/lib',
-    activeCollectionId: null,
     openTab: vi.fn(),
     ...overrides,
   } as unknown as ReturnType<typeof useAppContext>)
@@ -67,22 +61,6 @@ function mockDeleteDocuments() {
     mutateAsync: vi.fn(),
     isPending: false,
   } as unknown as ReturnType<typeof useDeleteDocuments>)
-}
-
-function mockCollections(collections: { collection_id: string; name: string }[] = []) {
-  vi.mocked(useCollections).mockReturnValue({
-    data: { collections },
-    isLoading: false,
-    isError: false,
-    error: null,
-  } as unknown as ReturnType<typeof useCollections>)
-}
-
-function mockMoveDocument() {
-  vi.mocked(useMoveDocument).mockReturnValue({
-    mutateAsync: vi.fn(),
-    isPending: false,
-  } as unknown as ReturnType<typeof useMoveDocument>)
 }
 
 function renderWorkspace() {
@@ -114,14 +92,15 @@ describe('Workspace', () => {
     vi.mocked(useIngestQueue).mockReturnValue({
       data: [],
     } as unknown as ReturnType<typeof useIngestQueue>)
+    vi.mocked(usePatentAnalysis).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof usePatentAnalysis>)
     mockDeleteDocuments()
-    mockCollections([])
-    mockMoveDocument()
   })
 
   it('shows loading state', () => {
     renderWorkspace()
-    expect(screen.getByTestId('workspace-library-panel')).toBeInTheDocument()
     expect(screen.getByTestId('workspace-skeleton')).toHaveAttribute('aria-busy', 'true')
   })
 
@@ -184,7 +163,7 @@ describe('Workspace', () => {
     expect(screen.getByLabelText('workspace.summary')).toBeInTheDocument()
     expect(screen.getByText('workspace.documentCount')).toHaveTextContent('workspace.documentCount')
     expect(screen.getByText('workspace.pageCount')).toHaveTextContent('workspace.pageCount')
-    expect(screen.getByLabelText('workspace.summary').children).toHaveLength(3)
+    expect(screen.getByLabelText('workspace.summary').children).toHaveLength(2)
   })
 
   it('shows error state when query fails', () => {
@@ -199,7 +178,7 @@ describe('Workspace', () => {
     expect(screen.getByText('Retry')).toBeInTheDocument()
   })
 
-  it('shows import button in empty state when no collection filter', () => {
+  it('shows import buttons in the empty state', () => {
     mockDocuments([])
     renderWorkspace()
     const importBtns = screen.getAllByText('library.importPdf')
@@ -250,24 +229,20 @@ describe('Workspace', () => {
     expect(deleteDocuments).toHaveBeenCalledWith(['doc1'])
   })
 
-  it('keeps the document when deletion is cancelled', async () => {
-    const deleteDocuments = vi.fn()
-    vi.mocked(useDeleteDocuments).mockReturnValue({
-      mutateAsync: deleteDocuments,
+  it('queues patent analysis from the document menu', async () => {
+    const patentAnalysis = vi.fn().mockResolvedValue({ success: true, enqueued: 1, skipped: 0 })
+    vi.mocked(usePatentAnalysis).mockReturnValue({
+      mutateAsync: patentAnalysis,
       isPending: false,
-    } as unknown as ReturnType<typeof useDeleteDocuments>)
-    mockDocuments([{ doc_id: 'doc1', title: 'Kept Doc', status: 'pending' }])
+    } as unknown as ReturnType<typeof usePatentAnalysis>)
+    mockDocuments([{ doc_id: 'doc1', title: 'Analyze Me', status: 'extracted' }])
     renderWorkspace()
 
     screen.getByRole('button', { name: 'doc.actions' }).click()
-    const deleteButton = await screen.findByRole('menuitem', { name: 'doc.delete' })
-    deleteButton.click()
-    // Cancel the dialog (cancel button label is the default 取消).
-    const cancel = await screen.findByRole('button', { name: /取消/ })
-    cancel.click()
+    const analyzeItem = await screen.findByRole('menuitem', { name: 'doc.patentAnalysis' })
+    analyzeItem.click()
 
-    expect(deleteDocuments).not.toHaveBeenCalled()
-    expect(screen.getByText('Kept Doc')).toBeInTheDocument()
+    expect(patentAnalysis).toHaveBeenCalledWith(['doc1'])
   })
 
 })

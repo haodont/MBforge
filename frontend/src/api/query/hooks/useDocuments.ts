@@ -1,20 +1,20 @@
 /** React Query hooks for document CRUD. */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listDocuments, importDocument, deleteDocuments } from '../../http/library'
+import { listDocuments, importDocument, deleteDocuments, runPatentAnalysis } from '../../http/library'
 import type { DocumentInfo } from '../../http/library'
 import { queryKeys } from '../keys'
 
 /**
- * List documents, optionally filtered by collection.
+ * List documents in the library.
  *
  * The document list changes when the user imports / deletes / refreshes,
  * so we keep the default staleTime.
  */
-export function useDocuments(collectionId?: string) {
+export function useDocuments() {
   return useQuery({
-    queryKey: queryKeys.documents.list(collectionId),
-    queryFn: () => listDocuments(collectionId),
+    queryKey: queryKeys.documents.list(),
+    queryFn: () => listDocuments(),
   })
 }
 
@@ -69,6 +69,26 @@ export function useDeleteDocuments() {
       // The document's molecules may sit in the review center queue; drop
       // those cached rows so an open review center does not show stale items.
       void qc.invalidateQueries({ queryKey: queryKeys.review.all })
+    },
+  })
+}
+
+/**
+ * Queue Patent analysis for one or more documents.
+ *
+ * Patent analysis is decoupled from import (which only extracts the document),
+ * so the workspace triggers it on demand. Invalidate the document list (a
+ * document moves from `extracted` to `ready` when the run finishes) and the
+ * queue (the new runs appear there).
+ */
+export function usePatentAnalysis() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: (docIds: string[]) => runPatentAnalysis(docIds),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
+      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
     },
   })
 }

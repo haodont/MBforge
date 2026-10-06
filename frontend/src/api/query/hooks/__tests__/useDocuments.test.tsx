@@ -38,13 +38,10 @@ describe('useDeleteDocuments', () => {
     vi.clearAllMocks()
   })
 
-  it('removes a document from every cached collection immediately', async () => {
+  it('removes a deleted document from the cached list immediately', async () => {
     const client = createQueryClient()
     client.setQueryData(queryKeys.documents.list(), {
       documents: [makeDocument('doc-1'), makeDocument('doc-2')],
-    })
-    client.setQueryData(queryKeys.documents.list('collection-a'), {
-      documents: [makeDocument('doc-1')],
     })
     client.setQueryData(queryKeys.review.all, { stale: 'review-cache' })
     deleteDocumentsMock.mockResolvedValue({ success: true })
@@ -60,9 +57,6 @@ describe('useDeleteDocuments', () => {
     await waitFor(() => {
       expect(client.getQueryData(queryKeys.documents.list())).toEqual({
         documents: [makeDocument('doc-2')],
-      })
-      expect(client.getQueryData(queryKeys.documents.list('collection-a'))).toEqual({
-        documents: [],
       })
     })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))

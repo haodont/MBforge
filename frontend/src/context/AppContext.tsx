@@ -118,10 +118,6 @@ interface AppState {
   libraryRoot: string
   /** Set library root (persists to localStorage) */
   setLibraryRoot: (root: string) => void
-  /** Active collection filter (null = show all) */
-  activeCollectionId: string | null
-  /** Set active collection filter */
-  setActiveCollectionId: (id: string | null) => void
   /** 通过全局文件树选中的待打开文件 */
   activeFile: ActiveFile | null
   /** 设置待打开文件（ProjectView 消费后应置空） */
@@ -155,7 +151,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null)
   const [{ openTabs, activeTabId }, dispatchTabs] = useReducer(tabsReducer, initialTabsState)
-  const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null)
 
   const setLibraryRoot = useCallback((root: string) => {
     setLibraryRootState(root)
@@ -179,8 +174,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       value={{
         libraryRoot,
         setLibraryRoot,
-        activeCollectionId,
-        setActiveCollectionId,
         activeFile,
         setActiveFile,
         openTabs,
