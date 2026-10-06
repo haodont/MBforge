@@ -481,8 +481,10 @@ class _FakeRuntime:
         return None
 
 
-def _seed_document_and_run(root: str, doc_id: str, run_id: str) -> str:
-    """Register a document and its single-stage run; return the claimed node id."""
+def _seed_document_and_run(
+    root: str, doc_id: str, run_id: str, stages: list[str] | None = None
+) -> str:
+    """Register a document and its run; return the first claimed node id."""
     from mbforge.db import document_records
     from mbforge.server.ingest import queue
 
@@ -496,7 +498,13 @@ def _seed_document_and_run(root: str, doc_id: str, run_id: str) -> str:
             "created_at": "2026-01-01 00:00:00",
         },
     )
-    queue.insert_dag(root, file_path=f"{doc_id}.pdf", doc_id=doc_id, run_id=run_id)
+    queue.insert_dag(
+        root,
+        file_path=f"{doc_id}.pdf",
+        doc_id=doc_id,
+        run_id=run_id,
+        stages=stages,
+    )
     return worker._claim_rows(root, "w", 8)[0]["id"]
 
 
@@ -507,19 +515,37 @@ def _document_status(root: str, doc_id: str) -> str | None:
     return None if row is None else row["status"]
 
 
-def test_run_pipeline_sync_marks_document_ready_after_final_stage(
+def test_run_pipeline_sync_marks_document_extracted_without_patent(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """A run whose every stage succeeded publishes the document to the workspace."""
+    """A run that did not schedule Patent rests at ``extracted`` (readable, not analyzed)."""
     import mbforge.service.ports as service_ports
 
     root = _library(tmp_path)
     DatabaseManager.get(root).initialize()
     monkeypatch.setattr(service_ports, "get_pipeline_runtime", _FakeRuntime)
-    task_id = _seed_document_and_run(root, "doc-ready", "run-1")
+    task_id = _seed_document_and_run(root, "doc-extracted", "run-1", stages=["extract"])
 
     worker._run_pipeline_sync(
-        "doc-ready.pdf", root, "doc-ready", task_id, "extract", "run-1"
+        "doc-extracted.pdf", root, "doc-extracted", task_id, "extract", "run-1"
+    )
+
+    assert _document_status(root, "doc-extracted") == "extracted"
+
+
+def test_run_pipeline_sync_marks_document_ready_when_run_has_patent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A Patent run publishes the document as fully analyzed (``ready``)."""
+    import mbforge.service.ports as service_ports
+
+    root = _library(tmp_path)
+    DatabaseManager.get(root).initialize()
+    monkeypatch.setattr(service_ports, "get_pipeline_runtime", _FakeRuntime)
+    task_id = _seed_document_and_run(root, "doc-ready", "run-1", stages=["patent"])
+
+    worker._run_pipeline_sync(
+        "doc-ready.pdf", root, "doc-ready", task_id, "patent", "run-1"
     )
 
     assert _document_status(root, "doc-ready") == "ready"

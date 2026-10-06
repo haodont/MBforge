@@ -43,14 +43,24 @@ logs, and retry.
 The worker writes the status — not the per-stage event sink, whose `complete`
 event fires once per stage and would mark a document ready early:
 
-- run finalization (`all_stages_done` + `claim_finalize`) → `ready`
+- run finalization (`all_stages_done` + `claim_finalize`) → `ready` when the
+  run includes the `patent` stage, otherwise `extracted`
 - stage failure, or a finalization that cannot publish → `error`
-- cancellation → `pending` (no outcome exists, so the document stays hidden)
+- cancellation → `pending` (no outcome exists; the document stays visible as
+  "待处理")
 
-`TERMINAL_DOCUMENT_STATUSES` in `src/mbforge/domain/document.py` names the
-visible statuses; the document listing, `doc_count`, and collection counts all
-filter on it so no count advertises a document the user cannot see. Re-import
-is the supported way to repair a legacy `pending` row.
+Import runs the pipeline through Extract + Markdown only: the document is listed
+as soon as it is imported (resting at `pending`, shown as "待处理") and becomes
+`extracted` once it is readable; Patent analysis is triggered separately (per
+document or in batch) with a `patent`-only run. A `patent`-only run rebuilds its
+context from the SQL `source_evidence` rows Extract wrote.
+
+`VISIBLE_DOCUMENT_STATUSES` in `src/mbforge/domain/document.py` names the
+visible statuses (`pending`, `extracted`, `ready`, `error`); the document
+listing, `doc_count`, and collection counts all filter on it so no count
+advertises a document the user cannot see. Deleting a queue task discards that
+run's results and returns the document to `pending`; only deleting the document
+itself removes its source PDF.
 
 Model loading is lazy. Tests use mocked or unavailable model capabilities and
 must not download weights or require a GPU.

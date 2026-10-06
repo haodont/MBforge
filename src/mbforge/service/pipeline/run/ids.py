@@ -14,6 +14,7 @@ persists straight to SQL, so this module only mints run IDs.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -23,15 +24,23 @@ from mbforge.foundation.layout import LibraryLayout
 RUN_ID_FORMAT = "%Y%m%d%H%M%S"
 
 
-def mint_run_id(library_root: str | Path, doc_id: str) -> str:
+def mint_run_id(
+    library_root: str | Path,
+    doc_id: str,
+    *,
+    extra_used: Iterable[str] = (),
+) -> str:
     """Mint a UTC ``YYYYMMDDHHMMSS`` run ID unique within *doc_id*.
 
-    Uniqueness is enforced against published run directories and active
-    staging-file run IDs;
-    on collision the timestamp is advanced one second at a time.
+    Uniqueness is enforced against published run directories, active
+    staging-file run IDs, and *extra_used* (callers pass the run IDs already
+    present in the ingest queue, so two enqueues in the same wall-clock second
+    never share an ID); on collision the timestamp is advanced one second at a
+    time.
     """
     layout = LibraryLayout(library_root)
     used = _existing_run_ids(layout.runs_dir(doc_id), layout.storage_dir(doc_id))
+    used.update(extra_used)
     now = datetime.now(UTC)
     candidate = now.strftime(RUN_ID_FORMAT)
     while candidate in used:

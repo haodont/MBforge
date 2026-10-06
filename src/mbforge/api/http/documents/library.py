@@ -271,15 +271,23 @@ async def library_get_document_evidence(
         {"library_root": library_root} if library_root else None
     )
     validate_doc_id(doc_id)
-    evidence = await asyncio.to_thread(
-        source_evidence.list_evidence,
+    annotated = await asyncio.to_thread(
+        source_evidence.list_page_evidence_with_paragraphs,
         root,
         doc_id,
         page,
     )
     return [
-        LibraryEvidenceItem(**item.to_dict(), category=category_of(item.kind))
-        for item in evidence
+        LibraryEvidenceItem(
+            **entry.evidence.to_dict(),
+            category=category_of(entry.evidence.kind),
+            paragraph_id=entry.paragraph_id,
+            paragraph_number=entry.paragraph_number,
+            paragraph_start=entry.paragraph_start,
+            paragraph_line=entry.paragraph_line,
+            indent_level=entry.indent_level,
+        )
+        for entry in annotated
     ]
 
 

@@ -397,6 +397,25 @@ def collect_all_summaries(
     return result
 
 
+def _load_published_report(library_root: str | Path, doc_id: str) -> dict[str, Any]:
+    """Load the current ``document_report.json`` as a base, or ``{}``.
+
+    Decoupled runs publish one stage subset at a time (import → Extract +
+    Markdown, then a Patent-only run), and each promotion discards staging, so
+    the new run's summaries only cover its own stages. Merging onto the
+    published report keeps earlier stages' metadata instead of resetting it.
+    """
+    path = LibraryLayout(library_root).report_json(doc_id)
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to load existing report %s: %s", path, exc)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def merge_report(
     staging_dir: Path | None,
     *,
@@ -408,12 +427,14 @@ def merge_report(
     The report is the authoritative ``document_report.json`` content.
     It consolidates per-stage timing, status, and statistics into one
     JSON-serializable dict that the caller writes to
-    ``storage/{doc_id}/document_report.json``.
+    ``storage/{doc_id}/document_report.json``. The previously published
+    report is the base, so a run that schedules only some stages (e.g. a
+    Patent-only analysis) preserves the other stages' entries and metadata.
     """
 
+    base = _load_published_report(library_root, doc_id)
     summaries = collect_all_summaries(staging_dir)
-    stages_payload: dict[str, Any] = {}
-    total_duration_ms = 0
+    stages_payload: dict[str, Any] = dict(base.get("stages") or {})
     for name in effective_stage_names():
         s = summaries.get(name)
         if s is None:
@@ -424,23 +445,33 @@ def merge_report(
             "message": s.get("message", ""),
             "context": s.get("context"),
         }
-        total_duration_ms += s.get("elapsed_ms", 0)
+    total_duration_ms = sum(
+        int(entry.get("elapsed_ms", 0) or 0)
+        for entry in stages_payload.values()
+        if isinstance(entry, dict)
+    )
 
-    # The current endpoint is Patent; later persistence will define its own
-    # report projection.
+    # The current endpoint is Patent; the report keeps its stats and falls
+    # back to the previously published values when this run did not run Patent.
     endpoint_ctx = summaries.get("patent", {}).get("context") or {}
     extract_ctx = summaries.get("extract", {}).get("context") or {}
 
     report: dict[str, Any] = {
         "doc_id": doc_id,
-        "page_count": extract_ctx.get("page_count", 0),
-        "parser": extract_ctx.get("parser", ""),
-        "title": extract_ctx.get("title", ""),
+        "page_count": extract_ctx.get("page_count", base.get("page_count", 0)),
+        "parser": extract_ctx.get("parser", base.get("parser", "")),
+        "title": extract_ctx.get("title", base.get("title", "")),
         "duration_ms": total_duration_ms,
         "stages": stages_payload,
-        "molecule_count": endpoint_ctx.get("molecule_count", 0),
-        "activity_count": endpoint_ctx.get("measurement_count", 0),
-        "structure_role_counts": endpoint_ctx.get("structure_role_counts"),
+        "molecule_count": endpoint_ctx.get(
+            "molecule_count", base.get("molecule_count", 0)
+        ),
+        "activity_count": endpoint_ctx.get(
+            "measurement_count", base.get("activity_count", 0)
+        ),
+        "structure_role_counts": endpoint_ctx.get(
+            "structure_role_counts", base.get("structure_role_counts")
+        ),
     }
 
     return report

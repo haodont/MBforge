@@ -357,12 +357,45 @@ def test_pipeline_bulk_queue_actions_update_only_eligible_tasks(
     assert retry.json()["updated"] == 1
     assert retry.json()["skipped"] == 1
 
-    cleanup = client.post(
-        "/api/v1/pipeline/queue/cleanup",
+
+def test_pipeline_delete_task_resets_document_and_keeps_source(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """Deleting a queue task discards its outputs but keeps the source PDF."""
+    from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.foundation.layout import LibraryLayout
+    from mbforge.service.use_cases.documents.library import LibraryStore
+
+    root = tmp_path / "library"
+    store = LibraryStore.get(str(root))
+    src = tmp_path / "source.pdf"
+    src.write_bytes(b"%PDF-1.4 fake pdf")
+    doc = store.add_document(src)
+    layout = LibraryLayout(str(root))
+    store.update_document_status(doc.doc_id, "ready")
+    layout.document_md(doc.doc_id).write_text("# processed")
+
+    # Seed a finished run for the document, independent of auto-enqueue.
+    db = DatabaseManager.get(str(root))
+    with db.kb_conn() as conn:
+        conn.execute(
+            "INSERT INTO ingest_queue (id, file_path, doc_id, stage, run_id, status) "
+            "VALUES ('node-1', ?, ?, 'extract', 'run-delete', 'done')",
+            (str(src), doc.doc_id),
+        )
+
+    resp = client.post(
+        "/api/v1/pipeline/queue/run-delete/delete",
         json={"library_root": str(root)},
     )
-    assert cleanup.status_code == 200
-    assert cleanup.json()["cleaned"] == 1
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 1
+
+    reloaded = store.get_document(doc.doc_id)
+    assert reloaded is not None
+    assert reloaded.status == "pending"
+    assert not layout.document_md(doc.doc_id).exists()
+    assert (layout.storage_dir(doc.doc_id) / doc.file_name).is_file()
 
 
 def _capture_to_thread(monkeypatch: pytest.MonkeyPatch):

@@ -402,19 +402,22 @@ def _run_pipeline_sync(
         except Exception:  # noqa: BLE001 — no published output means no "ready"
             _set_document_status(library_root, doc_id, "error")
             raise
-        # Every stage succeeded and the run published exactly once: this is the
-        # point where the document becomes visible in the workspace.
-        _set_document_status(library_root, doc_id, "ready")
-        logger.debug("Task %s: all stages complete", task_id)
+        # Every stage of this run succeeded and the run published exactly once.
+        # A run that did not include Patent only extracted the document, so it
+        # rests at ``extracted``; a run with Patent is fully analyzed (``ready``).
+        stages = queue_dao.stages_in_run(library_root, doc_id=doc_id, run_id=run_id)
+        final_status = "ready" if "patent" in stages else "extracted"
+        _set_document_status(library_root, doc_id, final_status)
+        logger.debug("Task %s: all stages complete (%s)", task_id, final_status)
 
 
 def _set_document_status(library_root: str, doc_id: str, status: str) -> None:
     """Record a document's processing outcome for the workspace listing.
 
-    The workspace only shows documents whose run reached an outcome
-    (``ready``/``error``), so each terminal queue transition writes the
-    registry row here. Failures are logged rather than raised — the queue
-    node's own status remains the authoritative record of the run.
+    The workspace shows documents that reached a resting status
+    (``extracted``/``ready``/``error``), so each terminal queue transition
+    writes the registry row here. Failures are logged rather than raised — the
+    queue node's own status remains the authoritative record of the run.
     """
     if not doc_id:
         return

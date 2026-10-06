@@ -14,11 +14,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-#: Statuses that mean a document's processing run reached an outcome —
-#: successfully (``ready``) or not (``error``). ``pending`` means the bytes are
-#: registered but no run has produced usable results yet, so the workspace
-#: hides the document until one of these is recorded.
-TERMINAL_DOCUMENT_STATUSES: frozenset[str] = frozenset({"ready", "error"})
+#: Statuses at which a document is shown in the workspace.
+#:
+#: ``pending`` means the bytes are registered but no usable results exist yet
+#: (freshly imported, or reset by deleting its queue task): it is shown as
+#: "待处理" so an import is visible immediately, with the queue layering the
+#: live "processing" state on top. ``extracted`` means Extract + Markdown
+#: completed and the document is readable, but Patent analysis has not run yet;
+#: ``ready`` means Patent analysis produced its facts too; ``error`` means a run
+#: failed.
+VISIBLE_DOCUMENT_STATUSES: frozenset[str] = frozenset(
+    {"pending", "extracted", "ready", "error"}
+)
 
 
 class Document:
@@ -74,7 +81,7 @@ class Document:
 
     @property
     def status(self) -> str:
-        """Return the document status (pending | ready | error)."""
+        """Return the document status (pending | extracted | ready | error)."""
         return self._status
 
     @property

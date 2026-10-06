@@ -26,10 +26,11 @@ def test_documents_list_uses_configured_root(
     assert resp.status_code == 200
     doc_id = resp.json()["document"]["doc_id"]
 
-    # A freshly imported document is still processing, so it is not listed yet.
+    # A freshly imported document is visible immediately, resting at ``pending``.
     resp = app_client.post("/api/v1/documents/list", json={})
     assert resp.status_code == 200
-    assert doc_id not in {d["doc_id"] for d in resp.json()["documents"]}
+    listed = {d["doc_id"]: d for d in resp.json()["documents"]}
+    assert listed[doc_id]["status"] == "pending"
 
     from mbforge.service.use_cases.documents.library import LibraryStore
 
@@ -52,6 +53,58 @@ def test_documents_reingest_unknown_doc_returns_404(app_client: TestClient) -> N
         404,
         "not_found",
     )
+
+
+def test_documents_patent_analysis_queues_patent_only_run(
+    app_client: TestClient, tmp_library: Path
+) -> None:
+    """Batch Patent analysis skips un-extracted docs and queues a Patent-only run otherwise."""
+    from mbforge.db.source_evidence import persist_source_evidence
+    from mbforge.domain.evidence import SourceEvidence
+    from mbforge.server.ingest import queue
+
+    # Unknown / not-yet-extracted documents are skipped, not failed.
+    resp = app_client.post(
+        "/api/v1/documents/patent-analysis",
+        json={"doc_ids": ["missing-doc"]},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"success": True, "enqueued": 0, "skipped": 1}
+
+    pdf_bytes = b"%PDF-1.4 fake pdf"
+    resp = app_client.post(
+        "/api/v1/library/import",
+        data={"title": "Patent Paper"},
+        files={"file": ("patent.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    doc_id = resp.json()["document"]["doc_id"]
+
+    # Extract has produced evidence for this document, so it becomes eligible.
+    persist_source_evidence(
+        tmp_library,
+        [
+            SourceEvidence.create(
+                doc_id=doc_id, page=1, bbox=(1, 1, 2, 2), raw_text="compound 1"
+            )
+        ],
+    )
+
+    resp = app_client.post(
+        "/api/v1/documents/patent-analysis",
+        json={"doc_ids": [doc_id]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["enqueued"] == 1
+    assert resp.json()["skipped"] == 0
+
+    # The document's queued run is Patent-only.
+    stages = {
+        task["stage"]
+        for task in queue.list_tasks(str(tmp_library))
+        if task["doc_id"] == doc_id
+    }
+    assert stages == {"patent"}
 
 
 def test_documents_delete_and_list_roundtrip(

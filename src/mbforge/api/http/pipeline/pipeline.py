@@ -165,18 +165,6 @@ async def pipeline_retry_batch(
     )
 
 
-@router.post("/queue/batch/delete")
-async def pipeline_delete_batch(
-    body: PipelineTaskBatchRequest,
-) -> PipelineTaskActionResponse:
-    root = resolve_library_root(body.library_root)
-    result = await ingest.delete_failed_cancelled_batch(str(root), body.run_ids)
-    return PipelineTaskActionResponse(
-        updated=result.updated,
-        skipped=result.skipped,
-    )
-
-
 @router.post("/queue/{run_id}/cancel")
 async def pipeline_cancel(
     run_id: str,
@@ -220,13 +208,6 @@ async def pipeline_set_priority(
 ) -> PipelineTaskActionResponse:
     """Set task priority stub."""
     return PipelineTaskActionResponse()
-
-
-@router.post("/queue/cleanup")
-async def pipeline_cleanup(body: PipelineQueueRequest) -> PipelineTaskActionResponse:
-    root = resolve_library_root(body.library_root)
-    cleaned = await ingest.cleanup_done(str(root))
-    return PipelineTaskActionResponse(cleaned=cleaned, updated=cleaned)
 
 
 @router.post("/queue/logs")

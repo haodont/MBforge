@@ -4,13 +4,18 @@ This directory records active architecture and implementation plans.
 
 ## Current pipeline
 
-`Extract → Markdown → Patent` is the registered pipeline. Extract is the single
-producer — the layout/text/table producer and the molecule pass
-(MolDet + MolParser) both run inside it — and mints and persists the canonical
-`SourceEvidence` rows to SQLite itself. SQL is the only evidence store (there is
-no branch artifact); Markdown assembles the readable document from that
-evidence, and Patent publishes the unified facts artifact. Link and Persist are
-removed from the active path.
+`Extract → Markdown → Patent` is the registered pipeline, but the stages are
+scheduled decoupled: import runs **Extract + Markdown** only and the document
+rests at status `extracted` (readable, not yet analyzed), and **Patent runs on
+demand** — per document or in batch (`POST /api/v1/documents/patent-analysis`)
+— as a `patent`-only run that rebuilds its inputs from the SQL evidence. Both
+entries run through the same queue; `enqueue(..., stages=...)` selects the
+subset. Extract is the single producer — the layout/text/table producer and the
+molecule pass (MolDet + MolParser) both run inside it — and mints and persists
+the canonical `SourceEvidence` rows to SQLite itself. SQL is the only evidence
+store (there is no branch artifact); Markdown assembles the readable document
+from that evidence, and Patent publishes the unified facts artifact. Link and
+Persist are removed from the active path.
 
 ## Model assets
 
@@ -68,10 +73,11 @@ checkout, so it read no settings at all and every saved key was silently lost.
 - The molecule↔evidence association is now persisted in `evidence.evidence_id`
   (pointing at the canonical `source_evidence` row); the legacy
   `text_molecule_links` table was dropped.
-- Import starts processing in the same request and the workspace lists only
-  documents whose run reached an outcome (`ready`/`error`). A row left
-  `pending` by an older build stays hidden; re-import it rather than
-  back-filling a status.
+- Import starts processing in the same request and the workspace lists every
+  imported document right away: a fresh import rests at `pending` and shows as
+  "待处理" while the queue reports the live stage. Deleting a queue task clears
+  that run's outputs (Markdown/report/pages/crops/molecule data) and returns the
+  document to `pending`; only deleting the document card removes the source PDF.
 - The `agent/` sidecar has no test runner, so its provider model-list and probe
   logic is guarded by `tsc --noEmit` alone. Those contracts used to live in
   `tests/unit/test_llm_probe.py` and `tests/unit/routers/test_settings.py`,

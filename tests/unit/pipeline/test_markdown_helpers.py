@@ -180,3 +180,128 @@ def test_markdown_renders_candidate_on_page_without_text(tmp_path: Path) -> None
     assert "<!-- PAGE 2 -->" in content
     assert "%% candidate=candidate-2" in content
     assert "CCN" in content
+
+
+def test_markdown_emits_numbered_paragraph_once_on_its_starting_page(
+    tmp_path: Path,
+) -> None:
+    """A patent paragraph split by a page break is one block, not two.
+
+    The layout cut ``[0003]`` at the foot of page 1 and carried the rest onto
+    page 2; the marker is the paragraph's real boundary, so the continuation
+    belongs to the block that already started rather than to a block of its own.
+    """
+    opening = _source(
+        "doc",
+        page=1,
+        bbox=(10.0, 700.0, 100.0, 720.0),
+        kind="text",
+        raw_text="[0003] MRGX2 is Gq-coupled … cultured mast cells (D.",
+    )
+    continuation = _source(
+        "doc",
+        page=2,
+        bbox=(10.0, 800.0, 100.0, 810.0),
+        kind="text",
+        raw_text="Fujisawa et al., J Allergy Clin Immunol …).",
+    )
+    following = _source(
+        "doc",
+        page=2,
+        bbox=(10.0, 600.0, 100.0, 610.0),
+        kind="text",
+        raw_text="[0004] MRGX2 is potentially involved in host defense.",
+    )
+    output_path = tmp_path / "document.md"
+
+    insert_esmiles_blocks(
+        [opening, continuation, following],
+        str(output_path),
+        pages=[
+            PageFrame(page=1, width=200.0, height=900.0),
+            PageFrame(page=2, width=200.0, height=900.0),
+        ],
+        doc_id="doc",
+    )
+
+    content = output_path.read_text(encoding="utf-8")
+    assert content.count("[0003]") == 1
+    assert content.count("Fujisawa") == 1
+    paragraph = next(line for line in content.splitlines() if line.startswith("[0003]"))
+    assert paragraph.endswith("(D. Fujisawa et al., J Allergy Clin Immunol …).")
+    # Rendered with the page its first fragment sits on, not the page it ends on.
+    assert content.index("[0003]") < content.index("<!-- PAGE 2 -->")
+
+
+def test_markdown_renders_indented_sub_items_as_a_nested_list(tmp_path: Path) -> None:
+    """A paragraph's deeper-left-edge fragments keep their level in Markdown."""
+    head = _source(
+        "doc",
+        page=1,
+        bbox=(85.0, 700.0, 500.0, 720.0),
+        kind="text",
+        raw_text="[0006] One aspect of the invention provides a compound:",
+    )
+    first = _source(
+        "doc",
+        page=1,
+        bbox=(125.0, 600.0, 500.0, 610.0),
+        kind="text",
+        raw_text="(a) C1-4 alkyl which is substituted",
+    )
+    second = _source(
+        "doc",
+        page=1,
+        bbox=(125.0, 500.0, 500.0, 510.0),
+        kind="text",
+        raw_text="(b) a cyclic group selected from",
+    )
+    output_path = tmp_path / "document.md"
+
+    insert_esmiles_blocks(
+        [head, first, second],
+        str(output_path),
+        pages=[PageFrame(page=1, width=600.0, height=900.0)],
+        doc_id="doc",
+    )
+
+    content = output_path.read_text(encoding="utf-8")
+    assert (
+        "[0006] One aspect of the invention provides a compound:\n"
+        "\n"
+        "- (a) C1-4 alkyl which is substituted\n"
+        "- (b) a cyclic group selected from\n"
+    ) in content
+
+
+def test_markdown_renders_a_centred_block_as_a_heading(tmp_path: Path) -> None:
+    """The layout's centred block is the trustworthy heading signal."""
+    body = [
+        _source(
+            "doc",
+            page=1,
+            bbox=(85.0, 700.0 - index * 10.0 - 10.0, 500.0, 700.0 - index * 10.0),
+            kind="text",
+            raw_text=f"Body line {index}",
+        )
+        for index in range(3)
+    ]
+    heading = _source(
+        "doc",
+        page=1,
+        bbox=(227.0, 400.0, 369.0, 410.0),
+        kind="sec",
+        raw_text="FIELD OF THE INVENTION",
+    )
+    output_path = tmp_path / "document.md"
+
+    insert_esmiles_blocks(
+        [*body, heading],
+        str(output_path),
+        pages=[PageFrame(page=1, width=600.0, height=900.0)],
+        doc_id="doc",
+    )
+
+    content = output_path.read_text(encoding="utf-8")
+    assert "## FIELD OF THE INVENTION" in content
+    assert "Body line 0" in content

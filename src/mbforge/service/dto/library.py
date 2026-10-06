@@ -97,6 +97,18 @@ class LibraryEvidenceItem(BaseModel):
     #: Category of ``kind`` (``text`` / ``table`` / ``image`` / ``molecule``), so
     #: readers never have to match a producer label by name.
     category: str = ""
+    #: Paragraph this row belongs to (``""`` when the row is not in one), the
+    #: patent's own paragraph number (``"0001"``, ``None`` when unnumbered), and
+    #: whether this row contributed the paragraph's first fragment. A paragraph
+    #: split across a page break shares one ``paragraph_id``; its later rows
+    #: carry ``paragraph_start=False``.
+    paragraph_id: str = ""
+    paragraph_number: str | None = None
+    paragraph_start: bool = False
+    #: Line index inside the paragraph, and that line's left-edge depth as the
+    #: layout encoded it (``0`` = body margin, ``1``+ = an indented sub-item).
+    paragraph_line: int = 0
+    indent_level: int = 0
 
 
 class LibraryConfigureResponse(BaseModel):

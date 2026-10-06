@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +28,15 @@ from mbforge.foundation.queue_contract import INGEST_TERMINAL_STATUSES
 from mbforge.service.ports import get_runtime
 
 logger = get_logger("mbforge.service.use_cases.ingest")
+
+#: Default stage subset for import/re-ingest: the "into the library" boundary.
+#: Patent analysis is triggered on demand (per document or in batch) with
+#: :func:`enqueue_patent_analysis`, so a default enqueue never runs it.
+EXTRACT_STAGES: tuple[str, ...] = ("extract", "markdown")
+
+#: Stage subset for a Patent-analysis run — Patent alone, a root node whose
+#: inputs are rebuilt from the SQL ``source_evidence`` rows Extract wrote.
+PATENT_STAGES: tuple[str, ...] = ("patent",)
 
 
 def _queue() -> Any:
@@ -43,14 +52,15 @@ def _process() -> Any:
 
 
 __all__ = [
+    "EXTRACT_STAGES",
     "INGEST_TERMINAL_STATUSES",
+    "PATENT_STAGES",
     "BatchActionResult",
     "cancel_batch",
-    "cleanup_done",
-    "delete_failed_cancelled_batch",
     "delete_task",
     "enqueue",
     "enqueue_all_unresolved",
+    "enqueue_patent_analysis",
     "fetch_doc_logs",
     "fetch_logs_since",
     "fetch_run_status",
@@ -71,17 +81,25 @@ class BatchActionResult:
     error: str | None = None
 
 
-async def enqueue(library_root: str, doc_id: str) -> str:
+async def enqueue(
+    library_root: str, doc_id: str, *, stages: Sequence[str] | None = None
+) -> str:
     """Enqueue a registered document for pipeline processing.
 
     Reads the document's registry row to resolve the source file path, inserts
     a ``pending`` row into ``ingest_queue``, and ensures the queue worker
     is running for *library_root*.
 
+    *stages* selects which pipeline stages this run schedules; it defaults to
+    :data:`EXTRACT_STAGES` (Extract + Markdown), so import/re-ingest never runs
+    Patent analysis — that is scheduled explicitly by
+    :func:`enqueue_patent_analysis`. Every name must be a registered stage.
+
     Returns the newly created ``run_id``.
 
     Raises:
-        ValidationError: if *doc_id* or *library_root* is empty.
+        ValidationError: if *doc_id* or *library_root* is empty, or a stage
+            name is not registered.
         NotFoundError: if *doc_id* is not registered or the source file
             cannot be found on disk.
     """
@@ -89,6 +107,16 @@ async def enqueue(library_root: str, doc_id: str) -> str:
         raise ValidationError("doc_id is required")
     if not library_root:
         raise ValidationError("library_root is required")
+
+    selected = tuple(stages) if stages is not None else EXTRACT_STAGES
+    if not selected:
+        raise ValidationError("stages must not be empty")
+    from mbforge.service.ports import get_pipeline_runtime
+
+    known = get_pipeline_runtime().stage_dependencies()
+    unknown = [stage for stage in selected if stage not in known]
+    if unknown:
+        raise ValidationError(f"Unknown pipeline stage(s): {', '.join(unknown)}")
 
     from mbforge.service.use_cases.documents.library import LibraryStore
 
@@ -110,16 +138,61 @@ async def enqueue(library_root: str, doc_id: str) -> str:
     from mbforge.service.pipeline.run.ids import mint_run_id
 
     def _register() -> str:
-        run_id = mint_run_id(library_root, doc_id)
+        # Two enqueues in the same wall-clock second must not share a run ID:
+        # the second would then reuse the first's queue nodes and finalize
+        # guard. Feed the queue's existing run IDs into the minter.
+        existing = set(_queue().run_ids_for_doc(library_root, doc_id))
+        run_id = mint_run_id(library_root, doc_id, extra_used=existing)
         _queue().insert_dag(
-            library_root, file_path=file_path, doc_id=doc_id, run_id=run_id
+            library_root,
+            file_path=file_path,
+            doc_id=doc_id,
+            run_id=run_id,
+            stages=selected,
         )
         return run_id
 
     run_id = await asyncio.to_thread(_register)
     ensure_worker(library_root)
-    logger.info("Enqueued doc %s as run %s", doc_id, run_id)
+    logger.info("Enqueued doc %s as run %s (stages=%s)", doc_id, run_id, selected)
     return run_id
+
+
+async def enqueue_patent_analysis(
+    library_root: str, doc_ids: Sequence[str]
+) -> BatchActionResult:
+    """Queue a Patent-only analysis run for each eligible document.
+
+    A document is eligible when it is registered and has at least one
+    ``source_evidence`` row (i.e. Extract already ran); others are skipped
+    without failing the batch. Each eligible document gets its own run so the
+    queue worker analyzes them as independent tasks.
+    """
+    if not library_root:
+        raise ValidationError("library_root is required")
+    ids = [doc_id for doc_id in dict.fromkeys(doc_ids) if doc_id]
+    if not ids:
+        raise ValidationError("doc_ids is required")
+
+    from mbforge.service.use_cases.documents.library import LibraryStore
+    from mbforge.service.use_cases.documents.source_evidence import list_evidence
+
+    store = LibraryStore.get(library_root)
+    enqueued = 0
+    skipped = 0
+    for doc_id in ids:
+        doc = await asyncio.to_thread(store.load_document, doc_id)
+        if doc is None:
+            skipped += 1
+            continue
+        evidence = await asyncio.to_thread(list_evidence, library_root, doc_id)
+        if not evidence:
+            logger.info("Patent analysis skipped: no source evidence for %s", doc_id)
+            skipped += 1
+            continue
+        await enqueue(library_root, doc_id, stages=PATENT_STAGES)
+        enqueued += 1
+    return BatchActionResult(updated=enqueued, skipped=skipped)
 
 
 async def enqueue_all_unresolved(library_root: str) -> int:
@@ -146,7 +219,11 @@ async def enqueue_all_unresolved(library_root: str) -> int:
                 continue
             run_id = mint_run_id(library_root, doc_id)
             _queue().insert_dag(
-                library_root, file_path=full_path, doc_id=doc_id, run_id=run_id
+                library_root,
+                file_path=full_path,
+                doc_id=doc_id,
+                run_id=run_id,
+                stages=EXTRACT_STAGES,
             )
             count += 1
         return count
@@ -300,32 +377,31 @@ async def retry_batch(
 
 
 async def delete_task(library_root: str, run_id: str) -> int:
-    """Remove every queue node of *run_id*. Returns rows deleted."""
-    return await asyncio.to_thread(_queue().delete_run, library_root, run_id)
+    """Delete a run's queue nodes and discard its pipeline results.
+
+    The original PDF and the ``documents`` row are kept: the run's processed
+    outputs (Markdown, report, pages, crops, artifacts, molecule data) are
+    cleared and the document returns to ``pending`` so it shows as "待处理" in
+    the workspace. Only deleting the document itself removes the PDF. Returns
+    the number of queue rows deleted.
+    """
+    doc_ids = await asyncio.to_thread(_queue().doc_ids_for_runs, library_root, [run_id])
+    deleted = await asyncio.to_thread(_queue().delete_run, library_root, run_id)
+    if doc_ids:
+        await asyncio.to_thread(_discard_pipeline_results, library_root, doc_ids)
+    return deleted
 
 
-async def delete_failed_cancelled_batch(
-    library_root: str, run_ids: list[str]
-) -> BatchActionResult:
-    """Delete failed/cancelled runs that have no active worker nodes."""
-    run_ids = list(dict.fromkeys(run_ids))
-    if not run_ids:
-        return BatchActionResult()
+def _discard_pipeline_results(library_root: str, doc_ids: list[str]) -> None:
+    """Clear processed outputs for *doc_ids*, restoring the imported state."""
+    from mbforge.service.use_cases.documents.library import LibraryStore
 
-    nodes = await asyncio.to_thread(_queue().run_nodes_for_runs, library_root, run_ids)
-    active_run_ids = {
-        run_id for node_id, run_id in nodes if _worker().is_task_active(node_id)
-    }
-    eligible_run_ids = [run_id for run_id in run_ids if run_id not in active_run_ids]
-    deleted = await asyncio.to_thread(
-        _queue().delete_failed_cancelled_runs, library_root, eligible_run_ids
-    )
-    return BatchActionResult(updated=deleted, skipped=len(run_ids) - deleted)
-
-
-async def cleanup_done(library_root: str) -> int:
-    """Delete all ``done`` tasks from the queue. Returns rows deleted."""
-    return await asyncio.to_thread(_queue().cleanup_done, library_root)
+    store = LibraryStore.get(library_root)
+    for doc_id in doc_ids:
+        try:
+            store.clear_pipeline_data(doc_id, backup=False)
+        except Exception as exc:  # noqa: BLE001 — a missing doc must not fail the delete
+            logger.warning("Failed to clear pipeline data for %s: %s", doc_id, exc)
 
 
 # ---------------------------------------------------------------------------

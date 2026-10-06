@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
-from mbforge.domain.document import TERMINAL_DOCUMENT_STATUSES, Document
+from mbforge.domain.document import VISIBLE_DOCUMENT_STATUSES, Document
 from mbforge.foundation.errors import ConflictError, MBForgeError, NotFoundError
 from mbforge.foundation.files import ensure_dir, sha256_file
 from mbforge.foundation.layout import LibraryLayout, sanitize_upload_filename
@@ -194,14 +194,15 @@ class LibraryStore:
         return len(ids)
 
     def list_documents(self) -> list[Document]:
-        """Return documents whose processing reached an outcome, newest first.
+        """Return every workspace-visible document, newest first.
 
-        ``pending`` documents are hidden: their bytes are registered but no run
-        has produced usable results yet, so the workspace only shows documents
-        that are ``ready`` or ``error`` (see ``TERMINAL_DOCUMENT_STATUSES``).
+        ``pending`` documents are listed too: a freshly imported (or
+        task-deleted) document has registered bytes but no usable results yet,
+        so it shows as "待处理" instead of being hidden. See
+        ``VISIBLE_DOCUMENT_STATUSES``.
         """
         rows = get_repositories(self._root).documents.list_rows(
-            statuses=sorted(TERMINAL_DOCUMENT_STATUSES)
+            statuses=sorted(VISIBLE_DOCUMENT_STATUSES)
         )
         return [Document.from_dict(row, self._root) for row in rows]
 
@@ -214,17 +215,23 @@ class LibraryStore:
             if q in d.title.lower() or q in d.file_name.lower()
         ]
 
-    def clear_pipeline_data(self, doc_id: str) -> None:
+    def clear_pipeline_data(self, doc_id: str, *, backup: bool = True) -> None:
         """Remove pipeline outputs for ``doc_id``, restoring the pre-pipeline state.
 
         Used before re-ingesting a document so the rerun does not hit
-        UNIQUE constraints or consume stale document Markdown, and by the
-        workspace "clear" action to revert a processed file to its imported
-        state (source PDF + document record only).
+        UNIQUE constraints or consume stale document Markdown, and by deleting
+        a queue task to discard that attempt's results while keeping the
+        original PDF (source PDF + ``documents`` row only, status back to
+        ``pending``).
+
+        ``backup=False`` skips the pre-clear snapshot for discard-style callers
+        (task deletion) that do not intend to restore.
         """
         from mbforge.service.ports import get_database
 
-        backup_path = create_backup(self._root, doc_id, "pipeline_clear")
+        backup_path = (
+            create_backup(self._root, doc_id, "pipeline_clear") if backup else None
+        )
         db = get_database(str(self._root))
         with db.transaction() as (_kb_conn, mol_conn):
             db.delete_document_molecule_data(mol_conn, doc_id)
@@ -274,9 +281,9 @@ class LibraryStore:
         return str(pdf_path) if pdf_path.exists() else None
 
     def doc_count(self) -> int:
-        """Count documents visible in the workspace (``ready`` + ``error``)."""
+        """Count documents visible in the workspace (``VISIBLE_DOCUMENT_STATUSES``)."""
         return get_repositories(self._root).documents.count(
-            statuses=sorted(TERMINAL_DOCUMENT_STATUSES)
+            statuses=sorted(VISIBLE_DOCUMENT_STATUSES)
         )
 
 

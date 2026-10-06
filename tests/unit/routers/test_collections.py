@@ -68,8 +68,8 @@ def test_collections_add_remove_document_tracks_doc_count(
 ) -> None:
     """Attaching/detaching a real document updates the listed doc_count.
 
-    The count only includes documents the workspace shows, so the imported
-    document has to reach a processing outcome before it counts.
+    The count includes the same statuses the workspace lists, so an imported
+    (``pending``) document counts as soon as it is attached.
     """
     from mbforge.service.use_cases.documents.library import LibraryStore
 
@@ -87,8 +87,8 @@ def test_collections_add_remove_document_tracks_doc_count(
         json={"collection_id": collection_id, "doc_id": doc_id},
     )
     assert resp.status_code == 200
-    # Still processing, so the group does not count it yet.
-    assert _doc_count() == 0
+    # A pending document is workspace-visible, so the group counts it.
+    assert _doc_count() == 1
 
     LibraryStore.get(str(tmp_library)).update_document_status(doc_id, "ready")
     assert _doc_count() == 1

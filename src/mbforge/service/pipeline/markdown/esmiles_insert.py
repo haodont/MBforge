@@ -8,8 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mbforge.domain.evidence import SourceEvidence
-from mbforge.domain.evidence_kind import IMAGE, category_of, is_text, kind_rank
+from mbforge.domain.evidence_kind import IMAGE, category_of, is_text
 from mbforge.domain.molecule import Molecule
+from mbforge.domain.paragraphs import (
+    EvidenceParagraph,
+    group_paragraphs,
+    paragraph_index,
+    reading_key,
+)
 from mbforge.foundation.logger import get_logger
 from mbforge.service.pipeline.detection.formula_normalization import (
     normalize_patent_formulas,
@@ -38,21 +44,6 @@ class _PlacedBlock:
     block: _RenderedBlock
 
 
-def _reading_key(
-    item: SourceEvidence, *, tie_breaker: str | None = None
-) -> tuple[object, ...]:
-    x0, y0, x1, y1 = item.bbox
-    return (
-        item.page,
-        -y1,
-        x0,
-        -y0,
-        x1,
-        kind_rank(item.kind),
-        tie_breaker or item.evidence_id,
-    )
-
-
 def _render_text(raw_text: str) -> str:
     lines: list[str] = []
     for paragraph in normalize_patent_formulas(raw_text).splitlines():
@@ -64,6 +55,56 @@ def _render_text(raw_text: str) -> str:
         else:
             lines.append(stripped)
     return "\n".join(lines)
+
+
+def _render_paragraph(paragraph: EvidenceParagraph) -> str:
+    """Render one patent paragraph, keeping its own indentation.
+
+    The layout split the paragraph into fragments and gave each one a left
+    edge; joining same-level fragments back into a line and expressing the
+    deeper levels as nested list items is what re-reads as the document's own
+    paragraph, marker included.
+    """
+    lines = [
+        normalize_patent_formulas(line.text).strip()
+        for line in paragraph.lines
+        if line.text.strip()
+    ]
+    if not lines:
+        return ""
+    head = lines[0]
+    head_level = paragraph.lines[0].level
+    if _is_heading(head, paragraph):
+        rendered = [f"## {head}"]
+    elif head_level >= 1:
+        rendered = [f"{'  ' * (head_level - 1)}- {head}"]
+    else:
+        rendered = [head]
+    body = paragraph.lines[1:]
+    if not body:
+        return "\n".join(rendered)
+    # A blank line keeps the list from being read as a lazy continuation of the
+    # paragraph above it.
+    rendered.append("")
+    for line in body:
+        text = normalize_patent_formulas(line.text).strip()
+        if not text:
+            continue
+        rendered.append(f"{'  ' * max(0, line.level - 1)}- {text}")
+    return "\n".join(rendered)
+
+
+def _is_heading(text: str, paragraph: EvidenceParagraph) -> bool:
+    """Whether a paragraph's first line reads as a section heading.
+
+    Only the geometric signal (the block sits on the column centre) and the
+    curated section-name list qualify.  ``is_heading_like`` is deliberately not
+    consulted: it exists to decide that a short all-caps block starts on its
+    own, which is also true of a figure label like ``A-2``.
+    """
+    if paragraph.centred:
+        return True
+    return bool(_HEADING_PATTERNS.match(text.split(".")[0].strip()))
 
 
 def _render_image(item: SourceEvidence) -> str:
@@ -99,7 +140,7 @@ def _candidate_blocks(
         ]
         if not molecule_evidence:
             continue
-        primary = min(molecule_evidence, key=_reading_key)
+        primary = min(molecule_evidence, key=reading_key)
         properties = getattr(candidate, "properties", {})
         raw_labels = (
             properties.get("refs", properties.get("ocr_labels", []))
@@ -131,7 +172,7 @@ def _candidate_blocks(
         )
         placed.append(
             _PlacedBlock(
-                key=_reading_key(primary, tie_breaker=primary.evidence_id),
+                key=reading_key(primary, tie_breaker=primary.evidence_id),
                 block=block,
             )
         )
@@ -142,6 +183,7 @@ def _page_blocks(
     evidence: Sequence[SourceEvidence],
     page: int,
     candidate_blocks: list[_PlacedBlock],
+    paragraphs: dict[str, EvidenceParagraph],
 ) -> list[_RenderedBlock]:
     page_evidence = [item for item in evidence if item.page == page]
     text_items = [item for item in page_evidence if is_text(item.kind)]
@@ -151,19 +193,19 @@ def _page_blocks(
         if category_of(item.kind) != IMAGE:
             continue
         placed = _PlacedBlock(
-            key=_reading_key(item),
+            key=reading_key(item),
             block=_RenderedBlock(
                 text=f"{_render_image(item)}\n\n",
                 evidence_ids=(item.evidence_id,),
             ),
         )
-        slot = sum(_reading_key(text_item) < placed.key for text_item in text_items)
+        slot = sum(reading_key(text_item) < placed.key for text_item in text_items)
         slots.setdefault(slot, []).append(placed)
 
     for placed in candidate_blocks:
         if placed.key[0] != page:
             continue
-        slot = sum(_reading_key(text_item) < placed.key for text_item in text_items)
+        slot = sum(reading_key(text_item) < placed.key for text_item in text_items)
         slots.setdefault(slot, []).append(placed)
 
     result: list[_RenderedBlock] = [_RenderedBlock(f"<!-- PAGE {page} -->\n")]
@@ -173,16 +215,33 @@ def _page_blocks(
             for item in sorted(slots.get(slot, []), key=lambda value: value.key)
         )
         if slot < len(text_items):
-            text_item = text_items[slot]
-            rendered = _render_text(text_item.raw_text)
-            if rendered:
-                result.append(
-                    _RenderedBlock(
-                        text=f"{rendered}\n\n",
-                        evidence_ids=(text_item.evidence_id,),
-                    )
-                )
+            block = _text_block(text_items[slot], paragraphs)
+            if block is not None:
+                result.append(block)
     return result
+
+
+def _text_block(
+    item: SourceEvidence, paragraphs: dict[str, EvidenceParagraph]
+) -> _RenderedBlock | None:
+    """Render one page's text slot, or ``None`` when it is a continuation.
+
+    A paragraph is emitted once, on the page its first fragment sits on: a
+    later fragment is the same text, not a new block.  Rows the grouping left
+    out (tables, page furniture) keep the per-region rendering.
+    """
+    paragraph = paragraphs.get(item.evidence_id)
+    if paragraph is None:
+        rendered = _render_text(item.raw_text)
+        evidence_ids = (item.evidence_id,)
+    elif paragraph.starts_at(item.evidence_id):
+        rendered = _render_paragraph(paragraph)
+        evidence_ids = paragraph.evidence_ids
+    else:
+        return None
+    if not rendered:
+        return None
+    return _RenderedBlock(text=f"{rendered}\n\n", evidence_ids=evidence_ids)
 
 
 def _assemble_blocks(
@@ -193,9 +252,10 @@ def _assemble_blocks(
     title: str,
 ) -> list[_RenderedBlock]:
     candidate_blocks = _candidate_blocks(evidence, candidates)
+    paragraphs = paragraph_index(group_paragraphs(evidence))
     blocks: list[_RenderedBlock] = []
     for page in sorted(pages):
-        blocks.extend(_page_blocks(evidence, page, candidate_blocks))
+        blocks.extend(_page_blocks(evidence, page, candidate_blocks, paragraphs))
     body = "".join(block.text for block in blocks)
     if not re.search(r"^#{1,6}\s", body, re.MULTILINE):
         blocks.insert(0, _RenderedBlock(f"# {title}\n\n"))

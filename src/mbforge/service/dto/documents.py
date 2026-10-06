@@ -62,3 +62,28 @@ class DocumentReingestResponse(BaseModel):
     success: bool = True
     run_id: str | None = Field(default=None, description="Queued run ID.")
     message: str = "document queued for re-ingest"
+
+
+class DocumentPatentAnalysisRequest(BaseModel):
+    """Request body for queuing Patent analysis for one or more documents."""
+
+    library_root: str | None = Field(
+        default=None,
+        description="Library root path. Falls back to global config when omitted.",
+    )
+    doc_ids: list[str] = Field(
+        default_factory=list,
+        min_length=1,
+        description="Document identifiers to analyze.",
+    )
+
+
+class DocumentPatentAnalysisResponse(BaseModel):
+    """Response body for queuing Patent analysis."""
+
+    success: bool = True
+    enqueued: int = Field(default=0, description="Documents queued for analysis.")
+    skipped: int = Field(
+        default=0,
+        description="Documents skipped (missing, or not yet extracted).",
+    )

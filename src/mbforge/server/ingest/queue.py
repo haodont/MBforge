@@ -10,6 +10,7 @@ lives in :mod:`mbforge.service.use_cases.pipeline.ingest`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from mbforge.db.sqlite.database import DatabaseManager
@@ -25,8 +26,9 @@ def insert_dag(
     file_path: str,
     doc_id: str,
     run_id: str,
+    stages: Sequence[str] | None = None,
 ) -> None:
-    """Register the full stage DAG for one document run.
+    """Register the stage DAG for one document run.
 
     One ``ingest_queue`` row per stage (roots ``pending``, everything else
     ``blocked``) plus one ``ingest_stage_deps`` edge per prerequisite, all
@@ -34,11 +36,23 @@ def insert_dag(
     attempt. Any earlier run of the same document is superseded: its rows
     and edges are removed so the queue holds exactly one run per document.
 
+    When *stages* is given, only those stages are scheduled. Prerequisites
+    outside the selected set are dropped, so a lone ``("patent",)`` run makes
+    ``patent`` a root node that is admitted immediately (its real data
+    dependency — the SQL ``source_evidence`` rows — is checked by the runner's
+    hydration, not by the queue DAG).
+
     Idempotent for the same ``(doc_id, run_id)`` via the unique node index.
     """
     from mbforge.service.ports import get_pipeline_runtime
 
     deps = get_pipeline_runtime().stage_dependencies()
+    if stages is not None:
+        selected = list(dict.fromkeys(stages))
+        deps = {
+            stage: tuple(prereq for prereq in deps.get(stage, ()) if prereq in selected)
+            for stage in selected
+        }
     db = DatabaseManager.get(library_root)
     with db.kb_conn() as conn:
         conn.execute(
@@ -209,6 +223,34 @@ def claim_finalize(library_root: str, *, doc_id: str, run_id: str) -> bool:
         return cursor.rowcount == 1
 
 
+def stages_in_run(library_root: str, *, doc_id: str, run_id: str) -> list[str]:
+    """Return the stage names scheduled for a run, in insertion order.
+
+    A run may hold only a subset of the pipeline stages (import schedules
+    Extract + Markdown; Patent analysis schedules Patent alone), so the
+    finalizer uses this to decide the document's resting status.
+    """
+    db = DatabaseManager.get(library_root)
+    with db.kb_conn() as conn:
+        rows = conn.execute(
+            "SELECT stage FROM ingest_queue WHERE doc_id = ? AND run_id = ?",
+            (doc_id, run_id),
+        ).fetchall()
+        return [row["stage"] for row in rows]
+
+
+def run_ids_for_doc(library_root: str, doc_id: str) -> list[str]:
+    """Return the distinct run IDs already queued for a document."""
+    db = DatabaseManager.get(library_root)
+    with db.kb_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT run_id FROM ingest_queue "
+            "WHERE doc_id = ? AND run_id IS NOT NULL",
+            (doc_id,),
+        ).fetchall()
+        return [row["run_id"] for row in rows]
+
+
 def node_ids_for_runs(library_root: str, run_ids: list[str]) -> list[str]:
     """Return the ``ingest_queue`` node ids belonging to *run_ids* (order kept)."""
     if not run_ids:
@@ -221,20 +263,6 @@ def node_ids_for_runs(library_root: str, run_ids: list[str]) -> list[str]:
             run_ids,
         ).fetchall()
         return [row["id"] for row in rows]
-
-
-def run_nodes_for_runs(library_root: str, run_ids: list[str]) -> list[tuple[str, str]]:
-    """Return ``(node_id, run_id)`` pairs belonging to *run_ids*."""
-    if not run_ids:
-        return []
-    placeholders = ",".join("?" for _ in run_ids)
-    db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
-        rows = conn.execute(
-            f"SELECT id, run_id FROM ingest_queue WHERE run_id IN ({placeholders})",
-            run_ids,
-        ).fetchall()
-        return [(row["id"], row["run_id"]) for row in rows]
 
 
 def doc_ids_for_runs(library_root: str, run_ids: list[str]) -> list[str]:
@@ -428,39 +456,4 @@ def delete_run(library_root: str, run_id: str) -> int:
     db = DatabaseManager.get(library_root)
     with db.kb_conn() as conn:
         cursor = conn.execute("DELETE FROM ingest_queue WHERE run_id = ?", (run_id,))
-        return cursor.rowcount
-
-
-def delete_failed_cancelled_runs(library_root: str, run_ids: list[str]) -> int:
-    """Delete failed/cancelled runs with no pending or processing nodes."""
-    if not run_ids:
-        return 0
-    placeholders = ",".join("?" for _ in run_ids)
-    db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
-        rows = conn.execute(
-            f"""
-            DELETE FROM ingest_queue
-            WHERE run_id IN ({placeholders})
-              AND run_id IN (
-                  SELECT run_id
-                  FROM ingest_queue
-                  WHERE run_id IN ({placeholders})
-                  GROUP BY run_id
-                  HAVING SUM(CASE WHEN status IN ('failed', 'cancelled') THEN 1 ELSE 0 END) > 0
-                     AND SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END) = 0
-                     AND SUM(CASE WHEN status IN ('done', 'failed', 'cancelled', 'blocked') THEN 1 ELSE 0 END) = COUNT(*)
-              )
-            RETURNING run_id
-            """,
-            (*run_ids, *run_ids),
-        ).fetchall()
-        return len({row["run_id"] for row in rows})
-
-
-def cleanup_done(library_root: str) -> int:
-    """Delete all ``done`` tasks from the queue. Returns rows deleted."""
-    db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
-        cursor = conn.execute("DELETE FROM ingest_queue WHERE status = 'done'")
         return cursor.rowcount

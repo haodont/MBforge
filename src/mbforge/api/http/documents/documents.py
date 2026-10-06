@@ -19,11 +19,18 @@ from mbforge.service.dto.documents import (
     DocumentDeleteResponse,
     DocumentListRequest,
     DocumentListResponse,
+    DocumentPatentAnalysisRequest,
+    DocumentPatentAnalysisResponse,
     DocumentReingestRequest,
     DocumentReingestResponse,
 )
 from mbforge.service.use_cases.documents.library import LibraryStore
-from mbforge.service.use_cases.pipeline.ingest import enqueue as ingest_enqueue
+from mbforge.service.use_cases.pipeline.ingest import (
+    enqueue as ingest_enqueue,
+)
+from mbforge.service.use_cases.pipeline.ingest import (
+    enqueue_patent_analysis,
+)
 
 logger = get_logger("mbforge.documents_router")
 
@@ -60,3 +67,19 @@ async def doc_reingest(body: DocumentReingestRequest) -> DocumentReingestRespons
     store.clear_pipeline_data(body.doc_id)
     run_id = await ingest_enqueue(str(root), body.doc_id)
     return DocumentReingestResponse(run_id=run_id)
+
+
+@router.post("/patent-analysis")
+async def doc_patent_analysis(
+    body: DocumentPatentAnalysisRequest,
+) -> DocumentPatentAnalysisResponse:
+    """Queue a Patent-only analysis run for each eligible document.
+
+    Documents without extracted ``source_evidence`` yet are skipped rather than
+    failing the whole batch.
+    """
+    root = resolve_library_root(body.library_root)
+    result = await enqueue_patent_analysis(str(root), body.doc_ids)
+    return DocumentPatentAnalysisResponse(
+        enqueued=result.updated, skipped=result.skipped
+    )
