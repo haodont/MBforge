@@ -15,7 +15,6 @@ from typing import Any
 
 from mbforge.db import (
     activity_store,
-    collection_store,
     docking_store,
     document_backup,
     document_records,
@@ -464,36 +463,6 @@ class SqliteDockingRepository:
 
 
 @dataclass
-class SqliteCollectionRepository:
-    """Repository for user collections ("Groups")."""
-
-    library_root: Path
-
-    def create(
-        self, collection_id: str, name: str, parent_id: str | None = None
-    ) -> None:
-        collection_store.create(self.library_root, collection_id, name, parent_id)
-
-    def rename(self, collection_id: str, name: str) -> None:
-        collection_store.rename(self.library_root, collection_id, name)
-
-    def list_rows(self) -> list[dict[str, Any]]:
-        return collection_store.list_rows(self.library_root)
-
-    def counts(self) -> dict[str, int]:
-        return collection_store.counts(self.library_root)
-
-    def delete(self, collection_id: str) -> None:
-        collection_store.delete(self.library_root, collection_id)
-
-    def add_document(self, collection_id: str, doc_id: str) -> None:
-        collection_store.add_document(self.library_root, collection_id, doc_id)
-
-    def remove_document(self, collection_id: str, doc_id: str) -> None:
-        collection_store.remove_document(self.library_root, collection_id, doc_id)
-
-
-@dataclass
 class FilesystemArtifactStore:
     """Repository facade for the PDF page-count probe."""
 
@@ -568,10 +537,6 @@ class SqliteRepositories(LibraryRepositories):
         return SqliteDockingRepository(self.library_root)
 
     @property
-    def collections(self) -> SqliteCollectionRepository:
-        return SqliteCollectionRepository(self.library_root)
-
-    @property
     def markush(self) -> SqliteMarkushRepository:
         return self._markush
 
@@ -599,7 +564,6 @@ def create_repositories(library_root: str | Path) -> SqliteRepositories:
 
 __all__ = [
     "SqliteActivityRepository",
-    "SqliteCollectionRepository",
     "SqliteDatabaseRepository",
     "SqliteDocumentRepository",
     "SqliteEvidenceRepository",

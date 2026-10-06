@@ -2,7 +2,7 @@
  *
  *  Usage:
  *    queryClient.invalidateQueries({ queryKey: queryKeys.documents.all })
- *    const { data } = useQuery({ queryKey: queryKeys.documents.list(collectionId), … })
+ *    const { data } = useQuery({ queryKey: queryKeys.documents.list(), … })
  */
 
 export const queryKeys = {

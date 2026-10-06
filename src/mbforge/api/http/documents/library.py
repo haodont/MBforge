@@ -28,28 +28,18 @@ from mbforge.foundation.errors import (
 )
 from mbforge.foundation.logger import get_logger
 from mbforge.service.dto.library import (
-    CollectionNode,
-    LibraryCollectionDocumentRequest,
-    LibraryCollectionsResponse,
     LibraryConfigureRequest,
     LibraryConfigureResponse,
-    LibraryCreateCollectionRequest,
-    LibraryCreateCollectionResponse,
-    LibraryDeleteCollectionRequest,
     LibraryDeleteDocumentsRequest,
     LibraryDeleteDocumentsResponse,
     LibraryDocumentsResponse,
     LibraryEvidenceItem,
     LibraryImportResponse,
-    LibraryListCollectionsRequest,
     LibraryListDocumentsRequest,
     LibraryMoleculeEvidenceUpdateRequest,
     LibraryMoleculeEvidenceUpdateResponse,
-    LibraryRenameCollectionRequest,
     LibraryStatus,
-    LibrarySuccessResponse,
 )
-from mbforge.service.use_cases.documents import collections as collection_service
 from mbforge.service.use_cases.documents import library as library_service
 from mbforge.service.use_cases.documents import source_evidence
 
@@ -342,78 +332,6 @@ async def library_get_page_text(
     )
     text = await asyncio.to_thread(library_service.read_page_text, root, doc_id, page)
     return PlainTextResponse(text)
-
-
-@router.post("/collections/list", response_model=LibraryCollectionsResponse)
-async def library_list_collections(
-    body: LibraryListCollectionsRequest,
-) -> LibraryCollectionsResponse:
-    """List all collections as a nested tree (library "Groups")."""
-    root = _resolve_library_root(body.model_dump() if body.library_root else None)
-    collections = await asyncio.to_thread(collection_service.list_collections, root)
-    return LibraryCollectionsResponse(
-        collections=[CollectionNode(**node) for node in collections]
-    )
-
-
-@router.post("/collections/create", response_model=LibraryCreateCollectionResponse)
-async def library_create_collection(
-    body: LibraryCreateCollectionRequest,
-) -> LibraryCreateCollectionResponse:
-    """Create a collection, optionally nested under a parent."""
-    root = _resolve_library_root(body.model_dump() if body.library_root else None)
-    result = await asyncio.to_thread(
-        collection_service.create_collection, root, body.name, body.parent_id
-    )
-    return LibraryCreateCollectionResponse(collection=result)
-
-
-@router.post("/collections/rename")
-async def library_rename_collection(
-    body: LibraryRenameCollectionRequest,
-) -> LibrarySuccessResponse:
-    """Rename a collection."""
-    root = _resolve_library_root(body.model_dump() if body.library_root else None)
-    await asyncio.to_thread(
-        collection_service.rename_collection, root, body.collection_id, body.name
-    )
-    return LibrarySuccessResponse()
-
-
-@router.post("/collections/delete")
-async def library_delete_collection(
-    body: LibraryDeleteCollectionRequest,
-) -> LibrarySuccessResponse:
-    """Delete a collection together with its descendants."""
-    root = _resolve_library_root(body.model_dump() if body.library_root else None)
-    await asyncio.to_thread(
-        collection_service.delete_collection, root, body.collection_id
-    )
-    return LibrarySuccessResponse()
-
-
-@router.post("/collections/add-document")
-async def library_add_collection_document(
-    body: LibraryCollectionDocumentRequest,
-) -> LibrarySuccessResponse:
-    """Attach a document to a collection."""
-    root = _resolve_library_root(body.model_dump() if body.library_root else None)
-    await asyncio.to_thread(
-        collection_service.add_document, root, body.collection_id, body.doc_id
-    )
-    return LibrarySuccessResponse()
-
-
-@router.post("/collections/remove-document")
-async def library_remove_collection_document(
-    body: LibraryCollectionDocumentRequest,
-) -> LibrarySuccessResponse:
-    """Detach a document from a collection."""
-    root = _resolve_library_root(body.model_dump() if body.library_root else None)
-    await asyncio.to_thread(
-        collection_service.remove_document, root, body.collection_id, body.doc_id
-    )
-    return LibrarySuccessResponse()
 
 
 @router.post("/configure")

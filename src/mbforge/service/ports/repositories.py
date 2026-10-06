@@ -216,26 +216,6 @@ class ActivityRepository(Protocol):
     ) -> list[dict[str, Any]]: ...
 
 
-class CollectionRepository(Protocol):
-    """Persistence boundary for user collections ("Groups")."""
-
-    def create(
-        self, collection_id: str, name: str, parent_id: str | None = None
-    ) -> None: ...
-
-    def rename(self, collection_id: str, name: str) -> None: ...
-
-    def list_rows(self) -> list[dict[str, Any]]: ...
-
-    def counts(self) -> dict[str, int]: ...
-
-    def delete(self, collection_id: str) -> None: ...
-
-    def add_document(self, collection_id: str, doc_id: str) -> None: ...
-
-    def remove_document(self, collection_id: str, doc_id: str) -> None: ...
-
-
 class MarkushRepository(Protocol):
     """Markush review persistence contract."""
 
@@ -358,9 +338,6 @@ class LibraryRepositories(Protocol):
 
     @property
     def docking(self) -> DockingRepository: ...
-
-    @property
-    def collections(self) -> CollectionRepository: ...
 
     @property
     def markush(self) -> MarkushRepository: ...

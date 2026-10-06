@@ -298,6 +298,12 @@ class DatabaseManager:
                 # Docking tables (receptors / jobs / poses) are likewise created
                 # here rather than in _KB_SCHEMA.
                 conn.executescript(_DOCKING_SCHEMA)
+                # Collections were removed; drop the retired tables from any
+                # existing library database.
+                conn.executescript(
+                    "DROP TABLE IF EXISTS collection_documents;"
+                    "DROP TABLE IF EXISTS collections;"
+                )
                 self._migrate_ingest_dag(conn)
                 conn.commit()
             finally:

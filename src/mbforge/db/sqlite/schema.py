@@ -61,26 +61,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_iq_doc_run_stage
     WHERE doc_id IS NOT NULL AND run_id IS NOT NULL AND stage IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_isd_stage ON ingest_stage_deps(doc_id, run_id, stage);
 CREATE INDEX IF NOT EXISTS idx_il_doc ON ingest_logs(doc_id);
--- User-defined collections (visible as library "Groups"). A parent delete
--- cascades to its whole subtree; a collection delete also drops membership.
--- collection_documents references doc_id by application contract, not a SQL
--- foreign key.
-CREATE TABLE IF NOT EXISTS collections (
-    collection_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    parent_id TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (parent_id) REFERENCES collections(collection_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_collection_parent ON collections(parent_id);
-CREATE TABLE IF NOT EXISTS collection_documents (
-    collection_id TEXT NOT NULL,
-    doc_id TEXT NOT NULL,
-    added_at TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (collection_id, doc_id),
-    FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_collection_documents_doc ON collection_documents(doc_id);
 -- Library documents. doc_id is the SHA-256 hex digest of the document's bytes,
 -- so the primary key doubles as the content address: identical bytes always
 -- map to one row. file_name is UNIQUE — the library rejects two documents that
