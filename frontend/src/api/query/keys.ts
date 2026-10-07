@@ -61,6 +61,13 @@ export const queryKeys = {
   settings: {
     all: ['settings'] as const,
     get: () => [...queryKeys.settings.all, 'get'] as const,
+    configDir: () => [...queryKeys.settings.all, 'config-dir'] as const,
+  },
+
+  models: {
+    all: ['models'] as const,
+    list: () => [...queryKeys.models.all, 'list'] as const,
+    cacheDir: () => [...queryKeys.models.all, 'cache-dir'] as const,
   },
 
   docs: {

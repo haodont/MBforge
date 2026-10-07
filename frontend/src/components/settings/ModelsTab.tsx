@@ -1,15 +1,15 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { type DownloadProgress } from '@/api/http/download'
 import {
-  listModels,
-  downloadModel,
-  deleteModel,
-  downloadModelSubfile,
-  testModel,
-  type DownloadModel,
-  type DownloadProgress,
-} from '@/api/http/download'
-import { refreshResolvedPaths, modelsCacheDirInfo } from '@/api/http/environment'
+  useModels,
+  useModelsCacheDirInfo,
+  useRefreshResolvedPaths,
+  useDeleteModel,
+  useTestModel,
+  useDownloadModel,
+  useDownloadModelSubfile,
+} from '@/api/query/hooks'
 import ModelCard from '@/components/settings/ModelCard'
 import Button from '@/components/ui/Button'
 import { showToast } from '@/hooks/useToast'
@@ -29,59 +29,58 @@ export interface DownloadState {
 
 export default function ModelsTab() {
   const { t } = useTranslation()
-  const [models, setModels] = useState<DownloadModel[]>([])
   const [downloadState, setDownloadState] = useState<DownloadState>({})
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [customOpen, setCustomOpen] = useState(false)
-  const [cacheDir, setCacheDir] = useState('')
   const [abortMap, setAbortMap] = useState<Map<string, () => void>>(new Map())
-  const [refreshing, setRefreshing] = useState(false)
   const [testingSubfiles, setTestingSubfiles] = useState<Set<string>>(new Set())
 
-  const loadModels = useCallback(async (opts: { showToast?: boolean } = {}) => {
-    setRefreshing(true)
-    try {
-      // Ask Rust to rescan ~/mbforge/ and refresh resolved_paths.json first,
-      // so the Python side sees newly placed files on its next read.
-      await refreshResolvedPaths().catch((_: unknown) => console.warn('refreshResolvedPaths failed'))
-      const resp = await listModels()
-      if (resp.success) {
-        setModels(resp.models)
-        // Silent by default; only explicit refresh toasts (avoids duplicate
-        // prompts on initial mount / after add-remove).
-        if (opts.showToast) {
-          const ready = resp.models.filter(m => m.downloaded).length
-          showToast(t('models.detectComplete', { ready, total: resp.models.length }), 'success')
-        }
-      } else if (opts.showToast) {
-        showToast(resp.error || t('models.loadFailed'), 'error')
-      }
-    } catch (e) {
-      if (opts.showToast) {
-        showToast(t('models.loadFailed') + ': ' + getUserFacingError(e), 'error')
-      }
-    } finally {
-      setRefreshing(false)
-    }
-  }, [t])
+  const {
+    data: modelsData,
+    isFetching: modelsFetching,
+    refetch: refetchModels,
+  } = useModels()
+  const {
+    data: cacheDirData,
+    isError: cacheDirIsError,
+    error: cacheDirError,
+  } = useModelsCacheDirInfo()
+  const { mutateAsync: refreshPaths } = useRefreshResolvedPaths()
+  const { mutateAsync: deleteModelAsync } = useDeleteModel()
+  const { mutateAsync: testModelAsync } = useTestModel()
+  const { mutateAsync: downloadModelAsync } = useDownloadModel()
+  const { mutateAsync: downloadSubfileAsync } = useDownloadModelSubfile()
 
-  const manualRefresh = useCallback(() => {
-    void loadModels({ showToast: true })
-  }, [loadModels])
+  const models = useMemo(() => modelsData?.models ?? [], [modelsData])
+  const cacheDir = cacheDirData?.mbforge.path ?? ''
+  const refreshing = modelsFetching
+  const didInitRefresh = useRef(false)
 
-  const loadCacheDir = useCallback(async () => {
-    try {
-      const info = await modelsCacheDirInfo()
-      setCacheDir(info.mbforge.path)
-    } catch (e) {
-      showToast(t('models.cacheDirFailed') + ': ' + getUserFacingError(e), 'error')
-    }
-  }, [t])
+  // Ask Rust to rescan ~/mbforge/ and refresh resolved_paths.json once on
+  // mount, so the Python side sees newly placed files on its next read.
+  useEffect(() => {
+    if (didInitRefresh.current) return
+    didInitRefresh.current = true
+    void refreshPaths().catch(() => console.warn('refreshResolvedPaths failed'))
+  }, [refreshPaths])
 
   useEffect(() => {
-    void loadModels()
-    void loadCacheDir()
-  }, [loadModels, loadCacheDir])
+    if (!cacheDirIsError) return
+    showToast(t('models.cacheDirFailed') + ': ' + getUserFacingError(cacheDirError), 'error')
+  }, [cacheDirIsError, cacheDirError, t])
+
+  const manualRefresh = useCallback(async () => {
+    await refreshPaths().catch(() => console.warn('refreshResolvedPaths failed'))
+    const { data: resp } = await refetchModels()
+    if (resp?.success) {
+      // Silent by default; only explicit refresh toasts (avoids duplicate
+      // prompts on initial mount / after add-remove).
+      const ready = resp.models.filter(m => m.downloaded).length
+      showToast(t('models.detectComplete', { ready, total: resp.models.length }), 'success')
+    } else {
+      showToast(resp?.error || t('models.loadFailed'), 'error')
+    }
+  }, [refreshPaths, refetchModels, t])
 
   const handleDownload = useCallback((modelId: string) => {
     setDownloadState(prev => {
@@ -93,44 +92,48 @@ export default function ModelsTab() {
       }
     })
 
-    const cleanup = downloadModel(modelId, (event: DownloadProgress) => {
-      setDownloadState(prev => {
-        const current = prev[modelId] ?? { progress: 0, status: 'idle' }
-        switch (event.status) {
-          case 'connecting':
-            return { ...prev, [modelId]: { ...current, status: 'connecting' } }
-          case 'downloading': {
-            const progress = event.total_files > 0
-              ? Math.round(((event.file_index) * 100 / event.total_files) + (event.file_progress * 100 / event.total_files))
-              : current.progress
-            return {
-              ...prev,
-              [modelId]: {
-                ...current,
-                status: 'downloading',
-                progress,
-                fileName: event.file,
-                fileIndex: event.file_index,
-                totalFiles: event.total_files,
-              },
+    void downloadModelAsync({
+      resourceId: modelId,
+      onProgress: (event: DownloadProgress) => {
+        setDownloadState(prev => {
+          const current = prev[modelId] ?? { progress: 0, status: 'idle' }
+          switch (event.status) {
+            case 'connecting':
+              return { ...prev, [modelId]: { ...current, status: 'connecting' } }
+            case 'downloading': {
+              const progress = event.total_files > 0
+                ? Math.round(((event.file_index) * 100 / event.total_files) + (event.file_progress * 100 / event.total_files))
+                : current.progress
+              return {
+                ...prev,
+                [modelId]: {
+                  ...current,
+                  status: 'downloading',
+                  progress,
+                  fileName: event.file,
+                  fileIndex: event.file_index,
+                  totalFiles: event.total_files,
+                },
+              }
             }
+            case 'completed':
+              return { ...prev, [modelId]: { progress: 100, status: 'completed' } }
+            case 'failed':
+              return { ...prev, [modelId]: { ...current, status: 'failed', error: event.error } }
+            default:
+              return prev
           }
-          case 'completed':
-            void loadModels()
-            return { ...prev, [modelId]: { progress: 100, status: 'completed' } }
-          case 'failed':
-            return { ...prev, [modelId]: { ...current, status: 'failed', error: event.error } }
-          default:
-            return prev
-        }
-      })
+        })
+      },
+      onCancelReady: cancel => {
+        setAbortMap(prev => {
+          const next = new Map(prev)
+          next.set(modelId, cancel)
+          return next
+        })
+      },
     })
-    setAbortMap(prev => {
-      const next = new Map(prev)
-      next.set(modelId, cleanup)
-      return next
-    })
-  }, [loadModels])
+  }, [downloadModelAsync])
 
   const handleCancel = useCallback((modelId: string) => {
     abortMap.get(modelId)?.()
@@ -144,13 +147,12 @@ export default function ModelsTab() {
 
   const handleDelete = useCallback(async (modelId: string) => {
     try {
-      await deleteModel(modelId)
+      await deleteModelAsync(modelId)
       setDeleteConfirm(null)
-      void loadModels()
     } catch (e) {
       showToast(t('models.deleteError', { error: getUserFacingError(e) }), 'error')
     }
-  }, [loadModels, t])
+  }, [deleteModelAsync, t])
 
   // ─── Multi-file sub-resource actions (key: `${modelId}::${subpath}`) ───
   const handleDownloadSubfile = useCallback((modelId: string, subpath: string) => {
@@ -159,25 +161,30 @@ export default function ModelsTab() {
       ...prev,
       [key]: { progress: 0, status: 'connecting' },
     }))
-    const cleanup = downloadModelSubfile(modelId, subpath, (event: DownloadProgress) => {
-      setDownloadState(prev => {
-        const current = prev[key] ?? { progress: 0, status: 'idle' }
-        if (event.status === 'completed') {
-          void loadModels()
-          return { ...prev, [key]: { progress: 100, status: 'completed' } }
-        }
-        if (event.status === 'failed') {
-          return { ...prev, [key]: { ...current, status: 'failed', error: event.error } }
-        }
-        return { ...prev, [key]: { ...current, status: event.status } }
-      })
+    void downloadSubfileAsync({
+      resourceId: modelId,
+      subpath,
+      onProgress: (event: DownloadProgress) => {
+        setDownloadState(prev => {
+          const current = prev[key] ?? { progress: 0, status: 'idle' }
+          if (event.status === 'completed') {
+            return { ...prev, [key]: { progress: 100, status: 'completed' } }
+          }
+          if (event.status === 'failed') {
+            return { ...prev, [key]: { ...current, status: 'failed', error: event.error } }
+          }
+          return { ...prev, [key]: { ...current, status: event.status } }
+        })
+      },
+      onCancelReady: cancel => {
+        setAbortMap(prev => {
+          const next = new Map(prev)
+          next.set(key, cancel)
+          return next
+        })
+      },
     })
-    setAbortMap(prev => {
-      const next = new Map(prev)
-      next.set(key, cleanup)
-      return next
-    })
-  }, [loadModels])
+  }, [downloadSubfileAsync])
 
   // ─── Model test ───
   // Card-level Test: single-file tests directly; multi-file tests the first
@@ -198,7 +205,7 @@ export default function ModelsTab() {
       return next
     })
     try {
-      const result = await testModel(modelId, subpath)
+      const result = await testModelAsync({ resourceId: modelId, subpath })
       if (result.ok) {
         showToast(t('models.testOk', { ms: result.duration_ms }), 'success')
       } else {
@@ -213,7 +220,7 @@ export default function ModelsTab() {
         return next
       })
     }
-  }, [t, models])
+  }, [t, models, testModelAsync])
 
   // Group by type (order preserved: embedding → reranker → detection)
   const typeOrder: Array<{ key: string; labelKey: string }> = [

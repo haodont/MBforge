@@ -6,8 +6,7 @@ import PageTitle from '@/components/ui/PageTitle'
 import AlertBanner from '@/components/ui/AlertBanner'
 import Button from '@/components/ui/Button'
 import SettingsTabs from '@/components/settings/SettingsTabs'
-import { useSettings, useSaveSettings } from '@/api/query/hooks'
-import { getConfigDir } from '@/api/http/settings'
+import { useSettings, useSaveSettings, useConfigDir } from '@/api/query/hooks'
 import { useTheme } from '@/hooks/useTheme'
 import i18n from '@/i18n'
 import { showToast } from '@/hooks/useToast'
@@ -35,6 +34,7 @@ export default function SettingsPage() {
 
   const settingsQuery = useSettings()
   const saveSettingsMutation = useSaveSettings()
+  const configDirQuery = useConfigDir()
 
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
 
@@ -100,12 +100,12 @@ export default function SettingsPage() {
 
   const handleOpenConfigDir = useCallback(async () => {
     try {
-      const path = await getConfigDir()
-      showToast(path, 'info')
+      const { data: path } = await configDirQuery.refetch()
+      showToast(path ?? '', 'info')
     } catch (e) {
       showToast(getUserFacingError(e, t('settings.configFile')), 'error')
     }
-  }, [t])
+  }, [configDirQuery, t])
 
   const loading = isLoading || settingsQuery.isLoading
 

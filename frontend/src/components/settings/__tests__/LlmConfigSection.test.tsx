@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from '@/api/query/client'
 import { DEFAULT_SETTINGS } from '../types'
 
 vi.mock('react-i18next', () => ({
@@ -18,13 +20,16 @@ vi.mock('@/api/http/settings', async importOriginal => {
 import LlmConfigSection from '../model/LlmConfigSection'
 
 const renderSection = () => {
+  const client = createQueryClient()
   render(
-    <LlmConfigSection
-      settings={DEFAULT_SETTINGS}
-      setSettings={vi.fn()}
-      markDirty={vi.fn()}
-      dirtyFields={{}}
-    />,
+    <QueryClientProvider client={client}>
+      <LlmConfigSection
+        settings={DEFAULT_SETTINGS}
+        setSettings={vi.fn()}
+        markDirty={vi.fn()}
+        dirtyFields={{}}
+      />
+    </QueryClientProvider>,
   )
 }
 
@@ -48,10 +53,12 @@ describe('LlmConfigSection — fetch model list from provider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.fetchModelsDesc' }))
 
-    expect(fetchLlmModelsMock).toHaveBeenCalledWith({
-      provider: DEFAULT_SETTINGS.llm_provider,
-      base_url: DEFAULT_SETTINGS.llm_base_url,
-      api_key: DEFAULT_SETTINGS.llm_api_key,
+    await waitFor(() => {
+      expect(fetchLlmModelsMock).toHaveBeenCalledWith({
+        provider: DEFAULT_SETTINGS.llm_provider,
+        base_url: DEFAULT_SETTINGS.llm_base_url,
+        api_key: DEFAULT_SETTINGS.llm_api_key,
+      })
     })
 
     await waitFor(() => {

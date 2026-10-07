@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import Caption from '@/components/ui/Caption'
 import Button from '@/components/ui/Button'
 import SettingSection, { SettingGroup, SettingItem } from '@/components/ui/SettingSection'
-import { fetchLlmModels } from '@/api/http/settings'
+import { useLlmModels } from '@/api/query/hooks'
 import { getUserFacingError } from '@/utils/errors'
 import { NumberField, ProviderField, SelectField } from '../SettingRow'
 import { ModelSelector } from '../ModelComponents'
@@ -38,6 +38,7 @@ export default function LlmConfigSection({
   dirtyFields,
 }: Props) {
   const { t } = useTranslation()
+  const fetchModels = useLlmModels()
   const update = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {
     setSettings(s => ({ ...s, [key]: value }))
   }
@@ -71,7 +72,7 @@ export default function LlmConfigSection({
     setFetchState('loading')
     setFetchError(null)
     try {
-      const res = await fetchLlmModels({
+      const res = await fetchModels.mutateAsync({
         provider: settings.llm_provider,
         base_url: settings.llm_base_url,
         api_key: settings.llm_api_key,

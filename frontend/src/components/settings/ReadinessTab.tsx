@@ -1,18 +1,17 @@
 /** Readiness diagnostics tab — subsystem health cards, LLM probe, demo run.
  * Used by Settings > Diagnostics tab. */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  readinessProbeLlm,
-  readinessDemoRun,
   type ProbeLlmResult,
   type ReadinessModel,
   type ReadinessSummary,
 } from '@/api/http/readiness'
-import { ingestList } from '@/api/http/ingest_queue'
 import { getUserFacingError } from '@/utils/errors'
 import { useReadinessSummary } from '@/api/query/hooks/useReadiness'
+import { useReadinessProbeLlm, useReadinessDemoRun } from '@/api/query/hooks/useReadinessActions'
+import { useIngestQueue } from '@/api/query/hooks/useIngestQueue'
 import Button from '@/components/ui/Button'
 import Caption from '@/components/ui/Caption'
 
@@ -65,22 +64,54 @@ export default function ReadinessTab({ libraryRoot }: Props) {
   const [probing, setProbing] = useState(false)
   const [probe, setProbe] = useState<ProbeLlmResult | null>(null)
   const [demo, setDemo] = useState<DemoState>({ running: false, tone: 'idle', message: null })
+  const [demoRunId, setDemoRunId] = useState<string | null>(null)
 
-  const pollTimer = useRef<number | null>(null)
+  const probeLlm = useReadinessProbeLlm()
+  const demoRun = useReadinessDemoRun()
+  // The demo task poller reads the shared ingest-queue query instead of
+  // fetching `ingestList` itself, so only one client hits the endpoint.
+  const { data: ingestTasks } = useIngestQueue(libraryRoot)
+
   const mounted = useRef(true)
 
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
-      if (pollTimer.current !== null) window.clearTimeout(pollTimer.current)
     }
   }, [])
+
+  // Track the demo run through the shared ingest queue. The query owns the
+  // polling cadence; this effect only mirrors the task into the demo banner.
+  useEffect(() => {
+    if (!demoRunId) return
+    const task = ingestTasks?.find(x => x.run_id === demoRunId)
+    if (!task) return
+    if (task.status === 'done') {
+      setDemo({ running: false, tone: 'ok', message: t('settings.readiness.demoDone') })
+      setDemoRunId(null)
+      return
+    }
+    if (task.status === 'failed' || task.status === 'cancelled') {
+      setDemo({
+        running: false,
+        tone: 'error',
+        message: t('settings.readiness.demoTaskFailed', { error: task.error ?? task.status }),
+      })
+      setDemoRunId(null)
+      return
+    }
+    setDemo({
+      running: true,
+      tone: 'idle',
+      message: t('settings.readiness.demoProgress', { stage: task.stage }),
+    })
+  }, [demoRunId, ingestTasks, t])
 
   const handleProbe = async () => {
     setProbing(true)
     try {
-      if (mounted.current) setProbe(await readinessProbeLlm())
+      if (mounted.current) setProbe(await probeLlm.mutateAsync())
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[ReadinessTab] LLM probe failed:', e)
       if (mounted.current) {
@@ -91,48 +122,10 @@ export default function ReadinessTab({ libraryRoot }: Props) {
     }
   }
 
-  const pollDemoTask = useCallback(
-    (runId: string) => {
-      const tick = async () => {
-        try {
-          const tasks = await ingestList(libraryRoot)
-          if (!mounted.current) return
-          const task = tasks.find((x) => x.run_id === runId)
-          if (task) {
-            if (task.status === 'done') {
-              setDemo({ running: false, tone: 'ok', message: t('settings.readiness.demoDone') })
-              return
-            }
-            if (task.status === 'failed' || task.status === 'cancelled') {
-              setDemo({
-                running: false,
-                tone: 'error',
-                message: t('settings.readiness.demoTaskFailed', { error: task.error ?? task.status }),
-              })
-              return
-            }
-            setDemo({
-              running: true,
-              tone: 'idle',
-              message: t('settings.readiness.demoProgress', {
-                stage: task.stage,
-              }),
-            })
-          }
-        } catch (e) {
-          if (import.meta.env.DEV) console.warn('[ReadinessTab] demo poll failed:', e)
-        }
-        if (mounted.current) pollTimer.current = window.setTimeout(() => void tick(), 1500)
-      }
-      void tick()
-    },
-    [libraryRoot, t],
-  )
-
   const handleDemoRun = async () => {
     setDemo({ running: true, tone: 'idle', message: t('settings.readiness.demoStarting') })
     try {
-      const res = await readinessDemoRun()
+      const res = await demoRun.mutateAsync()
       if (!mounted.current) return
       if (!res.ok) {
         setDemo({
@@ -143,7 +136,7 @@ export default function ReadinessTab({ libraryRoot }: Props) {
         return
       }
       if (res.run_id) {
-        pollDemoTask(res.run_id)
+        setDemoRunId(res.run_id)
       } else {
         setDemo({ running: false, tone: 'ok', message: t('settings.readiness.demoDone') })
       }
