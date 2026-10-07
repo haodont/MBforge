@@ -13,14 +13,12 @@ def test_review_queue_stats_and_batch_decision(
     db = DatabaseManager.get(root)
     db.initialize()
     repo = get_repositories(root).review
-    with db.mol_conn() as conn:
-        repo.insert_review_item(
-            conn,
-            item_id="native-1",
-            kind="missing_evidence",
-            doc_id="doc-1",
-            reasons=["missing_crop"],
-        )
+    repo.insert_review_item(
+        item_id="native-1",
+        kind="missing_evidence",
+        doc_id="doc-1",
+        reasons=["missing_crop"],
+    )
 
     queue = app_client.get(
         "/api/v1/review/queue",

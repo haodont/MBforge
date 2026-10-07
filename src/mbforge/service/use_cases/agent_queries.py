@@ -20,39 +20,15 @@ from mbforge.service.use_cases.documents.source_evidence import find_text, list_
 #: Long free text (evidence, context) is truncated before crossing the tool boundary.
 MAX_TEXT_CHARS = 2000
 
-#: Tables the ``library_stats`` tool reports a total for.
-_COUNTED_TABLES: tuple[tuple[str, str], ...] = (
-    ("documents", "documents"),
-    ("source_evidence", "source_evidence"),
-    ("molecules", "molecules"),
-    ("activities", "activities"),
-    ("markush_review_candidates", "markush_review_candidates"),
-    ("review_items", "review_items"),
-)
-
-
-def _count(conn: Any, sql: str) -> int:
-    row = conn.execute(sql).fetchone()
-    if row is None:
-        return 0
-    return int(row[0])
-
 
 def library_stats(library_root: str) -> dict[str, Any]:
     """Return coarse counts across the library's main tables."""
     db = get_database(library_root)
-    with db.kb_conn() as conn:
-        totals = {
-            name: _count(conn, f"SELECT COUNT(*) FROM {table}")
-            for name, table in _COUNTED_TABLES
-        }
-        by_status = {
-            row["status"]: int(row["c"])
-            for row in conn.execute(
-                "SELECT status, COUNT(*) AS c FROM documents GROUP BY status"
-            ).fetchall()
-        }
-    totals["documents"] = {"total": totals["documents"], "by_status": by_status}
+    totals: dict[str, Any] = dict(db.table_counts())
+    totals["documents"] = {
+        "total": totals["documents"],
+        "by_status": db.document_status_counts(),
+    }
     return totals
 
 

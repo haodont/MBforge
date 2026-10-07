@@ -141,16 +141,17 @@ def apply_decision(
     """
     if action not in _VALID_ACTIONS:
         raise ReviewTransitionError(f"unknown action: {action}")
-    fetch_one = (
-        review_repository.fetch_one
-        if review_repository is not None
-        else _fetch_one_compat
-    )
-    row = fetch_one(
-        conn,
-        "SELECT * FROM markush_review_candidates WHERE candidate_id = ?",
-        (candidate_id,),
-    )
+    if review_repository is not None:
+        row = review_repository.fetch_one(
+            "SELECT * FROM markush_review_candidates WHERE candidate_id = ?",
+            (candidate_id,),
+        )
+    else:
+        row = _fetch_one_compat(
+            conn,
+            "SELECT * FROM markush_review_candidates WHERE candidate_id = ?",
+            (candidate_id,),
+        )
     if row is None:
         raise ReviewNotFoundError(candidate_id)
     if row["review_version"] != expected_version:
@@ -168,21 +169,19 @@ def apply_decision(
         """,
         (new_state, candidate_id),
     )
-    record = (
-        review_repository.record_review_decision
-        if review_repository is not None
-        else _record_review_decision_compat
-    )
-    record(
-        conn,
-        entity_type="review_candidate",
-        entity_id=candidate_id,
-        action=action,
-        previous_state=previous_state,
-        new_state=new_state,
-        reason=reason,
-        snapshot=payload,
-    )
+    decision_kwargs: dict[str, Any] = {
+        "entity_type": "review_candidate",
+        "entity_id": candidate_id,
+        "action": action,
+        "previous_state": previous_state,
+        "new_state": new_state,
+        "reason": reason,
+        "snapshot": payload,
+    }
+    if review_repository is not None:
+        review_repository.record_review_decision(**decision_kwargs)
+    else:
+        _record_review_decision_compat(conn, **decision_kwargs)
     payload.update(
         {
             "candidate_id": candidate_id,
@@ -276,12 +275,10 @@ def _confirm_complete_to_molecules(
             row["smiles"] or "",
         ),
     )
-    copy_evidence = (
-        review_repository.copy_evidence
-        if review_repository is not None
-        else _copy_evidence_compat
-    )
-    copy_evidence(conn, row, "molecule", mol_id, row["doc_id"])
+    if review_repository is not None:
+        review_repository.copy_evidence(row, "molecule", mol_id, row["doc_id"])
+    else:
+        _copy_evidence_compat(conn, row, "molecule", mol_id, row["doc_id"])
     return mol_id
 
 
@@ -334,12 +331,10 @@ def _confirm_scaffold_to_markush_scaffolds(
         "UPDATE markush_review_candidates SET properties = ? WHERE candidate_id = ?",
         (json.dumps(existing, ensure_ascii=False), row["candidate_id"]),
     )
-    copy_evidence = (
-        review_repository.copy_evidence
-        if review_repository is not None
-        else _copy_evidence_compat
-    )
-    copy_evidence(conn, row, "scaffold", scaffold_id, row["doc_id"])
+    if review_repository is not None:
+        review_repository.copy_evidence(row, "scaffold", scaffold_id, row["doc_id"])
+    else:
+        _copy_evidence_compat(conn, row, "scaffold", scaffold_id, row["doc_id"])
     return scaffold_id
 
 
@@ -381,12 +376,10 @@ def _confirm_fragment_to_markush_fragments(
             ),
         ),
     )
-    copy_evidence = (
-        review_repository.copy_evidence
-        if review_repository is not None
-        else _copy_evidence_compat
-    )
-    copy_evidence(conn, row, "fragment", fragment_id, row["doc_id"])
+    if review_repository is not None:
+        review_repository.copy_evidence(row, "fragment", fragment_id, row["doc_id"])
+    else:
+        _copy_evidence_compat(conn, row, "fragment", fragment_id, row["doc_id"])
     return fragment_id
 
 

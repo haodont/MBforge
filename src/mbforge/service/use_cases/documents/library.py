@@ -186,9 +186,8 @@ class LibraryStore:
         from mbforge.service.ports import get_database
 
         db = get_database(str(self._root))
-        with db.transaction() as (_kb_conn, mol_conn):
-            for doc_id in ids:
-                db.delete_document_molecule_data(mol_conn, doc_id)
+        for doc_id in ids:
+            db.delete_document_molecule_data(doc_id)
         get_repositories(self._root).documents.delete_many(ids)
         logger.info("Documents deleted: %s", ids)
         return len(ids)
@@ -233,8 +232,7 @@ class LibraryStore:
             create_backup(self._root, doc_id, "pipeline_clear") if backup else None
         )
         db = get_database(str(self._root))
-        with db.transaction() as (_kb_conn, mol_conn):
-            db.delete_document_molecule_data(mol_conn, doc_id)
+        db.delete_document_molecule_data(doc_id)
 
         resolver = self._layout
         paths = [

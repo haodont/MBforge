@@ -11,7 +11,6 @@ def test_unified_queue_maps_native_and_markush_rows(tmp_path) -> None:
     repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         repo.insert_review_item(
-            conn,
             item_id="low-1",
             kind="low_conf_molecule",
             doc_id="doc-native",
@@ -31,11 +30,11 @@ def test_unified_queue_maps_native_and_markush_rows(tmp_path) -> None:
                     '*CCO', 0, '["markush_context"]', '{"x": 1}')
             """
         )
-        items, total = repo.list_queue(conn, page=1, page_size=10)
+        items, total = repo.list_queue(page=1, page_size=10)
         assert total == 2
         assert {item["kind"] for item in items} == {"low_conf_molecule", "markush_link"}
         assert next(item for item in items if item["id"] == "mark-1")["page"] == 1
-        assert repo.stats(conn)["pending"] == 2
+        assert repo.stats()["pending"] == 2
 
 
 def test_native_decision_updates_status_and_audit(tmp_path) -> None:
@@ -44,7 +43,6 @@ def test_native_decision_updates_status_and_audit(tmp_path) -> None:
     repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         repo.insert_review_item(
-            conn,
             item_id="activity-1",
             kind="activity_match",
             doc_id="doc-1",
@@ -80,7 +78,6 @@ def test_ambiguous_coref_confirm_adopts_chosen_label(tmp_path) -> None:
             "INSERT INTO molecules (mol_id, smiles, name) VALUES ('mol-1', 'CCO', '')"
         )
         repo.insert_review_item(
-            conn,
             item_id="coref-1",
             kind="ambiguous_coref",
             doc_id="doc-1",
@@ -115,7 +112,6 @@ def test_ambiguous_coref_confirm_without_choice_falls_back_to_primary(tmp_path) 
             "INSERT INTO molecules (mol_id, smiles, name) VALUES ('mol-2', 'CCO', '')"
         )
         repo.insert_review_item(
-            conn,
             item_id="coref-2",
             kind="ambiguous_coref",
             doc_id="doc-1",
@@ -142,7 +138,6 @@ def test_ambiguous_coref_reject_only_marks_item(tmp_path) -> None:
             "INSERT INTO molecules (mol_id, smiles, name) VALUES ('mol-3', 'CCO', '')"
         )
         repo.insert_review_item(
-            conn,
             item_id="coref-3",
             kind="ambiguous_coref",
             doc_id="doc-1",
@@ -205,7 +200,6 @@ def test_reimport_preserves_native_human_decision(tmp_path) -> None:
     repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         repo.insert_review_item(
-            conn,
             item_id="stable-1",
             kind="low_conf_molecule",
             doc_id="doc-1",
@@ -216,7 +210,6 @@ def test_reimport_preserves_native_human_decision(tmp_path) -> None:
         )
 
         repo.insert_review_item(
-            conn,
             item_id="stable-1",
             kind="low_conf_molecule",
             doc_id="doc-1",
@@ -239,14 +232,12 @@ def test_clear_all_empties_review_items_candidates_and_audit(tmp_path) -> None:
     repo = get_repositories(str(tmp_path)).review
     with db.mol_conn() as conn:
         repo.insert_review_item(
-            conn,
             item_id="pending-1",
             kind="low_conf_molecule",
             doc_id="doc-1",
             smiles="CCO",
         )
         repo.insert_review_item(
-            conn,
             item_id="resolved-1",
             kind="activity_match",
             doc_id="doc-1",
@@ -284,7 +275,7 @@ def test_clear_all_empties_review_items_candidates_and_audit(tmp_path) -> None:
             "VALUES ('dec-mark', 'review_candidate', 'mark-active', 'approve', '{}')"
         )
 
-        result = repo.clear_all(conn)
+        result = repo.clear_all()
 
         assert result == {"deleted_items": 2, "deleted_candidates": 2}
         assert conn.execute("SELECT COUNT(*) FROM review_items").fetchone()[0] == 0
@@ -315,7 +306,7 @@ def test_clear_all_keeps_promoted_artifacts(tmp_path) -> None:
             "(candidate_id, source_key, doc_id, predicted_role, smiles) "
             "VALUES ('mark-1', 'src-1', 'doc-1', 'scaffold', '*CCO')"
         )
-        repo.clear_all(conn)
+        repo.clear_all()
 
         assert (
             conn.execute("SELECT 1 FROM molecules WHERE mol_id = 'mol-1'").fetchone()

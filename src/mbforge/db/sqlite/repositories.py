@@ -42,6 +42,17 @@ from mbforge.ports.repositories import (
     LibraryRepositories,
 )
 
+#: Tables the ``library_stats`` agent tool reports a total for. The names double
+#: as the reported keys, so the order here is the order the tool returns them.
+_COUNTED_TABLES: tuple[str, ...] = (
+    "documents",
+    "source_evidence",
+    "molecules",
+    "activities",
+    "markush_review_candidates",
+    "review_items",
+)
+
 
 @dataclass
 class SqliteDatabaseRepository:
@@ -52,19 +63,14 @@ class SqliteDatabaseRepository:
     def initialize(self) -> None:
         self._manager.initialize()
 
-    def kb_conn(self) -> Any:
-        return self._manager.kb_conn()
-
     def mol_conn(self) -> Any:
+        """Return the unified database connection context.
+
+        Retained on the adapter (not the port) for the Markush raw-SQL service
+        modules that still thread a connection themselves; those move behind
+        typed repository methods in a follow-up task.
+        """
         return self._manager.mol_conn()
-
-    def transaction(self, db: str = "kb") -> Any:
-        # The legacy manager now exposes one unified database transaction;
-        # keep the optional argument for callers that still pass ``db``.
-        return self._manager.transaction()
-
-    def execute(self, sql: str, params: Sequence[Any] = (), *, db: str = "kb") -> Any:
-        return self._manager.execute(sql, params, db=db)
 
     def readonly_schema(self) -> list[dict[str, Any]]:
         from mbforge.db.sqlite import readonly_sql
@@ -75,6 +81,27 @@ class SqliteDatabaseRepository:
         from mbforge.db.sqlite import readonly_sql
 
         return readonly_sql.run_query(self._manager.kb_path, sql, max_rows=max_rows)
+
+    def table_counts(self) -> dict[str, int]:
+        """Count the main library tables reported by the ``library_stats`` tool."""
+        with self._manager.kb_conn() as conn:
+            return {
+                name: int(conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0])
+                for name in _COUNTED_TABLES
+            }
+
+    def document_status_counts(self) -> dict[str, int]:
+        """Count documents grouped by ``status``."""
+        with self._manager.kb_conn() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) AS c FROM documents GROUP BY status"
+            ).fetchall()
+        return {row["status"]: int(row["c"]) for row in rows}
+
+    def ping(self) -> None:
+        """Open (and initialize) the unified database connection."""
+        with self._manager.kb_conn():
+            pass
 
     def delete_molecule_records(self, conn: Any, mol_ids: Iterable[str]) -> int:
         return DatabaseManager.delete_molecule_records(conn, mol_ids)
@@ -88,19 +115,15 @@ class SqliteDatabaseRepository:
     def sync_molecule_fingerprint(self, conn: Any, mol_id: str) -> None:
         DatabaseManager.sync_molecule_fingerprint(conn, mol_id)
 
-    def delete_document_molecule_data(self, conn: Any, doc_id: str) -> int:
-        return DatabaseManager.delete_document_molecule_data(conn, doc_id)
+    def delete_document_molecule_data(self, doc_id: str) -> int:
+        with self._manager.mol_conn() as conn:
+            return DatabaseManager.delete_document_molecule_data(conn, doc_id)
 
     def record_ingest_event(self, **kwargs: Any) -> None:
         record_ingest_event(self._manager, **kwargs)
 
     def snapshot_document(self, doc_id: str) -> dict[str, Any]:
         return document_backup.snapshot_doc_db(self._manager, doc_id)
-
-    def __getattr__(self, name: str) -> Any:
-        """Keep the adapter surface compatible while methods are extracted."""
-
-        return getattr(self._manager, name)
 
 
 @dataclass
@@ -109,12 +132,33 @@ class SqliteEvidenceRepository:
 
     library_root: Path
 
-    def persist(
-        self, evidence: Sequence[SourceEvidence] | object, conn: Any = None
-    ) -> int:
-        return source_evidence.persist_source_evidence(
-            self.library_root, evidence, conn=conn
-        )
+    def persist(self, evidence: Sequence[SourceEvidence] | object) -> int:
+        return source_evidence.persist_source_evidence(self.library_root, evidence)
+
+    def persist_extraction(
+        self,
+        *,
+        doc_id: str,
+        evidence: Sequence[SourceEvidence] | object,
+        candidates: Sequence[Any],
+        recognition_version: int = 1,
+    ) -> tuple[int, int]:
+        """Persist evidence and review candidates atomically.
+
+        Both writes run on one unified-database transaction so either both
+        succeed or both roll back; returns ``(evidence_count, candidate_count)``.
+        """
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            evidence_count = source_evidence.persist_source_evidence(
+                self.library_root, evidence, conn=conn
+            )
+            candidate_count = persist_review_candidates(
+                doc_id,
+                candidates,
+                conn=conn,
+                recognition_version=recognition_version,
+            )
+        return evidence_count, candidate_count
 
     def get(self, evidence_id: str) -> SourceEvidence | None:
         return source_evidence.get_source_evidence(self.library_root, evidence_id)
@@ -272,53 +316,71 @@ class SqliteMoleculeRepository:
 
 @dataclass
 class SqliteMarkushRepository:
-    """Repository facade for Markush review transitions."""
+    """Repository facade for Markush review transitions.
 
-    def list_candidates(self, conn: Any, **kwargs: Any) -> Any:
-        return markush_transitions.list_candidates(conn, **kwargs)
+    Owns its connections: every method opens a unified-database transaction so
+    callers never thread a ``conn``.
+    """
 
-    def get_candidate_detail(self, conn: Any, candidate_id: str) -> Any:
-        return markush_transitions.get_candidate_detail(conn, candidate_id)
+    library_root: Path
 
-    def update_candidate(self, conn: Any, **kwargs: Any) -> Any:
-        return markush_transitions.update_candidate(conn, **kwargs)
+    def list_candidates(self, **kwargs: Any) -> Any:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_transitions.list_candidates(conn, **kwargs)
+
+    def get_candidate_detail(self, candidate_id: str) -> Any:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_transitions.get_candidate_detail(conn, candidate_id)
+
+    def update_candidate(self, **kwargs: Any) -> Any:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_transitions.update_candidate(conn, **kwargs)
 
 
 @dataclass
 class SqliteReviewRepository:
-    """Repository facade for review queue and audit persistence."""
+    """Repository facade for review queue and audit persistence.
 
-    def insert_review_item(self, conn: Any, **kwargs: Any) -> str:
-        return insert_review_item(conn, **kwargs)
+    Owns its connections: every method opens a unified-database transaction so
+    callers never thread a ``conn``.
+    """
 
-    def record_review_decision(self, conn: Any, **kwargs: Any) -> None:
-        record_review_decision(conn, **kwargs)
+    library_root: Path
+
+    def insert_review_item(self, **kwargs: Any) -> str:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return insert_review_item(conn, **kwargs)
+
+    def record_review_decision(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            record_review_decision(conn, **kwargs)
 
     def persist_review_candidates(
         self,
         doc_id: str,
         candidates: Any,
-        conn: Any,
         recognition_version: int = 1,
     ) -> int:
-        return persist_review_candidates(
-            doc_id,
-            candidates,
-            conn=conn,
-            recognition_version=recognition_version,
-        )
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return persist_review_candidates(
+                doc_id,
+                candidates,
+                conn=conn,
+                recognition_version=recognition_version,
+            )
 
-    def fetch_one(self, conn: Any, sql: str, params: Any) -> Any:
-        return _fetch_one(conn, sql, params)
+    def fetch_one(self, sql: str, params: Any) -> Any:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return _fetch_one(conn, sql, params)
 
     def copy_evidence(
-        self, conn: Any, row: Any, entity_type: str, entity_id: str, doc_id: str
+        self, row: Any, entity_type: str, entity_id: str, doc_id: str
     ) -> None:
-        _copy_evidence(conn, row, entity_type, entity_id, doc_id)
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            _copy_evidence(conn, row, entity_type, entity_id, doc_id)
 
     def list_queue(
         self,
-        conn: Any,
         *,
         kind: str | None = None,
         status: str | None = None,
@@ -326,45 +388,53 @@ class SqliteReviewRepository:
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[dict[str, Any]], int]:
-        return review_store.list_queue(
-            conn,
-            kind=kind,
-            status=status,
-            doc_id=doc_id,
-            page=page,
-            page_size=page_size,
-        )
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return review_store.list_queue(
+                conn,
+                kind=kind,
+                status=status,
+                doc_id=doc_id,
+                page=page,
+                page_size=page_size,
+            )
 
-    def get_item(self, conn: Any, kind: str, item_id: str) -> dict[str, Any]:
-        return review_store.get_item(conn, kind, item_id)
+    def get_item(self, kind: str, item_id: str) -> dict[str, Any]:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return review_store.get_item(conn, kind, item_id)
 
-    def stats(self, conn: Any) -> dict[str, Any]:
-        return review_store.stats(conn)
+    def stats(self) -> dict[str, Any]:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return review_store.stats(conn)
 
-    def history(self, conn: Any, entity_id: str) -> tuple[str, list[dict[str, Any]]]:
-        return review_store.history(conn, entity_id)
+    def history(self, entity_id: str) -> tuple[str, list[dict[str, Any]]]:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return review_store.history(conn, entity_id)
 
-    def markush_candidate_version(self, conn: Any, item_id: str) -> int | None:
-        return review_store.markush_candidate_version(conn, item_id)
+    def markush_candidate_version(self, item_id: str) -> int | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return review_store.markush_candidate_version(conn, item_id)
 
     def review_item_status_payload(
-        self, conn: Any, item_id: str, kind: str
+        self, item_id: str, kind: str
     ) -> dict[str, Any] | None:
-        return review_store.review_item_status_payload(conn, item_id, kind)
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return review_store.review_item_status_payload(conn, item_id, kind)
 
-    def set_review_item_status(
-        self, conn: Any, item_id: str, kind: str, new_status: str
-    ) -> None:
-        review_store.set_review_item_status(conn, item_id, kind, new_status)
+    def set_review_item_status(self, item_id: str, kind: str, new_status: str) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            review_store.set_review_item_status(conn, item_id, kind, new_status)
 
-    def set_molecule_review_status(self, conn: Any, mol_id: str, status: str) -> None:
-        review_store.set_molecule_review_status(conn, mol_id, status)
+    def set_molecule_review_status(self, mol_id: str, status: str) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            review_store.set_molecule_review_status(conn, mol_id, status)
 
-    def set_molecule_name(self, conn: Any, mol_id: str, name: str) -> None:
-        review_store.set_molecule_name(conn, mol_id, name)
+    def set_molecule_name(self, mol_id: str, name: str) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            review_store.set_molecule_name(conn, mol_id, name)
 
-    def clear_all(self, conn: Any) -> dict[str, int]:
-        return review_store.clear_all(conn)
+    def clear_all(self) -> dict[str, int]:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return review_store.clear_all(conn)
 
 
 @dataclass
@@ -555,9 +625,9 @@ def create_repositories(library_root: str | Path) -> SqliteRepositories:
     root = Path(library_root).expanduser().resolve()
     return SqliteRepositories(
         root,
-        SqliteDatabaseRepository(DatabaseManager.get(root)),
-        SqliteMarkushRepository(),
-        SqliteReviewRepository(),
+        SqliteDatabaseRepository(DatabaseManager.get(str(root))),
+        SqliteMarkushRepository(root),
+        SqliteReviewRepository(root),
         FilesystemArtifactStore(),
     )
 

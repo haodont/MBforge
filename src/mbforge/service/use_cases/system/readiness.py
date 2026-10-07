@@ -69,8 +69,8 @@ def _probe_database_sync(library: LibraryReadiness) -> DatabaseReadiness:
         return DatabaseReadiness(ok=False, error="library_not_configured")
     try:
         db = get_database(library.path)
-        with db.kb_conn():
-            return DatabaseReadiness(ok=True)
+        db.ping()
+        return DatabaseReadiness(ok=True)
     except Exception as exc:  # noqa: BLE001 — degraded probe, never raise
         logger.warning("readiness: database probe failed: %s", exc)
         return DatabaseReadiness(ok=False, error=_sanitize_error(exc))

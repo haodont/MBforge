@@ -47,7 +47,7 @@ def decide(
 ) -> dict[str, Any]:
     """Route one decision to its native persistence target."""
     if kind == "markush_link":
-        version = review.markush_candidate_version(conn, item_id)
+        version = review.markush_candidate_version(item_id)
         if version is None:
             raise ReviewNotFoundError(item_id)
         mapped_action = {
@@ -66,7 +66,7 @@ def decide(
             review_repository=review,
         )
 
-    row = review.review_item_status_payload(conn, item_id, kind)
+    row = review.review_item_status_payload(item_id, kind)
     if row is None:
         raise ReviewNotFoundError(item_id)
     current = row["status"]
@@ -75,11 +75,11 @@ def decide(
         action,
         action_targets={"confirm": "confirmed", "reject": "rejected"},
     )
-    review.set_review_item_status(conn, item_id, kind, new_status)
+    review.set_review_item_status(item_id, kind, new_status)
     payload = row["payload"]
     mol_id = payload.get("mol_id") if isinstance(payload, dict) else None
     if mol_id and kind == "low_conf_molecule":
-        review.set_molecule_review_status(conn, mol_id, new_status)
+        review.set_molecule_review_status(mol_id, new_status)
     if kind == "ambiguous_coref" and new_status == "confirmed":
         # Adopt the reviewer-chosen compound identifier as the molecule name
         # (falls back to the OCR suggestion, then the first label).
@@ -90,9 +90,8 @@ def decide(
             or (labels[0] if isinstance(labels, list) and labels else None)
         )
         if mol_id and chosen:
-            review.set_molecule_name(conn, mol_id, str(chosen))
+            review.set_molecule_name(mol_id, str(chosen))
     review.record_review_decision(
-        conn,
         entity_type="review_item",
         entity_id=item_id,
         action=action,
@@ -113,15 +112,13 @@ def queue_page(
     page_size: int,
 ) -> ReviewQueueResponse:
     repositories = _get_repositories(library_root)
-    with repositories.database.mol_conn() as conn:
-        items, total = repositories.review.list_queue(
-            conn,
-            kind=kind,
-            status=item_status,
-            doc_id=doc_id,
-            page=page,
-            page_size=page_size,
-        )
+    items, total = repositories.review.list_queue(
+        kind=kind,
+        status=item_status,
+        doc_id=doc_id,
+        page=page,
+        page_size=page_size,
+    )
     return ReviewQueueResponse(
         items=[ReviewQueueItem(**item) for item in items],
         total=total,
@@ -131,15 +128,11 @@ def queue_page(
 
 
 def stats_summary(library_root: str | None) -> dict[str, Any]:
-    repositories = _get_repositories(library_root)
-    with repositories.database.mol_conn() as conn:
-        return repositories.review.stats(conn)
+    return _get_repositories(library_root).review.stats()
 
 
 def item_detail(library_root: str | None, kind: str, item_id: str) -> dict[str, Any]:
-    repositories = _get_repositories(library_root)
-    with repositories.database.mol_conn() as conn:
-        return repositories.review.get_item(conn, kind, item_id)
+    return _get_repositories(library_root).review.get_item(kind, item_id)
 
 
 def decide_items(
@@ -157,6 +150,10 @@ def decide_items(
     updated = 0
     skipped = 0
     results: list[dict] = []
+    # The connection is needed only to drive the Markush decision path
+    # (``apply_decision`` still owns raw SQL); the repository calls re-use it
+    # through the per-thread connection. The Markush raw-SQL downsink is a
+    # follow-up task.
     with repositories.database.mol_conn() as conn:
         for item in items:
             try:
@@ -196,13 +193,10 @@ def clear_all_review_queue(library_root: str | None) -> dict[str, int]:
     independently of the queue.
     """
     repositories = _get_repositories(library_root)
-    with repositories.database.mol_conn() as conn:
-        return repositories.review.clear_all(conn)
+    return repositories.review.clear_all()
 
 
 def entity_history(
     library_root: str | None, entity_id: str
 ) -> tuple[Any, list[dict[str, Any]]]:
-    repositories = _get_repositories(library_root)
-    with repositories.database.mol_conn() as conn:
-        return repositories.review.history(conn, entity_id)
+    return _get_repositories(library_root).review.history(entity_id)

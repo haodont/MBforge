@@ -152,15 +152,16 @@ class ExtractStage:
                 classify_structure_role(candidate)
 
             repositories = get_repositories(ctx.library_root)
-            with repositories.database.transaction() as (_kb_conn, conn):
-                ctx.source_evidence_count = repositories.evidence.persist(
-                    evidence, conn=conn
-                )
-                markush_candidate_count = repositories.review.persist_review_candidates(
-                    ctx.doc_id,
-                    candidates,
-                    conn=conn,
-                )
+            # Canonical evidence and the Markush review queue are written in
+            # one transaction: either both land or both roll back.
+            (
+                ctx.source_evidence_count,
+                markush_candidate_count,
+            ) = repositories.evidence.persist_extraction(
+                doc_id=ctx.doc_id,
+                evidence=evidence,
+                candidates=candidates,
+            )
             molecule_stats["markush_review_candidate_count"] = markush_candidate_count
 
             molecule_count = molecule_stats.get("molecule_count", 0)

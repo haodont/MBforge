@@ -45,7 +45,6 @@ def _seed_activity_data(library_root: Path) -> None:
             """
         )
         repo.insert_review_item(
-            conn,
             item_id="review-activity-1",
             kind="activity_match",
             doc_id="doc-1",
