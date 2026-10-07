@@ -37,7 +37,6 @@ def _get_repositories(library_root: str | None) -> LibraryRepositories:
 
 def decide(
     review: ReviewRepository,
-    conn: Any,
     *,
     kind: str,
     item_id: str,
@@ -58,12 +57,11 @@ def decide(
         if mapped_action is None:
             raise ReviewTransitionError(f"unsupported action: {action}")
         return apply_decision(
-            conn,
+            review,
             candidate_id=item_id,
             expected_version=int(version),
             action=mapped_action,
             reason=reason,
-            review_repository=review,
         )
 
     row = review.review_item_status_payload(item_id, kind)
@@ -150,32 +148,26 @@ def decide_items(
     updated = 0
     skipped = 0
     results: list[dict] = []
-    # The connection is needed only to drive the Markush decision path
-    # (``apply_decision`` still owns raw SQL); the repository calls re-use it
-    # through the per-thread connection. The Markush raw-SQL downsink is a
-    # follow-up task.
-    with repositories.database.mol_conn() as conn:
-        for item in items:
-            try:
-                result = decide(
-                    repositories.review,
-                    conn,
-                    kind=item.kind,
-                    item_id=item.id,
-                    action=action,
-                    reason=reason or "",
-                    choice=item.choice,
-                )
-            except (
-                ReviewConflictError,
-                ReviewNotFoundError,
-                ReviewTransitionError,
-            ) as exc:
-                skipped += 1
-                results.append({"kind": item.kind, "id": item.id, "error": str(exc)})
-            else:
-                updated += 1
-                results.append(result)
+    for item in items:
+        try:
+            result = decide(
+                repositories.review,
+                kind=item.kind,
+                item_id=item.id,
+                action=action,
+                reason=reason or "",
+                choice=item.choice,
+            )
+        except (
+            ReviewConflictError,
+            ReviewNotFoundError,
+            ReviewTransitionError,
+        ) as exc:
+            skipped += 1
+            results.append({"kind": item.kind, "id": item.id, "error": str(exc)})
+        else:
+            updated += 1
+            results.append(result)
     return ReviewDecisionResponse(updated=updated, skipped=skipped, results=results)
 
 

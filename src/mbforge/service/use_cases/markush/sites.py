@@ -2,8 +2,9 @@
 
 This module sits on top of the ``markush_sites`` / ``markush_options`` /
 ``markush_mounts`` database schema and exposes the operations the HTTP
-router and the review UI need. The error type comes from
-:mod:`mbforge.domain.markush`.
+router and the review UI need. The SQL now lives behind
+:class:`~mbforge.ports.repositories.MarkushRepository`; the error type comes
+from :mod:`mbforge.domain.markush`.
 
 Invariants enforced by the operations below:
 
@@ -20,7 +21,6 @@ Invariants enforced by the operations below:
 from __future__ import annotations
 
 import json
-import sqlite3
 from collections.abc import Iterable
 from typing import Any
 
@@ -28,6 +28,7 @@ from mbforge.domain.markush import MarkushSiteError
 from mbforge.foundation.files import safe_json_loads
 from mbforge.foundation.ids import short_id
 from mbforge.foundation.logger import get_logger
+from mbforge.ports.repositories import MarkushRepository
 from mbforge.service.dto.markush_sites import (
     MarkushMount,
     MarkushOption,
@@ -38,7 +39,7 @@ logger = get_logger("mbforge.service.use_cases.markush.sites")
 
 
 def _fragment_attachment_count(
-    conn: sqlite3.Connection, fragment_id: str
+    repository: MarkushRepository, fragment_id: str
 ) -> int | None:
     """Return the attachment count of a stored fragment by ``*`` count in SMILES.
 
@@ -46,17 +47,13 @@ def _fragment_attachment_count(
     :class:`MarkushSiteError` when the fragment's attachment count cannot
     be parsed.
     """
-    row = conn.execute(
-        "SELECT smiles FROM markush_fragments WHERE fragment_id = ?",
-        (fragment_id,),
-    ).fetchone()
-    if row is None:
+    smiles = repository.fragment_smiles(fragment_id)
+    if smiles is None:
         return None
-    smiles = row["smiles"] or ""
     return smiles.count("*")
 
 
-def _row_to_site(row: sqlite3.Row) -> MarkushSite:
+def _row_to_site(row: dict[str, Any]) -> MarkushSite:
     properties = safe_json_loads(row["properties"], {})
     return MarkushSite(
         site_id=row["site_id"],
@@ -73,7 +70,7 @@ def _row_to_site(row: sqlite3.Row) -> MarkushSite:
     )
 
 
-def _row_to_option(row: sqlite3.Row) -> MarkushOption:
+def _row_to_option(row: dict[str, Any]) -> MarkushOption:
     constraints = safe_json_loads(row["constraints"], {})
     return MarkushOption(
         option_id=row["option_id"],
@@ -88,7 +85,7 @@ def _row_to_option(row: sqlite3.Row) -> MarkushOption:
     )
 
 
-def _row_to_mount(row: sqlite3.Row) -> MarkushMount:
+def _row_to_mount(row: dict[str, Any]) -> MarkushMount:
     reasons = safe_json_loads(row["reasons"], [])
     return MarkushMount(
         mount_id=row["mount_id"],
@@ -108,16 +105,12 @@ def _row_to_mount(row: sqlite3.Row) -> MarkushMount:
 # ---------------------------------------------------------------------------
 
 
-def list_sites(conn: sqlite3.Connection, scaffold_id: str) -> list[MarkushSite]:
-    rows = conn.execute(
-        "SELECT * FROM markush_sites WHERE scaffold_id = ? ORDER BY site_label, site_id",
-        (scaffold_id,),
-    ).fetchall()
-    return [_row_to_site(r) for r in rows]
+def list_sites(repository: MarkushRepository, scaffold_id: str) -> list[MarkushSite]:
+    return [_row_to_site(row) for row in repository.list_site_rows(scaffold_id)]
 
 
 def create_site(
-    conn: sqlite3.Connection,
+    repository: MarkushRepository,
     *,
     scaffold_id: str,
     site_label: str,
@@ -136,10 +129,7 @@ def create_site(
         raise MarkushSiteError("attachment_count must be >= 1")
     if atom_map_num is None:
         raise MarkushSiteError("atom_map_num is required")
-    scaffold = conn.execute(
-        "SELECT smiles, status FROM markush_scaffolds WHERE scaffold_id = ?",
-        (scaffold_id,),
-    ).fetchone()
+    scaffold = repository.scaffold_site_context(scaffold_id)
     if scaffold is None:
         raise MarkushSiteError(f"scaffold not found: {scaffold_id}")
     if scaffold["status"] != "confirmed":
@@ -151,32 +141,22 @@ def create_site(
             f"scaffold has {star_count} attachment points"
         )
     site_id = short_id()
-    conn.execute(
-        """
-        INSERT INTO markush_sites
-            (site_id, scaffold_id, site_label, atom_map_num,
-             attachment_count, bond_type, source_text, status, properties)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', '{}')
-        """,
-        (
-            site_id,
-            scaffold_id,
-            site_label,
-            atom_map_num,
-            attachment_count,
-            bond_type,
-            source_text,
-        ),
+    repository.insert_site(
+        site_id=site_id,
+        scaffold_id=scaffold_id,
+        site_label=site_label,
+        atom_map_num=atom_map_num,
+        attachment_count=attachment_count,
+        bond_type=bond_type,
+        source_text=source_text,
     )
-    return _row_to_site(
-        conn.execute(
-            "SELECT * FROM markush_sites WHERE site_id = ?", (site_id,)
-        ).fetchone()
-    )
+    created = repository.get_site_row(site_id)
+    assert created is not None
+    return _row_to_site(created)
 
 
 def update_site(
-    conn: sqlite3.Connection,
+    repository: MarkushRepository,
     *,
     site_id: str,
     site_label: str | None = None,
@@ -185,41 +165,20 @@ def update_site(
     bond_type: str | None = None,
     source_text: str | None = None,
 ) -> MarkushSite:
-    row = conn.execute(
-        "SELECT * FROM markush_sites WHERE site_id = ?", (site_id,)
-    ).fetchone()
+    row = repository.get_site_row(site_id)
     if row is None:
         raise MarkushSiteError(f"site not found: {site_id}")
-    fields: list[str] = []
-    params: list[Any] = []
-    if site_label is not None:
-        fields.append("site_label = ?")
-        params.append(site_label)
-    if atom_map_num is not None:
-        fields.append("atom_map_num = ?")
-        params.append(atom_map_num)
-    if attachment_count is not None:
-        if attachment_count < 1:
-            raise MarkushSiteError("attachment_count must be >= 1")
-        fields.append("attachment_count = ?")
-        params.append(attachment_count)
-    if bond_type is not None:
-        fields.append("bond_type = ?")
-        params.append(bond_type)
-    if source_text is not None:
-        fields.append("source_text = ?")
-        params.append(source_text)
-    if not fields:
-        return _row_to_site(row)
-    fields.append("updated_at = datetime('now')")
-    params.append(site_id)
-    conn.execute(
-        f"UPDATE markush_sites SET {', '.join(fields)} WHERE site_id = ?",
-        params,
+    if attachment_count is not None and attachment_count < 1:
+        raise MarkushSiteError("attachment_count must be >= 1")
+    updated = repository.update_site_row(
+        site_id=site_id,
+        site_label=site_label,
+        atom_map_num=atom_map_num,
+        attachment_count=attachment_count,
+        bond_type=bond_type,
+        source_text=source_text,
     )
-    updated = conn.execute(
-        "SELECT * FROM markush_sites WHERE site_id = ?", (site_id,)
-    ).fetchone()
+    assert updated is not None
     return _row_to_site(updated)
 
 
@@ -228,16 +187,12 @@ def update_site(
 # ---------------------------------------------------------------------------
 
 
-def list_options(conn: sqlite3.Connection, site_id: str) -> list[MarkushOption]:
-    rows = conn.execute(
-        "SELECT * FROM markush_options WHERE site_id = ? ORDER BY option_id",
-        (site_id,),
-    ).fetchall()
-    return [_row_to_option(r) for r in rows]
+def list_options(repository: MarkushRepository, site_id: str) -> list[MarkushOption]:
+    return [_row_to_option(row) for row in repository.list_option_rows(site_id)]
 
 
 def create_option(
-    conn: sqlite3.Connection,
+    repository: MarkushRepository,
     *,
     site_id: str,
     fragment_id: str | None = None,
@@ -250,42 +205,27 @@ def create_option(
             "an option requires either fragment_id or one of "
             "(normalized_smiles, definition_text)"
         )
-    site = conn.execute(
-        "SELECT site_id, status FROM markush_sites WHERE site_id = ?", (site_id,)
-    ).fetchone()
+    site = repository.site_status(site_id)
     if site is None:
         raise MarkushSiteError(f"site not found: {site_id}")
     if fragment_id is not None:
-        fragment = conn.execute(
-            "SELECT status FROM markush_fragments WHERE fragment_id = ?",
-            (fragment_id,),
-        ).fetchone()
+        fragment = repository.fragment_status(fragment_id)
         if fragment is None:
             raise MarkushSiteError(f"fragment not found: {fragment_id}")
         if fragment["status"] != "confirmed":
             raise MarkushSiteError(f"fragment is not confirmed: {fragment_id}")
     option_id = short_id()
-    conn.execute(
-        """
-        INSERT INTO markush_options
-            (option_id, site_id, fragment_id, normalized_smiles,
-             definition_text, constraints, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending')
-        """,
-        (
-            option_id,
-            site_id,
-            fragment_id,
-            normalized_smiles,
-            definition_text,
-            json.dumps(constraints or {}, ensure_ascii=False),
-        ),
+    repository.insert_option(
+        option_id=option_id,
+        site_id=site_id,
+        fragment_id=fragment_id,
+        normalized_smiles=normalized_smiles,
+        definition_text=definition_text,
+        constraints_json=json.dumps(constraints or {}, ensure_ascii=False),
     )
-    return _row_to_option(
-        conn.execute(
-            "SELECT * FROM markush_options WHERE option_id = ?", (option_id,)
-        ).fetchone()
-    )
+    created = repository.get_option_row(option_id)
+    assert created is not None
+    return _row_to_option(created)
 
 
 # ---------------------------------------------------------------------------
@@ -294,35 +234,22 @@ def create_option(
 
 
 def list_mounts(
-    conn: sqlite3.Connection,
+    repository: MarkushRepository,
     *,
     site_id: str | None = None,
     scaffold_id: str | None = None,
     fragment_id: str | None = None,
 ) -> list[MarkushMount]:
-    clauses: list[str] = ["1=1"]
-    params: list[Any] = []
-    if site_id is not None:
-        clauses.append("m.site_id = ?")
-        params.append(site_id)
-    if fragment_id is not None:
-        clauses.append("m.fragment_id = ?")
-        params.append(fragment_id)
-    if scaffold_id is not None:
-        clauses.append(
-            "m.site_id IN (SELECT site_id FROM markush_sites WHERE scaffold_id = ?)"
-        )
-        params.append(scaffold_id)
-    rows = conn.execute(
-        f"SELECT m.* FROM markush_mounts m WHERE {' AND '.join(clauses)} "
-        "ORDER BY m.created_at DESC, m.mount_id",
-        params,
-    ).fetchall()
-    return [_row_to_mount(r) for r in rows]
+    rows = repository.list_mount_rows(
+        site_id=site_id,
+        scaffold_id=scaffold_id,
+        fragment_id=fragment_id,
+    )
+    return [_row_to_mount(row) for row in rows]
 
 
 def create_mount(
-    conn: sqlite3.Connection,
+    repository: MarkushRepository,
     *,
     site_id: str,
     fragment_id: str,
@@ -336,18 +263,13 @@ def create_mount(
     site and vice versa; the check surfaces a clear error rather than
     silently producing a half-mounted structure.
     """
-    site = conn.execute(
-        "SELECT * FROM markush_sites WHERE site_id = ?", (site_id,)
-    ).fetchone()
+    site = repository.get_site_row(site_id)
     if site is None:
         raise MarkushSiteError(f"site not found: {site_id}")
-    fragment_attachments = _fragment_attachment_count(conn, fragment_id)
+    fragment_attachments = _fragment_attachment_count(repository, fragment_id)
     if fragment_attachments is None:
         raise MarkushSiteError(f"fragment not found: {fragment_id}")
-    fragment_row = conn.execute(
-        "SELECT status FROM markush_fragments WHERE fragment_id = ?",
-        (fragment_id,),
-    ).fetchone()
+    fragment_row = repository.fragment_status(fragment_id)
     if fragment_row is None or fragment_row["status"] != "confirmed":
         raise MarkushSiteError(f"fragment is not confirmed: {fragment_id}")
     if fragment_attachments != site["attachment_count"]:
@@ -356,93 +278,61 @@ def create_mount(
             f"{site['attachment_count']}, fragment has {fragment_attachments}"
         )
     # Idempotent: same (site, fragment) → reuse the existing row.
-    existing = conn.execute(
-        "SELECT * FROM markush_mounts WHERE site_id = ? AND fragment_id = ?",
-        (site_id, fragment_id),
-    ).fetchone()
+    existing = repository.find_mount_row(site_id, fragment_id)
     if existing is not None:
         return _row_to_mount(existing)
     mount_id = short_id()
-    conn.execute(
-        """
-        INSERT INTO markush_mounts
-            (mount_id, site_id, fragment_id, origin, confidence,
-             reasons, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'suggested')
-        """,
-        (
-            mount_id,
-            site_id,
-            fragment_id,
-            origin,
-            confidence,
-            json.dumps(list(reasons or []), ensure_ascii=False),
-        ),
+    repository.insert_mount(
+        mount_id=mount_id,
+        site_id=site_id,
+        fragment_id=fragment_id,
+        origin=origin,
+        confidence=confidence,
+        reasons_json=json.dumps(list(reasons or []), ensure_ascii=False),
     )
-    return _row_to_mount(
-        conn.execute(
-            "SELECT * FROM markush_mounts WHERE mount_id = ?", (mount_id,)
-        ).fetchone()
-    )
+    created = repository.get_mount_row(mount_id)
+    assert created is not None
+    return _row_to_mount(created)
 
 
 def decide_mount(
-    conn: sqlite3.Connection, *, mount_id: str, action: str, reason: str = ""
+    repository: MarkushRepository,
+    *,
+    mount_id: str,
+    action: str,
+    reason: str = "",
 ) -> MarkushMount:
     if action not in {"confirm", "reject"}:
         raise MarkushSiteError(f"unknown mount action: {action}")
-    row = conn.execute(
-        "SELECT * FROM markush_mounts WHERE mount_id = ?", (mount_id,)
-    ).fetchone()
+    row = repository.get_mount_row(mount_id)
     if row is None:
         raise MarkushSiteError(f"mount not found: {mount_id}")
     if row["status"] != "suggested":
         raise MarkushSiteError(f"mount is already {row['status']}")
     if action == "confirm":
-        fragment_row = conn.execute(
-            "SELECT status FROM markush_fragments WHERE fragment_id = ?",
-            (row["fragment_id"],),
-        ).fetchone()
+        fragment_row = repository.fragment_status(row["fragment_id"])
         if fragment_row is None or fragment_row["status"] != "confirmed":
             raise MarkushSiteError(f"fragment is not confirmed: {row['fragment_id']}")
     new_status = "confirmed" if action == "confirm" else "rejected"
-    conn.execute(
-        """
-        UPDATE markush_mounts
-        SET status = ?, updated_at = datetime('now')
-        WHERE mount_id = ?
-        """,
-        (new_status, mount_id),
-    )
     # Audit entry for the mount decision. ``markush_decisions.entity_type``
     # is the same string we use for the review queue; the snapshot keeps
-    # the mount state at decision time.
-    conn.execute(
-        """
-        INSERT INTO markush_decisions
-            (decision_id, entity_type, entity_id, action,
-             previous_state, new_state, reason, snapshot)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            short_id(),
-            "markush_mount",
-            mount_id,
-            f"mount_{action}",
-            row["status"],
-            new_status,
-            reason,
-            json.dumps(
-                {"site_id": row["site_id"], "fragment_id": row["fragment_id"]},
-                ensure_ascii=False,
-            ),
+    # the mount state at decision time. The status flip and the audit row
+    # are written in one repository transaction.
+    repository.apply_mount_decision(
+        mount_id=mount_id,
+        new_status=new_status,
+        decision_id=short_id(),
+        action=f"mount_{action}",
+        previous_state=row["status"],
+        reason=reason,
+        snapshot_json=json.dumps(
+            {"site_id": row["site_id"], "fragment_id": row["fragment_id"]},
+            ensure_ascii=False,
         ),
     )
-    return _row_to_mount(
-        conn.execute(
-            "SELECT * FROM markush_mounts WHERE mount_id = ?", (mount_id,)
-        ).fetchone()
-    )
+    updated = repository.get_mount_row(mount_id)
+    assert updated is not None
+    return _row_to_mount(updated)
 
 
 __all__ = [

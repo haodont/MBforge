@@ -20,13 +20,14 @@ Markush scaffold SMILES, with three non-negotiable guarantees:
    The only path into ``molecules`` is the human review UI calling
    ``/api/v1/markush/generated/decide`` with action ``confirm``.
 
-The persistence half (run rows, generated candidates, decision
-promotion) lives in :mod:`mbforge.service.use_cases.markush.enumeration`.
+The persistence half (selection authorization, run rows, generated
+candidates, decision promotion) lives in
+:mod:`mbforge.db.markush_enumeration_store`; the use-case orchestration in
+:mod:`mbforge.service.use_cases.markush.enumeration`.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass, field
 from itertools import product
 from typing import Any
@@ -144,96 +145,6 @@ def preview(
     }
 
 
-def resolve_authorized_selection(
-    conn: sqlite3.Connection,
-    *,
-    scaffold_id: str,
-    selection: list[SiteSelection],
-) -> tuple[str, list[ResolvedSiteSelection]]:
-    """Validate every selection identifier against confirmed DB state.
-
-    Returns ``(scaffold_smiles, resolved)`` where ``resolved`` carries
-    server-side fragment IDs and SMILES. Raises
-    :class:`MarkushEnumerationError` before any run is created when the
-    scaffold, site, fragment, or relation is missing or not confirmed.
-    """
-    scaffold = conn.execute(
-        "SELECT smiles, status FROM markush_scaffolds WHERE scaffold_id = ?",
-        (scaffold_id,),
-    ).fetchone()
-    if scaffold is None:
-        raise MarkushEnumerationError(f"scaffold not found: {scaffold_id}")
-    if scaffold["status"] != "confirmed":
-        raise MarkushEnumerationError(f"scaffold is not confirmed: {scaffold_id}")
-
-    resolved: list[ResolvedSiteSelection] = []
-    for site in selection:
-        site_row = conn.execute(
-            """
-            SELECT site_id, site_label, atom_map_num, status
-            FROM markush_sites
-            WHERE scaffold_id = ? AND site_label = ? AND atom_map_num = ?
-            """,
-            (scaffold_id, site.site_label, site.atom_map_num),
-        ).fetchone()
-        if site_row is None:
-            raise MarkushEnumerationError(
-                f"site {site.site_label}[*:{site.atom_map_num}] "
-                f"not found on scaffold {scaffold_id}"
-            )
-        if site_row["status"] != "confirmed":
-            raise MarkushEnumerationError(f"site {site.site_label} is not confirmed")
-
-        fragments: list[ResolvedFragment] = []
-        for fragment_id in site.fragments:
-            fragment = conn.execute(
-                "SELECT fragment_id, smiles, status FROM markush_fragments WHERE fragment_id = ?",
-                (fragment_id,),
-            ).fetchone()
-            if fragment is None:
-                raise MarkushEnumerationError(f"fragment not found: {fragment_id}")
-            if fragment["status"] != "confirmed":
-                raise MarkushEnumerationError(
-                    f"fragment is not confirmed: {fragment_id}"
-                )
-            relation = conn.execute(
-                """
-                SELECT 1
-                FROM markush_sites AS s
-                LEFT JOIN markush_options AS o
-                  ON o.site_id = s.site_id
-                 AND o.fragment_id = ?
-                 AND o.status = 'confirmed'
-                LEFT JOIN markush_mounts AS m
-                  ON m.site_id = s.site_id
-                 AND m.fragment_id = ?
-                 AND m.status = 'confirmed'
-                WHERE s.site_id = ?
-                  AND (o.option_id IS NOT NULL OR m.mount_id IS NOT NULL)
-                """,
-                (fragment_id, fragment_id, site_row["site_id"]),
-            ).fetchone()
-            if relation is None:
-                raise MarkushEnumerationError(
-                    f"fragment {fragment_id} has no confirmed relation "
-                    f"to site {site.site_label}"
-                )
-            fragments.append(
-                ResolvedFragment(
-                    fragment_id=fragment_id,
-                    smiles=fragment["smiles"] or "",
-                )
-            )
-        resolved.append(
-            ResolvedSiteSelection(
-                site_label=site.site_label,
-                atom_map_num=site.atom_map_num,
-                fragments=fragments,
-            )
-        )
-    return scaffold["smiles"] or "", resolved
-
-
 def _substitute(
     scaffold_smiles: str,
     sites: list[ResolvedSiteSelection],
@@ -319,6 +230,5 @@ __all__ = [
     "ResolvedSiteSelection",
     "SiteSelection",
     "preview",
-    "resolve_authorized_selection",
     "theoretical_count",
 ]

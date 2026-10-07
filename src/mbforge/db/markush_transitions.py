@@ -360,6 +360,165 @@ def update_candidate(
     return get_candidate_detail(conn, candidate_id)
 
 
+# ---------------------------------------------------------------------------
+# Decision application writes — the destination rows minted by a review action
+# ---------------------------------------------------------------------------
+
+
+def get_review_candidate(
+    conn: sqlite3.Connection, candidate_id: str
+) -> sqlite3.Row | None:
+    """Return the raw ``markush_review_candidates`` row, or ``None``."""
+    return _fetch_one(
+        conn,
+        "SELECT * FROM markush_review_candidates WHERE candidate_id = ?",
+        (candidate_id,),
+    )
+
+
+def set_candidate_status(
+    conn: sqlite3.Connection, candidate_id: str, new_state: str
+) -> None:
+    conn.execute(
+        """
+        UPDATE markush_review_candidates
+        SET review_status = ?, review_version = review_version + 1,
+            updated_at = datetime('now')
+        WHERE candidate_id = ?
+        """,
+        (new_state, candidate_id),
+    )
+
+
+def set_candidate_properties(
+    conn: sqlite3.Connection, candidate_id: str, properties_json: str
+) -> None:
+    conn.execute(
+        "UPDATE markush_review_candidates SET properties = ? WHERE candidate_id = ?",
+        (properties_json, candidate_id),
+    )
+
+
+def insert_molecule_from_candidate(
+    conn: sqlite3.Connection,
+    *,
+    mol_id: str,
+    smiles: str,
+    esmiles: str,
+    name: str,
+    doc_id: str,
+    properties_json: str,
+) -> None:
+    """Write the ``molecules`` row a ``confirm_complete`` action mints."""
+    conn.execute(
+        """
+        INSERT INTO molecules
+            (mol_id, smiles, esmiles, name, source_doc,
+             status, properties, canonical_smiles, review_status)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 'confirmed')
+        """,
+        (
+            mol_id,
+            smiles,
+            esmiles,
+            name,
+            doc_id,
+            properties_json,
+            smiles,
+        ),
+    )
+
+
+def insert_scaffold_from_candidate(
+    conn: sqlite3.Connection,
+    *,
+    scaffold_id: str,
+    doc_id: str,
+    formula_label: str,
+    smiles: str,
+    esmiles: str,
+    page: int | None,
+    bbox_x0: float | None,
+    bbox_y0: float | None,
+    bbox_x1: float | None,
+    bbox_y1: float | None,
+    crop_relpath: str | None,
+    confidence: float | None,
+    properties_json: str,
+) -> None:
+    """Write the ``markush_scaffolds`` row a ``confirm_scaffold`` action mints."""
+    conn.execute(
+        """
+        INSERT INTO markush_scaffolds
+            (scaffold_id, doc_id, formula_label, smiles, esmiles, page,
+             bbox_x0, bbox_y0, bbox_x1, bbox_y1, crop_relpath, confidence,
+             status, properties)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            scaffold_id,
+            doc_id,
+            formula_label,
+            smiles,
+            esmiles,
+            page,
+            bbox_x0,
+            bbox_y0,
+            bbox_x1,
+            bbox_y1,
+            crop_relpath,
+            confidence,
+            "confirmed",
+            properties_json,
+        ),
+    )
+
+
+def insert_fragment_from_candidate(
+    conn: sqlite3.Connection,
+    *,
+    fragment_id: str,
+    doc_id: str,
+    label: str,
+    smiles: str,
+    esmiles: str,
+    page: int | None,
+    bbox_x0: float | None,
+    bbox_y0: float | None,
+    bbox_x1: float | None,
+    bbox_y1: float | None,
+    crop_relpath: str | None,
+    confidence: float | None,
+    properties_json: str,
+) -> None:
+    """Write the ``markush_fragments`` row a ``confirm_fragment`` action mints."""
+    conn.execute(
+        """
+        INSERT INTO markush_fragments
+            (fragment_id, doc_id, label, smiles, esmiles, page,
+             bbox_x0, bbox_y0, bbox_x1, bbox_y1, crop_relpath, confidence,
+             status, properties)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            fragment_id,
+            doc_id,
+            label,
+            smiles,
+            esmiles,
+            page,
+            bbox_x0,
+            bbox_y0,
+            bbox_x1,
+            bbox_y1,
+            crop_relpath,
+            confidence,
+            "confirmed",
+            properties_json,
+        ),
+    )
+
+
 def _copy_evidence(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
@@ -406,6 +565,12 @@ def _copy_evidence(
 
 __all__ = [
     "get_candidate_detail",
+    "get_review_candidate",
+    "insert_fragment_from_candidate",
+    "insert_molecule_from_candidate",
+    "insert_scaffold_from_candidate",
     "list_candidates",
+    "set_candidate_properties",
+    "set_candidate_status",
     "update_candidate",
 ]

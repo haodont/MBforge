@@ -18,6 +18,7 @@ from mbforge.domain.review import (
     ReviewTransitionError,
 )
 from mbforge.domain.types import DetectionSource
+from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.markush.review import apply_decision
 
 
@@ -26,6 +27,11 @@ def database(tmp_path):
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
     return db
+
+
+@pytest.fixture
+def repo(tmp_path):
+    return get_repositories(str(tmp_path)).review
 
 
 def _seed_one(database, *, smiles: str = "*c1ccccc1", label: str = "R1") -> str:
@@ -56,16 +62,16 @@ def _seed_one(database, *, smiles: str = "*c1ccccc1", label: str = "R1") -> str:
     return row["candidate_id"]
 
 
-def test_list_filters_pending_only(database) -> None:
+def test_list_filters_pending_only(database, repo) -> None:
     candidate_id = _seed_one(database)
+    apply_decision(
+        repo,
+        candidate_id=candidate_id,
+        expected_version=1,
+        action="reject",
+        reason="test reject",
+    )
     with database.mol_conn() as conn:
-        apply_decision(
-            conn,
-            candidate_id=candidate_id,
-            expected_version=1,
-            action="reject",
-            reason="test reject",
-        )
         pending, total_pending = list_candidates(conn, review_status="pending")
         rejected, total_rejected = list_candidates(conn, review_status="rejected")
     assert pending == []
@@ -75,7 +81,7 @@ def test_list_filters_pending_only(database) -> None:
     assert total_rejected == 1
 
 
-def test_get_detail_includes_evidence_and_decisions(database) -> None:
+def test_get_detail_includes_evidence_and_decisions(database, repo) -> None:
     candidate_id = _seed_one(database)
     with database.mol_conn() as conn:
         detail = get_candidate_detail(conn, candidate_id)
@@ -86,16 +92,15 @@ def test_get_detail_includes_evidence_and_decisions(database) -> None:
     assert detail.decisions[0].action == "candidate_created"
 
 
-def test_confirm_complete_writes_molecule(database) -> None:
+def test_confirm_complete_writes_molecule(database, repo) -> None:
     candidate_id = _seed_one(database)
-    with database.mol_conn() as conn:
-        payload = apply_decision(
-            conn,
-            candidate_id=candidate_id,
-            expected_version=1,
-            action="confirm_complete",
-            reason="looks like a real molecule",
-        )
+    payload = apply_decision(
+        repo,
+        candidate_id=candidate_id,
+        expected_version=1,
+        action="confirm_complete",
+        reason="looks like a real molecule",
+    )
     assert payload["new_state"] == "confirmed"
     assert payload["molecule_id"]
     with database.mol_conn() as conn:
@@ -107,15 +112,14 @@ def test_confirm_complete_writes_molecule(database) -> None:
     assert mol_row["source_doc"] == "doc-1"
 
 
-def test_confirm_scaffold_writes_markush_scaffold(database) -> None:
+def test_confirm_scaffold_writes_markush_scaffold(database, repo) -> None:
     candidate_id = _seed_one(database, label="Formula I")
-    with database.mol_conn() as conn:
-        payload = apply_decision(
-            conn,
-            candidate_id=candidate_id,
-            expected_version=1,
-            action="confirm_scaffold",
-        )
+    payload = apply_decision(
+        repo,
+        candidate_id=candidate_id,
+        expected_version=1,
+        action="confirm_scaffold",
+    )
     assert payload["scaffold_id"]
     with database.mol_conn() as conn:
         scaffold = conn.execute(
@@ -126,15 +130,14 @@ def test_confirm_scaffold_writes_markush_scaffold(database) -> None:
     assert scaffold["status"] == "confirmed"
 
 
-def test_confirm_fragment_writes_markush_fragment(database) -> None:
+def test_confirm_fragment_writes_markush_fragment(database, repo) -> None:
     candidate_id = _seed_one(database)
-    with database.mol_conn() as conn:
-        payload = apply_decision(
-            conn,
-            candidate_id=candidate_id,
-            expected_version=1,
-            action="confirm_fragment",
-        )
+    payload = apply_decision(
+        repo,
+        candidate_id=candidate_id,
+        expected_version=1,
+        action="confirm_fragment",
+    )
     assert payload["fragment_id"]
     with database.mol_conn() as conn:
         fragment = conn.execute(
@@ -145,15 +148,17 @@ def test_confirm_fragment_writes_markush_fragment(database) -> None:
     assert fragment["status"] == "confirmed"
 
 
-def test_candidate_detail_exposes_fragment_id_and_blocks_enumeration(database) -> None:
+def test_candidate_detail_exposes_fragment_id_and_blocks_enumeration(
+    database, repo
+) -> None:
     candidate_id = _seed_one(database)
+    payload = apply_decision(
+        repo,
+        candidate_id=candidate_id,
+        expected_version=1,
+        action="confirm_fragment",
+    )
     with database.mol_conn() as conn:
-        payload = apply_decision(
-            conn,
-            candidate_id=candidate_id,
-            expected_version=1,
-            action="confirm_fragment",
-        )
         detail = get_candidate_detail(conn, candidate_id)
 
     assert detail.fragment_id == payload["fragment_id"]
@@ -162,15 +167,17 @@ def test_candidate_detail_exposes_fragment_id_and_blocks_enumeration(database) -
     assert detail.enumeration_block_reasons == ["candidate is not a confirmed scaffold"]
 
 
-def test_candidate_detail_requires_confirmed_scaffold_relationships(database) -> None:
+def test_candidate_detail_requires_confirmed_scaffold_relationships(
+    database, repo
+) -> None:
     candidate_id = _seed_one(database, label="Formula I")
+    payload = apply_decision(
+        repo,
+        candidate_id=candidate_id,
+        expected_version=1,
+        action="confirm_scaffold",
+    )
     with database.mol_conn() as conn:
-        payload = apply_decision(
-            conn,
-            candidate_id=candidate_id,
-            expected_version=1,
-            action="confirm_scaffold",
-        )
         detail = get_candidate_detail(conn, candidate_id)
 
     assert detail.scaffold_id == payload["scaffold_id"]
@@ -179,16 +186,18 @@ def test_candidate_detail_requires_confirmed_scaffold_relationships(database) ->
     assert detail.enumeration_block_reasons == ["no confirmed attachment site"]
 
 
-def test_candidate_detail_allows_confirmed_scaffold_relationship(database) -> None:
+def test_candidate_detail_allows_confirmed_scaffold_relationship(
+    database, repo
+) -> None:
     candidate_id = _seed_one(database, label="Formula I")
+    payload = apply_decision(
+        repo,
+        candidate_id=candidate_id,
+        expected_version=1,
+        action="confirm_scaffold",
+    )
+    scaffold_id = str(payload["scaffold_id"])
     with database.mol_conn() as conn:
-        payload = apply_decision(
-            conn,
-            candidate_id=candidate_id,
-            expected_version=1,
-            action="confirm_scaffold",
-        )
-        scaffold_id = str(payload["scaffold_id"])
         conn.execute(
             """
             INSERT INTO markush_sites
@@ -217,60 +226,55 @@ def test_candidate_detail_allows_confirmed_scaffold_relationship(database) -> No
     assert detail.enumeration_block_reasons == []
 
 
-def test_decision_increments_version(database) -> None:
+def test_decision_increments_version(database, repo) -> None:
     candidate_id = _seed_one(database)
-    with database.mol_conn() as conn:
-        first = apply_decision(
-            conn, candidate_id=candidate_id, expected_version=1, action="reject"
-        )
+    first = apply_decision(
+        repo, candidate_id=candidate_id, expected_version=1, action="reject"
+    )
     assert first["new_version"] == 2
     # Reopen
-    with database.mol_conn() as conn:
-        second = apply_decision(
-            conn, candidate_id=candidate_id, expected_version=2, action="reopen"
-        )
+    second = apply_decision(
+        repo, candidate_id=candidate_id, expected_version=2, action="reopen"
+    )
     assert second["new_state"] == "pending"
     assert second["new_version"] == 3
 
 
-def test_decision_with_stale_version_raises_conflict(database) -> None:
+def test_decision_with_stale_version_raises_conflict(database, repo) -> None:
     candidate_id = _seed_one(database)
-    with database.mol_conn() as conn:
+    apply_decision(repo, candidate_id=candidate_id, expected_version=1, action="reject")
+    with pytest.raises(ReviewConflictError):
         apply_decision(
-            conn, candidate_id=candidate_id, expected_version=1, action="reject"
-        )
-    with database.mol_conn() as conn, pytest.raises(ReviewConflictError):
-        apply_decision(
-            conn,
+            repo,
             candidate_id=candidate_id,
             expected_version=1,
             action="reopen",
         )
 
 
-def test_reopen_from_pending_is_rejected(database) -> None:
+def test_reopen_from_pending_is_rejected(database, repo) -> None:
     candidate_id = _seed_one(database)
-    with database.mol_conn() as conn, pytest.raises(ReviewTransitionError):
+    with pytest.raises(ReviewTransitionError):
         apply_decision(
-            conn,
+            repo,
             candidate_id=candidate_id,
             expected_version=1,
             action="reopen",
         )
 
 
-def test_confirm_complete_with_empty_smiles_is_rejected(database) -> None:
+def test_confirm_complete_with_empty_smiles_is_rejected(database, repo) -> None:
     candidate_id = _seed_one(database, smiles="")
-    with database.mol_conn() as conn, pytest.raises(ReviewTransitionError):
+    with pytest.raises(ReviewTransitionError):
         apply_decision(
-            conn,
+            repo,
             candidate_id=candidate_id,
             expected_version=1,
             action="confirm_complete",
         )
 
 
-def test_update_changes_smiles_and_label(database) -> None:
+def test_update_changes_smiles_and_label(database, repo) -> None:
     candidate_id = _seed_one(database)
     with database.mol_conn() as conn:
         updated = update_candidate(
@@ -292,12 +296,9 @@ def test_update_changes_smiles_and_label(database) -> None:
     assert any(d["action"] == "update" for d in decisions)
 
 
-def test_update_after_confirm_is_rejected(database) -> None:
+def test_update_after_confirm_is_rejected(database, repo) -> None:
     candidate_id = _seed_one(database)
-    with database.mol_conn() as conn:
-        apply_decision(
-            conn, candidate_id=candidate_id, expected_version=1, action="reject"
-        )
+    apply_decision(repo, candidate_id=candidate_id, expected_version=1, action="reject")
     with database.mol_conn() as conn, pytest.raises(ReviewTransitionError):
         update_candidate(
             conn,
@@ -307,8 +308,8 @@ def test_update_after_confirm_is_rejected(database) -> None:
         )
 
 
-def test_unknown_candidate_raises_not_found(database) -> None:
-    with database.mol_conn() as conn, pytest.raises(ReviewNotFoundError):
+def test_unknown_candidate_raises_not_found(database, repo) -> None:
+    with pytest.raises(ReviewNotFoundError):
         apply_decision(
-            conn, candidate_id="does-not-exist", expected_version=1, action="reject"
+            repo, candidate_id="does-not-exist", expected_version=1, action="reject"
         )

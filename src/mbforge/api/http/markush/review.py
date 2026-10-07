@@ -6,6 +6,7 @@ import asyncio
 
 from fastapi import APIRouter
 
+from mbforge.api.http.markush._shared import resolve_repositories
 from mbforge.service.dto.markush import (
     MarkushDecisionRequest,
     MarkushDecisionResponse,
@@ -14,8 +15,6 @@ from mbforge.service.dto.markush import (
     MarkushListResponse,
     MarkushUpdateRequest,
 )
-from mbforge.service.ports import get_repositories
-from mbforge.service.use_cases.markush._db import resolve_db, run_db_sync
 from mbforge.service.use_cases.markush.review import apply_decision
 
 router = APIRouter()
@@ -23,7 +22,7 @@ router = APIRouter()
 
 @router.post("/list", response_model=MarkushListResponse)
 async def list_endpoint(body: MarkushListRequest) -> MarkushListResponse:
-    repository = get_repositories(body.library_root).markush
+    repository = resolve_repositories(body.library_root).markush
     items, total = await asyncio.to_thread(
         repository.list_candidates,
         doc_id=body.doc_id,
@@ -41,25 +40,21 @@ async def list_endpoint(body: MarkushListRequest) -> MarkushListResponse:
 @router.post("/get")
 async def get_endpoint(body: MarkushGetRequest) -> dict:
     """Return the candidate plus evidence and decisions."""
-    repository = get_repositories(body.library_root).markush
+    repository = resolve_repositories(body.library_root).markush
     detail = await asyncio.to_thread(repository.get_candidate_detail, body.candidate_id)
     return detail.model_dump(mode="json")
 
 
 @router.post("/decide", response_model=MarkushDecisionResponse)
 async def decide_endpoint(body: MarkushDecisionRequest) -> MarkushDecisionResponse:
-    db = resolve_db(body.library_root)
-    review_repository = get_repositories(body.library_root).review
-    payload = await run_db_sync(
-        db,
-        lambda conn: apply_decision(
-            conn,
-            candidate_id=body.entity_id,
-            expected_version=body.expected_version,
-            action=body.action,
-            reason=body.reason,
-            review_repository=review_repository,
-        ),
+    repository = resolve_repositories(body.library_root).review
+    payload = await asyncio.to_thread(
+        apply_decision,
+        repository,
+        candidate_id=body.entity_id,
+        expected_version=body.expected_version,
+        action=body.action,
+        reason=body.reason,
     )
     return MarkushDecisionResponse(
         candidate_id=str(payload.get("candidate_id", body.entity_id)),
@@ -73,7 +68,7 @@ async def decide_endpoint(body: MarkushDecisionRequest) -> MarkushDecisionRespon
 
 @router.post("/update")
 async def update_endpoint(body: MarkushUpdateRequest) -> dict:
-    repository = get_repositories(body.library_root).markush
+    repository = resolve_repositories(body.library_root).markush
     detail = await asyncio.to_thread(
         repository.update_candidate,
         candidate_id=body.entity_id,

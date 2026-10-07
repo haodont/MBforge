@@ -18,16 +18,15 @@ from mbforge.db import (
     docking_store,
     document_backup,
     document_records,
+    markush_enumeration_store,
+    markush_sites_store,
     markush_transitions,
     molecule_store,
     review_store,
     source_evidence,
 )
 from mbforge.db.markush_candidates import persist_review_candidates
-from mbforge.db.markush_transitions import (
-    _copy_evidence,
-    _fetch_one,
-)
+from mbforge.db.markush_transitions import _copy_evidence
 from mbforge.db.review_audit import (
     insert_review_item,
     record_review_decision,
@@ -62,15 +61,6 @@ class SqliteDatabaseRepository:
 
     def initialize(self) -> None:
         self._manager.initialize()
-
-    def mol_conn(self) -> Any:
-        """Return the unified database connection context.
-
-        Retained on the adapter (not the port) for the Markush raw-SQL service
-        modules that still thread a connection themselves; those move behind
-        typed repository methods in a follow-up task.
-        """
-        return self._manager.mol_conn()
 
     def readonly_schema(self) -> list[dict[str, Any]]:
         from mbforge.db.sqlite import readonly_sql
@@ -316,13 +306,15 @@ class SqliteMoleculeRepository:
 
 @dataclass
 class SqliteMarkushRepository:
-    """Repository facade for Markush review transitions.
+    """Repository facade for Markush review, sites, and enumeration.
 
     Owns its connections: every method opens a unified-database transaction so
     callers never thread a ``conn``.
     """
 
     library_root: Path
+
+    # --- Review candidates ---
 
     def list_candidates(self, **kwargs: Any) -> Any:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
@@ -335,6 +327,110 @@ class SqliteMarkushRepository:
     def update_candidate(self, **kwargs: Any) -> Any:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
             return markush_transitions.update_candidate(conn, **kwargs)
+
+    # --- Attachment sites ---
+
+    def scaffold_site_context(self, scaffold_id: str) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.scaffold_site_context(conn, scaffold_id)
+
+    def insert_site(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_sites_store.insert_site(conn, **kwargs)
+
+    def get_site_row(self, site_id: str) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.get_site_row(conn, site_id)
+
+    def list_site_rows(self, scaffold_id: str) -> list[dict[str, Any]]:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.list_site_rows(conn, scaffold_id)
+
+    def update_site_row(self, **kwargs: Any) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.update_site_row(conn, **kwargs)
+
+    # --- Options ---
+
+    def site_status(self, site_id: str) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.site_status(conn, site_id)
+
+    def fragment_status(self, fragment_id: str) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.fragment_status(conn, fragment_id)
+
+    def fragment_smiles(self, fragment_id: str) -> str | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.fragment_smiles(conn, fragment_id)
+
+    def insert_option(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_sites_store.insert_option(conn, **kwargs)
+
+    def get_option_row(self, option_id: str) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.get_option_row(conn, option_id)
+
+    def list_option_rows(self, site_id: str) -> list[dict[str, Any]]:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.list_option_rows(conn, site_id)
+
+    # --- Mounts ---
+
+    def find_mount_row(self, site_id: str, fragment_id: str) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.find_mount_row(conn, site_id, fragment_id)
+
+    def insert_mount(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_sites_store.insert_mount(conn, **kwargs)
+
+    def get_mount_row(self, mount_id: str) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.get_mount_row(conn, mount_id)
+
+    def apply_mount_decision(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_sites_store.apply_mount_decision(conn, **kwargs)
+
+    def list_mount_rows(self, **kwargs: Any) -> list[dict[str, Any]]:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_sites_store.list_mount_rows(conn, **kwargs)
+
+    # --- Enumeration ---
+
+    def resolve_authorized_selection(
+        self, *, scaffold_id: str, selection: list[Any]
+    ) -> Any:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_enumeration_store.resolve_authorized_selection(
+                conn, scaffold_id=scaffold_id, selection=selection
+            )
+
+    def insert_generation_run_terminal(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_enumeration_store.insert_generation_run_terminal(conn, **kwargs)
+
+    def record_enumeration_run(self, **kwargs: Any) -> int:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_enumeration_store.record_enumeration_run(conn, **kwargs)
+
+    def get_generated_candidate(self, generated_id: str) -> dict[str, Any] | None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_enumeration_store.get_generated_candidate(conn, generated_id)
+
+    def confirm_generated_candidate(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_enumeration_store.confirm_generated_candidate(conn, **kwargs)
+
+    def reject_generated_candidate(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_enumeration_store.reject_generated_candidate(conn, **kwargs)
+
+    def list_run_results(self, run_id: str) -> list[dict[str, Any]]:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            return markush_enumeration_store.list_run_results(conn, run_id)
 
 
 @dataclass
@@ -369,9 +465,31 @@ class SqliteReviewRepository:
                 recognition_version=recognition_version,
             )
 
-    def fetch_one(self, sql: str, params: Any) -> Any:
+    def get_review_candidate(self, candidate_id: str) -> Any:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return _fetch_one(conn, sql, params)
+            return markush_transitions.get_review_candidate(conn, candidate_id)
+
+    def set_candidate_status(self, candidate_id: str, new_state: str) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_transitions.set_candidate_status(conn, candidate_id, new_state)
+
+    def set_candidate_properties(self, candidate_id: str, properties_json: str) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_transitions.set_candidate_properties(
+                conn, candidate_id, properties_json
+            )
+
+    def insert_molecule_from_candidate(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_transitions.insert_molecule_from_candidate(conn, **kwargs)
+
+    def insert_scaffold_from_candidate(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_transitions.insert_scaffold_from_candidate(conn, **kwargs)
+
+    def insert_fragment_from_candidate(self, **kwargs: Any) -> None:
+        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
+            markush_transitions.insert_fragment_from_candidate(conn, **kwargs)
 
     def copy_evidence(
         self, row: Any, entity_type: str, entity_id: str, doc_id: str

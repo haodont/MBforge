@@ -50,7 +50,6 @@ def test_native_decision_updates_status_and_audit(tmp_path) -> None:
         )
         result = decide(
             repo,
-            conn,
             kind="activity_match",
             item_id="activity-1",
             action="reject",
@@ -90,7 +89,6 @@ def test_ambiguous_coref_confirm_adopts_chosen_label(tmp_path) -> None:
         )
         result = decide(
             repo,
-            conn,
             kind="ambiguous_coref",
             item_id="coref-1",
             action="confirm",
@@ -121,7 +119,7 @@ def test_ambiguous_coref_confirm_without_choice_falls_back_to_primary(tmp_path) 
                 "coref_primary": "21",
             },
         )
-        decide(repo, conn, kind="ambiguous_coref", item_id="coref-2", action="confirm")
+        decide(repo, kind="ambiguous_coref", item_id="coref-2", action="confirm")
         name = conn.execute(
             "SELECT name FROM molecules WHERE mol_id = 'mol-2'"
         ).fetchone()[0]
@@ -147,7 +145,7 @@ def test_ambiguous_coref_reject_only_marks_item(tmp_path) -> None:
                 "coref_primary": "21",
             },
         )
-        decide(repo, conn, kind="ambiguous_coref", item_id="coref-3", action="reject")
+        decide(repo, kind="ambiguous_coref", item_id="coref-3", action="reject")
         assert (
             conn.execute(
                 "SELECT status FROM review_items WHERE item_id = 'coref-3'"
@@ -177,14 +175,12 @@ def test_unified_markush_decision_uses_markush_lifecycle(tmp_path) -> None:
 
         rejected = decide(
             repo,
-            conn,
             kind="markush_link",
             item_id="mark-1",
             action="reject",
         )
         reopened = decide(
             repo,
-            conn,
             kind="markush_link",
             item_id="mark-1",
             action="reopen",
@@ -205,9 +201,7 @@ def test_reimport_preserves_native_human_decision(tmp_path) -> None:
             doc_id="doc-1",
             smiles="CCO",
         )
-        decide(
-            repo, conn, kind="low_conf_molecule", item_id="stable-1", action="reject"
-        )
+        decide(repo, kind="low_conf_molecule", item_id="stable-1", action="reject")
 
         repo.insert_review_item(
             item_id="stable-1",

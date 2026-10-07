@@ -12,6 +12,7 @@ from mbforge.domain.enumeration import (
     preview,
     theoretical_count,
 )
+from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.markush.enumeration import (
     apply_generated_decision,
     list_run_results,
@@ -24,6 +25,11 @@ def database(tmp_path):
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
     return db
+
+
+@pytest.fixture
+def repo(tmp_path):
+    return get_repositories(str(tmp_path)).markush
 
 
 def _seed_scaffold(
@@ -86,16 +92,15 @@ def _seed_confirmed_relations(
         conn.commit()
 
 
-def test_run_resolves_fragment_id_from_database(database):
+def test_run_resolves_fragment_id_from_database(database, repo):
     _seed_confirmed_relations(database)
-    with database.mol_conn() as conn:
-        result = run_enumeration(
-            conn,
-            scaffold_id="sc-1",
-            selection=[SiteSelection("R1", 1, ["frag-1"])],
-            requested_limit=10,
-        )
-        items = list_run_results(conn, result.run_id)
+    result = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=[SiteSelection("R1", 1, ["frag-1"])],
+        requested_limit=10,
+    )
+    items = list_run_results(repo, result.run_id)
     assert result.status == "completed"
     assert items
     assert items[0]["assignments"][0]["fragment_id"] == "frag-1"
@@ -137,7 +142,7 @@ def test_preview_reports_truncation(
     assert info["truncated"] is truncated
 
 
-def test_run_rejects_when_theoretical_exceeds_limit(database):
+def test_run_rejects_when_theoretical_exceeds_limit(database, repo):
     _seed_confirmed_relations(
         database,
         scaffold_id="sc-1",
@@ -153,19 +158,18 @@ def test_run_rejects_when_theoretical_exceeds_limit(database):
         SiteSelection(site_label="R2", atom_map_num=2, fragments=["f-4", "f-5", "f-6"]),
         SiteSelection(site_label="R3", atom_map_num=3, fragments=["f-7", "f-8", "f-9"]),
     ]
-    with database.mol_conn() as conn:
-        result = run_enumeration(
-            conn,
-            scaffold_id="sc-1",
-            selection=selections,
-            requested_limit=5,
-        )
+    result = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=selections,
+        requested_limit=5,
+    )
     assert result.status == "rejected"
     assert result.theoretical_count == 27
     assert result.written_count == 0
 
 
-def test_run_writes_deterministic_canonical_smiles(database):
+def test_run_writes_deterministic_canonical_smiles(database, repo):
     """Two runs against the same selection produce identical canonical sets."""
     _seed_confirmed_relations(
         database,
@@ -176,28 +180,27 @@ def test_run_writes_deterministic_canonical_smiles(database):
     selections = [
         SiteSelection(site_label="R1", atom_map_num=1, fragments=["f-1", "f-2", "f-3"]),
     ]
-    with database.mol_conn() as conn:
-        first = run_enumeration(
-            conn,
-            scaffold_id="sc-1",
-            selection=selections,
-            requested_limit=50,
-        )
-        second = run_enumeration(
-            conn,
-            scaffold_id="sc-1",
-            selection=selections,
-            requested_limit=50,
-        )
-        first_items = list_run_results(conn, first.run_id)
-        second_items = list_run_results(conn, second.run_id)
+    first = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=selections,
+        requested_limit=50,
+    )
+    second = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=selections,
+        requested_limit=50,
+    )
+    first_items = list_run_results(repo, first.run_id)
+    second_items = list_run_results(repo, second.run_id)
     first_canon = sorted(item["canonical_smiles"] for item in first_items)
     second_canon = sorted(item["canonical_smiles"] for item in second_items)
     assert first_canon == second_canon
     assert len(first_canon) == 3  # F, Cl, Br all canonicalize
 
 
-def test_run_empty_selection_writes_zero_rows(database):
+def test_run_empty_selection_writes_zero_rows(database, repo):
     _seed_confirmed_relations(
         database,
         scaffold_id="sc-1",
@@ -207,33 +210,32 @@ def test_run_empty_selection_writes_zero_rows(database):
     selections = [
         SiteSelection(site_label="R1", atom_map_num=1, fragments=[]),
     ]
-    with database.mol_conn() as conn:
-        result = run_enumeration(
-            conn,
-            scaffold_id="sc-1",
-            selection=selections,
-            requested_limit=10,
-        )
+    result = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=selections,
+        requested_limit=10,
+    )
     assert result.status == "empty"
     assert result.written_count == 0
 
 
-def test_generated_confirm_writes_molecule_with_provenance(database):
+def test_generated_confirm_writes_molecule_with_provenance(database, repo):
     _seed_confirmed_relations(database)
+    result = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=[SiteSelection("R1", 1, ["frag-1"])],
+        requested_limit=10,
+    )
+    generated_id = list_run_results(repo, result.run_id)[0]["generated_id"]
+    decision = apply_generated_decision(
+        repo,
+        entity_id=generated_id,
+        action="confirm",
+        reason="verified",
+    )
     with database.mol_conn() as conn:
-        result = run_enumeration(
-            conn,
-            scaffold_id="sc-1",
-            selection=[SiteSelection("R1", 1, ["frag-1"])],
-            requested_limit=10,
-        )
-        generated_id = list_run_results(conn, result.run_id)[0]["generated_id"]
-        decision = apply_generated_decision(
-            conn,
-            entity_id=generated_id,
-            action="confirm",
-            reason="verified",
-        )
         mol = conn.execute(
             "SELECT properties, review_status, source_doc FROM molecules WHERE mol_id = ?",
             (generated_id,),
@@ -249,22 +251,22 @@ def test_generated_confirm_writes_molecule_with_provenance(database):
     assert provenance["assignments"][0]["fragment_id"] == "frag-1"
 
 
-def test_generated_reject_writes_no_molecule(database):
+def test_generated_reject_writes_no_molecule(database, repo):
     _seed_confirmed_relations(database)
+    result = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=[SiteSelection("R1", 1, ["frag-1"])],
+        requested_limit=10,
+    )
+    generated_id = list_run_results(repo, result.run_id)[0]["generated_id"]
+    decision = apply_generated_decision(
+        repo,
+        entity_id=generated_id,
+        action="reject",
+        reason="not useful",
+    )
     with database.mol_conn() as conn:
-        result = run_enumeration(
-            conn,
-            scaffold_id="sc-1",
-            selection=[SiteSelection("R1", 1, ["frag-1"])],
-            requested_limit=10,
-        )
-        generated_id = list_run_results(conn, result.run_id)[0]["generated_id"]
-        decision = apply_generated_decision(
-            conn,
-            entity_id=generated_id,
-            action="reject",
-            reason="not useful",
-        )
         mol = conn.execute(
             "SELECT mol_id FROM molecules WHERE mol_id = ?", (generated_id,)
         ).fetchone()
