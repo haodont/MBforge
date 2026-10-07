@@ -39,9 +39,7 @@ def load_patent_facts(
 ) -> PatentFactsArtifact | None:
     """Return the published patent facts for *doc_id*, or ``None``."""
     layout = LibraryLayout(library_root)
-    data = _load_json_file(
-        layout.storage_dir(doc_id) / "patent_facts.json", "patent facts"
-    )
+    data = _load_json_file(layout.patent_facts_json(doc_id), "patent facts")
     if data is None:
         return None
     try:

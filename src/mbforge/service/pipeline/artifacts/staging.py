@@ -161,9 +161,7 @@ def publish_run(
     """Publish the current Patent facts artifact at the document root."""
     if patent_facts is None or (stage is not None and stage != "patent"):
         raise ValueError("publish_run requires patent_facts for the patent stage")
-    artifact_path = (
-        LibraryLayout(library_root).storage_dir(doc_id) / "patent_facts.json"
-    )
+    artifact_path = LibraryLayout(library_root).patent_facts_json(doc_id)
     _atomic_write_json(artifact_path, patent_facts.model_dump())
     logger.info(
         "Published patent facts for %s (run %s): %s", doc_id, run_id, artifact_path

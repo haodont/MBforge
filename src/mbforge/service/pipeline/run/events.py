@@ -2,8 +2,9 @@
 
 Consolidates the ``_maybe_record`` / ``_emit`` / ``_emit_stage_result`` closures
 that used to live inside ``run_pipeline``: the ``on_progress`` callback, the
-structured run logs, and the ``ingest_queue`` event recording (including the
-terminal-status mapping and the diagnostics fallback on write failure).
+structured run logs, and the ``ingest_queue`` stage mirror (plus the diagnostics
+fallback on write failure). The queue node's status is owned solely by the
+worker/DAO; this sink never writes it.
 """
 
 from __future__ import annotations
@@ -19,19 +20,6 @@ if TYPE_CHECKING:
     from mbforge.service.pipeline.stage import StageResult
 
 logger = get_logger("mbforge.service.pipeline.runner")
-
-# Map lifecycle events onto the ingest_queue terminal status so the UI reflects
-# the actual run state instead of being stuck at "processing" forever.
-# "start" opens the task, "complete" closes it as done, unrecoverable "error"
-# aborts as failed, and "cancelled" keeps the queue terminal state at cancelled
-# (distinct from ordinary failures). Intermediate warning/success events leave
-# the status alone.
-_STATUS_BY_EVENT = {
-    "start": "processing",
-    "complete": "done",
-    "error": "failed",
-    "cancelled": "cancelled",
-}
 
 
 class PipelineEventSink:
@@ -54,7 +42,7 @@ class PipelineEventSink:
     def _record(
         self, event: str, message: str, *, stage: str | None, data: dict | None
     ) -> None:
-        """Persist one event to ``ingest_logs`` / mirror it onto the queue row."""
+        """Persist one event to ``ingest_logs`` / mirror its stage onto the queue row."""
         if self.task_id is None:
             return
         try:
@@ -68,7 +56,6 @@ class PipelineEventSink:
                 level=event,
                 message=message,
                 data=data,
-                status=_STATUS_BY_EVENT.get(event),
                 update_stage=(stage if stage and stage in STAGE_ORDER else None),
             )
         except Exception as exc:  # noqa: BLE001 — observability must not abort work

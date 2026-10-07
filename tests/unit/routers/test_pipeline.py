@@ -398,6 +398,49 @@ def test_pipeline_delete_task_resets_document_and_keeps_source(
     assert (layout.storage_dir(doc.doc_id) / doc.file_name).is_file()
 
 
+def test_pipeline_enqueue_reuses_inflight_run_and_force_supersedes(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """Re-enqueueing an in-flight document reuses its run; force starts fresh."""
+    from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.service.use_cases.documents.library import LibraryStore
+
+    root = tmp_path / "library"
+    store = LibraryStore.get(str(root))
+    src = tmp_path / "doc.pdf"
+    src.write_bytes(b"%PDF-1.4 fake pdf")
+    doc = store.add_document(src)
+
+    def _enqueue(force: bool) -> str:
+        resp = client.post(
+            "/api/v1/pipeline/enqueue",
+            json={"library_root": str(root), "doc_id": doc.doc_id, "force": force},
+        )
+        assert resp.status_code == 200
+        return resp.json()["run_id"]
+
+    first = _enqueue(False)
+    # Idempotent while the run is in flight: the same run id is returned.
+    assert _enqueue(False) == first
+
+    # Forced re-enqueue supersedes it with a brand-new run.
+    forced = _enqueue(True)
+    assert forced and forced != first
+
+    db = DatabaseManager.get(str(root))
+    with db.kb_conn() as conn:
+        runs = [
+            row["run_id"]
+            for row in conn.execute(
+                "SELECT DISTINCT run_id FROM ingest_queue WHERE doc_id = ?",
+                (doc.doc_id,),
+            ).fetchall()
+        ]
+    # Only the new run survives; the superseded one was cleaned up.
+    assert forced in runs
+    assert first not in runs
+
+
 def _capture_to_thread(monkeypatch: pytest.MonkeyPatch):
     """Patch asyncio.to_thread so callers can inspect what was offloaded."""
     calls: list[tuple[object, tuple, dict]] = []

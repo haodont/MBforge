@@ -21,8 +21,7 @@ export interface UsePollingOptions<T> {
 
 /**
  * Shared interval-driven polling effect. Used by `useIngestNotifications`
- * and `useModelDownloadStatus` to keep their timer/lifecycle logic in
- * one place.
+ * to keep its timer/lifecycle logic in one place.
  */
 export function usePolling<T>({
   intervalMs,

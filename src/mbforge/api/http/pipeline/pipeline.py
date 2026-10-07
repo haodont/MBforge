@@ -60,7 +60,7 @@ async def pipeline_enqueue(body: PipelineEnqueueRequest) -> PipelineEnqueueRespo
         return PipelineEnqueueResponse(enqueued=enqueued)
 
     doc_id = body.doc_id or ""
-    run_id = await ingest.enqueue(root_str, doc_id)
+    run_id = await ingest.enqueue(root_str, doc_id, force=body.force)
     return PipelineEnqueueResponse(run_id=run_id)
 
 

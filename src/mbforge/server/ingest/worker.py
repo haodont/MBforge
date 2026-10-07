@@ -430,7 +430,7 @@ def _set_document_status(library_root: str, doc_id: str, status: str) -> None:
 
 
 def _write_final_report(library_root: str, doc_id: str, task_id: str) -> None:
-    """Write the merged document_report.json, then promote staged evidence.
+    """Write the merged report.json, then promote staged evidence.
 
     The report must be written *before* promotion because promote_staging
     deletes the staging directory (which holds the checkpoint files).

@@ -12,7 +12,6 @@ import PdfViewer from './components/project/PdfViewer'
 import DocumentViewer from './components/project/DocumentViewer'
 import MarkdownViewer from './components/MarkdownViewer'
 import { registerGlobalErrorHandlers } from './api/http/_utils'
-import { useSidecarEvents } from './hooks/useSidecarEvents'
 import { useIngestNotifications } from './hooks/useIngestNotifications'
 import { getLibraryStatus } from './api/http/library'
 import { clearViewerSnapshot } from './components/project/pdf/usePdfViewer'
@@ -74,7 +73,6 @@ function AppShellOrBootstrap() {
   const [libraryStatusError, setLibraryStatusError] = useState<Error | null>(null)
   const [libraryStatusRetry, setLibraryStatusRetry] = useState(0)
 
-  useSidecarEvents()
   useIngestNotifications(libraryRoot)
 
   // Register global error handlers once on mount.

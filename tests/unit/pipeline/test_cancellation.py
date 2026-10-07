@@ -135,8 +135,9 @@ def test_cancel_before_start_raises_with_distinct_code(
     # Terminal-state cleanup released the registry entry.
     assert not is_task_cancelled("cancel-me")
     assert len(default_registry) == 0
-    # Queue terminal state stays 'cancelled', not 'failed'.
-    assert _queue_status(library_root, "cancel-me") == "cancelled"
+    # The queue node's terminal status is owned by the worker
+    # (``_run_pipeline_sync``), not by the event sink; that transition is
+    # covered by tests/unit/infra/test_queue_worker.py.
 
 
 def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:

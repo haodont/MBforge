@@ -240,6 +240,7 @@ class LibraryStore:
         paths = [
             resolver.document_md(doc_id),
             resolver.report_json(doc_id),
+            resolver.patent_facts_json(doc_id),
         ]
         dirs = [
             resolver.pages_dir(doc_id),
@@ -333,7 +334,7 @@ def add_uploaded_file(
 
 def read_document_markdown(root: str, doc_id: str) -> str:
     """Read the canonical ``document.md`` for a document."""
-    p = LibraryLayout(root).storage_dir(doc_id) / "document.md"
+    p = LibraryLayout(root).document_md(doc_id)
     if not p.is_file():
         logger.error(f"document.md not found for {doc_id}")
         return "document.md not found run pipeline first"
@@ -342,7 +343,7 @@ def read_document_markdown(root: str, doc_id: str) -> str:
 
 def read_document_report(root: str, doc_id: str) -> bytes:
     """Read the pipeline ``report.json`` for a document."""
-    p = LibraryLayout(root).storage_dir(doc_id) / "report.json"
+    p = LibraryLayout(root).report_json(doc_id)
     if not p.is_file():
         raise NotFoundError(f"report.json not found for {doc_id}")
     return p.read_bytes()
@@ -350,7 +351,7 @@ def read_document_report(root: str, doc_id: str) -> bytes:
 
 def read_patent_facts(root: str, doc_id: str) -> bytes:
     """Read the Patent-stage facts artifact for a document."""
-    p = LibraryLayout(root).storage_dir(doc_id) / "patent_facts.json"
+    p = LibraryLayout(root).patent_facts_json(doc_id)
     if not p.is_file():
         raise NotFoundError(f"patent_facts.json not found for {doc_id}")
     return p.read_bytes()

@@ -118,9 +118,9 @@ def test_cached_instance_per_project_root(tmp_path: Path) -> None:
     assert db1 is db2
 
 
-def test_record_ingest_event_writes_log_row_and_updates_queue(tmp_path: Path) -> None:
-    """record_ingest_event persists a log row with all fields and updates the
-    matching ingest_queue row."""
+def test_record_ingest_event_writes_log_row_and_mirrors_stage(tmp_path: Path) -> None:
+    """record_ingest_event persists a log row and mirrors the stage onto the
+    matching ingest_queue row; node status is owned by the worker, not here."""
     db = DatabaseManager(str(tmp_path))
     with db.kb_conn() as conn:
         conn.execute(
@@ -136,7 +136,6 @@ def test_record_ingest_event_writes_log_row_and_updates_queue(tmp_path: Path) ->
         level="start",
         message="Extracting text...",
         data={"molecule_count": 3, "rejected_count": 0},
-        status="processing",
         update_stage="extract",
     )
 
@@ -161,7 +160,8 @@ def test_record_ingest_event_writes_log_row_and_updates_queue(tmp_path: Path) ->
     )
     assert len(queue_rows) == 1
     queue_row = queue_rows[0]
-    assert queue_row["status"] == "processing"
+    # The event sink never writes status; the pending status is untouched.
+    assert queue_row["status"] == "pending"
     assert queue_row["stage"] == "extract"
 
 

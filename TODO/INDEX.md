@@ -63,9 +63,10 @@ checkout, so it read no settings at all and every saved key was silently lost.
 
 ## Known gaps
 
-- `report.json` and `storage/{doc_id}/pages/` have no writer in the active
-  path: the removed Persist stage produced them, while the document report and
-  page readers still consume them.
+- `storage/{doc_id}/pages/` has no writer in the active path: the removed Persist
+  stage produced it, while the page reader still consumes it. `report.json` is
+  written again by run finalization (`run/checkpoint.write_merged_report` →
+  `LibraryLayout.report_json`), matching the reader.
 - Extract now classifies recognized image structures and atomically queues
   Markush scaffolds, fragments, and uncertain candidates with their canonical
   source-evidence links. Prose-only Markush definitions still need a separate

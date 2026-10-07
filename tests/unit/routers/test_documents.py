@@ -80,6 +80,16 @@ def test_documents_patent_analysis_queues_patent_only_run(
     assert resp.status_code == 200
     doc_id = resp.json()["document"]["doc_id"]
 
+    # Import auto-enqueues Extract + Markdown; mark that run finished so the
+    # document rests 'extracted' — the state Patent analysis is triggered from.
+    from mbforge.db.sqlite.database import DatabaseManager
+
+    db = DatabaseManager.get(str(tmp_library))
+    with db.kb_conn() as conn:
+        conn.execute(
+            "UPDATE ingest_queue SET status = 'done' WHERE doc_id = ?", (doc_id,)
+        )
+
     # Extract has produced evidence for this document, so it becomes eligible.
     persist_source_evidence(
         tmp_library,

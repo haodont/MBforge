@@ -33,8 +33,11 @@ def insert_dag(
     One ``ingest_queue`` row per stage (roots ``pending``, everything else
     ``blocked``) plus one ``ingest_stage_deps`` edge per prerequisite, all
     carrying *run_id* so the row's stage is executed against the same
-    attempt. Any earlier run of the same document is superseded: its rows
-    and edges are removed so the queue holds exactly one run per document.
+    attempt. Earlier **finished** runs of the same document are superseded:
+    their rows and edges are removed so the queue holds exactly one live run
+    per document. An in-flight run is never deleted here — callers must cancel
+    it first (see ``use_cases.pipeline.ingest.enqueue``), so a re-import cannot
+    silently drop a processing node and leave two writers on the same doc.
 
     When *stages* is given, only those stages are scheduled. Prerequisites
     outside the selected set are dropped, so a lone ``("patent",)`` run makes
@@ -56,12 +59,14 @@ def insert_dag(
     db = DatabaseManager.get(library_root)
     with db.kb_conn() as conn:
         conn.execute(
-            "DELETE FROM ingest_queue WHERE doc_id = ? AND run_id != ?",
+            "DELETE FROM ingest_queue WHERE doc_id = ? AND run_id != ? "
+            "AND status IN ('done', 'failed', 'cancelled')",
             (doc_id, run_id),
         )
         conn.execute(
-            "DELETE FROM ingest_stage_deps WHERE doc_id = ? AND run_id != ?",
-            (doc_id, run_id),
+            "DELETE FROM ingest_stage_deps WHERE doc_id = ? AND run_id != ? "
+            "AND run_id NOT IN (SELECT DISTINCT run_id FROM ingest_queue WHERE doc_id = ?)",
+            (doc_id, run_id, doc_id),
         )
         conn.execute(
             "INSERT OR IGNORE INTO ingest_runs (doc_id, run_id) VALUES (?, ?)",
@@ -353,6 +358,24 @@ def doc_queued(library_root: str, doc_id: str) -> bool:
             "SELECT 1 FROM ingest_queue WHERE doc_id = ? LIMIT 1", (doc_id,)
         ).fetchone()
     return row is not None
+
+
+def active_run_id(library_root: str, doc_id: str) -> str | None:
+    """Return the run_id of *doc_id* with a non-terminal node, if any.
+
+    A non-terminal node (``pending``/``processing``/``blocked``) means the
+    document has an in-flight run; ``enqueue`` reuses it (or, when forced,
+    cancels it) instead of deleting its rows out from under a live writer.
+    """
+    db = DatabaseManager.get(library_root)
+    with db.kb_conn() as conn:
+        row = conn.execute(
+            "SELECT run_id FROM ingest_queue "
+            "WHERE doc_id = ? AND status IN ('pending', 'processing', 'blocked') "
+            "LIMIT 1",
+            (doc_id,),
+        ).fetchone()
+    return row["run_id"] if row is not None else None
 
 
 def list_tasks(library_root: str) -> list[dict]:

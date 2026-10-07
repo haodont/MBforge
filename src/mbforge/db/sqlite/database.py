@@ -491,7 +491,6 @@ def record_ingest_event(
     level: str,
     message: str,
     data: dict[str, Any] | None = None,
-    status: str | None = None,
     update_stage: str | None = None,
 ) -> None:
     """Write a pipeline event to the ``ingest_logs`` table.
@@ -502,6 +501,10 @@ def record_ingest_event(
     ``update_stage`` is the checkpoint column value supplied by the caller
     (the runner validates it against the stage registry); storage does not
     know pipeline stage names.
+
+    The queue node's ``status`` is intentionally **not** written here: the
+    worker/DAO owns it (``set_node_status``/``advance_dependents``), so this
+    event sink cannot race the claim/finalize path.
     """
     import json
     import time
@@ -527,16 +530,15 @@ def record_ingest_event(
                     data_json,
                 ),
             )
-            if status is not None or update_stage is not None:
+            if update_stage is not None:
                 conn.execute(
                     """
                     UPDATE ingest_queue
-                    SET status = COALESCE(?, status),
-                        stage = COALESCE(?, stage),
+                    SET stage = COALESCE(?, stage),
                         updated_at = datetime('now')
                     WHERE id = ?
                     """,
-                    (status, update_stage, task_id),
+                    (update_stage, task_id),
                 )
         logger.debug("Recorded ingest event for %s: %s", task_id, message)
     except Exception as exc:  # noqa: BLE001

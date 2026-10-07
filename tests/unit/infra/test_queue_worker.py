@@ -596,3 +596,6 @@ def test_run_pipeline_sync_returns_document_to_pending_on_cancel(
     )
 
     assert _document_status(root, "doc-cancel") == "pending"
+    # The worker owns the queue node's terminal status: a cancelled run leaves
+    # the node 'cancelled' (not 'failed' and not stuck at 'processing').
+    assert _queue_row(DatabaseManager.get(root), task_id)["status"] == "cancelled"

@@ -398,7 +398,7 @@ def collect_all_summaries(
 
 
 def _load_published_report(library_root: str | Path, doc_id: str) -> dict[str, Any]:
-    """Load the current ``document_report.json`` as a base, or ``{}``.
+    """Load the current ``report.json`` as a base, or ``{}``.
 
     Decoupled runs publish one stage subset at a time (import → Extract +
     Markdown, then a Patent-only run), and each promotion discards staging, so
@@ -424,10 +424,10 @@ def merge_report(
 ) -> dict[str, Any]:
     """Merge all stage summaries into a single readable report dict.
 
-    The report is the authoritative ``document_report.json`` content.
+    The report is the authoritative ``report.json`` content.
     It consolidates per-stage timing, status, and statistics into one
     JSON-serializable dict that the caller writes to
-    ``storage/{doc_id}/document_report.json``. The previously published
+    ``storage/{doc_id}/report.json``. The previously published
     report is the base, so a run that schedules only some stages (e.g. a
     Patent-only analysis) preserves the other stages' entries and metadata.
     """
@@ -483,15 +483,13 @@ def write_merged_report(
     doc_id: str,
     library_root: str | Path,
 ) -> Path:
-    """Write the merged report to ``storage/{doc_id}/document_report.json``.
+    """Write the merged report to ``storage/{doc_id}/report.json``.
 
     Returns the path of the written file.
     """
 
     report = merge_report(staging_dir, doc_id=doc_id, library_root=library_root)
-    report_path = (
-        LibraryLayout(library_root).storage_dir(doc_id) / "document_report.json"
-    )
+    report_path = LibraryLayout(library_root).report_json(doc_id)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"

@@ -82,7 +82,11 @@ class BatchActionResult:
 
 
 async def enqueue(
-    library_root: str, doc_id: str, *, stages: Sequence[str] | None = None
+    library_root: str,
+    doc_id: str,
+    *,
+    stages: Sequence[str] | None = None,
+    force: bool = False,
 ) -> str:
     """Enqueue a registered document for pipeline processing.
 
@@ -95,7 +99,12 @@ async def enqueue(
     Patent analysis — that is scheduled explicitly by
     :func:`enqueue_patent_analysis`. Every name must be a registered stage.
 
-    Returns the newly created ``run_id``.
+    An in-flight run (``pending``/``processing``/``blocked`` node) is never
+    superseded destructively: with ``force=False`` the existing ``run_id`` is
+    returned unchanged (idempotent re-enqueue), and with ``force=True`` the
+    in-flight run is cancelled before the new one is created.
+
+    Returns the run id (new, or the reused in-flight one).
 
     Raises:
         ValidationError: if *doc_id* or *library_root* is empty, or a stage
@@ -135,6 +144,14 @@ async def enqueue(
             detail=f"doc_id={doc_id}",
         )
 
+    active = await asyncio.to_thread(_queue().active_run_id, library_root, doc_id)
+    if active is not None:
+        if not force:
+            logger.info("Reusing in-flight run %s for doc %s", active, doc_id)
+            return active
+        logger.info("Force enqueue cancels in-flight run %s for doc %s", active, doc_id)
+        await asyncio.to_thread(_queue().cancel_doc, library_root, doc_id)
+
     from mbforge.service.pipeline.run.ids import mint_run_id
 
     def _register() -> str:
@@ -165,8 +182,10 @@ async def enqueue_patent_analysis(
 
     A document is eligible when it is registered and has at least one
     ``source_evidence`` row (i.e. Extract already ran); others are skipped
-    without failing the batch. Each eligible document gets its own run so the
-    queue worker analyzes them as independent tasks.
+    without failing the batch. A document with an in-flight run is also skipped
+    — two concurrent runs on one document would race on its evidence and crops.
+    Each eligible document gets its own run so the queue worker analyzes them as
+    independent tasks.
     """
     if not library_root:
         raise ValidationError("library_root is required")
@@ -188,6 +207,10 @@ async def enqueue_patent_analysis(
         evidence = await asyncio.to_thread(list_evidence, library_root, doc_id)
         if not evidence:
             logger.info("Patent analysis skipped: no source evidence for %s", doc_id)
+            skipped += 1
+            continue
+        if await asyncio.to_thread(_queue().active_run_id, library_root, doc_id):
+            logger.info("Patent analysis deferred: run in flight for %s", doc_id)
             skipped += 1
             continue
         await enqueue(library_root, doc_id, stages=PATENT_STAGES)

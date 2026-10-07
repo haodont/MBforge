@@ -21,6 +21,10 @@ class PipelineEnqueueRequest(BaseModel):
         description="Special action, e.g. 'enqueue_unresolved'.",
     )
     doc_id: str = Field(default="", description="Document identifier to enqueue.")
+    force: bool = Field(
+        default=False,
+        description="Cancel an in-flight run for the document before enqueueing.",
+    )
 
 
 class PipelineEnqueueResponse(BaseModel):

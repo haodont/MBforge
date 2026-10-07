@@ -275,6 +275,9 @@ class LibraryLayout:
     def report_json(self, doc_id: str) -> Path:
         return self._doc_file(doc_id, "report.json")
 
+    def patent_facts_json(self, doc_id: str) -> Path:
+        return self._doc_file(doc_id, "patent_facts.json")
+
     def pages_dir(self, doc_id: str) -> Path:
         return self._doc_file(doc_id, "pages")
 
