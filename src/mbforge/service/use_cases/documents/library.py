@@ -15,7 +15,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
-from mbforge.domain.document import VISIBLE_DOCUMENT_STATUSES, Document
+from mbforge.domain.document import (
+    VISIBLE_DOCUMENT_STATUSES,
+    Document,
+    DuplicateDocumentNameError,
+)
 from mbforge.foundation.errors import ConflictError, MBForgeError, NotFoundError
 from mbforge.foundation.files import ensure_dir, sha256_file
 from mbforge.foundation.layout import LibraryLayout, sanitize_upload_filename
@@ -24,10 +28,6 @@ from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.documents.backup import create_backup
 
 logger = get_logger("mbforge.service.use_cases.documents.library")
-
-
-class DuplicateDocumentNameError(ConflictError):
-    error_code = "duplicate_filename"
 
 
 def _now() -> str:

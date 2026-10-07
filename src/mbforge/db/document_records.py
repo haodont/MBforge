@@ -55,7 +55,7 @@ def insert(library_root: str | Path, record: dict[str, Any]) -> None:
 
 def _raise_conflict(kb: Any, record: dict[str, Any], exc: Exception) -> None:
     """Turn a UNIQUE violation into the duplicate-name error the API reports."""
-    from mbforge.service.use_cases.documents.library import DuplicateDocumentNameError
+    from mbforge.domain.document import DuplicateDocumentNameError
 
     taken = kb.execute(
         "SELECT doc_id FROM documents WHERE file_name = ?", (record["file_name"],)

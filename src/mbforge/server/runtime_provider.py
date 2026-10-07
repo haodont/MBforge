@@ -42,6 +42,12 @@ def create_runtime_provider() -> RuntimeProvider:
     There is no LLM capability: the chat agent runs in its own Node sidecar
     (agent/) and owns every provider call.
     """
+    # The inference backends live in ``foundation`` and must not import
+    # ``server``; install the concrete resource manager into their seam here.
+    from mbforge.foundation.inference import assets
+
+    assets.configure_resource_resolver(resource_manager.ResourceManager)
+    assets.configure_model_status_sink(models.ensure)
 
     return RuntimeProvider(
         resource_manager=resource_manager.ResourceManager,

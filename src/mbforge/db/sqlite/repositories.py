@@ -37,7 +37,7 @@ from mbforge.db.sqlite.database import (
     record_ingest_event,
 )
 from mbforge.domain.evidence import SourceEvidence
-from mbforge.service.ports.repositories import (
+from mbforge.ports.repositories import (
     DatabaseRepository,
     LibraryRepositories,
 )

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mbforge.foundation.errors import ConflictError
+
 #: Statuses at which a document is shown in the workspace.
 #:
 #: ``pending`` means the bytes are registered but no usable results exist yet
@@ -116,3 +118,13 @@ class Document:
             created_at=data.get("created_at", ""),
         )
         return doc
+
+
+class DuplicateDocumentNameError(ConflictError):
+    """A PDF with the same ``file_name`` already exists in the library.
+
+    Lives in the domain so the persistence layer can raise it without importing
+    the use-case module that owns the rest of the library store.
+    """
+
+    error_code = "duplicate_filename"

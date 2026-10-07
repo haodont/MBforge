@@ -131,10 +131,10 @@ class MolDetv2Detector:
         self._load_model()
 
     def _resolve_model_path(self) -> Path:
-        """Resolve the model path through ResourceManager."""
-        from mbforge.server.resource_manager import ResourceManager
+        """Resolve the model path through the installed resource resolver."""
+        from mbforge.foundation.inference.assets import get_resource_resolver
 
-        resolved = ResourceManager.resolve_model_for_backend(
+        resolved = get_resource_resolver().resolve_model_for_backend(
             "moldet", subpath=self.DEFAULT_SUBPATH
         )
         if resolved is not None and resolved.exists():
@@ -399,10 +399,10 @@ def get_moldet() -> MolDetv2Detector:
             )
         with _detector_lock:
             if _detector_singleton is None:
-                from mbforge.server.resource_manager import ResourceManager
+                from mbforge.foundation.inference.assets import get_resource_resolver
 
                 try:
-                    ResourceManager.ensure("moldet")
+                    get_resource_resolver().ensure("moldet")
                     _detector_singleton = MolDetv2Detector()
                 except Exception as exc:
                     _GUARD.record_failure(str(exc))

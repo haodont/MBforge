@@ -23,6 +23,12 @@ import sqlite3
 from collections.abc import Iterable
 from typing import Any
 
+from mbforge.contracts.markush import (
+    MarkushCandidate,
+    MarkushCandidateDetail,
+    MarkushDecisionItem,
+    MarkushEvidenceItem,
+)
 from mbforge.db.review_audit import record_review_decision
 from mbforge.domain.review import (
     ReviewConflictError,
@@ -30,12 +36,6 @@ from mbforge.domain.review import (
     ReviewTransitionError,
 )
 from mbforge.foundation.files import safe_json_loads
-from mbforge.service.dto.markush import (
-    MarkushCandidate,
-    MarkushCandidateDetail,
-    MarkushDecisionItem,
-    MarkushEvidenceItem,
-)
 
 
 def _row_to_candidate(row: sqlite3.Row) -> MarkushCandidate:

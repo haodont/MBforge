@@ -178,10 +178,10 @@ class HiroLayoutDetector:
         self._load_model(providers=providers, num_threads=num_threads)
 
     def _resolve_model_path(self) -> Path:
-        """Resolve the ONNX weights through ResourceManager."""
-        from mbforge.server.resource_manager import ResourceManager
+        """Resolve the ONNX weights through the installed resource resolver."""
+        from mbforge.foundation.inference.assets import get_resource_resolver
 
-        resolved = ResourceManager.resolve_model_for_backend(
+        resolved = get_resource_resolver().resolve_model_for_backend(
             "hiro_layout", subpath=DEFAULT_ONNX_SUBPATH
         )
         if resolved is not None and resolved.exists():
@@ -476,10 +476,10 @@ def get_hiro() -> HiroLayoutDetector:
             )
         with _detector_lock:
             if _process_singleton is None:
-                from mbforge.server.resource_manager import ResourceManager
+                from mbforge.foundation.inference.assets import get_resource_resolver
 
                 try:
-                    ResourceManager.ensure("hiro_layout")
+                    get_resource_resolver().ensure("hiro_layout")
                     _process_singleton = HiroLayoutDetector()
                 except Exception as exc:
                     _GUARD.record_failure(str(exc))

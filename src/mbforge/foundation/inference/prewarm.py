@@ -44,18 +44,18 @@ def prewarm_models() -> dict[str, str]:
 
     loaders.update(moldet=load_moldet, molparser=load_molparser)
     statuses: dict[str, str] = {}
-    from mbforge.server.models import ensure as ensure_model_status
+    from mbforge.foundation.inference.assets import emit_model_status
 
     for name, loader in loaders.items():
-        ensure_model_status(name, "loading")
+        emit_model_status(name, "loading")
         logger.info("model_loading model=%s", name)
         try:
             # One model raising must never skip the remaining loaders.
             statuses[name] = loader()
-            ensure_model_status(name, statuses[name])
+            emit_model_status(name, statuses[name])
             logger.info("model_loading model=%s status=%s", name, statuses[name])
         except Exception as exc:
             statuses[name] = "error"
-            ensure_model_status(name, "error")
+            emit_model_status(name, "error")
             logger.warning("model_loading model=%s status=error error=%s", name, exc)
     return statuses

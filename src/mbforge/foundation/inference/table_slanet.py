@@ -123,16 +123,17 @@ def load(device: str | None = None) -> None:
 
         logger.info("Loading SLANet-1M table structure recognizer...")
         try:
-            from mbforge.server.resource_manager import ResourceManager
+            from mbforge.foundation.inference.assets import get_resource_resolver
 
-            path = ResourceManager.get_slanet_path()
+            resolver = get_resource_resolver()
+            path = resolver.get_slanet_path()
             if path is None:
                 logger.info(
                     "SLANet-1M weights missing; auto-downloading "
                     "(HF bdatdo0601/slanet-1m-onnx)..."
                 )
-                ResourceManager.ensure("slanet_table")
-                path = ResourceManager.get_slanet_path()
+                resolver.ensure("slanet_table")
+                path = resolver.get_slanet_path()
             if path is None:
                 _AVAILABLE = False
                 _ERROR = (

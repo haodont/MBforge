@@ -67,9 +67,10 @@ def load(device: str | None = None) -> None:
 
         logger.info("Loading MolParser-Mobile model...")
         try:
-            from mbforge.server.resource_manager import ResourceManager
+            from mbforge.foundation.inference.assets import get_resource_resolver
 
-            path = ResourceManager.get_molparser_path()
+            resolver = get_resource_resolver()
+            path = resolver.get_molparser_path()
             if path is None:
                 # Auto-fetch weights on first use when missing, mirroring
                 # moldet's self-ensure. ensure() is idempotent and a fast
@@ -78,8 +79,8 @@ def load(device: str | None = None) -> None:
                     "MolParser-Mobile weights missing; auto-downloading "
                     "(ModelScope UniParser/MolParser-Mobile, HF fallback)..."
                 )
-                ResourceManager.ensure("molparser")
-                path = ResourceManager.get_molparser_path()
+                resolver.ensure("molparser")
+                path = resolver.get_molparser_path()
             if path is None:
                 from mbforge.foundation.paths import get_model_cache_dir
 

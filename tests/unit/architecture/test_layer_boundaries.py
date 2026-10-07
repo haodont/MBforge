@@ -23,6 +23,7 @@ _FORBIDDEN_IMPORTS = {
     "db": ("mbforge.api", "mbforge.server"),
     "service": ("mbforge.db", "mbforge.api", "mbforge.server"),
     "api": ("mbforge.db", "mbforge.server"),
+    "foundation": ("mbforge.service", "mbforge.db", "mbforge.api", "mbforge.server"),
 }
 
 
