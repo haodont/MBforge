@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from '@/api/query/client'
 
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => {} },
@@ -8,17 +10,26 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/hooks/useToast', () => ({ showToast: vi.fn() }))
 
-vi.mock('@/api/http/molecule', () => ({
+vi.mock('@/api/http/molecule_chem', () => ({
   molListClusters: vi.fn(),
   molGetClusterMembers: vi.fn(),
   molAssignCluster: vi.fn(),
   molRemoveFromCluster: vi.fn(),
 }))
 
-import { molAssignCluster, molListClusters } from '@/api/http/molecule'
+import { molAssignCluster, molListClusters } from '@/api/http/molecule_chem'
 import ClusterPanel from '../ClusterPanel'
 
 const molecules = [{ mol_id: 'm1', esmiles: 'CCO', name: 'ethanol' }] as never[]
+
+function renderPanel() {
+  const client = createQueryClient()
+  return render(
+    <QueryClientProvider client={client}>
+      <ClusterPanel molecules={molecules} />
+    </QueryClientProvider>,
+  )
+}
 
 describe('ClusterPanel destructive confirmation', () => {
   beforeEach(() => {
@@ -27,7 +38,7 @@ describe('ClusterPanel destructive confirmation', () => {
   })
 
   it('does not assign when the dialog is cancelled', () => {
-    render(<ClusterPanel molecules={molecules} />)
+    renderPanel()
     fireEvent.click(screen.getByRole('button', { name: 'analytics.clusters.assign' }))
     fireEvent.click(screen.getByRole('button', { name: /取消/ }))
     expect(molAssignCluster).not.toHaveBeenCalled()
@@ -36,7 +47,7 @@ describe('ClusterPanel destructive confirmation', () => {
   it('assigns only after confirming the dialog', async () => {
     ;(molAssignCluster as ReturnType<typeof vi.fn>).mockResolvedValue(undefined)
 
-    render(<ClusterPanel molecules={molecules} />)
+    renderPanel()
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'm1' } })
     fireEvent.change(

@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createQueryClient } from '@/api/query/client'
 
 vi.mock('@/context/AppContext', () => ({
   useAppContext: vi.fn(),
@@ -60,6 +62,15 @@ import { useMoleculeAnalysis } from '@/hooks/useMoleculeAnalysis'
 import { useMoleculeLibrary } from '@/hooks/useMoleculeLibrary'
 import MoleculeLibrary from '../MoleculeLibrary'
 
+function renderLibrary() {
+  const client = createQueryClient()
+  return render(
+    <QueryClientProvider client={client}>
+      <MoleculeLibrary />
+    </QueryClientProvider>,
+  )
+}
+
 describe('MoleculeLibrary', () => {
   let setViewMode = vi.fn()
 
@@ -112,7 +123,7 @@ describe('MoleculeLibrary', () => {
   })
 
   it('keeps results full width until a selected molecule is analyzed', () => {
-    render(<MoleculeLibrary />)
+    renderLibrary()
 
     expect(screen.getByTestId('molecule-table')).toBeInTheDocument()
     expect(screen.queryByText('Selected 1 / 12')).not.toBeInTheDocument()
@@ -126,7 +137,7 @@ describe('MoleculeLibrary', () => {
   })
 
   it('switches view mode from the page header', () => {
-    render(<MoleculeLibrary />)
+    renderLibrary()
 
     fireEvent.click(screen.getByRole('button', { name: 'Card view' }))
 

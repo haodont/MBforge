@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { CheckIcon, AlertIcon, InfoIcon } from '../icons'
 import { basicValidate } from './moleculeUtils'
-import { smilesToRdkitSvg } from '@/api/http/molecule'
+import { useSmilesToRdkitSvg } from '@/api/query/hooks/useMolecules'
 import ConfidenceBadge from './ConfidenceBadge'
 import { useMoleculeDisplay } from '@/hooks/useMoleculeDisplay'
 import Button from '@/components/ui/Button'
@@ -45,10 +45,6 @@ export default function MoleculeDisplay({
 }: MoleculeDisplayProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [renderSource, setRenderSource] = useState<'rdkit' | 'crop'>('rdkit')
-  const [rdkitSvg, setRdkitSvg] = useState<string | null>(null)
-  const [rdkitRenderError, setRdkitRenderError] = useState<string | null>(null)
-  const [rdkitLoading, setRdkitLoading] = useState(false)
-  const [renderAttempt, setRenderAttempt] = useState(0)
   const validation = basicValidate(smiles)
 
   const {
@@ -74,45 +70,32 @@ export default function MoleculeDisplay({
     validateRemotely,
   )
 
+  const svgQuery = useSmilesToRdkitSvg(validation.valid ? smiles : null, size, size)
+  const rdkitSvg = svgQuery.data ?? null
+  const rdkitLoading = svgQuery.isFetching
+  const rdkitRenderError = svgQuery.isError
+    ? svgQuery.error instanceof Error
+      ? svgQuery.error.message
+      : '本地结构渲染失败'
+    : null
+
   useEffect(() => {
     setRenderSource('rdkit')
-    setRdkitSvg(null)
-    setRdkitRenderError(null)
-    setRdkitLoading(false)
     setImgError(false)
   }, [setImgError, smiles])
 
   useEffect(() => {
-    if (renderSource !== 'rdkit' || !validation.valid) {
-      return
+    // Fall back to the original crop when local RDKit rendering fails.
+    if (svgQuery.isError && sourceImageUrl) {
+      setRenderSource('crop')
     }
-
-    let cancelled = false
-    setRdkitLoading(true)
-    setRdkitSvg(null)
-    setRdkitRenderError(null)
-    smilesToRdkitSvg(smiles, size, size)
-      .then((svg) => {
-        if (!cancelled) setRdkitSvg(svg)
-      })
-      .catch((error: unknown) => {
-        if (!cancelled && sourceImageUrl) setRenderSource('crop')
-        if (!cancelled) {
-          setRdkitRenderError(error instanceof Error ? error.message : '本地结构渲染失败')
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setRdkitLoading(false)
-      })
-
-    return () => { cancelled = true }
-  }, [renderAttempt, renderSource, size, smiles, sourceImageUrl, validation.valid])
+  }, [svgQuery.isError, sourceImageUrl])
 
   const retryStructureRender = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     setImgError(false)
     setRenderSource('rdkit')
-    setRenderAttempt((attempt) => attempt + 1)
+    void svgQuery.refetch()
   }
 
   const handleStructureImageError = () => {

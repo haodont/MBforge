@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { molAdminListPage } from '@/api/http/molecule_admin'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMoleculePage } from '@/api/query/hooks/useMolecules'
+import type { MoleculeListParams } from '@/api/http/molecule_admin'
 import type { MoleculeRecord } from '@/types'
 
 export type MoleculeStatusFilter = 'all' | 'confirmed' | 'pending' | 'rejected' | 'corrected'
@@ -60,11 +61,6 @@ export interface UseMoleculeLibraryResult {
 const VIEW_MODE_KEY = 'mbforge_molecule_view_mode'
 
 export function useMoleculeLibrary(libraryRoot: string | null): UseMoleculeLibraryResult {
-  const [molecules, setMolecules] = useState<MoleculeRecord[]>([])
-  const [totalCount, setTotalCount] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [info, setInfo] = useState<string | null>(null)
   const [query, setQueryState] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState(query)
   const [filters, setFiltersState] = useState<MoleculeFilters>({
@@ -82,9 +78,6 @@ export function useMoleculeLibrary(libraryRoot: string | null): UseMoleculeLibra
     return saved === 'card' ? 'card' : 'table'
   })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [matchingIds, setMatchingIds] = useState<string[]>([])
-  const [sourceTypeOptions, setSourceTypeOptions] = useState<string[]>([])
-  const [sourceDocOptions, setSourceDocOptions] = useState<string[]>([])
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 250)
@@ -118,50 +111,41 @@ export function useMoleculeLibrary(libraryRoot: string | null): UseMoleculeLibra
     setViewModeState(mode)
   }, [])
 
-  const load = useCallback(async () => {
-    if (!libraryRoot) {
-      setMolecules([])
-      setTotalCount(0)
-      setMatchingIds([])
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await molAdminListPage(libraryRoot, {
-        page: pagination.page,
-        pageSize: pagination.pageSize,
-        status: filters.status === 'all' ? undefined : filters.status,
-        sourceType: filters.sourceType === 'all' ? undefined : filters.sourceType,
-        sourceDoc: filters.sourceDoc === 'all' ? undefined : filters.sourceDoc,
-        activityPresence: filters.activityPresence,
-        activityMin: filters.activityMin,
-        activityMax: filters.activityMax,
-        query: debouncedQuery.trim(),
-        sortField: sort.field,
-        sortDirection: sort.direction,
-      })
+  const params = useMemo<MoleculeListParams>(
+    () => ({
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      status: filters.status === 'all' ? undefined : filters.status,
+      sourceType: filters.sourceType === 'all' ? undefined : filters.sourceType,
+      sourceDoc: filters.sourceDoc === 'all' ? undefined : filters.sourceDoc,
+      activityPresence: filters.activityPresence,
+      activityMin: filters.activityMin,
+      activityMax: filters.activityMax,
+      query: debouncedQuery.trim(),
+      sortField: sort.field,
+      sortDirection: sort.direction,
+    }),
+    [pagination.page, pagination.pageSize, filters, sort, debouncedQuery],
+  )
 
-      setMolecules(response.items)
-      setTotalCount(response.total)
-      setMatchingIds(response.matching_ids)
-      setSourceTypeOptions(response.source_types)
-      setSourceDocOptions(response.source_docs)
-      setInfo(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载分子失败')
-      setInfo(null)
-      setMolecules([])
-      setTotalCount(0)
-      setMatchingIds([])
-    } finally {
-      setLoading(false)
-    }
-  }, [libraryRoot, debouncedQuery, filters, sort, pagination.page, pagination.pageSize])
+  const { data, isPending, isFetching, isError, error: queryError, refetch } =
+    useMoleculePage(libraryRoot, params)
 
-  useEffect(() => {
-    void load()
-  }, [load])
+  const molecules = useMemo(() => data?.items ?? [], [data])
+  const totalCount = data?.total ?? 0
+  const matchingIds = useMemo(() => data?.matching_ids ?? [], [data])
+  const sourceTypeOptions = data?.source_types ?? []
+  const sourceDocOptions = data?.source_docs ?? []
+  const loading = Boolean(libraryRoot) && (isPending || isFetching)
+  const error = isError
+    ? queryError instanceof Error
+      ? queryError.message
+      : '加载分子失败'
+    : null
+
+  const refresh = useCallback(() => {
+    void refetch()
+  }, [refetch])
 
   const toggleSelection = useCallback((molId: string) => {
     setSelectedIds((prev) => {
@@ -207,7 +191,7 @@ export function useMoleculeLibrary(libraryRoot: string | null): UseMoleculeLibra
     totalCount,
     loading,
     error,
-    info,
+    info: null,
     query,
     filters,
     sort,
@@ -228,6 +212,6 @@ export function useMoleculeLibrary(libraryRoot: string | null): UseMoleculeLibra
     selectAllResults,
     selectAll: selectAllResults,
     clearSelection,
-    refresh: load,
+    refresh,
   }
 }

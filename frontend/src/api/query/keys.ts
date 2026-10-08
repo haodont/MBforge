@@ -38,8 +38,37 @@ export const queryKeys = {
     all: ['molecules'] as const,
     list: (libraryRoot: string) =>
       [...queryKeys.molecules.all, 'list', libraryRoot] as const,
+    page: (libraryRoot: string, params: unknown) =>
+      [...queryKeys.molecules.all, 'page', libraryRoot, params] as const,
+    detail: (libraryRoot: string, molId: string) =>
+      [...queryKeys.molecules.all, 'detail', libraryRoot, molId] as const,
     stats: (libraryRoot: string) =>
       [...queryKeys.molecules.all, 'stats', libraryRoot] as const,
+    corrections: (libraryRoot: string, molId: string) =>
+      [...queryKeys.molecules.all, 'corrections', libraryRoot, molId] as const,
+    byLocation: (
+      libraryRoot: string,
+      docId: string,
+      page: number,
+      bbox: [number, number, number, number] | null,
+    ) =>
+      [...queryKeys.molecules.all, 'by-location', libraryRoot, docId, page, bbox] as const,
+    descriptors: (smiles: string) =>
+      [...queryKeys.molecules.all, 'descriptors', smiles] as const,
+    validation: (smiles: string) =>
+      [...queryKeys.molecules.all, 'validation', smiles] as const,
+    svg: (smiles: string, width: number, height: number) =>
+      [...queryKeys.molecules.all, 'svg', smiles, width, height] as const,
+    clusters: () => [...queryKeys.molecules.all, 'clusters'] as const,
+    clusterMembers: (clusterId: string) =>
+      [...queryKeys.molecules.all, 'cluster-members', clusterId] as const,
+    relationStats: () => [...queryKeys.molecules.all, 'relation-stats'] as const,
+    relations: (molId: string) =>
+      [...queryKeys.molecules.all, 'relations', molId] as const,
+    substructure: (query: string, threshold: number) =>
+      [...queryKeys.molecules.all, 'substructure', query, threshold] as const,
+    analogs: (molId: string, minSimilarity: number) =>
+      [...queryKeys.molecules.all, 'analogs', molId, minSimilarity] as const,
   },
 
   markush: {

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from '@/api/query/client'
 
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => {} },
@@ -8,14 +10,14 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/hooks/useToast', () => ({ showToast: vi.fn() }))
 
-vi.mock('@/api/http/molecule', () => ({
+vi.mock('@/api/http/molecule_chem', () => ({
   molGetStats: vi.fn(),
   molFindByMolecule: vi.fn(),
   molAddRelation: vi.fn(),
   molDeleteRelation: vi.fn(),
 }))
 
-import { molAddRelation } from '@/api/http/molecule'
+import { molAddRelation } from '@/api/http/molecule_chem'
 import RelationPanel from '../RelationPanel'
 
 const molecules = [
@@ -23,13 +25,22 @@ const molecules = [
   { mol_id: 'm2', esmiles: 'CCN', name: 'ethylamine' },
 ] as never[]
 
+function renderPanel() {
+  const client = createQueryClient()
+  return render(
+    <QueryClientProvider client={client}>
+      <RelationPanel molecules={molecules} />
+    </QueryClientProvider>,
+  )
+}
+
 describe('RelationPanel destructive confirmation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   it('does not add a relation when the dialog is cancelled', () => {
-    render(<RelationPanel molecules={molecules} />)
+    renderPanel()
     fireEvent.click(screen.getByRole('button', { name: 'common.add' }))
     fireEvent.click(screen.getByRole('button', { name: /取消/ }))
     expect(molAddRelation).not.toHaveBeenCalled()
@@ -38,7 +49,7 @@ describe('RelationPanel destructive confirmation', () => {
   it('adds a relation only after confirming the dialog', async () => {
     vi.mocked(molAddRelation).mockResolvedValue({ id: 1 } as never)
 
-    render(<RelationPanel molecules={molecules} />)
+    renderPanel()
 
     const selects = screen.getAllByRole('combobox')
     fireEvent.change(selects[0], { target: { value: 'm1' } })

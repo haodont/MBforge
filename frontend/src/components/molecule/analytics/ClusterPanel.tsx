@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { showToast } from '@/hooks/useToast'
 import {
-  molListClusters,
-  molGetClusterMembers,
-  molAssignCluster,
-  molRemoveFromCluster,
-} from '@/api/http/molecule'
-import type { ClusterInfo } from '@/api/http/molecule'
+  useAssignCluster,
+  useClusterMembers,
+  useMoleculeClusters,
+  useRemoveFromCluster,
+} from '@/api/query/hooks/useMolecules'
+import type { ClusterInfo } from '@/api/http/molecule_chem'
 import type { MoleculeRecord } from '@/types'
 import { Card, Button, SectionTitle, Input, Select, ConfirmDialog } from '../../ui'
 import { getUserFacingError } from '@/utils/errors'
@@ -18,37 +18,41 @@ export interface ClusterPanelProps {
 
 export default function ClusterPanel({ molecules }: ClusterPanelProps) {
   const { t } = useTranslation()
-  const [clusters, setClusters] = useState<ClusterInfo[]>([])
-  const [selectedCluster, setSelectedCluster] = useState<ClusterInfo | null>(null)
-  const [loading, setLoading] = useState(false)
+  const clustersQuery = useMoleculeClusters()
+  const clusters: ClusterInfo[] = clustersQuery.data ?? []
+  const loading = clustersQuery.isFetching
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null)
+  const membersQuery = useClusterMembers(selectedClusterId)
+  const selectedCluster = membersQuery.data ?? null
+  const assignCluster = useAssignCluster()
+  const removeFromCluster = useRemoveFromCluster()
   const [assignMolId, setAssignMolId] = useState('')
   const [assignClusterId, setAssignClusterId] = useState('')
   const [confirmAssignOpen, setConfirmAssignOpen] = useState(false)
   const [pendingRemove, setPendingRemove] = useState<{ molId: string; clusterId: string } | null>(null)
 
-  const loadClusters = useCallback(async () => {
-    setLoading(true)
-    try {
-      const list = await molListClusters()
-      setClusters(list)
-    } catch (e) {
-      showToast(`${t('analytics.clusters.loadFailed')}: ${getUserFacingError(e)}`, 'error')
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    if (clustersQuery.isError) {
+      showToast(`${t('analytics.clusters.loadFailed')}: ${getUserFacingError(clustersQuery.error)}`, 'error')
     }
-  }, [t])
+  }, [clustersQuery.isError, clustersQuery.error, t])
 
   useEffect(() => {
-    void loadClusters()
-  }, [loadClusters])
+    if (selectedClusterId && membersQuery.isError) {
+      showToast(t('analytics.clusters.membersFailed'), 'error')
+    }
+  }, [selectedClusterId, membersQuery.isError, t])
+
+  const loadClusters = () => {
+    void clustersQuery.refetch()
+  }
 
   const handleAssign = async () => {
     if (!assignMolId || !assignClusterId) return
     setConfirmAssignOpen(false)
     try {
-      await molAssignCluster(assignMolId, assignClusterId)
+      await assignCluster.mutateAsync({ molId: assignMolId, clusterId: assignClusterId })
       showToast(t('analytics.clusters.assigned'), 'success')
-      void loadClusters()
       setAssignMolId('')
       setAssignClusterId('')
     } catch (e) {
@@ -59,13 +63,8 @@ export default function ClusterPanel({ molecules }: ClusterPanelProps) {
   const handleRemove = async (molId: string, clusterId: string) => {
     setPendingRemove(null)
     try {
-      await molRemoveFromCluster(molId, clusterId)
+      await removeFromCluster.mutateAsync({ molId, clusterId })
       showToast(t('analytics.clusters.removed'), 'success')
-      void loadClusters()
-      if (selectedCluster?.cluster_id === clusterId) {
-        const updated = await molGetClusterMembers(clusterId)
-        setSelectedCluster(updated)
-      }
     } catch (e) {
       showToast(`${t('analytics.clusters.removeFailed')}: ${getUserFacingError(e)}`, 'error')
     }
@@ -111,14 +110,7 @@ export default function ClusterPanel({ molecules }: ClusterPanelProps) {
           <Card
             key={c.cluster_id}
             hoverable
-            onClick={async () => {
-              try {
-                const info = await molGetClusterMembers(c.cluster_id)
-                setSelectedCluster(info)
-              } catch {
-                showToast(t('analytics.clusters.membersFailed'), 'error')
-              }
-            }}
+            onClick={() => setSelectedClusterId(c.cluster_id)}
           >
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{c.cluster_id}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('analytics.clusters.members', { count: c.member_count })}</div>

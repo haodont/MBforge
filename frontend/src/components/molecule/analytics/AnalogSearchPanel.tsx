@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { showToast } from '@/hooks/useToast'
-import { molFindAnalogsWithActivity } from '@/api/http/molecule'
-import type { AnalogWithActivity } from '@/api/http/molecule'
+import { useAnalogSearch } from '@/api/query/hooks/useMolecules'
+import type { AnalogWithActivity } from '@/api/http/molecule_chem'
 import type { MoleculeRecord } from '@/types'
 import { Card, Slider, Button, DataTable, Select } from '../../ui'
 import { getUserFacingError } from '@/utils/errors'
@@ -15,21 +15,30 @@ export default function AnalogSearchPanel({ molecules }: AnalogSearchPanelProps)
   const { t } = useTranslation()
   const [selectedId, setSelectedId] = useState('')
   const [minSim, setMinSim] = useState(0.7)
-  const [results, setResults] = useState<AnalogWithActivity[]>([])
-  const [loading, setLoading] = useState(false)
+  const [submitted, setSubmitted] = useState<{ molId: string; minSim: number } | null>(null)
 
-  const handleSearch = async () => {
-    if (!selectedId.trim()) return
-    setLoading(true)
-    try {
-      const analogs = await molFindAnalogsWithActivity(selectedId.trim(), minSim)
-      setResults(analogs)
-      if (analogs.length === 0) showToast(t('analytics.analogs.noMatches'), 'info')
-    } catch (e) {
-      showToast(`${t('analytics.search.failed')}: ${getUserFacingError(e)}`, 'error')
-    } finally {
-      setLoading(false)
+  const search = useAnalogSearch(submitted?.molId ?? null, submitted?.minSim ?? minSim)
+  const results: AnalogWithActivity[] = search.data ?? []
+  const loading = search.isFetching
+
+  const notifiedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!submitted) return
+    const key = `${submitted.molId}::${submitted.minSim}`
+    if (notifiedRef.current === key) return
+    if (search.isError) {
+      notifiedRef.current = key
+      showToast(`${t('analytics.search.failed')}: ${getUserFacingError(search.error)}`, 'error')
+    } else if (search.isSuccess) {
+      notifiedRef.current = key
+      if (results.length === 0) showToast(t('analytics.analogs.noMatches'), 'info')
     }
+  }, [submitted, search.isError, search.isSuccess, search.error, results.length, t])
+
+  const handleSearch = () => {
+    const trimmed = selectedId.trim()
+    if (!trimmed) return
+    setSubmitted({ molId: trimmed, minSim })
   }
 
   const selectOptions = molecules.map((m) => ({

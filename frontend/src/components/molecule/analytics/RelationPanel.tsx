@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { showToast } from '@/hooks/useToast'
 import {
-  molGetStats,
-  molFindByMolecule,
-  molAddRelation,
-  molDeleteRelation,
-} from '@/api/http/molecule'
-import type { RelationStats, MoleculeRelation } from '@/api/http/molecule'
+  useAddRelation,
+  useDeleteRelation,
+  useMoleculeRelations,
+  useRelationStats,
+} from '@/api/query/hooks/useMolecules'
+import type { RelationStats, MoleculeRelation } from '@/api/http/molecule_chem'
 import type { MoleculeRecord } from '@/types'
 import { Card, Button, SectionTitle, Input, DataTable, Select, ResponsiveStatGrid, StatCard, ConfirmDialog } from '../../ui'
 import { getUserFacingError } from '@/utils/errors'
@@ -18,10 +18,15 @@ export interface RelationPanelProps {
 
 export default function RelationPanel({ molecules }: RelationPanelProps) {
   const { t } = useTranslation()
-  const [stats, setStats] = useState<RelationStats | null>(null)
+  const statsQuery = useRelationStats()
+  const stats: RelationStats | null = statsQuery.data ?? null
+  const addRelation = useAddRelation()
+  const deleteRelation = useDeleteRelation()
   const [searchMolId, setSearchMolId] = useState('')
-  const [relations, setRelations] = useState<MoleculeRelation[]>([])
-  const [loading, setLoading] = useState(false)
+  const [submittedMolId, setSubmittedMolId] = useState<string | null>(null)
+  const relationsQuery = useMoleculeRelations(submittedMolId)
+  const relations: MoleculeRelation[] = relationsQuery.data ?? []
+  const loading = relationsQuery.isFetching
 
   // 添加关系表单
   const [newRelA, setNewRelA] = useState('')
@@ -31,39 +36,35 @@ export default function RelationPanel({ molecules }: RelationPanelProps) {
   const [confirmAddOpen, setConfirmAddOpen] = useState(false)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
 
-  const loadStats = useCallback(async () => {
-    try {
-      const s = await molGetStats()
-      setStats(s)
-    } catch {
+  useEffect(() => {
+    if (statsQuery.isError) {
       showToast(t('analytics.relations.loadFailed'), 'error')
     }
-  }, [t])
+  }, [statsQuery.isError, t])
 
   useEffect(() => {
-    void loadStats()
-  }, [loadStats])
-
-  const handleSearchRelations = async () => {
-    if (!searchMolId.trim()) return
-    setLoading(true)
-    try {
-      const list = await molFindByMolecule(searchMolId.trim())
-      setRelations(list)
-    } catch (e) {
-      showToast(`${t('analytics.relations.searchFailed')}: ${getUserFacingError(e)}`, 'error')
-    } finally {
-      setLoading(false)
+    if (submittedMolId && relationsQuery.isError) {
+      showToast(`${t('analytics.relations.searchFailed')}: ${getUserFacingError(relationsQuery.error)}`, 'error')
     }
+  }, [submittedMolId, relationsQuery.isError, relationsQuery.error, t])
+
+  const handleSearchRelations = () => {
+    const trimmed = searchMolId.trim()
+    if (!trimmed) return
+    setSubmittedMolId(trimmed)
   }
 
   const handleAddRelation = async () => {
     if (!newRelA || !newRelB) return
     setConfirmAddOpen(false)
     try {
-      await molAddRelation(newRelA, newRelB, newRelType, newRelScore ? parseFloat(newRelScore) : undefined)
+      await addRelation.mutateAsync({
+        molAId: newRelA,
+        molBId: newRelB,
+        relationType: newRelType,
+        score: newRelScore ? parseFloat(newRelScore) : undefined,
+      })
       showToast(t('analytics.relations.added'), 'success')
-      void loadStats()
       setNewRelA('')
       setNewRelB('')
       setNewRelScore('')
@@ -75,10 +76,8 @@ export default function RelationPanel({ molecules }: RelationPanelProps) {
   const handleDeleteRelation = async (id: number) => {
     setPendingDeleteId(null)
     try {
-      await molDeleteRelation(id)
+      await deleteRelation.mutateAsync({ id })
       showToast(t('analytics.relations.deleted'), 'success')
-      setRelations((prev) => prev.filter((r) => r.id !== id))
-      void loadStats()
     } catch (e) {
       showToast(`${t('analytics.relations.deleteFailed')}: ${getUserFacingError(e)}`, 'error')
     }

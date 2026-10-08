@@ -16,7 +16,10 @@ import MoleculeCardGrid from '@/components/molecule/MoleculeCardGrid'
 import MoleculeAnalysisPanel from '@/components/molecule/MoleculeAnalysisPanel'
 import MoleculeDetailDrawer from '@/components/molecule/MoleculeDetailDrawer'
 import { GridIcon, SparklesIcon, TableIcon } from '@/components/icons'
-import { molAdminBulkDelete, molAdminBulkUpdateStatus } from '@/api/http/molecule_admin'
+import {
+  useBulkDeleteMolecules,
+  useBulkUpdateMoleculeStatus,
+} from '@/api/query/hooks/useMolecules'
 import { showToast } from '@/hooks/useToast'
 import type { MoleculeRecord } from '@/types'
 import type { MoleculeSortField } from '@/hooks/useMoleculeLibrary'
@@ -67,6 +70,9 @@ export default function MoleculeLibrary() {
     sarSession,
   } = useMoleculeAnalysis(molecules, selectedIds)
 
+  const bulkUpdateStatus = useBulkUpdateMoleculeStatus()
+  const bulkDelete = useBulkDeleteMolecules()
+
   const [selectedMolecule, setSelectedMolecule] = useState<MoleculeRecord | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [lastClickedId, setLastClickedId] = useState<string | null>(null)
@@ -111,7 +117,7 @@ export default function MoleculeLibrary() {
     setIsBulkUpdating(true)
     const ids = Array.from(selectedIds)
     try {
-      const result = await molAdminBulkUpdateStatus(libraryRoot, ids, status)
+      const result = await bulkUpdateStatus.mutateAsync({ libraryRoot, molIds: ids, status })
       if (result.skipped > 0) {
         showToast(t('mol.bulkStatusPartial', { updated: result.updated, failed: result.skipped }), 'warning')
       } else {
@@ -131,7 +137,7 @@ export default function MoleculeLibrary() {
     setPendingDeleteOpen(false)
     setIsDeleting(true)
     try {
-      const deleted = await molAdminBulkDelete(libraryRoot, Array.from(selectedIds))
+      const deleted = await bulkDelete.mutateAsync({ libraryRoot, molIds: Array.from(selectedIds) })
       clearSelection()
       refresh()
       showToast(t('mol.deleteSuccess', { count: deleted }), 'success')

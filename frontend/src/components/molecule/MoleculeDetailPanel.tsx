@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { chemDescriptors } from '@/api/http/molecule'
-import { molAdminUpdate } from '@/api/http/molecule_admin'
+import { useChemDescriptors, useUpdateMolecule } from '@/api/query/hooks/useMolecules'
 import { toast } from '@/hooks/useToast'
 import type { EvidenceItem, ExtractionResult, MoleculeRecord } from '@/types'
 import MoleculeEditorDialog from './MoleculeEditorDialog'
@@ -9,7 +8,7 @@ import DetectionHeader from './detail/DetectionHeader'
 import MoleculeRecordForm from './detail/MoleculeRecordForm'
 import ReadOnlyMeta from './detail/ReadOnlyMeta'
 import RelatedTextPanel from './detail/RelatedTextPanel'
-import DescGrid, { type ChemDescriptors } from './detail/DescGrid'
+import DescGrid from './detail/DescGrid'
 import FormField from './detail/FormField'
 import TextArea from '@/components/ui/TextArea'
 
@@ -73,18 +72,10 @@ export default function MoleculeDetailPanel(props: MoleculeDetailPanelProps) {
     ? (edited?.smiles || edited?.esmiles)
     : (detection?.smiles || detection?.esmiles)
 
-  const [descriptors, setDescriptors] = useState<ChemDescriptors | null>(null)
-  const [descLoading, setDescLoading] = useState(false)
-
-  // 获取理化性质
-  useEffect(() => {
-    if (!displayEsmiles) return
-    setDescLoading(true)
-    chemDescriptors(displayEsmiles)
-      .then(setDescriptors)
-      .catch(() => setDescriptors(null))
-      .finally(() => setDescLoading(false))
-  }, [displayEsmiles])
+  const updateMolecule = useUpdateMolecule()
+  const descriptorsQuery = useChemDescriptors(displayEsmiles)
+  const descriptors = descriptorsQuery.data ?? null
+  const descLoading = descriptorsQuery.isFetching
 
   const handleEditorSave = useCallback(async (newSmiles: string) => {
     if (detection) {
@@ -100,7 +91,7 @@ export default function MoleculeDetailPanel(props: MoleculeDetailPanelProps) {
 
     try {
       const updated = { ...edited, esmiles: newSmiles, status: 'corrected' }
-      const success = await molAdminUpdate(libraryRoot, updated)
+      const success = await updateMolecule.mutateAsync({ libraryRoot, record: updated })
       if (!success) {
         throw new Error('Failed to save molecule structure')
       }
@@ -112,7 +103,7 @@ export default function MoleculeDetailPanel(props: MoleculeDetailPanelProps) {
       toast.error(error instanceof Error ? error.message : '结构保存失败')
       throw error
     }
-  }, [detection, edited, libraryRoot, props])
+  }, [detection, edited, libraryRoot, props, updateMolecule])
 
   // MoleculeRecord 模式：保存编辑后的记录
   const handleSaveRecord = async () => {
@@ -123,7 +114,7 @@ export default function MoleculeDetailPanel(props: MoleculeDetailPanelProps) {
     if (!edited) return
     setSaving(true)
     try {
-      const success = await molAdminUpdate(libraryRoot, edited)
+      const success = await updateMolecule.mutateAsync({ libraryRoot, record: edited })
       if (success) {
         toast.success('分子记录已更新')
         ;(props as MoleculeProps).onSaved?.()

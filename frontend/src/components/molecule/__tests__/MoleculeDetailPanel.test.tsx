@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from '@/api/query/client'
 
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => {} },
@@ -45,7 +47,7 @@ import { molAdminUpdate } from '@/api/http/molecule_admin'
 import MoleculeDetailPanel from '../MoleculeDetailPanel'
 import type { MoleculeRecord } from '@/types'
 
-vi.mock('@/api/http/molecule', () => ({
+vi.mock('@/api/http/molecule_chem', () => ({
   smilesToRdkitSvg: vi.fn().mockResolvedValue('<svg />'),
   chemDescriptors: vi.fn().mockResolvedValue({
     molecular_weight: 46.07,
@@ -56,6 +58,11 @@ vi.mock('@/api/http/molecule', () => ({
     rotatable_bonds: 0,
     formula: 'C2H6O',
   }),
+}))
+
+vi.mock('@/api/http/molecule_store', () => ({
+  moleculeCorrections: vi.fn().mockResolvedValue([]),
+  moleculeByLocation: vi.fn().mockResolvedValue([]),
 }))
 
 vi.mock('@/api/http/molecule_admin', () => ({
@@ -125,9 +132,14 @@ const molecule: MoleculeRecord = {
 }
 
 describe('MoleculeDetailPanel', () => {
+  function renderPanel(ui: React.ReactElement) {
+    const client = createQueryClient()
+    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  }
+
   it('persists a visual structure correction without an approval step', async () => {
     const onSaved = vi.fn()
-    render(
+    renderPanel(
       <MoleculeDetailPanel
         molecule={molecule}
         libraryRoot="C:/library"
@@ -151,7 +163,7 @@ describe('MoleculeDetailPanel', () => {
   })
 
   it('deduplicates related evidence text and places notes last', () => {
-    render(
+    renderPanel(
       <MoleculeDetailPanel
         molecule={molecule}
         libraryRoot="C:/library"
@@ -167,7 +179,7 @@ describe('MoleculeDetailPanel', () => {
   })
 
   it('shows the source crop beside the current E-SMILES structure', () => {
-    render(<MoleculeDetailPanel molecule={molecule} libraryRoot="C:/library" />)
+    renderPanel(<MoleculeDetailPanel molecule={molecule} libraryRoot="C:/library" />)
 
     expect(screen.getByLabelText('结构对照')).toBeInTheDocument()
     expect(screen.getByText('原始证据')).toBeInTheDocument()
@@ -176,7 +188,7 @@ describe('MoleculeDetailPanel', () => {
   })
 
   it('places the evidence chain before the editable record fields', () => {
-    render(<MoleculeDetailPanel molecule={molecule} libraryRoot="C:/library" />)
+    renderPanel(<MoleculeDetailPanel molecule={molecule} libraryRoot="C:/library" />)
 
     const panelText = screen.getByTestId('molecule-detail-panel').textContent
     expect(panelText.indexOf('证据链 · 2 处')).toBeLessThan(panelText.indexOf('名称'))

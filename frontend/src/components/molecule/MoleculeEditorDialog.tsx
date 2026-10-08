@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { smilesToRdkitSvg } from '@/api/http/molecule'
+import { useSmilesToRdkitSvg } from '@/api/query/hooks/useMolecules'
 import { Editor } from 'ketcher-react'
 import { StandaloneStructServiceProvider } from 'ketcher-standalone'
 import 'ketcher-react/dist/index.css'
@@ -46,10 +46,17 @@ interface KetcherInstance {
   const [saving, setSaving] = useState(false)
   const [currentSmiles, setCurrentSmiles] = useState(smiles)
   const [currentName, setCurrentName] = useState(name ?? '')
-  const [rdkitSvg, setRdkitSvg] = useState<string | null>(null)
-  const [renderError, setRenderError] = useState<string | null>(null)
-  const [renderLoading, setRenderLoading] = useState(false)
   const [originalImageFailed, setOriginalImageFailed] = useState(false)
+
+  // SMILES 变化时由本地 RDKit 生成结构图，支持 `*` 等 Markush 占位符。
+  const svgQuery = useSmilesToRdkitSvg(currentSmiles.trim() ? currentSmiles : null)
+  const rdkitSvg = svgQuery.data ?? null
+  const renderLoading = svgQuery.isFetching
+  const renderError = svgQuery.isError
+    ? svgQuery.error instanceof Error
+      ? svgQuery.error.message
+      : 'RDKit 无法渲染此结构'
+    : null
 
   useEffect(() => {
     setOriginalImageFailed(false)
@@ -81,20 +88,6 @@ interface KetcherInstance {
       console.error('Failed to get SMILES from Ketcher:', err)
     }
   }, [])
-
-  // SMILES 变化时由本地 RDKit 生成结构图，支持 `*` 等 Markush 占位符。
-  useEffect(() => {
-    if (!currentSmiles.trim()) return
-    setRenderLoading(true)
-    setRdkitSvg(null)
-    setRenderError(null)
-    smilesToRdkitSvg(currentSmiles)
-      .then(setRdkitSvg)
-      .catch((error: unknown) => {
-        setRenderError(error instanceof Error ? error.message : 'RDKit 无法渲染此结构')
-      })
-      .finally(() => setRenderLoading(false))
-  }, [currentSmiles])
 
   // 保存
   const handleSave = useCallback(async () => {

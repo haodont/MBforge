@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { showToast } from '@/hooks/useToast'
-import { molDedupBatch } from '@/api/http/molecule'
-import type { DedupResult } from '@/api/http/molecule'
+import { useDedupBatch } from '@/api/query/hooks/useMolecules'
+import type { DedupResult } from '@/api/http/molecule_chem'
 import type { MoleculeRecord } from '@/types'
 import { Card, Button, Slider, SectionTitle, AlertBanner, ResponsiveStatGrid, StatCard, DataTable, ConfirmDialog } from '../../ui'
 import { getUserFacingError } from '@/utils/errors'
@@ -14,6 +14,7 @@ export interface DedupPanelProps {
 
 export default function DedupPanel({ molecules, onComplete }: DedupPanelProps) {
   const { t } = useTranslation()
+  const dedup = useDedupBatch()
   const [threshold, setThreshold] = useState(0.95)
   const [result, setResult] = useState<DedupResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -28,7 +29,7 @@ export default function DedupPanel({ molecules, onComplete }: DedupPanelProps) {
     setLoading(true)
     try {
       const newMols: Array<[string, string]> = molecules.map((m) => [m.mol_id, m.esmiles])
-      const res = await molDedupBatch(newMols, threshold)
+      const res = await dedup.mutateAsync({ newMols, sameAsThreshold: threshold })
       setResult(res)
       showToast(t('analytics.dedup.done', { count: res.duplicates.length }), 'success')
       onComplete()

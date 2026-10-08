@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/components/ui/Button'
 import type { EvidenceItem } from '@/types'
-import { smilesToRdkitSvg } from '@/api/http/molecule'
-import type { MoleculeCorrection } from '@/api/http/molecule'
+import { useMoleculeCorrections, useSmilesToRdkitSvg } from '@/api/query/hooks/useMolecules'
+import type { MoleculeCorrection } from '@/api/http/molecule_store'
 import SmilesDiff from './SmilesDiff'
 
 interface EvidencePanelProps {
@@ -40,7 +40,8 @@ export default function EvidencePanel({
 }: EvidencePanelProps) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
-  const [corrections, setCorrections] = useState<MoleculeCorrection[]>([])
+  const correctionsQuery = useMoleculeCorrections(libraryRoot, molId ?? null)
+  const corrections: MoleculeCorrection[] = correctionsQuery.data ?? []
   const groups = useMemo(() => {
     const grouped = new Map<string, EvidenceItem[]>()
     for (const item of items) {
@@ -50,26 +51,6 @@ export default function EvidencePanel({
     }
     return Array.from(grouped, ([docId, groupItems]) => ({ docId, items: groupItems }))
   }, [items])
-
-  useEffect(() => {
-    if (!libraryRoot || !molId) {
-      setCorrections([])
-      return
-    }
-    let cancelled = false
-    void import('@/api/http/molecule')
-      .then((module) => {
-        if (typeof module.moleculeCorrections !== 'function') return []
-        return module.moleculeCorrections(libraryRoot, molId)
-      })
-      .then((result) => {
-        if (!cancelled) setCorrections(result)
-      })
-      .catch(() => {
-        if (!cancelled) setCorrections([])
-      })
-    return () => { cancelled = true }
-  }, [libraryRoot, molId])
 
   if (items.length === 0) {
     return null
@@ -167,24 +148,13 @@ function CorrectionHistory({ corrections }: { corrections: MoleculeCorrection[] 
 
 function StructureComparison({ evidence, esmiles }: { evidence: EvidenceItem; esmiles: string }) {
   const { t } = useTranslation()
-  const [rdkitSvg, setRdkitSvg] = useState<string | null>(null)
-  const [renderError, setRenderError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setRdkitSvg(null)
-    setRenderError(null)
-    smilesToRdkitSvg(esmiles)
-      .then((svg) => {
-        if (!cancelled) setRdkitSvg(svg)
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setRenderError(error instanceof Error ? error.message : t('evidence.rdkitRenderError'))
-        }
-      })
-    return () => { cancelled = true }
-  }, [esmiles, t])
+  const svgQuery = useSmilesToRdkitSvg(esmiles)
+  const rdkitSvg = svgQuery.data ?? null
+  const renderError = svgQuery.isError
+    ? svgQuery.error instanceof Error
+      ? svgQuery.error.message
+      : t('evidence.rdkitRenderError')
+    : null
 
   if (!evidence.crop_url) return null
 

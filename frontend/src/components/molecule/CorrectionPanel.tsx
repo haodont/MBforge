@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import MoleculeDisplay from './MoleculeDisplay'
 import ConfidenceThresholdSlider from './ConfidenceThresholdSlider'
 import { useConfidenceThreshold } from '@/hooks/useConfidenceThreshold'
 import Button from '@/components/ui/Button'
 import { CheckIcon, XIcon, AlertIcon, ChevronLeftIcon, ChevronRightIcon } from '../icons'
-import { validateSmiles } from '@/api/http/molecule'
+import { useValidateSmiles } from '@/api/query/hooks/useMolecules'
+import type { ValidationIssue } from '@/api/http/molecule_chem'
 import StatusBadge from './StatusBadge'
 import SmilesDiff from './SmilesDiff'
 import ValidationResult from './ValidationResult'
@@ -48,14 +49,6 @@ export default function CorrectionPanel({
 
   const [autoConfirmThreshold] = useConfidenceThreshold()
 
-  const [validation, setValidation] = useState<{
-    smiles: string
-    issues: import('../../api/http/molecule').ValidationIssue[]
-    canonical: string | null
-    loading: boolean
-  } | null>(null)
-  const validationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const total = items.length
   const current = items[currentIndex]
   const currentDecision = (current.id in decisions ? decisions[current.id] : undefined) as { status: CorrectionItem['status']; finalSmiles: string } | undefined
@@ -64,36 +57,46 @@ export default function CorrectionPanel({
 
   const currentFinalSmiles = currentDecision?.finalSmiles ?? current.correctedSmiles ?? current.ocrSmiles
 
+  // Only validate an edited structure; the untouched OCR value is trusted.
+  const needsValidation = Boolean(currentFinalSmiles) && currentFinalSmiles !== current.ocrSmiles
+  const [debouncedSmiles, setDebouncedSmiles] = useState<string | null>(null)
+
   useEffect(() => {
-    if (!currentFinalSmiles || currentFinalSmiles === current.ocrSmiles) {
-      setValidation(null)
+    if (!needsValidation) {
+      setDebouncedSmiles(null)
       return
     }
-    if (validationTimerRef.current) clearTimeout(validationTimerRef.current)
-    setValidation(prev => prev ? { ...prev, loading: true } : { smiles: currentFinalSmiles, issues: [], canonical: null, loading: true })
-    validationTimerRef.current = setTimeout(async () => {
-      try {
-        const resp = await validateSmiles(currentFinalSmiles)
-        setValidation({
-          smiles: currentFinalSmiles,
-          issues: resp.issues,
-          canonical: resp.canonical_smiles,
-          loading: false,
-        })
-      } catch (err) {
-        const message = getUserFacingError(err, '校正失败')
-        setValidation({
-          smiles: currentFinalSmiles,
-          issues: [{ code: 'NETWORK', severity: 'error', message: `结构校验失败：${message}` }],
-          canonical: null,
-          loading: false,
-        })
-      }
-    }, 600)
-    return () => {
-      if (validationTimerRef.current) clearTimeout(validationTimerRef.current)
+    // Debounce so typing a SMILES does not fire a request per keystroke.
+    const timer = setTimeout(() => setDebouncedSmiles(currentFinalSmiles), 600)
+    return () => clearTimeout(timer)
+  }, [needsValidation, currentFinalSmiles])
+
+  const validationQuery = useValidateSmiles(debouncedSmiles)
+
+  const validation = useMemo(() => {
+    if (!needsValidation) return null
+    const issues: ValidationIssue[] = validationQuery.isError
+      ? [{
+          code: 'NETWORK',
+          severity: 'error',
+          message: `结构校验失败：${getUserFacingError(validationQuery.error, '校正失败')}`,
+        }]
+      : validationQuery.data?.issues ?? []
+    return {
+      smiles: currentFinalSmiles,
+      issues,
+      canonical: validationQuery.data?.canonical_smiles ?? null,
+      loading: debouncedSmiles !== currentFinalSmiles || validationQuery.isFetching,
     }
-  }, [currentFinalSmiles, current.ocrSmiles])
+  }, [
+    needsValidation,
+    currentFinalSmiles,
+    debouncedSmiles,
+    validationQuery.data,
+    validationQuery.isError,
+    validationQuery.error,
+    validationQuery.isFetching,
+  ])
 
   if (total === 0) {
     return (

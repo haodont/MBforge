@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createElement, type ReactNode } from 'react'
 import { useMoleculeLibrary } from '../useMoleculeLibrary'
+import { createQueryClient } from '@/api/query/client'
 
 vi.mock('@/api/http/molecule_admin', () => ({
   molAdminListPage: vi.fn(),
@@ -24,6 +27,14 @@ const mockMolecule = {
   created_at: '2026-01-01',
 }
 
+function renderLibrary(root: string) {
+  const client = createQueryClient()
+  return renderHook(() => useMoleculeLibrary(root), {
+    wrapper: ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children),
+  })
+}
+
 describe('useMoleculeLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -34,7 +45,7 @@ describe('useMoleculeLibrary', () => {
     const mockList = molAdminListPage as ReturnType<typeof vi.fn>
     mockList.mockResolvedValue({ items: molecules, total: 1, matching_ids: ['m1'], source_types: ['text'], source_docs: ['doc1'] })
 
-    const { result } = renderHook(() => useMoleculeLibrary('/project'))
+    const { result } = renderLibrary('/project')
 
     expect(result.current.loading).toBe(true)
     await waitFor(() => expect(result.current.loading).toBe(false))
@@ -48,7 +59,7 @@ describe('useMoleculeLibrary', () => {
     const mockList = molAdminListPage as ReturnType<typeof vi.fn>
     mockList.mockResolvedValue({ items: molecules, total: 1, matching_ids: ['m1'], source_types: ['text'], source_docs: ['doc1'] })
 
-    const { result } = renderHook(() => useMoleculeLibrary('/project'))
+    const { result } = renderLibrary('/project')
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     act(() => {
@@ -70,7 +81,7 @@ describe('useMoleculeLibrary', () => {
     const mockList = molAdminListPage as ReturnType<typeof vi.fn>
     mockList.mockResolvedValue({ items: molecules, total: molecules.length, matching_ids: molecules.map((m) => m.mol_id), source_types: ['text'], source_docs: ['doc1'] })
 
-    const { result } = renderHook(() => useMoleculeLibrary('/project'))
+    const { result } = renderLibrary('/project')
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     act(() => {
@@ -94,7 +105,7 @@ describe('useMoleculeLibrary', () => {
       .mockResolvedValueOnce({ items: molecules, total: 2, matching_ids: ['m1', 'm2'], source_types: ['text'], source_docs: ['doc1'] })
       .mockResolvedValueOnce({ items: [molecules[0]], total: 2, matching_ids: ['m1', 'm2'], source_types: ['text'], source_docs: ['doc1'] })
 
-    const { result } = renderHook(() => useMoleculeLibrary('/project'))
+    const { result } = renderLibrary('/project')
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     act(() => {
@@ -118,7 +129,7 @@ describe('useMoleculeLibrary', () => {
       .mockResolvedValueOnce({ items: molecules, total: 2, matching_ids: ['m1', 'm2'], source_types: ['text'], source_docs: ['doc1'] })
       .mockResolvedValueOnce({ items: [molecules[1]], total: 1, matching_ids: ['m2'], source_types: ['text'], source_docs: ['doc1'] })
 
-    const { result } = renderHook(() => useMoleculeLibrary('/project'))
+    const { result } = renderLibrary('/project')
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     act(() => {

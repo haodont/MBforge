@@ -1,30 +1,39 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { showToast } from '@/hooks/useToast'
 import { getUserFacingError } from '@/utils/errors'
-import { molSearchSubstructure } from '@/api/http/molecule'
-import type { SubstructureMatch } from '@/api/http/molecule'
+import { useSubstructureSearch } from '@/api/query/hooks/useMolecules'
+import type { SubstructureMatch } from '@/api/http/molecule_chem'
 import { Card, Input, Slider, Button, DataTable } from '../../ui'
 
 export default function SubstructureSearchPanel() {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [threshold, setThreshold] = useState(0.3)
-  const [results, setResults] = useState<SubstructureMatch[]>([])
-  const [loading, setLoading] = useState(false)
+  const [submitted, setSubmitted] = useState<{ query: string; threshold: number } | null>(null)
 
-  const handleSearch = async () => {
-    if (!query.trim()) return
-    setLoading(true)
-    try {
-      const matches = await molSearchSubstructure(query.trim(), threshold)
-      setResults(matches)
-      if (matches.length === 0) showToast(t('analytics.search.noMatches'), 'info')
-    } catch (e) {
-      showToast(`${t('analytics.search.failed')}: ${getUserFacingError(e)}`, 'error')
-    } finally {
-      setLoading(false)
+  const search = useSubstructureSearch(submitted?.query ?? null, submitted?.threshold ?? threshold)
+  const results: SubstructureMatch[] = search.data ?? []
+  const loading = search.isFetching
+
+  const notifiedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!submitted) return
+    const key = `${submitted.query}::${submitted.threshold}`
+    if (notifiedRef.current === key) return
+    if (search.isError) {
+      notifiedRef.current = key
+      showToast(`${t('analytics.search.failed')}: ${getUserFacingError(search.error)}`, 'error')
+    } else if (search.isSuccess) {
+      notifiedRef.current = key
+      if (results.length === 0) showToast(t('analytics.search.noMatches'), 'info')
     }
+  }, [submitted, search.isError, search.isSuccess, search.error, results.length, t])
+
+  const handleSearch = () => {
+    const trimmed = query.trim()
+    if (!trimmed) return
+    setSubmitted({ query: trimmed, threshold })
   }
 
   return (
