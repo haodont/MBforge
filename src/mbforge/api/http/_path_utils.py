@@ -60,7 +60,7 @@ def resolve_pdf_path(
 ) -> Path:
     """Resolve ``(library_root, doc_id)`` to the canonical PDF path.
 
-    Primary resolution uses ``ArtifactResolver.source_pdf(doc_id)``. If that
+    Primary resolution uses ``LibraryLayout.source_pdf(doc_id)``. If that
     file does not exist, we fall back to the filename recorded in the
     ``LibraryStore`` so endpoints work for documents imported before the
     canonical ``source.pdf`` layout was enforced.

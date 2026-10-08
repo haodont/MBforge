@@ -61,6 +61,17 @@ Both sides resolve `settings.json` the same way: `<source root>/library` when
 defaulted to `~/MBForge/settings.json`, which does not exist in a source
 checkout, so it read no settings at all and every saved key was silently lost.
 
+## Layer boundaries
+
+Repository and runtime ports live in the neutral `mbforge/ports/` (implemented
+by `db`), and the cross-layer request/read models they reference in
+`mbforge/contracts/` (re-exported by the `service` DTO modules), so `db`
+implements the ports without importing `service`. The Markush SQL now lives in
+`db/markush_*_store.py` behind `MarkushRepository`, so no `service`/`api` module
+can obtain a raw connection. `foundation/inference/assets.py` defines the
+`ResourceResolver` seam the composition root injects, so the inference backends
+never import `server`.
+
 ## Known gaps
 
 - `storage/{doc_id}/pages/` has no writer in the active path: the removed Persist

@@ -42,7 +42,10 @@ def test_udp_command_and_pose_parsing(tmp_path: Path, monkeypatch) -> None:
 
     request = DockingRequest(
         receptor_pdbqt=tmp_path / "rec.pdbqt",
-        ligands=[DockingLigand(label="L1", smiles="CCO"), DockingLigand(label="L2", smiles="CCN")],
+        ligands=[
+            DockingLigand(label="L1", smiles="CCO"),
+            DockingLigand(label="L2", smiles="CCN"),
+        ],
         box=DockingBox(center=(1.0, 2.0, 3.0), size=(20.0, 20.0, 20.0)),
         out_dir=tmp_path / "job",
         options={"search_mode": "fast", "num_modes": 9, "seed": 7},
@@ -52,7 +55,11 @@ def test_udp_command_and_pose_parsing(tmp_path: Path, monkeypatch) -> None:
     assert [(p.label, p.affinity) for p in poses] == [("L1", -7.5), ("L2", -6.1)]
     assert poses[0].rmsd_lb == 0.2
 
-    args = (tmp_path / "job" / "poses" / "args.txt").read_text(encoding="utf-8").splitlines()
+    args = (
+        (tmp_path / "job" / "poses" / "args.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     assert "--search_mode" in args and args[args.index("--search_mode") + 1] == "fast"
     assert "--receptor" in args
     assert "--ligand_index" in args

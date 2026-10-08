@@ -95,7 +95,9 @@ async def _loop(library_root: str) -> None:
         from mbforge.service.ports import get_repositories
 
         # Recover jobs left ``running`` by a previous process.
-        await asyncio.to_thread(get_repositories(library_root).docking.reset_running_jobs)
+        await asyncio.to_thread(
+            get_repositories(library_root).docking.reset_running_jobs
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("docking startup recovery failed: %s", exc)
 

@@ -69,7 +69,9 @@ async def docking_upload_receptor(
 
 
 @router.get("/receptors", response_model=ReceptorListResponse)
-async def docking_list_receptors(library_root: str | None = None) -> ReceptorListResponse:
+async def docking_list_receptors(
+    library_root: str | None = None,
+) -> ReceptorListResponse:
     items = await asyncio.to_thread(receptors.list_receptors, _root(library_root))
     return ReceptorListResponse(receptors=items)
 
@@ -154,19 +156,25 @@ async def docking_list_jobs(
 
 
 @router.get("/jobs/{job_id}", response_model=DockingJobResponse)
-async def docking_get_job(job_id: str, library_root: str | None = None) -> DockingJobResponse:
+async def docking_get_job(
+    job_id: str, library_root: str | None = None
+) -> DockingJobResponse:
     job = await asyncio.to_thread(jobs.get_job, _root(library_root), job_id)
     return DockingJobResponse(job=job)
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=DockingJobResponse)
-async def docking_cancel_job(job_id: str, library_root: str | None = None) -> DockingJobResponse:
+async def docking_cancel_job(
+    job_id: str, library_root: str | None = None
+) -> DockingJobResponse:
     job = await asyncio.to_thread(jobs.cancel_job, _root(library_root), job_id)
     return DockingJobResponse(job=job)
 
 
 @router.get("/poses/{pose_id}")
-async def docking_download_pose(pose_id: str, library_root: str | None = None) -> FileResponse:
+async def docking_download_pose(
+    pose_id: str, library_root: str | None = None
+) -> FileResponse:
     from mbforge.service.ports import get_repositories
 
     pose = await asyncio.to_thread(

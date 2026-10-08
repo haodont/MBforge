@@ -139,9 +139,7 @@ def delete_many(library_root: str | Path, doc_ids: Sequence[str]) -> None:
         for start in range(0, len(ids), chunk_size):
             chunk = ids[start : start + chunk_size]
             placeholders = ",".join("?" for _ in chunk)
-            kb.execute(
-                f"DELETE FROM documents WHERE doc_id IN ({placeholders})", chunk
-            )
+            kb.execute(f"DELETE FROM documents WHERE doc_id IN ({placeholders})", chunk)
 
 
 __all__ = [

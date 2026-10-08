@@ -82,7 +82,9 @@ def delete_receptor(library_root: str | Path, receptor_id: str) -> int:
     if repo.get_receptor(receptor_id) is None:
         raise NotFoundError("receptor not found", detail=receptor_id)
     deleted = repo.delete_receptor(receptor_id)
-    shutil.rmtree(LibraryLayout(library_root).receptor_dir(receptor_id), ignore_errors=True)
+    shutil.rmtree(
+        LibraryLayout(library_root).receptor_dir(receptor_id), ignore_errors=True
+    )
     return deleted
 
 

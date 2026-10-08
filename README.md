@@ -151,8 +151,8 @@ one document, and `file_name` is unique. The canonical layout is:
     └── runs/                           # published pipeline runs
 ```
 
-Use `LibraryLayout` for library paths and `ArtifactResolver` for document
-artifacts. Do not construct these paths inline.
+Use `LibraryLayout` for library and document paths. Do not construct these
+paths inline.
 
 ## Documentation
 

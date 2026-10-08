@@ -5,11 +5,12 @@ and delegates the write to the ``MoleculeRepository`` port.
 
 For each candidate (a single canonical SMILES, possibly with multiple
 detections) the repository upserts a `molecules` row keyed by
-`canonical_smiles`, inserts one `molecule_detections` row per primary detection,
-and inserts one first-class `evidence` row.
+`canonical_smiles` and inserts one `molecule_detections` row per primary
+detection, carrying its `evidence_id` link to the canonical `source_evidence`
+row. The retired `evidence` table no longer exists.
 
-Page semantics: `molecule_detections.page` stays a 0-based `PageIndex`;
-`evidence.page` uses a 1-based `PageNumber`.
+Page semantics: `molecule_detections.page` stays a 0-based `PageIndex`; the
+molecule-evidence projection exposes the 1-based `PageNumber` (`page + 1`).
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ def persist_molecule_candidates(
     doc_id: str,
     candidates: list[Molecule],
 ) -> None:
-    """Upsert canonical molecule rows + insert detection / evidence rows.
+    """Upsert canonical molecule rows + insert detection rows.
 
     Candidates are filtered to the persistable subset first; the write itself
     is delegated to the molecule repository.

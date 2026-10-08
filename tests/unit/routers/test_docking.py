@@ -72,7 +72,9 @@ def test_receptor_upload_prepares_and_registers(
 
     response = app_client.post(
         "/api/v1/docking/receptors",
-        files={"file": ("receptor.pdb", b"ATOM      1  N   ALA A   1\n", "chemical/x-pdb")},
+        files={
+            "file": ("receptor.pdb", b"ATOM      1  N   ALA A   1\n", "chemical/x-pdb")
+        },
         data={"name": "Test Receptor"},
     )
 
@@ -80,7 +82,11 @@ def test_receptor_upload_prepares_and_registers(
     receptor = response.json()["receptor"]
     assert receptor["name"] == "Test Receptor"
     pdbqt = (
-        tmp_library / "docking" / "receptors" / receptor["receptor_id"] / "receptor.pdbqt"
+        tmp_library
+        / "docking"
+        / "receptors"
+        / receptor["receptor_id"]
+        / "receptor.pdbqt"
     )
     assert pdbqt.is_file()
 

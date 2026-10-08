@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ChevronRightIcon, FolderIcon } from '../icons'
+import { ChevronRightIcon } from '../icons'
 
 export interface BreadcrumbItem {
   /** 显示文本 */
@@ -125,26 +125,5 @@ export default function Breadcrumb({
         })}
       </ol>
     </nav>
-  )
-}
-
-/** 预设：文件树风格的面包屑 */
-export function FileBreadcrumb({
-  segments,
-  onNavigate,
-}: {
-  segments: string[]
-  onNavigate?: (depth: number) => void
-}) {
-  return (
-    <Breadcrumb
-      items={segments.map((seg, i) => ({
-        label: seg,
-        onClick: onNavigate ? () => onNavigate(i) : undefined,
-        current: i === segments.length - 1,
-        icon: i === 0 ? <FolderIcon size={12} /> : undefined,
-      }))}
-      size="sm"
-    />
   )
 }

@@ -523,4 +523,3 @@ CREATE TABLE IF NOT EXISTS docking_poses (
 CREATE INDEX IF NOT EXISTS idx_dock_pose_job ON docking_poses(job_id);
 CREATE INDEX IF NOT EXISTS idx_dock_pose_mol ON docking_poses(mol_id);
 """
-

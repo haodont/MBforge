@@ -56,7 +56,9 @@ def _engine_binary() -> str | None:
 
 
 def _safe(label: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in label) or "ligand"
+    return (
+        "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in label) or "ligand"
+    )
 
 
 class UnidockProEngine:
@@ -131,20 +133,34 @@ class UnidockProEngine:
         size = request.box.size
         cmd = [
             binary,
-            "--receptor", str(request.receptor_pdbqt),
-            "--ligand_index", str(index_path),
-            "--center_x", str(center[0]),
-            "--center_y", str(center[1]),
-            "--center_z", str(center[2]),
-            "--size_x", str(size[0]),
-            "--size_y", str(size[1]),
-            "--size_z", str(size[2]),
-            "--search_mode", search_mode,
-            "--scoring", str(options.get("scoring", _DEFAULT_SCORING)),
-            "--exhaustiveness", str(int(options.get("exhaustiveness", 8))),
-            "--num_modes", str(int(options.get("num_modes", 9))),
-            "--seed", str(int(options.get("seed", 0))),
-            "--dir", str(out_dir),
+            "--receptor",
+            str(request.receptor_pdbqt),
+            "--ligand_index",
+            str(index_path),
+            "--center_x",
+            str(center[0]),
+            "--center_y",
+            str(center[1]),
+            "--center_z",
+            str(center[2]),
+            "--size_x",
+            str(size[0]),
+            "--size_y",
+            str(size[1]),
+            "--size_z",
+            str(size[2]),
+            "--search_mode",
+            search_mode,
+            "--scoring",
+            str(options.get("scoring", _DEFAULT_SCORING)),
+            "--exhaustiveness",
+            str(int(options.get("exhaustiveness", 8))),
+            "--num_modes",
+            str(int(options.get("num_modes", 9))),
+            "--seed",
+            str(int(options.get("seed", 0))),
+            "--dir",
+            str(out_dir),
         ]
         logger.info("Running UniDock-Pro: %s", " ".join(cmd))
         try:
@@ -155,7 +171,9 @@ class UnidockProEngine:
             raise DockingError(f"docking timed out after {timeout}s") from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()[:400]
-            raise DockingError(f"UniDock-Pro failed (exit {result.returncode}): {detail}")
+            raise DockingError(
+                f"UniDock-Pro failed (exit {result.returncode}): {detail}"
+            )
 
 
 def _parse_poses(
@@ -185,7 +203,9 @@ def _parse_poses(
     return poses
 
 
-def _ligand_for(path: Path, label_by_stem: dict[str, DockingLigand]) -> DockingLigand | None:
+def _ligand_for(
+    path: Path, label_by_stem: dict[str, DockingLigand]
+) -> DockingLigand | None:
     stem = path.stem
     for suffix in ("_out", "_docked"):
         if stem.endswith(suffix):
