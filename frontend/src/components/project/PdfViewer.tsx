@@ -6,6 +6,7 @@ import OcrOverlay from '@/components/OcrOverlay'
 import ScrollColumn from '../ui/ScrollColumn'
 import Button from '../ui/Button'
 import IconButton from '../ui/IconButton'
+import Tabs from '../ui/Tabs'
 import { LoadingState } from '../ui/LoadingState'
 import type { DocumentEntry, ExtractionResult } from '@/types'
 import { usePdfViewer } from './pdf/usePdfViewer'
@@ -267,9 +268,19 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
             </IconButton>
           ) : (
             <>
-              <div className="pdf-document-sidebar__tabs" role="tablist" aria-label={t('pdf.moleculesHeader')}>
-                <button type="button" role="tab" aria-selected={sidePaneTab === 'evidence'} className={sidePaneTab === 'evidence' ? 'is-active' : ''} onClick={() => setSidePaneTab('evidence')}>{t('pdf.tabEvidence')}</button>
-                <button type="button" role="tab" aria-selected={sidePaneTab === 'molecules'} className={sidePaneTab === 'molecules' ? 'is-active' : ''} onClick={() => setSidePaneTab('molecules')}>{t('pdf.tabMolecules')}</button>
+              <div className="pdf-document-sidebar__tabs">
+                <Tabs
+                  items={[
+                    { key: 'evidence', label: t('pdf.tabEvidence') },
+                    { key: 'molecules', label: t('pdf.tabMolecules') },
+                  ]}
+                  activeKey={sidePaneTab}
+                  onChange={(key) => setSidePaneTab(key === 'molecules' ? 'molecules' : 'evidence')}
+                  variant="underline"
+                  size="sm"
+                  fullWidth
+                  style={{ flex: 1, minWidth: 0 }}
+                />
                 <IconButton
                   size={28}
                   className="pdf-document-sidebar__collapse-button"

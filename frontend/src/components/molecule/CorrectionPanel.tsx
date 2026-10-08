@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
-import { motion } from 'framer-motion'
 import MoleculeDisplay from './MoleculeDisplay'
 import ConfidenceThresholdSlider from './ConfidenceThresholdSlider'
 import { useConfidenceThreshold } from '@/hooks/useConfidenceThreshold'
 import Button from '@/components/ui/Button'
+import ProgressBar from '@/components/ui/ProgressBar'
 import { CheckIcon, XIcon, AlertIcon, ChevronLeftIcon, ChevronRightIcon } from '../icons'
 import { useValidateSmiles } from '@/api/query/hooks/useMolecules'
 import type { ValidationIssue } from '@/api/http/molecule_chem'
@@ -160,12 +160,7 @@ export default function CorrectionPanel({
           </div>
         </div>
         <div className="mol-correction-progress-bar">
-          <motion.div
-            className="mol-correction-progress-fill"
-            initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
-            transition={{ duration: 0.3 }}
-          />
+          <ProgressBar value={progress} showPercent={false} />
         </div>
       </div>
 

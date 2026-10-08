@@ -84,6 +84,11 @@
   font-weight: 600;
 }
 
+/* ui/Tabs 自带底部边框；容器已提供整行边框，避免叠加成双线。 */
+.pdf-document-sidebar__tabs .ui-tabs  {
+  border-bottom: 0;
+}
+
 .pdf-document-sidebar__content  {
   min-height: 0;
   flex: 1;

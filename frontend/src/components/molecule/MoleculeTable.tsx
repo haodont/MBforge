@@ -252,7 +252,7 @@ const MoleculeTableRow = memo(function MoleculeTableRow({
       <td className="molecule-table-cell">
         {molecule.activity !== null
           ? `${molecule.activity.toFixed(2)} ${molecule.units || 'nM'}`
-          : <span className="activity-missing-badge">{t('mol.activityMissing')}</span>}
+          : <Badge tone="warning">{t('mol.activityMissing')}</Badge>}
       </td>
       <td className="molecule-table-cell">
         <StatusBadge status={molecule.status} label={t(`mol.status.${molecule.status}`)} />

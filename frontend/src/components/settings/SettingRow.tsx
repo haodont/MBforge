@@ -4,6 +4,7 @@
 
 import type { ReactNode } from 'react'
 import Input from '@/components/ui/Input'
+import Select from '@/components/ui/Select'
 import Switch from '@/components/ui/Switch'
 import { SettingItem } from '@/components/ui/SettingSection'
 import Caption from '@/components/ui/Caption'
@@ -118,20 +119,16 @@ export function SelectField<T extends string | number>({
 }) {
   return (
     <SettingItem title={label} description={description} labelWidth={labelWidth} dirty={dirty}>
-      <select
-        className="ui-select"
+      <Select
         value={String(value)}
-        onChange={e => {
-          const v = e.target.value
+        onChange={(v) => {
           const match = options.find(o => String(o.value) === v)
           if (match) onChange(match.value)
         }}
+        options={options.map(o => ({ value: String(o.value), label: o.label }))}
+        showPlaceholder={false}
         style={{ width: '100%' }}
-      >
-        {options.map(o => (
-          <option key={String(o.value)} value={String(o.value)}>{o.label}</option>
-        ))}
-      </select>
+      />
     </SettingItem>
   )
 }
@@ -225,16 +222,13 @@ export function ProviderField({
   return (
     <>
       <SettingItem title={label} description={description} labelWidth={labelWidth} dirty={dirty}>
-        <select
-          className="ui-select"
+        <Select
           value={provider}
-          onChange={e => onProviderChange(e.target.value)}
+          onChange={onProviderChange}
+          options={providerOptions}
+          showPlaceholder={false}
           style={{ width: '100%' }}
-        >
-          {providerOptions.map(o => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
+        />
       </SettingItem>
       {showBaseUrl && (
         <TextField

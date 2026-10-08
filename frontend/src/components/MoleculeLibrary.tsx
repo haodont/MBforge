@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import PageContainer from '@/components/ui/PageContainer'
 import Button from '@/components/ui/Button'
 import IconButton from '@/components/ui/IconButton'
+import Pagination from '@/components/ui/Pagination'
 import Select from '@/components/ui/Select'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { AddMoleculeDialog } from '@/components/ui/AddMoleculeDialog'
@@ -292,25 +293,14 @@ export default function MoleculeLibrary() {
 
             <footer className="molecule-library-results__footer">
               <div className="molecule-library-pagination">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPagination((page) => ({ ...page, page: page.page - 1 }))}
-                  disabled={loading || pagination.page <= 1}
-                >
-                  {t('mol.previous')}
-                </Button>
-                <span className="molecule-library-pagination__summary">
-                  {t('mol.pageInfo', { current: pagination.page, total: totalPages })}
-                </span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPagination((page) => ({ ...page, page: page.page + 1 }))}
-                  disabled={loading || pagination.page >= totalPages}
-                >
-                  {t('mol.next')}
-                </Button>
+                <Pagination
+                  current={pagination.page}
+                  total={totalPages}
+                  pageSize={pagination.pageSize}
+                  totalItems={totalCount}
+                  onChange={(page) => setPagination((prev) => ({ ...prev, page }))}
+                  showTotal
+                />
                 <label className="molecule-library-page-size" htmlFor="page-size">
                   <span>{t('mol.pageSize')}</span>
                   <Select

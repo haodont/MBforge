@@ -4,9 +4,8 @@ import { Editor } from 'ketcher-react'
 import { StandaloneStructServiceProvider } from 'ketcher-standalone'
 import 'ketcher-react/dist/index.css'
 import Button from '@/components/ui/Button'
-import IconButton from '@/components/ui/IconButton'
+import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
-import { XIcon } from '../icons'
 import ScrollColumn from '@/components/ui/ScrollColumn'
 
 const structServiceProvider = new StandaloneStructServiceProvider()
@@ -158,64 +157,27 @@ interface KetcherInstance {
     }
   }, [onClose])
 
-  return (
-    <div
-      ref={containerRef}
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div
-        style={{
-          background: 'var(--bg-surface)',
-          borderRadius: 12,
-          width: '90vw',
-          maxWidth: 1200,
-          height: '85vh',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-        }}
-      >
-        {/* 标题栏 */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--border)',
-            background: 'var(--bg-elevated)',
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 600 }}>
-            分子编辑器 {name && `- ${name}`}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Button size="sm" variant="primary" onClick={handleSave} loading={saving} disabled={saving}>
-              {saving ? '保存中...' : '保存'}
-            </Button>
-            <IconButton size={32} onClick={onClose} ariaLabel="关闭" title="关闭">
-              <XIcon size={14} />
-            </IconButton>
-          </div>
-        </div>
+  const title = name ? `分子编辑器 - ${name}` : '分子编辑器'
 
+  return (
+    <div ref={containerRef}>
+      <Modal
+        open
+        onClose={onClose}
+        title={title}
+        width="90vw"
+        maxWidth={1200}
+        height="85vh"
+        maxHeight="85vh"
+        fullScreenOnMobile={false}
+        footer={
+          <Button size="sm" variant="primary" onClick={handleSave} loading={saving} disabled={saving}>
+            {saving ? '保存中...' : '保存'}
+          </Button>
+        }
+      >
         {/* 主内容区 */}
-        <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
           {/* 左侧：Ketcher 编辑器 */}
           <div style={{ flex: '2 1 0', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)', overflow: 'hidden', position: 'relative', isolation: 'isolate' }}>
             <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
@@ -288,7 +250,7 @@ interface KetcherInstance {
             </ScrollColumn>
           </div>
         </div>
-      </div>
+      </Modal>
     </div>
   )
 }

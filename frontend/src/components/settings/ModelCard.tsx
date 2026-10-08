@@ -1,8 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import Button from '@/components/ui/Button'
+import Badge from '@/components/ui/Badge'
+import ProgressBar from '@/components/ui/ProgressBar'
 import type { DownloadModel, SubfileStatus } from '../../api/http/download'
 import type { DownloadState } from './ModelsTab'
-import ProgressBar from './ProgressBar'
 
 interface ModelCardProps {
   model: DownloadModel
@@ -56,10 +57,10 @@ export default function ModelCard({
             </span>
           )}
           {!hasSubfiles && allReady && (
-            <span className="model-card-badge model-card-badge--success">{t('models.downloaded')}</span>
+            <Badge tone="success">{t('models.downloaded')}</Badge>
           )}
           {isDownloading && (
-            <span className="model-card-badge model-card-badge--active">{t('models.downloading')}</span>
+            <Badge tone="info">{t('models.downloading')}</Badge>
           )}
           {!hasSubfiles && model.size_mb > 0 && (
             <span className="model-card-size">~{model.size_mb < 1024 ? `${model.size_mb} MB` : `${(model.size_mb / 1024).toFixed(1)} GB`}</span>
@@ -74,7 +75,7 @@ export default function ModelCard({
               : t('models.expectedAt', { path: model.expected_path })}
           </div>
         )}
-        {state && state.status !== 'idle' && !hasSubfiles && <ProgressBar state={state} />}
+        {state && state.status !== 'idle' && !hasSubfiles && <DownloadProgress state={state} />}
 
         {/* Multi-file model: each subfile only exposes Download (hidden once done) */}
         {hasSubfiles && (
@@ -146,7 +147,7 @@ function SubfileRow({ subfile, downloadState, onDownload }: SubfileRowProps) {
         <div className="subfile-row-label" title={subfile.local_path}>
           {subfile.label}
         </div>
-        {downloadState && downloadState.status !== 'idle' && <ProgressBar state={downloadState} />}
+        {downloadState && downloadState.status !== 'idle' && <DownloadProgress state={downloadState} />}
       </div>
       <div className="subfile-row-actions">
         {!subfile.ready && !isDownloading && onDownload && (
@@ -156,6 +157,54 @@ function SubfileRow({ subfile, downloadState, onDownload }: SubfileRowProps) {
           <span className="subfile-row-progress">{t('models.downloading')}…</span>
         )}
       </div>
+    </div>
+  )
+}
+
+interface DownloadProgressProps {
+  state: DownloadState[string] | undefined
+}
+
+/**
+ * 下载状态块：包装 ui/ProgressBar，并补充连接/完成/失败等状态文案。
+ * （原先的本地 settings/ProgressBar 已删除，统一改用共享进度条。）
+ */
+function DownloadProgress({ state }: DownloadProgressProps) {
+  const { t } = useTranslation()
+  if (!state || state.status === 'idle') return null
+  const progress = state.progress || 0
+
+  return (
+    <div className="settings-progress-bar">
+      {state.status === 'connecting' && (
+        <span className="settings-progress-status">
+          {t('models.downloading')} {state.source && t('models.fromSource', { source: state.source })}
+        </span>
+      )}
+      {state.status === 'downloading' && (
+        <>
+          <div className="download-progress">
+            <ProgressBar value={progress} showPercent={false} height={6} color="var(--accent)" style={{ flex: 1 }} />
+            <span className="download-progress-text">{progress}%</span>
+          </div>
+          {state.fileName && (
+            <div className="settings-progress-file">
+              {state.fileName}
+              {state.fileIndex && state.totalFiles && ` (${state.fileIndex}/${state.totalFiles})`}
+            </div>
+          )}
+        </>
+      )}
+      {state.status === 'completed' && (
+        <span className="settings-progress-status settings-progress-status--success">
+          {t('models.downloadComplete')} {state.source && t('models.fromSource', { source: state.source })}
+        </span>
+      )}
+      {state.status === 'failed' && (
+        <span className="settings-progress-status settings-progress-status--error">
+          {state.error || t('models.downloadFailed')}
+        </span>
+      )}
     </div>
   )
 }

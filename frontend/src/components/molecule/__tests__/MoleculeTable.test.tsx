@@ -84,6 +84,6 @@ describe('MoleculeTable', () => {
       />,
     )
 
-    expect(screen.getByText('mol.activityMissing')).toHaveClass('activity-missing-badge')
+    expect(screen.getByText('mol.activityMissing')).toBeInTheDocument()
   })
 })

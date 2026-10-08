@@ -136,7 +136,7 @@ const MoleculeCard = memo(function MoleculeCard({
           <span>
             {molecule.activity != null
               ? `${molecule.activity.toFixed(2)} ${molecule.units || 'nM'}`
-              : <span className="activity-missing-badge">{t('mol.activityMissing')}</span>}
+              : <Badge tone="warning">{t('mol.activityMissing')}</Badge>}
           </span>
           <span
             className="molecule-card__status"

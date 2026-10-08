@@ -1,4 +1,4 @@
-import Button from '@/components/ui/Button'
+import Modal from '@/components/ui/Modal'
 import MoleculeDetailPanel from './MoleculeDetailPanel'
 import { showToast } from '@/hooks/useToast'
 import { useAppContext } from '@/context/AppContext'
@@ -11,15 +11,6 @@ interface MoleculeDetailDrawerProps {
   libraryRoot: string | null
   onClose: () => void
   onSaved?: () => void
-}
-
-function CloseIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  )
 }
 
 export default function MoleculeDetailDrawer({
@@ -67,90 +58,27 @@ export default function MoleculeDetailDrawer({
     onClose()
   }
 
-  if (!open || !molecule) return null
+  if (!molecule) return null
 
   const title = molecule.name || molecule.mol_id
 
   return (
-    <>
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0, 0, 0, 0.35)',
-          zIndex: 40,
-        }}
-        onClick={onClose}
-        aria-hidden="true"
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      width="100%"
+      maxWidth="100%"
+      height="100%"
+      maxHeight="100%"
+      fullScreenOnMobile={false}
+    >
+      <MoleculeDetailPanel
+        molecule={molecule}
+        libraryRoot={libraryRoot}
+        onSaved={onSaved}
+        onOpenPdf={handleOpenPdf}
       />
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: '100vw',
-          maxWidth: '100vw',
-          background: 'var(--bg-surface)',
-          borderLeft: '1px solid var(--border)',
-          zIndex: 50,
-          display: 'flex',
-          flexDirection: 'column',
-          boxShadow: '-4px 0 24px rgba(0, 0, 0, 0.15)',
-        }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '14px 16px',
-            borderBottom: '1px solid var(--border)',
-          }}
-        >
-          <h3
-            style={{
-              margin: 0,
-              fontSize: 15,
-              fontWeight: 600,
-              color: 'var(--text-primary)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={title}
-          >
-            {title}
-          </h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            icon={<CloseIcon size={18} />}
-            aria-label="关闭"
-          />
-        </div>
-
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflow: 'hidden',
-            padding: '16px',
-            display: 'flex',
-          }}
-        >
-          <MoleculeDetailPanel
-            molecule={molecule}
-            libraryRoot={libraryRoot}
-            onSaved={onSaved}
-            onOpenPdf={handleOpenPdf}
-          />
-        </div>
-      </div>
-    </>
+    </Modal>
   )
 }

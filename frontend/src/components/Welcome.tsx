@@ -6,6 +6,7 @@ import { StaggerContainer, StaggerItem } from './animations/StaggerContainer'
 import { showToast } from '@/hooks/useToast'
 import { fadeIn, logoEntrance } from '@/hooks/useAnimations'
 import Button from '@/components/ui/Button'
+import Input from '@/components/ui/Input'
 import PageTitle from '@/components/ui/PageTitle'
 import BodyText from '@/components/ui/BodyText'
 import { useConfigureLibrary } from '@/api/query/hooks'
@@ -80,8 +81,7 @@ export default function Welcome() {
           <StaggerItem>
             <div className="welcome-config-form">
               <div className="welcome-dir-input-wrapper">
-                <input
-                  type="text"
+                <Input
                   className="welcome-dir-input"
                   placeholder={t('library.libraryRoot')}
                   value={dir}
