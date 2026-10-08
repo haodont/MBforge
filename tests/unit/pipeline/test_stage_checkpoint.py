@@ -241,3 +241,13 @@ def test_write_merged_report(tmp_path: Path) -> None:
     data = json.loads(report_path.read_text(encoding="utf-8"))
     assert data["doc_id"] == doc_id
     assert data["duration_ms"] == 310  # 100+0+200+10
+
+    # Writer and reader must agree on the canonical artifact: the API reads
+    # ``report.json``, so the merged report has to land exactly there.
+    from mbforge.foundation.layout import LibraryLayout
+    from mbforge.service.use_cases.documents.library import read_document_report
+
+    assert report_path == LibraryLayout(str(library_root)).report_json(doc_id)
+    assert (
+        json.loads(read_document_report(str(library_root), doc_id))["doc_id"] == doc_id
+    )
