@@ -3,10 +3,12 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  molAdminAdd,
   molAdminBulkDelete,
   molAdminBulkUpdateStatus,
   molAdminGet,
   molAdminListPage,
+  molAdminSearchBySmiles,
   molAdminUpdate,
 } from '@/api/http/molecule_admin'
 import type {
@@ -18,6 +20,7 @@ import { moleculeByLocation, moleculeCorrections } from '@/api/http/molecule_sto
 import type { MoleculeCorrection, MoleculeLocationMatch } from '@/api/http/molecule_store'
 import {
   chemDescriptors,
+  chemValidateSmiles,
   molAddRelation,
   molAssignCluster,
   molDedupBatch,
@@ -39,6 +42,7 @@ import type {
   DedupResult,
   MoleculeRelation,
   RelationStats,
+  SmilesValidation,
   SubstructureMatch,
   ValidateResponse,
 } from '@/api/http/molecule_chem'
@@ -321,6 +325,45 @@ export function useDedupBatch() {
     { newMols: Array<[string, string]>; sameAsThreshold?: number }
   >({
     mutationFn: ({ newMols, sameAsThreshold }) => molDedupBatch(newMols, sameAsThreshold),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
+    },
+  })
+}
+
+// ── SMILES validation / create (imperative dialog flows) ─────────────
+
+/**
+ * Validate a SMILES string through the RDKit backend.
+ *
+ * Exposed as a mutation because the Add-molecule dialog validates on each
+ * keystroke and again on submit — the result drives local form state rather
+ * than a rendered cache entry.
+ */
+export function useChemValidateSmiles() {
+  return useMutation<SmilesValidation, unknown, string>({
+    mutationFn: (smiles) => chemValidateSmiles(smiles),
+  })
+}
+
+/** Exact-SMILES lookup used to warn about duplicates before insert. */
+export function useMoleculeSearchBySmiles() {
+  return useMutation<
+    MoleculeRecord | null,
+    unknown,
+    { libraryRoot: string; smiles: string }
+  >({
+    mutationFn: ({ libraryRoot, smiles }) => molAdminSearchBySmiles(libraryRoot, smiles),
+  })
+}
+
+/** Insert a new molecule record; the listing caches are refreshed. */
+export function useAddMolecule() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ libraryRoot, record }: { libraryRoot: string; record: MoleculeRecord }) =>
+      molAdminAdd(libraryRoot, record),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
     },

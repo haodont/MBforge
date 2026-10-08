@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useCommonDirs } from '@/api/query/hooks/useCommonDirs'
 import { cleanWindowsPath } from '../../utils/path'
-import { getCommonDirs } from '../../api/http/project'
 
 
 interface FolderPickerProps {
@@ -20,13 +19,9 @@ export function FolderPicker({
   disabled = false
 }: FolderPickerProps) {
   const { t } = useTranslation()
-  const [commonDirs, setCommonDirs] = useState<{ name: string; path: string }[]>([])
+  const { data: commonDirs = [] } = useCommonDirs()
 
   const effectivePlaceholder = placeholder ?? t('folder.select')
-
-  useEffect(() => {
-    setCommonDirs(getCommonDirs())
-  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

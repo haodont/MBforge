@@ -1,8 +1,11 @@
 import { useState, ChangeEvent, useEffect } from 'react'
 import type { SyntheticEvent } from 'react'
-import { molAdminAdd, molAdminSearchBySmiles } from '../../api/http/molecule_admin'
-import { chemValidateSmiles } from '../../api/http/molecule'
-import type { MoleculeRecord } from '../../types'
+import {
+  useAddMolecule,
+  useChemValidateSmiles,
+  useMoleculeSearchBySmiles,
+} from '@/api/query/hooks/useMolecules'
+import type { MoleculeRecord } from '@/types'
 import Button from './Button'
 import Input from './Input'
 import Modal from './Modal'
@@ -30,6 +33,10 @@ export function AddMoleculeDialog({ open, onClose, libraryRoot, onAdded }: AddMo
   const [error, setError] = useState<string | null>(null)
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null)
 
+  const validateSmiles = useChemValidateSmiles()
+  const searchBySmiles = useMoleculeSearchBySmiles()
+  const addMolecule = useAddMolecule()
+
   // Clear state when dialog opens
   useEffect(() => {
     if (open) {
@@ -55,7 +62,7 @@ export function AddMoleculeDialog({ open, onClose, libraryRoot, onAdded }: AddMo
     // [B.1] 实时 SMILES 校验 — 走 Rust chematic，零后端依赖
     if (trimmed.length > 1) {
       try {
-        const v = await chemValidateSmiles(trimmed)
+        const v = await validateSmiles.mutateAsync(trimmed)
         if (!v.valid) {
           setError(v.error ?? 'Invalid SMILES')
         } else if (v.canonical_smiles && v.canonical_smiles !== trimmed) {
@@ -69,7 +76,7 @@ export function AddMoleculeDialog({ open, onClose, libraryRoot, onAdded }: AddMo
 
     if (trimmed.length > 5) {
       try {
-        const existing = await molAdminSearchBySmiles(libraryRoot, trimmed)
+        const existing = await searchBySmiles.mutateAsync({ libraryRoot, smiles: trimmed })
         if (existing) {
           setDuplicateWarning(`Molecule already exists as "${existing.name}" (${existing.mol_id})`)
         }
@@ -88,7 +95,7 @@ export function AddMoleculeDialog({ open, onClose, libraryRoot, onAdded }: AddMo
 
     // [B.1] 提交前最后一次 chematic 校验 — 阻止非法 SMILES 写入 store
     try {
-      const v = await chemValidateSmiles(esmiles.trim())
+      const v = await validateSmiles.mutateAsync(esmiles.trim())
       if (!v.valid) {
         setError(v.error ?? 'Invalid SMILES')
         return
@@ -118,7 +125,7 @@ export function AddMoleculeDialog({ open, onClose, libraryRoot, onAdded }: AddMo
         notes: '',
         created_at: new Date().toISOString(),
       }
-      await molAdminAdd(libraryRoot, record)
+      await addMolecule.mutateAsync({ libraryRoot, record })
       onAdded?.()
       handleClose()
     } catch (err) {

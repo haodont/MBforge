@@ -27,7 +27,16 @@ export {
   useSetTaskPriority,
 } from './useIngestQueue'
 export { useNotes, useNotesBacklinks, useSaveNote, useDeleteNote } from './useNotes'
-export { useSettings, useSaveSettings } from './useSettings'
+export {
+  useSettings,
+  useSaveSettings,
+  useLlmEnvConfig,
+  useTestLlmConnection,
+  useBuildInfo,
+  useExportSettings,
+} from './useSettings'
+export { useSidecarStatus, useSidecarRestart } from './useSidecar'
+export { useCommonDirs } from './useCommonDirs'
 export { useDocsIndex, useDocsPage } from './useDocs'
 export {
   useDocumentMarkdown,
@@ -85,4 +94,7 @@ export {
   useAddRelation,
   useDeleteRelation,
   useDedupBatch,
+  useChemValidateSmiles,
+  useMoleculeSearchBySmiles,
+  useAddMolecule,
 } from './useMolecules'

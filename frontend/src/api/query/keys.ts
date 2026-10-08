@@ -97,6 +97,22 @@ export const queryKeys = {
     all: ['settings'] as const,
     get: () => [...queryKeys.settings.all, 'get'] as const,
     configDir: () => [...queryKeys.settings.all, 'config-dir'] as const,
+    llmEnv: () => [...queryKeys.settings.all, 'llm-env'] as const,
+  },
+
+  about: {
+    all: ['about'] as const,
+    buildInfo: () => [...queryKeys.about.all, 'build-info'] as const,
+  },
+
+  sidecar: {
+    all: ['sidecar'] as const,
+    status: () => [...queryKeys.sidecar.all, 'status'] as const,
+  },
+
+  dirs: {
+    all: ['dirs'] as const,
+    common: () => [...queryKeys.dirs.all, 'common'] as const,
   },
 
   models: {

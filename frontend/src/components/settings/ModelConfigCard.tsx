@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getLlmEnvConfig, testLlmConnection, type LlmEnvStatus } from '../../api/http/settings'
+import { useLlmEnvConfig, useTestLlmConnection } from '@/api/query/hooks/useSettings'
+import type { LlmEnvStatus } from '@/api/http/settings'
 import Button from '@/components/ui/Button'
 import Badge, { type BadgeTone } from '@/components/ui/Badge'
 import InlineAlert from '@/components/ui/InlineAlert'
@@ -39,7 +40,6 @@ export default function ModelConfigCard({
 }: Props) {
   const { t } = useTranslation()
   const [testStatus, setTestStatus] = useState<LlmEnvStatus | null>(null)
-  const [testing, setTesting] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [dirtyFields, setDirtyFields] = useState<Record<string, boolean>>({})
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -54,16 +54,13 @@ export default function ModelConfigCard({
     }, 1000)
   }
 
-  // Load the current active LLM config once on mount (env or saved config).
+  // Load the current active LLM config on mount (env or saved config).
   // This only reads the resolved config; it does not perform a network probe.
-  useEffect(() => {
-    if (!showTest) return
-    let cancelled = false
-    getLlmEnvConfig()
-      .then(s => { if (!cancelled) setTestStatus(s) })
-      .catch(() => { /* ignore initial load errors; user can hit Test */ })
-    return () => { cancelled = true }
-  }, [showTest])
+  const envQuery = useLlmEnvConfig(Boolean(showTest))
+  const testLlm = useTestLlmConnection()
+  const testing = testLlm.isPending
+  // Prefer the probe result once Test ran; otherwise show the saved config.
+  const displayedStatus = testStatus ?? envQuery.data ?? null
 
   useEffect(() => {
     const dirtyTimers = dirtyTimersRef.current
@@ -76,14 +73,13 @@ export default function ModelConfigCard({
   }, [])
 
   const runTest = async () => {
-    setTesting(true)
     if (successTimerRef.current) {
       clearTimeout(successTimerRef.current)
       successTimerRef.current = null
     }
     try {
       // Probe the form values, not the saved ones, so Test works before Save.
-      const s = await testLlmConnection({
+      const s = await testLlm.mutateAsync({
         provider: settings.llm_provider,
         base_url: settings.llm_base_url,
         api_key: settings.llm_api_key,
@@ -108,8 +104,6 @@ export default function ModelConfigCard({
         http_status: null,
         latency_ms: null,
       })
-    } finally {
-      setTesting(false)
     }
   }
 
@@ -129,10 +123,10 @@ export default function ModelConfigCard({
         </div>
         {showTest && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexShrink: 0 }}>
-            {testStatus && (
-              <Badge tone={testing ? 'loading' : STATUS_TONE[testStatus.status]}>
-                {testing ? t('settings.testing') : t(`settings.llmStatus.${testStatus.status}`)}
-                {!testing && testStatus.latency_ms != null && ` (${testStatus.latency_ms} ms)`}
+            {displayedStatus && (
+              <Badge tone={testing ? 'loading' : STATUS_TONE[displayedStatus.status]}>
+                {testing ? t('settings.testing') : t(`settings.llmStatus.${displayedStatus.status}`)}
+                {!testing && displayedStatus.latency_ms != null && ` (${displayedStatus.latency_ms} ms)`}
               </Badge>
             )}
             <Button size="sm" variant="secondary" onClick={runTest} disabled={testing} loading={testing}>
@@ -146,9 +140,9 @@ export default function ModelConfigCard({
       {modelType === 'vlm' && <VlmConfigSection {...sectionProps} />}
       {modelType === 'ocr' && <LayoutConfigSection {...sectionProps} />}
 
-      {testStatus?.error && (
+      {displayedStatus?.error && (
         <InlineAlert tone="danger" title={t('settings.connectionFailed')} style={{ marginTop: 'var(--space-4)' }}>
-          {testStatus.error}
+          {displayedStatus.error}
         </InlineAlert>
       )}
       {successMessage && (

@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useBuildInfo, useExportSettings } from '@/api/query/hooks/useSettings'
 import SettingSection, { SettingGroup } from '@/components/ui/SettingSection'
 import { CustomField } from './SettingRow'
 import Button from '@/components/ui/Button'
 import { showToast } from '../../hooks/useToast'
-import { fetchBuildInfo, exportSettings } from '../../api/http/settings'
 import { getUserFacingError } from '@/utils/errors'
 
 interface Props {
@@ -20,30 +20,28 @@ interface Props {
 export default function AboutSection({ onReset, onOpenConfig }: Props) {
   const { t } = useTranslation()
   const [confirmingReset, setConfirmingReset] = useState(false)
-  const [tierInfo, setTierInfo] = useState<string | null>(null)
-  const [exporting, setExporting] = useState(false)
+  // On-demand build-info read: `refetch` runs the query when the button is hit.
+  const buildInfoQuery = useBuildInfo(false)
+  const exportSettings = useExportSettings()
+  const tierInfo = buildInfoQuery.data
+    ? `${buildInfoQuery.data.version} (${buildInfoQuery.data.platform})`
+    : buildInfoQuery.error
+      ? getUserFacingError(buildInfoQuery.error, t('settings.buildInfoFailed'))
+      : null
 
   const handleFetchBuildInfo = () => {
-    try {
-      const info = fetchBuildInfo()
-      setTierInfo(`${info.version} (${info.platform})`)
-    } catch (e) {
-      setTierInfo(getUserFacingError(e, t('settings.buildInfoFailed')))
-    }
+    void buildInfoQuery.refetch()
   }
 
   const handleExport = async () => {
-    setExporting(true)
     try {
       // Simplified: write next to the config dir as .mbforge-config-<timestamp>.json
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       const target = `mbforge-config-${ts}.json`
-      await exportSettings(target)
+      await exportSettings.mutateAsync(target)
       showToast(`${t('settings.exported')}: ${target}`, 'success')
     } catch (e) {
       showToast(getUserFacingError(e, t('settings.exportFailed')), 'error')
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -84,7 +82,7 @@ export default function AboutSection({ onReset, onOpenConfig }: Props) {
             <Button
               size="sm"
               variant="secondary"
-              loading={exporting}
+              loading={exportSettings.isPending}
               onClick={handleExport}
             >
               {t('settings.exportConfig')}

@@ -2,7 +2,8 @@
 
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { sidecarStatus } from '../../api/http/sidecar'
+import { useSidecarStatus } from '@/api/query/hooks/useSidecar'
+import type { SidecarStatus } from '@/api/http/sidecar'
 import SettingSection, { SettingGroup } from '@/components/ui/SettingSection'
 import {
   TextField,
@@ -20,38 +21,33 @@ interface Props {
   setSettings: React.Dispatch<React.SetStateAction<SettingsState>>
 }
 
-interface SidecarStatus {
-  healthy: boolean
-  state: string
-  restartCount: number
-  uptimeSecs: number
-  lastError: string | null
-}
-
 export default function ModelServiceSection({ settings, setSettings }: Props) {
   const { t } = useTranslation()
   const [status, setStatus] = useState<SidecarStatus | null>(null)
-  const [testing, setTesting] = useState(false)
+  // On-demand probe: the query stays idle until the button calls `refetch`.
+  const { refetch, isFetching } = useSidecarStatus(false)
 
   const testConnection = useCallback(async () => {
-    setTesting(true)
-    try {
-      const res = await sidecarStatus()
-      setStatus(res)
-      if (res.healthy) {
-        showToast(t('settings.serverOk', { secs: res.uptimeSecs }), 'success')
-      } else {
-        showToast(
-          t('settings.serverDown', { err: res.lastError || t('settings.serverUnknown') }),
-          'error',
-        )
-      }
-    } catch (e) {
-      showToast(t('settings.serverTestFailed', { err: getUserFacingError(e) }), 'error')
-    } finally {
-      setTesting(false)
+    const result = await refetch()
+    if (result.error) {
+      showToast(
+        t('settings.serverTestFailed', { err: getUserFacingError(result.error) }),
+        'error',
+      )
+      return
     }
-  }, [t])
+    const res = result.data
+    if (!res) return
+    setStatus(res)
+    if (res.healthy) {
+      showToast(t('settings.serverOk', { secs: res.uptimeSecs }), 'success')
+    } else {
+      showToast(
+        t('settings.serverDown', { err: res.lastError || t('settings.serverUnknown') }),
+        'error',
+      )
+    }
+  }, [refetch, t])
 
   return (
     <SettingSection>
@@ -79,7 +75,7 @@ export default function ModelServiceSection({ settings, setSettings }: Props) {
             <Button
               variant="secondary"
               size="sm"
-              loading={testing}
+              loading={isFetching}
               onClick={testConnection}
             >
               {t('settings.testNow')}
