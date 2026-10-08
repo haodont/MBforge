@@ -1,25 +1,20 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import PdfCanvas from '@/components/PdfCanvas'
-import MoleculeOverlay from '@/components/MoleculeOverlay'
-import OcrOverlay from '@/components/OcrOverlay'
 import ScrollColumn from '../ui/ScrollColumn'
-import Button from '../ui/Button'
-import IconButton from '../ui/IconButton'
-import Tabs from '../ui/Tabs'
 import { LoadingState } from '../ui/LoadingState'
 import type { DocumentEntry, ExtractionResult } from '@/types'
 import { usePdfViewer } from './pdf/usePdfViewer'
+import { usePdfSidebarState } from './pdf/usePdfSidebarState'
+import { usePdfDeepLink } from './pdf/usePdfDeepLink'
+import PdfOverlays from './pdf/PdfOverlays'
+import PdfSidebar from './pdf/PdfSidebar'
 import PdfFloatingControls from './pdf/PdfFloatingControls'
 import PdfContinuousView from './pdf/PdfContinuousView'
-import PageEvidencePane from './PageEvidencePane'
-import { ChevronLeftIcon, ChevronRightIcon } from '@/components/icons'
-import { RdkitStructure } from '@/components/chat/markdownExtensions'
-import { pdfToCss } from '@/utils/pdf'
+import LocationHighlight from './pdf/LocationHighlight'
 import MoleculeEditorDialog from '@/components/molecule/MoleculeEditorDialog'
-import { cropImageUrl, type PatentFactsArtifact, type PatentFactsMeasurement } from '@/api/http/library'
+import { cropImageUrl } from '@/api/http/library'
 import { useDocumentPatentFacts } from '@/api/query/hooks'
-import Badge from '@/components/ui/Badge'
 
 /** Imperative handle exposed to a parent (DocumentViewer). */
 export interface PdfViewerHandle {
@@ -65,12 +60,14 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
     handleZoomIn, handleZoomOut, handleZoomReset,
     handleJumpToPage, handleKeyDown, handleWheel, scrollToDetection,
   } = usePdfViewer(doc, libraryRoot, viewerKey, initialPage)
-  const [isResultPaneCollapsed, setIsResultPaneCollapsed] = useState(false)
-  const [sourcePaneWidth, setSourcePaneWidth] = useState<number | null>(null)
-  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
-  const [sidePaneTab, setSidePaneTab] = useState<'evidence' | 'molecules'>('evidence')
-  const [editingDetectionIndex, setEditingDetectionIndex] = useState<number | null>(null)
-  const [continuousMode, setContinuousMode] = useState(false)
+  const {
+    isResultPaneCollapsed, setIsResultPaneCollapsed,
+    sourcePaneWidth,
+    sidePaneTab, setSidePaneTab,
+    selectedEvidenceId, setSelectedEvidenceId,
+    editingDetectionIndex, setEditingDetectionIndex,
+    continuousMode, toggleContinuousMode,
+  } = usePdfSidebarState({ pageInfo })
   const { data: patentFactsResult } = useDocumentPatentFacts(doc.doc_id, libraryRoot)
   const patentFacts = patentFactsResult?.ok ? patentFactsResult.data : null
   const pdfCanvasStyle = useMemo(() => ({
@@ -80,93 +77,23 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
   const openTextPanel = useCallback(() => setShowTextPanel(true), [setShowTextPanel])
   const handleContinuousPageChange = useCallback((page: number) => setCurrentPage(page), [setCurrentPage])
 
-  useEffect(() => {
-    if (!pageInfo || !pageInfo.width || sourcePaneWidth === pageInfo.width) return
-    setSourcePaneWidth(pageInfo.width)
-  }, [pageInfo, sourcePaneWidth])
-
-  useEffect(() => {
-    setSelectedEvidenceId(null)
-    setSelectedOcrIndex(null)
-    setEditingDetectionIndex(null)
-  }, [currentPage, setSelectedEvidenceId, setSelectedOcrIndex])
-
   // 覆盖层读源：文档打开时一次性加载全文 bbox（流水线 v2 证据 ∪ 交互识别写入的
   // molecule_detections，后端逐页去重，含低置信/被拒候选，框颜色编码置信度）；
-  // MoleculeOverlay 自身保留 bbox 有效性过滤。置信度阈值过滤已随旧按页读源移除
-  // （阈值滑条本就无 UI 入口）。
+  // MoleculeOverlay 自身保留 bbox 有效性过滤。
   const visibleDetections = currentDetections
-  const deepLinkKeyRef = useRef<string | null>(null)
 
-  useEffect(() => {
-    if (!initialPage) return
-    if (currentPage !== initialPage) {
-      setCurrentPage(initialPage)
-      return
-    }
-    if (!initialBbox || !pageInfo) return
-    const key = `${initialPage}:${initialBbox.join(',')}`
-    if (deepLinkKeyRef.current === key) return
-    deepLinkKeyRef.current = key
-    scrollToDetection({
-      esmiles: '',
-      name: '',
-      source: 'manual',
-      moldet_conf: 1,
-      bbox_pdf: initialBbox,
-      page_idx: initialPage - 1,
-      context_text: '',
-      mol_img_path: null,
-      status: 'confirmed',
-      properties: {},
-    })
-  }, [initialBbox, initialPage, currentPage, pageInfo, scrollToDetection, setCurrentPage])
-
-  useEffect(() => {
-    if (initialEvidenceId && initialPage && currentPage === initialPage) {
-      setSelectedEvidenceId(initialEvidenceId)
-    }
-  }, [initialEvidenceId, initialPage, currentPage])
-
-  const pageOverlay = pageInfo && visibleDetections.length > 0 ? (
-    <MoleculeOverlay
-      detections={visibleDetections}
-      renderWidth={pageInfo.width}
-      renderHeight={pageInfo.height}
-      originalHeight={pageInfo.originalHeight}
-      originalWidth={pageInfo.originalWidth}
-      scale={pageInfo.scale}
-      currentPage={currentPage}
-      selectedIndex={selectedDetection ?? undefined}
-      onSelect={(index, detection) => {
-        setSelectedDetection(index)
-        setSelectedOcrIndex(null)
-        setSelectedEvidenceId(detection?.evidence_id ?? null)
-        onMoleculeClick?.({ page: currentPage, bbox: detection?.bbox_pdf })
-      }}
-      onRecognize={handleRecognizePage}
-      isRecognizing={isDetecting}
-    />
-  ) : null
-
-  const ocrPageOverlay = pageInfo && ocrBlocks.length > 0 ? (
-    <OcrOverlay
-      blocks={ocrBlocks}
-      renderWidth={pageInfo.width}
-      renderHeight={pageInfo.height}
-      originalHeight={pageInfo.originalHeight}
-      originalWidth={pageInfo.originalWidth}
-      scale={pageInfo.scale}
-      page={currentPage}
-      selectedIndex={selectedOcrIndex ?? undefined}
-      onSelect={(index, block) => {
-        setSelectedOcrIndex(index)
-        setSelectedDetection(null)
-        setSelectedEvidenceId(block?.evidence_id ?? null)
-        onMoleculeClick?.({ page: currentPage, bbox: block?.bbox })
-      }}
-    />
-  ) : null
+  usePdfDeepLink({
+    initialPage,
+    initialBbox,
+    initialEvidenceId,
+    currentPage,
+    setCurrentPage,
+    pageInfo,
+    scrollToDetection,
+    setSelectedEvidenceId,
+    setSelectedOcrIndex,
+    setEditingDetectionIndex,
+  })
 
   useImperativeHandle(ref, () => ({
     setCurrentPage: (page: number) => setCurrentPage(page),
@@ -204,7 +131,22 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
                   scale={pdfScale}
                   showTextLayer={showTextLayer && hasTextLayer}
                   scrollRootRef={pdfScrollRef}
-                  overlay={<>{pageOverlay}{ocrPageOverlay}</>}
+                  overlay={(
+                    <PdfOverlays
+                      detections={visibleDetections}
+                      ocrBlocks={ocrBlocks}
+                      pageInfo={pageInfo}
+                      currentPage={currentPage}
+                      selectedDetection={selectedDetection}
+                      selectedOcrIndex={selectedOcrIndex}
+                      isDetecting={isDetecting}
+                      onMoleculeClick={onMoleculeClick}
+                      onRecognize={handleRecognizePage}
+                      setSelectedDetection={setSelectedDetection}
+                      setSelectedOcrIndex={setSelectedOcrIndex}
+                      setSelectedEvidenceId={setSelectedEvidenceId}
+                    />
+                  )}
                   onPageChange={handleContinuousPageChange}
                   onPageRendered={handlePageRendered}
                   onImageReady={handleImageReady}
@@ -228,8 +170,20 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
                 />
               )}
               {!continuousMode && <>
-                {pageOverlay}
-                {ocrPageOverlay}
+                <PdfOverlays
+                  detections={visibleDetections}
+                  ocrBlocks={ocrBlocks}
+                  pageInfo={pageInfo}
+                  currentPage={currentPage}
+                  selectedDetection={selectedDetection}
+                  selectedOcrIndex={selectedOcrIndex}
+                  isDetecting={isDetecting}
+                  onMoleculeClick={onMoleculeClick}
+                  onRecognize={handleRecognizePage}
+                  setSelectedDetection={setSelectedDetection}
+                  setSelectedOcrIndex={setSelectedOcrIndex}
+                  setSelectedEvidenceId={setSelectedEvidenceId}
+                />
                 {initialPage === currentPage && initialBbox && pageInfo && (
                   <LocationHighlight bbox={initialBbox} pageInfo={pageInfo} />
                 )}
@@ -250,77 +204,28 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
             onPrevPage={() => { setCurrentPage(p => Math.max(1, p - 1)); setSelectedDetection(null); requestAnimationFrame(() => pdfScrollRef.current?.focus()) }}
             onNextPage={() => { setCurrentPage(p => p + 1); requestAnimationFrame(() => pdfScrollRef.current?.focus()) }}
             continuousMode={continuousMode}
-            onToggleContinuous={() => setContinuousMode(mode => !mode)}
+            onToggleContinuous={toggleContinuousMode}
           />
         </div>
 
         {/* 右侧：当前页 SQL 证据与分子；事实证据显示在分子卡片内 */}
-        <aside className={`pdf-document-sidebar${isResultPaneCollapsed ? ' is-collapsed' : ''}`} aria-label={t('pdf.moleculesHeader')}>
-          {isResultPaneCollapsed ? (
-            <IconButton
-              size={32}
-              className="pdf-document-sidebar__collapse-button"
-              onClick={() => setIsResultPaneCollapsed(false)}
-              ariaLabel={t('pdf.sidebarExpand')}
-              title={t('pdf.sidebarExpandTitle')}
-            >
-              <ChevronLeftIcon size={16} />
-            </IconButton>
-          ) : (
-            <>
-              <div className="pdf-document-sidebar__tabs">
-                <Tabs
-                  items={[
-                    { key: 'evidence', label: t('pdf.tabEvidence') },
-                    { key: 'molecules', label: t('pdf.tabMolecules') },
-                  ]}
-                  activeKey={sidePaneTab}
-                  onChange={(key) => setSidePaneTab(key === 'molecules' ? 'molecules' : 'evidence')}
-                  variant="underline"
-                  size="sm"
-                  fullWidth
-                  style={{ flex: 1, minWidth: 0 }}
-                />
-                <IconButton
-                  size={28}
-                  className="pdf-document-sidebar__collapse-button"
-                  onClick={() => setIsResultPaneCollapsed(true)}
-                  ariaLabel={t('pdf.sidebarCollapse')}
-                  title={t('pdf.sidebarCollapseTitle')}
-                >
-                  <ChevronRightIcon size={16} />
-                </IconButton>
-              </div>
-              <div className="pdf-document-sidebar__content">
-                {sidePaneTab === 'evidence' && (
-                  <PageEvidencePane
-                    docId={doc.doc_id}
-                    page={currentPage}
-                    libraryRoot={libraryRoot}
-                    selectedEvidenceId={selectedEvidenceId}
-                  />
-                )}
-                {sidePaneTab === 'molecules' && (
-                  <section className="pdf-current-molecules">
-                    <div className="pdf-current-molecules__header">
-                      <div><strong>{t('pdf.moleculesHeader')}</strong><span>{t('pdf.moleculesCount', { count: visibleDetections.length })}</span></div>
-                      <Button variant="primary" onClick={() => handleDetectPage(true)} disabled={isDetecting || !canDetect}>
-                        {isDetecting ? t('pdf.detecting') : t('pdf.detect')}
-                      </Button>
-                    </div>
-                    {visibleDetections.length === 0 ? <p className="pdf-current-molecules__empty">{t('pdf.moleculesEmpty')}</p> : visibleDetections.map((detection, index) => (
-                      <button type="button" className="pdf-current-molecule" key={`${detection.esmiles}-${index}`} onClick={() => { setSelectedDetection(index); setEditingDetectionIndex(index) }}>
-                        {detection.esmiles ? <RdkitStructure smiles={detection.smiles || detection.esmiles} /> : <span className="pdf-current-molecule__fallback">{t('pdf.structureUnavailable')}</span>}
-                        <span className="pdf-current-molecule__meta"><strong>{detection.name || t('pdf.moleculeFallbackName', { index: index + 1 })}</strong><span>{Math.round(detection.moldet_conf * 100)}%</span></span>
-                        <MoleculePatentFacts facts={patentFacts} detection={detection} />
-                      </button>
-                    ))}
-                  </section>
-                )}
-              </div>
-            </>
-          )}
-        </aside>
+        <PdfSidebar
+          docId={doc.doc_id}
+          libraryRoot={libraryRoot}
+          currentPage={currentPage}
+          isResultPaneCollapsed={isResultPaneCollapsed}
+          setIsResultPaneCollapsed={setIsResultPaneCollapsed}
+          sidePaneTab={sidePaneTab}
+          setSidePaneTab={setSidePaneTab}
+          selectedEvidenceId={selectedEvidenceId}
+          detections={visibleDetections}
+          isDetecting={isDetecting}
+          canDetect={canDetect}
+          patentFacts={patentFacts}
+          onDetect={() => handleDetectPage(true)}
+          setSelectedDetection={setSelectedDetection}
+          setEditingDetectionIndex={setEditingDetectionIndex}
+        />
       </div>
 
       {editingDetectionIndex !== null && visibleDetections[editingDetectionIndex] && (
@@ -340,118 +245,3 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
 })
 
 export default PdfViewer
-
-function compoundLabelKey(value: string): string {
-  const cleaned = value
-    .normalize('NFKC')
-    .trim()
-    .replace(/^(?:化合物|compound|cmpd|cpd|mol(?:ecule)?)[#_\-\s]*/i, '')
-    .replace(/\s+/g, '')
-  const match = /^(\d+[a-z]?)$/i.exec(cleaned)
-  return (match?.[1] ?? cleaned).toLowerCase()
-}
-
-function measurementLabel(measurement: PatentFactsMeasurement): string {
-  const value = measurement.value
-  return `${measurement.metric || '—'} ${value.operator} ${value.raw_text} ${value.original_unit}`.trim()
-}
-
-function MoleculePatentFacts({
-  facts,
-  detection,
-}: {
-  facts: PatentFactsArtifact | null
-  detection: ExtractionResult
-}) {
-  const { t } = useTranslation()
-  if (!facts || !detection.name) return null
-  const labelKey = compoundLabelKey(detection.name)
-  const entries = facts.entries.filter((entry) => entry.label_key === labelKey)
-  if (entries.length === 0) return null
-
-  const entryIds = new Set(entries.map((entry) => entry.entry_id))
-  const measurements = facts.measurements.filter(
-    (measurement) => measurement.compound_entry_id && entryIds.has(measurement.compound_entry_id),
-  )
-  const evidenceIds = new Set([
-    ...entries.flatMap((entry) => entry.evidence_ids),
-    ...measurements.flatMap((measurement) => measurement.evidence_ids),
-  ])
-
-  return (
-    <span className="pdf-current-molecule__facts">
-      <span className="pdf-current-molecule__facts-header">
-        <strong>{t('pdf.moleculeFactsTitle')}</strong>
-        <Badge tone={measurements.length > 0 ? 'success' : 'neutral'}>
-          {measurements.length > 0 ? t('pdf.patentFactsMeasured') : t('pdf.moleculeFactsNoMeasurement')}
-        </Badge>
-      </span>
-      {entries.map((entry) => {
-        const section = facts.sections.find((item) => item.section_id === entry.section_id)
-        return (
-          <span className="pdf-current-molecule__fact" key={entry.entry_id}>
-            <span>{section?.title || entry.label_raw || entry.label_key}</span>
-            {measurements
-              .filter((measurement) => measurement.compound_entry_id === entry.entry_id)
-              .map((measurement) => (
-                <strong key={measurement.measurement_id}>{measurementLabel(measurement)}</strong>
-              ))}
-          </span>
-        )
-      })}
-      <span className="pdf-current-molecule__facts-meta">
-        {t('pdf.moleculeFactsEvidence', { count: evidenceIds.size })}
-      </span>
-    </span>
-  )
-}
-
-function LocationHighlight({
-  bbox,
-  pageInfo,
-}: {
-  bbox: [number, number, number, number]
-  pageInfo: {
-    width: number
-    height: number
-    originalWidth: number
-    originalHeight: number
-    scale: number
-  }
-}) {
-  const box = pdfToCss(
-    bbox,
-    pageInfo.originalHeight,
-    pageInfo.scale,
-    pageInfo.originalWidth,
-    pageInfo.width,
-  )
-  return (
-    <div
-      aria-label="Deep-linked molecule location"
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: '50%',
-        width: pageInfo.width,
-        height: pageInfo.height,
-        transform: 'translateX(-50%)',
-        pointerEvents: 'none',
-        zIndex: 3,
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          left: box.x,
-          top: box.y,
-          width: box.w,
-          height: box.h,
-          border: '3px solid var(--accent)',
-          borderRadius: 4,
-          boxShadow: '0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent)',
-        }}
-      />
-    </div>
-  )
-}
