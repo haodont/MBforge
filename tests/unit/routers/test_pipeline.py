@@ -13,7 +13,11 @@ from mbforge.db.sqlite.database import DatabaseManager
 
 
 @pytest.fixture
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    patch_config_root,
+) -> TestClient:
     """Create a TestClient for the FastAPI app.
 
     Models are loaded lazily; no startup pre-warming to patch.
@@ -21,25 +25,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     The durable queue worker is stubbed so enqueueing never runs a real
     pipeline during router tests.
     """
-    from mbforge.foundation import config
     from mbforge.server.ingest import worker
 
     monkeypatch.setattr(worker, "ensure_queue_worker", lambda _root: True)
 
     lib = tmp_path / "library"
     lib.mkdir(parents=True, exist_ok=True)
-    original_load = config.load_global_config
-
-    class _PatchedLoad:
-        def __call__(self):
-            cfg = original_load()
-            cfg.library_root = str(lib)
-            return cfg
-
-        def cache_clear(self):
-            original_load.cache_clear()
-
-    monkeypatch.setattr(config, "load_global_config", _PatchedLoad())
+    patch_config_root(lib)
 
     try:
         from mbforge.server.app import create_app
@@ -453,22 +445,8 @@ def _capture_to_thread(monkeypatch: pytest.MonkeyPatch):
     return calls
 
 
-def _patch_config_root(monkeypatch: pytest.MonkeyPatch, root: str) -> None:
-    """Point load_global_config at ``root`` so path validation succeeds."""
-    from mbforge.foundation import config
-
-    original_load = config.load_global_config
-
-    def _patched_load():
-        cfg = original_load()
-        cfg.library_root = root
-        return cfg
-
-    monkeypatch.setattr(config, "load_global_config", _patched_load)
-
-
 def test_pipeline_queue_offloads_sqlite_to_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, patch_config_root
 ) -> None:
     """The /queue route must not run SQLite queries on the event loop."""
     import asyncio
@@ -480,7 +458,7 @@ def test_pipeline_queue_offloads_sqlite_to_thread(
 
     root = str(tmp_path / "library")
     Path(root).mkdir(parents=True, exist_ok=True)
-    _patch_config_root(monkeypatch, root)
+    patch_config_root(root)
     db = DatabaseManager.get(root)
     db.initialize()
 
@@ -492,7 +470,7 @@ def test_pipeline_queue_offloads_sqlite_to_thread(
 
 
 def test_pipeline_queue_stats_offloads_sqlite_to_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, patch_config_root
 ) -> None:
     """The /queue/stats route must not run SQLite queries on the event loop."""
     import asyncio
@@ -504,7 +482,7 @@ def test_pipeline_queue_stats_offloads_sqlite_to_thread(
 
     root = str(tmp_path / "library")
     Path(root).mkdir(parents=True, exist_ok=True)
-    _patch_config_root(monkeypatch, root)
+    patch_config_root(root)
     db = DatabaseManager.get(root)
     db.initialize()
 
@@ -516,7 +494,7 @@ def test_pipeline_queue_stats_offloads_sqlite_to_thread(
 
 
 def test_pipeline_enqueue_unresolved_offloads_scan_and_sqlite(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, patch_config_root
 ) -> None:
     """The enqueue_unresolved action offloads file scanning and DB work."""
     import asyncio
@@ -538,7 +516,7 @@ def test_pipeline_enqueue_unresolved_offloads_scan_and_sqlite(
 
     root = str(tmp_path / "library")
     Path(root).mkdir(parents=True, exist_ok=True)
-    _patch_config_root(monkeypatch, root)
+    patch_config_root(root)
     db = DatabaseManager.get(root)
     db.initialize()
 

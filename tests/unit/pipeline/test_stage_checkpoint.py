@@ -21,7 +21,6 @@ from mbforge.service.pipeline.run.checkpoint import (
     next_stage,
     reset_stage_for_retry,
     save_stage_summary,
-    summary_path,
     write_merged_report,
 )
 
@@ -38,10 +37,6 @@ def test_next_stage_walks_order() -> None:
     assert next_stage("patent") is None
 
 
-def test_next_stage_unknown_stage_restarts_from_extract() -> None:
-    assert next_stage("__removed_stage__") == "extract"
-
-
 def test_next_stage_unknown_resets_to_extract() -> None:
     assert next_stage("bogus") == "extract"
 
@@ -53,14 +48,6 @@ def test_is_last_stage() -> None:
     assert not is_last_stage("extract")
     assert not is_last_stage("markdown")
     assert is_last_stage("patent")
-
-
-# ── summary_path ─────────────────────────────────────────────────────
-
-
-def test_summary_path_returns_expected(tmp_path: Path) -> None:
-    p = summary_path(tmp_path, "markdown")
-    assert p == tmp_path / "_stage_markdown.json"
 
 
 # ── save / load stage summary ────────────────────────────────────────

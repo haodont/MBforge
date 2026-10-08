@@ -86,26 +86,12 @@ def test_library_import_auto_enqueues_processing_run(
 
 
 def test_library_import_respects_disabled_auto_enqueue(
-    app_client: TestClient, tmp_library: Path, monkeypatch
+    app_client: TestClient, tmp_library: Path, patch_config
 ) -> None:
     """``ingest.auto_enqueue_on_import = false`` keeps import a register-only step."""
     from mbforge.db.sqlite.database import DatabaseManager
-    from mbforge.foundation import config as app_config
 
-    original = app_config.load_global_config
-
-    class _NoAutoEnqueue:
-        def __call__(self):
-            # Copy before mutating: ``load_global_config`` is lru_cached, so
-            # editing its return value in place would leak into every later test.
-            cfg = original().model_copy(deep=True)
-            cfg.ingest.auto_enqueue_on_import = False
-            return cfg
-
-        def cache_clear(self):
-            original.cache_clear()
-
-    monkeypatch.setattr(app_config, "load_global_config", _NoAutoEnqueue())
+    patch_config(lambda cfg: setattr(cfg.ingest, "auto_enqueue_on_import", False))
 
     resp = app_client.post(
         "/api/v1/library/import",

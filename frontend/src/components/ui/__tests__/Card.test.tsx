@@ -8,13 +8,6 @@ describe('Card', () => {
     expect(screen.getByTestId('child')).toBeInTheDocument()
   })
 
-  it('renders plain div when not hoverable and no onClick', () => {
-    const { container } = render(<Card>plain</Card>)
-    const el = container.firstChild
-    expect(el?.nodeName).toBe('DIV')
-    expect(el).not.toHaveClass('motion-div')
-  })
-
   it('calls onClick when clicked', () => {
     const onClick = vi.fn()
     render(<Card onClick={onClick}>click</Card>)

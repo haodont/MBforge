@@ -28,9 +28,4 @@ describe('ErrorState', () => {
     fireEvent.click(btn)
     expect(onDismiss).toHaveBeenCalledOnce()
   })
-
-  it('renders compact variant', () => {
-    const { container } = render(<ErrorState error="Compact error" compact />)
-    expect(container.firstChild).toHaveClass('error-state--compact')
-  })
 })

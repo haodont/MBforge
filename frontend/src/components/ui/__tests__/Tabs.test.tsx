@@ -19,10 +19,7 @@ describe('Tabs', () => {
 
   it('activates first tab by default in uncontrolled mode', () => {
     render(<Tabs items={defaultItems} />)
-    const tab1 = screen.getByText('Tab One').closest('button')
-    const tab2 = screen.getByText('Tab Two').closest('button')
-    expect(tab1).toHaveClass('ui-tabs__tab--active')
-    expect(tab2).not.toHaveClass('ui-tabs__tab--active')
+    expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('Tab One')
   })
 
   it('switches active tab on click in uncontrolled mode', () => {
@@ -34,14 +31,12 @@ describe('Tabs', () => {
 
   it('respects defaultActiveKey', () => {
     render(<Tabs items={defaultItems} defaultActiveKey="tab2" />)
-    const tab2 = screen.getByText('Tab Two').closest('button')
-    expect(tab2).toHaveClass('ui-tabs__tab--active')
+    expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('Tab Two')
   })
 
   it('works in controlled mode with activeKey', () => {
     render(<Tabs items={defaultItems} activeKey="tab2" />)
-    const tab2 = screen.getByText('Tab Two').closest('button')
-    expect(tab2).toHaveClass('ui-tabs__tab--active')
+    expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('Tab Two')
   })
 
   it('calls onChange in controlled mode', () => {
@@ -87,8 +82,8 @@ describe('TabPanel', () => {
   })
 
   it('renders nothing when activeKey does not match tabKey', () => {
-    const { container } = render(<TabPanel activeKey="tab2" tabKey="tab1"><span>Content</span></TabPanel>)
-    expect(container.querySelector('div')).toBeNull()
+    render(<TabPanel activeKey="tab2" tabKey="tab1"><span>Content</span></TabPanel>)
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument()
   })
 
   it('renders with role tabpanel', () => {
@@ -97,11 +92,11 @@ describe('TabPanel', () => {
   })
 
   it('forceMount keeps DOM even when inactive', () => {
-    const { container } = render(
+    render(
       <TabPanel activeKey="tab2" tabKey="tab1" forceMount><span>Hidden</span></TabPanel>
     )
     expect(screen.getByText('Hidden')).toBeInTheDocument()
-    expect(container.querySelector('[role="tabpanel"]')).toBeInTheDocument()
+    expect(screen.getByRole('tabpanel')).toBeInTheDocument()
   })
 
   it('wires ARIA ids when tabsId prop is provided', () => {

@@ -70,7 +70,7 @@ def test_import_upload_small_succeeds(
 
 
 async def test_import_upload_oversize_rejected_early(
-    tmp_library: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_library: Path, monkeypatch: pytest.MonkeyPatch, patch_config_root
 ) -> None:
     """Oversize body must be rejected before the handler drains it.
 
@@ -80,7 +80,6 @@ async def test_import_upload_oversize_rejected_early(
     short of the 100 reads the body would require if it were drained.
     """
     from mbforge.api.http.documents import library as library_router
-    from mbforge.foundation import config
     from mbforge.service.use_cases.documents import library as library_service
 
     # Lower the upload cap for this test.
@@ -89,18 +88,7 @@ async def test_import_upload_oversize_rejected_early(
     # The route resolves the active library root through ``config.load_global_config``;
     # patch it the same way the ``app_client`` fixture does so the import lands
     # in our temp library regardless of how we invoke the handler.
-    original_load = config.load_global_config
-
-    class _PatchedLoad:
-        def __call__(self):
-            cfg = original_load()
-            cfg.library_root = str(tmp_library)
-            return cfg
-
-        def cache_clear(self):
-            original_load.cache_clear()
-
-    monkeypatch.setattr(config, "load_global_config", _PatchedLoad())
+    patch_config_root(tmp_library)
     tmp_dir = _patch_upload_tmpfile(monkeypatch, tmp_library)
 
     class CountingBody:

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import importlib
 import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from mbforge.db.sqlite.repositories import create_repositories
 from mbforge.foundation import config as app_config
+from mbforge.foundation.config import AppConfig
 from mbforge.server.runtime_provider import create_runtime_provider
 from mbforge.service.pipeline.runtime import create_pipeline_runtime
 from mbforge.service.ports import (
@@ -45,6 +48,57 @@ tempfile.tempdir = str(_TMP_ROOT)
 configure_repository_factory(create_repositories)
 configure_runtime_provider(create_runtime_provider())
 configure_pipeline_runtime(create_pipeline_runtime())
+
+
+def _install_config_patch(
+    monkeypatch: pytest.MonkeyPatch,
+    mutate: Callable[[AppConfig], None],
+) -> None:
+    """Point ``load_global_config`` at a mutated, isolated copy.
+
+    ``load_global_config`` is ``lru_cache``d and hands out a *mutable*
+    ``AppConfig``. A test that edits that shared instance in place (setting
+    ``library_root``, flipping ``ingest.auto_enqueue_on_import`` …) would leak
+    into every later test. The replacement accessor therefore deep-copies the
+    real config before mutating it, so edits stay local. It also forwards
+    ``cache_clear`` to the real accessor for callers that pre-clear the cache.
+    """
+    original = app_config.load_global_config
+
+    class _PatchedLoad:
+        def __call__(self) -> AppConfig:
+            cfg = original().model_copy(deep=True)
+            mutate(cfg)
+            return cfg
+
+        def cache_clear(self) -> None:
+            original.cache_clear()
+
+    monkeypatch.setattr(app_config, "load_global_config", _PatchedLoad())
+
+
+@pytest.fixture
+def patch_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[Callable[[AppConfig], None]], None]:
+    """Return a helper that points ``load_global_config`` at a mutated copy."""
+
+    def _patch(mutate: Callable[[AppConfig], None]) -> None:
+        _install_config_patch(monkeypatch, mutate)
+
+    return _patch
+
+
+@pytest.fixture
+def patch_config_root(
+    patch_config: Callable[[Callable[[AppConfig], None]], None],
+) -> Callable[[str | Path], None]:
+    """Return a helper that pins ``load_global_config``'s ``library_root``."""
+
+    def _patch(root: str | Path) -> None:
+        patch_config(lambda cfg: setattr(cfg, "library_root", str(root)))
+
+    return _patch
 
 
 @pytest.fixture
@@ -116,9 +170,12 @@ def sample_pdf(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def app_client(tmp_library: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def app_client(
+    tmp_library: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    patch_config_root: Callable[[str | Path], None],
+) -> TestClient:
     """FastAPI TestClient with global config pointing to a temp library."""
-    from mbforge.foundation import config
     from mbforge.server.app import app
     from mbforge.server.ingest import worker
 
@@ -127,32 +184,54 @@ def app_client(tmp_library: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     # tests (tests/unit/core/test_queue_worker.py).
     monkeypatch.setattr(worker, "ensure_queue_worker", lambda _root: True)
 
-    original_load = config.load_global_config
-
-    class _PatchedLoad:
-        def __call__(self):
-            cfg = original_load()
-            cfg.library_root = str(tmp_library)
-            return cfg
-
-        def cache_clear(self):
-            original_load.cache_clear()
-
-    patched = _PatchedLoad()
-
     # Routers that imported ``load_global_config`` directly must be patched
     # in their own module namespace; patching ``config.load_global_config``
     # only affects runtime lookups inside ``mbforge.foundation.config``.
-    monkeypatch.setattr(config, "load_global_config", patched)
+    patch_config_root(tmp_library)
     return TestClient(app)
+
+
+#: ``(module, reset callable)`` pairs for every process-wide model singleton.
+#: A test that loads a model (or leaves one half-loaded after a mocked failure)
+#: must not let it leak into the next test; each ``unload``/``_clear_engines``
+#: drops the cached instance. Modules without a reset path are omitted.
+_MODEL_SINGLETON_RESETS: tuple[tuple[str, str], ...] = (
+    ("mbforge.foundation.inference.moldet_v2_ft", "unload"),
+    ("mbforge.foundation.inference.hiro_layout", "unload"),
+    ("mbforge.foundation.inference.molparser", "unload"),
+    ("mbforge.foundation.inference.table_slanet", "unload"),
+    ("mbforge.foundation.inference.ocr.label_reader", "unload"),
+    ("mbforge.foundation.inference.ocr.crop_labels", "_clear_engines"),
+    ("mbforge.foundation.inference.ocr.page_text", "_clear_engines"),
+    ("mbforge.foundation.inference.ocr.daemon_client", "unload_daemon"),
+)
+
+
+def _reset_model_singletons() -> None:
+    """Drop every process-wide model/OCR singleton that exposes a reset path."""
+    for module_name, reset_name in _MODEL_SINGLETON_RESETS:
+        try:
+            module = importlib.import_module(module_name)
+            reset = getattr(module, reset_name)
+        except (ImportError, AttributeError):  # pragma: no cover — defensive
+            continue
+        with contextlib.suppress(Exception):  # best-effort isolation only
+            reset()
 
 
 @pytest.fixture(autouse=True)
 def _clear_singleton_caches() -> None:
-    """Clear module-level singleton caches after every test for isolation."""
+    """Reset process-wide caches/singletons after every test for isolation."""
     yield
     from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.foundation.config import load_global_config
+    from mbforge.foundation.docking import get_docking_engine
     from mbforge.service.use_cases.documents.library import LibraryStore
 
     DatabaseManager.get.cache_clear()
     LibraryStore.get.cache_clear()
+    # ``load_global_config`` returns a mutable object; clearing its cache
+    # after every test guarantees a copy mutated in place cannot survive.
+    load_global_config.cache_clear()
+    get_docking_engine.cache_clear()
+    _reset_model_singletons()

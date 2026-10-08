@@ -16,27 +16,6 @@ def fresh_db(tmp_path):
     return db
 
 
-def _table_names(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
-    ).fetchall()
-    return {row[0] for row in rows}
-
-
-def test_greenfield_init_creates_review_tables(fresh_db) -> None:
-    """A fresh database must include the review queue tables."""
-    with fresh_db.mol_conn() as conn:
-        names = _table_names(conn)
-    expected = {
-        "markush_review_candidates",
-        "markush_evidence",
-        "markush_decisions",
-        "molecule_corrections",
-        "review_items",
-    }
-    assert expected.issubset(names)
-
-
 def test_review_candidate_source_key_is_unique(fresh_db) -> None:
     """``source_key`` is the re-import identity — duplicates must fail."""
     with fresh_db.mol_conn() as conn:

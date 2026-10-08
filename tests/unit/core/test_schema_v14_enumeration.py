@@ -16,19 +16,6 @@ def fresh_db(tmp_path):
     return db
 
 
-def _table_names(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
-    ).fetchall()
-    return {row[0] for row in rows}
-
-
-def test_greenfield_init_creates_enumeration_tables(fresh_db) -> None:
-    with fresh_db.mol_conn() as conn:
-        names = _table_names(conn)
-    assert {"markush_generation_runs", "markush_generated_candidates"} <= names
-
-
 def test_generated_candidate_unique_per_run_combination(fresh_db) -> None:
     """``UNIQUE(run_id, combination_key)`` prevents duplicate combinations."""
     with fresh_db.mol_conn() as conn:

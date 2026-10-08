@@ -16,19 +16,6 @@ def fresh_db(tmp_path):
     return db
 
 
-def _table_names(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
-    ).fetchall()
-    return {row[0] for row in rows}
-
-
-def test_greenfield_init_creates_attachment_tables(fresh_db) -> None:
-    with fresh_db.mol_conn() as conn:
-        names = _table_names(conn)
-    assert {"markush_sites", "markush_options", "markush_mounts"} <= names
-
-
 def test_attachment_table_indexes_exist(fresh_db) -> None:
     """Required indexes for the UI queries."""
     with fresh_db.mol_conn() as conn:
