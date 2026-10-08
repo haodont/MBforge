@@ -11,10 +11,10 @@
 
 import { useCallback, useState } from 'react'
 import {
-  extractPdfMolecules,
-  savePageDetections,
-  clearDetectionCacheForDoc,
-} from '@/api/http/detection_cache'
+  useClearDetectionCacheForDoc,
+  useExtractPdfMolecules,
+  useSavePageDetections,
+} from '@/api/query/hooks'
 import { showToast } from '@/hooks/useToast'
 import { getUserFacingError } from '@/utils/errors'
 import type { DocumentEntry, ExtractionResult } from '@/types'
@@ -56,6 +56,12 @@ export function usePdfOcr(args: UsePdfOcrArgs): UsePdfOcrResult {
   const [showOcrPanel, setShowOcrPanel] = useState(initialShowOcrPanel ?? false)
   const [selectedOcrIndex, setSelectedOcrIndex] = useState<number | null>(null)
 
+  // Recognition / cache flows talk to the backend through the query layer;
+  // the stable ``mutateAsync`` functions keep the callbacks stable.
+  const { mutateAsync: extractPageDetections } = useExtractPdfMolecules()
+  const { mutateAsync: persistPageDetections } = useSavePageDetections()
+  const { mutateAsync: clearDetectionCache } = useClearDetectionCacheForDoc()
+
   const handleRecognizePage = useCallback(async () => {
     if (!currentPageDataUrl || !pageInfo) {
       showToast('页面尚未渲染完成，请稍候', 'info')
@@ -64,7 +70,7 @@ export function usePdfOcr(args: UsePdfOcrArgs): UsePdfOcrResult {
     setIsDetecting(true)
     setSelectedDetection(null)
     try {
-      const results = await extractPdfMolecules({
+      const results = await extractPageDetections({
         libraryRoot,
         docId: doc.doc_id,
         page: currentPage,
@@ -72,7 +78,12 @@ export function usePdfOcr(args: UsePdfOcrArgs): UsePdfOcrResult {
       const enriched = enrichResults(results, currentPage)
       try {
         // 存 0-based 页码，与 pipeline persist 写入的行同语义。
-        await savePageDetections(libraryRoot, doc.doc_id, currentPage - 1, enriched)
+        await persistPageDetections({
+          libraryRoot,
+          docId: doc.doc_id,
+          page: currentPage - 1,
+          results: enriched,
+        })
       } catch (saveError) {
         console.warn('[PdfViewer] Failed to save recognized detections:', saveError)
       }
@@ -85,13 +96,13 @@ export function usePdfOcr(args: UsePdfOcrArgs): UsePdfOcrResult {
       console.error('Recognition failed:', e)
       showToast('识别失败: ' + getUserFacingError(e), 'error')
     } finally { setIsDetecting(false) }
-  }, [currentPageDataUrl, pageInfo, currentPage, libraryRoot, doc.doc_id, enrichResults, setIsDetecting, setPageDetections, setSelectedDetection])
+  }, [currentPageDataUrl, pageInfo, currentPage, libraryRoot, doc.doc_id, enrichResults, setIsDetecting, setPageDetections, setSelectedDetection, extractPageDetections, persistPageDetections])
 
   const handleClearDetectionCache = useCallback(async () => {
     if (!libraryRoot) return
     setIsDetecting(true)
     try {
-      await clearDetectionCacheForDoc(libraryRoot, doc.doc_id)
+      await clearDetectionCache({ libraryRoot, docId: doc.doc_id })
       setPageDetections(new Map())
       setSelectedDetection(null)
       showToast('分子识别缓存已清除', 'success')
@@ -99,7 +110,7 @@ export function usePdfOcr(args: UsePdfOcrArgs): UsePdfOcrResult {
       console.error('Failed to clear detection cache:', e)
       showToast('清除缓存失败: ' + getUserFacingError(e), 'error')
     } finally { setIsDetecting(false) }
-  }, [libraryRoot, doc.doc_id, setIsDetecting, setPageDetections, setSelectedDetection])
+  }, [libraryRoot, doc.doc_id, setIsDetecting, setPageDetections, setSelectedDetection, clearDetectionCache])
 
   return {
     showOcrPanel, setShowOcrPanel,

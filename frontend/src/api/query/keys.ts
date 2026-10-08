@@ -34,6 +34,12 @@ export const queryKeys = {
       [...queryKeys.ingest.all, 'worker-status'] as const,
   },
 
+  pdf: {
+    all: ['pdf'] as const,
+    overlay: (libraryRoot: string, docId: string, path: string) =>
+      [...queryKeys.pdf.all, 'overlay', libraryRoot, docId, path] as const,
+  },
+
   molecules: {
     all: ['molecules'] as const,
     list: (libraryRoot: string) =>

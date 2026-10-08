@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { StrictMode } from 'react'
+import { StrictMode, createElement, type ReactNode } from 'react'
 import { renderHook, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ExtractionResult } from '@/types'
+import { createQueryClient } from '@/api/query/client'
 
 vi.mock('@/api/http/pdf', () => ({
   getDocumentOverlay: vi.fn(),
@@ -51,6 +53,14 @@ const block: OcrBlock = {
 
 const mockedOverlay = vi.mocked(getDocumentOverlay)
 
+/** A stable provider wrapper for an existing client; optionally under StrictMode. */
+function makeWrapper(client: QueryClient, strict = false) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    const provider = createElement(QueryClientProvider, { client }, children)
+    return strict ? createElement(StrictMode, null, provider) : provider
+  }
+}
+
 describe('usePdfOverlay — one request per document', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -67,15 +77,17 @@ describe('usePdfOverlay — one request per document', () => {
 
   it('primes blocks and every page bbox from a single request', async () => {
     const onLoaded = vi.fn()
-    const { rerender } = renderHook(() =>
-      usePdfOverlay({
-        doc,
-        libraryRoot: '/lib',
-        absDocPath: '/lib/a.pdf',
-        skip: false,
-        enrichResults: enrich,
-        onLoaded,
-      }),
+    const { rerender } = renderHook(
+      () =>
+        usePdfOverlay({
+          doc,
+          libraryRoot: '/lib',
+          absDocPath: '/lib/a.pdf',
+          skip: false,
+          enrichResults: enrich,
+          onLoaded,
+        }),
+      { wrapper: makeWrapper(createQueryClient()) },
     )
 
     await waitFor(() => expect(mockedOverlay).toHaveBeenCalledTimes(1))
@@ -109,7 +121,7 @@ describe('usePdfOverlay — one request per document', () => {
           enrichResults: enrich,
           onLoaded,
         }),
-      { wrapper: StrictMode },
+      { wrapper: makeWrapper(createQueryClient(), true) },
     )
 
     // The request fires once; the second (StrictMode) setup must not swallow
@@ -124,30 +136,34 @@ describe('usePdfOverlay — one request per document', () => {
   })
 
   it('skips the request when a warm snapshot already holds the overlay', () => {
-    renderHook(() =>
-      usePdfOverlay({
-        doc,
-        libraryRoot: '/lib',
-        absDocPath: '/lib/a.pdf',
-        skip: true,
-        enrichResults: enrich,
-        onLoaded: vi.fn(),
-      }),
+    renderHook(
+      () =>
+        usePdfOverlay({
+          doc,
+          libraryRoot: '/lib',
+          absDocPath: '/lib/a.pdf',
+          skip: true,
+          enrichResults: enrich,
+          onLoaded: vi.fn(),
+        }),
+      { wrapper: makeWrapper(createQueryClient()) },
     )
 
     expect(mockedOverlay).not.toHaveBeenCalled()
   })
 
   it('does not fetch without a library root', () => {
-    renderHook(() =>
-      usePdfOverlay({
-        doc,
-        libraryRoot: '',
-        absDocPath: '/lib/a.pdf',
-        skip: false,
-        enrichResults: enrich,
-        onLoaded: vi.fn(),
-      }),
+    renderHook(
+      () =>
+        usePdfOverlay({
+          doc,
+          libraryRoot: '',
+          absDocPath: '/lib/a.pdf',
+          skip: false,
+          enrichResults: enrich,
+          onLoaded: vi.fn(),
+        }),
+      { wrapper: makeWrapper(createQueryClient()) },
     )
 
     expect(mockedOverlay).not.toHaveBeenCalled()

@@ -9,8 +9,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { extractPdfMolecules, savePageDetections } from '@/api/http/detection_cache'
-import { updateMoleculeEvidence } from '@/api/http/library'
+import {
+  useExtractPdfMolecules,
+  useSavePageDetections,
+  useUpdateMoleculeEvidence,
+} from '@/api/query/hooks'
 import { showToast } from '@/hooks/useToast'
 import { getUserFacingError } from '@/utils/errors'
 import type { DocumentEntry, ExtractionResult } from '@/types'
@@ -63,6 +66,13 @@ export function usePdfDetections(args: UsePdfDetectionsArgs): UsePdfDetectionsRe
     viewerSnapshots.get(viewerKey)?.selectedDetection ?? null,
   )
 
+  // Detection/recognition flows talk to the backend through the query layer;
+  // the stable ``mutateAsync`` functions keep the callbacks below referentially
+  // stable across renders.
+  const { mutateAsync: extractPageDetections } = useExtractPdfMolecules()
+  const { mutateAsync: persistPageDetections } = useSavePageDetections()
+  const { mutateAsync: saveMoleculeEvidence } = useUpdateMoleculeEvidence()
+
   // 本会话内真正点过"识别"的页。流水线检测缓存已有行的页面不能算"已检测"，
   // 否则实时识别按钮会被误短路（覆盖层读源与写入 molecule_detections 解耦）。
   const interactivelyDetectedPages = useRef(new Set<number>())
@@ -111,7 +121,7 @@ export function usePdfDetections(args: UsePdfDetectionsArgs): UsePdfDetectionsRe
     setIsDetecting(true)
     setSelectedDetection(null)
     try {
-      const results = await extractPdfMolecules({
+      const results = await extractPageDetections({
         libraryRoot,
         docId: doc.doc_id,
         page: currentPage,
@@ -130,7 +140,12 @@ export function usePdfDetections(args: UsePdfDetectionsArgs): UsePdfDetectionsRe
       const enriched = enrichResults(validatedResults, currentPage)
       try {
         // 存 0-based 页码，与 pipeline persist 写入的行同语义。
-        await savePageDetections(libraryRoot, doc.doc_id, currentPage - 1, enriched)
+        await persistPageDetections({
+          libraryRoot,
+          docId: doc.doc_id,
+          page: currentPage - 1,
+          results: enriched,
+        })
       } catch (saveError) {
         console.warn('[PdfViewer] Failed to save detections:', saveError)
       }
@@ -144,7 +159,7 @@ export function usePdfDetections(args: UsePdfDetectionsArgs): UsePdfDetectionsRe
       console.error('Detection failed:', e)
       showToast('检测失败: ' + getUserFacingError(e), 'error')
     } finally { setIsDetecting(false) }
-  }, [currentPageDataUrl, pageInfo, currentPage, libraryRoot, doc.doc_id, enrichResults, setPageDetections, setSelectedDetection])
+  }, [currentPageDataUrl, pageInfo, currentPage, libraryRoot, doc.doc_id, enrichResults, setPageDetections, setSelectedDetection, extractPageDetections, persistPageDetections])
 
   const handleSaveMolecule = useCallback(async (newSmiles: string, newName?: string) => {
     if (selectedDetection === null) return
@@ -162,9 +177,19 @@ export function usePdfDetections(args: UsePdfDetectionsArgs): UsePdfDetectionsRe
     }
     try {
       if (current.evidence_id) {
-        await updateMoleculeEvidence(doc.doc_id, current.evidence_id, name, newSmiles)
+        await saveMoleculeEvidence({
+          docId: doc.doc_id,
+          evidenceId: current.evidence_id,
+          name,
+          smiles: newSmiles,
+        })
       }
-      await savePageDetections(libraryRoot, doc.doc_id, currentPage - 1, updated)
+      await persistPageDetections({
+        libraryRoot,
+        docId: doc.doc_id,
+        page: currentPage - 1,
+        results: updated,
+      })
     } catch (e) {
       showToast('分子保存失败: ' + getUserFacingError(e), 'error')
       throw e
@@ -175,7 +200,7 @@ export function usePdfDetections(args: UsePdfDetectionsArgs): UsePdfDetectionsRe
       return next
     })
     showToast('分子结构和标签已更新', 'success')
-  }, [currentPage, doc.doc_id, libraryRoot, pageDetections, selectedDetection, setPageDetections])
+  }, [currentPage, doc.doc_id, libraryRoot, pageDetections, selectedDetection, setPageDetections, persistPageDetections, saveMoleculeEvidence])
 
   return {
     pageDetections, setPageDetections,

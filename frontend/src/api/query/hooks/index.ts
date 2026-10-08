@@ -1,6 +1,12 @@
 /** Barrel file — re-export all React Query hooks. */
 
-export { useLibraryStatus } from './useLibraryStatus'
+export { useLibraryStatus, useConfigureLibrary } from './useLibraryStatus'
+export { useDocumentOverlay } from './useDocumentOverlay'
+export {
+  useExtractPdfMolecules,
+  useSavePageDetections,
+  useClearDetectionCacheForDoc,
+} from './usePdfDetection'
 export {
   useDocuments,
   useImportDocument,

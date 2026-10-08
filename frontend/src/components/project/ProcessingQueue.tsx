@@ -15,14 +15,11 @@ import { WorkerStatusBadge } from './WorkerStatusBadge'
 import { StatPill } from './StatPill'
 import { TaskRow } from './TaskRow'
 import { getUserFacingError } from '@/utils/errors'
-import {
-  ingestGetLogs,
-  type IngestLogEvent,
-  type IngestTask,
-} from '@/api/http/ingest_queue'
+import type { IngestLogEvent, IngestTask } from '@/api/http/ingest_queue'
 import {
   useIngestQueue,
   useIngestStats,
+  useIngestLogs,
   useWorkerStatus,
   useCancelTask,
   useRetryTask,
@@ -50,7 +47,6 @@ const STATUS_RANK: Record<StatusKey, number> = {
   done: 4,
 }
 
-const LOG_FETCH_LIMIT = 200
 const LOGS_PER_DOC_CAP = 200
 const MAX_LOG_DOCS = 50
 // Stable identity so memoized rows without logs skip re-renders.
@@ -115,39 +111,38 @@ export default function ProcessingQueue() {
   ], [t])
 
   // ── Log fetching ──────────────────────────────────────────────
-  const fetchLogsForDoc = useCallback(
-    async (docId: string) => {
-      try {
-        const records = await ingestGetLogs(libraryRoot, docId, LOG_FETCH_LIMIT)
-        if (records.length === 0) return
-        setLogMap((prev) => {
-          const list = prev.get(docId) ?? []
-          const seen = new Set(list.map((e) => `${e.ts_ms}::${e.message}`))
-          const merged = [...list]
-          for (const r of records) {
-            const key = `${r.ts_ms}::${r.message}`
-            if (!seen.has(key)) {
-              seen.add(key)
-              merged.push(r)
-            }
+  // The records themselves come from the `useIngestLogs` query hook (one
+  // `IngestLogsBridge` per expanded document, rendered below). This merge keeps
+  // the historical append/dedupe/cap semantics: repeated fetches for one doc
+  // accumulate, then sort and cap at LOGS_PER_DOC_CAP.
+  const mergeLogsForDoc = useCallback(
+    (docId: string, records: IngestLogEvent[]) => {
+      if (records.length === 0) return
+      setLogMap((prev) => {
+        const list = prev.get(docId) ?? []
+        const seen = new Set(list.map((e) => `${e.ts_ms}::${e.message}`))
+        const merged = [...list]
+        for (const r of records) {
+          const key = `${r.ts_ms}::${r.message}`
+          if (!seen.has(key)) {
+            seen.add(key)
+            merged.push(r)
           }
-          merged.sort((a, b) => a.ts_ms - b.ts_ms)
-          const trimmed = merged.length > LOGS_PER_DOC_CAP ? merged.slice(-LOGS_PER_DOC_CAP) : merged
-          const next = new Map(prev)
-          next.set(docId, trimmed)
-          // Bound the total number of docs we keep logs for.
-          while (next.size > MAX_LOG_DOCS) {
-            const first = next.keys().next().value
-            if (first === undefined) break
-            next.delete(first)
-          }
-          return next
-        })
-      } catch (e) {
-        logger.error('[ProcessingQueue] fetchLogsForDoc failed:', e)
-      }
+        }
+        merged.sort((a, b) => a.ts_ms - b.ts_ms)
+        const trimmed = merged.length > LOGS_PER_DOC_CAP ? merged.slice(-LOGS_PER_DOC_CAP) : merged
+        const next = new Map(prev)
+        next.set(docId, trimmed)
+        // Bound the total number of docs we keep logs for.
+        while (next.size > MAX_LOG_DOCS) {
+          const first = next.keys().next().value
+          if (first === undefined) break
+          next.delete(first)
+        }
+        return next
+      })
     },
-    [libraryRoot],
+    [],
   )
 
   // Prune logMap when tasks change so we don't retain logs for removed docs.
@@ -310,9 +305,8 @@ export default function ProcessingQueue() {
         else next.add(docId)
         return next
       })
-      void fetchLogsForDoc(docId)
     },
-    [fetchLogsForDoc],
+    [],
   )
 
   // ── Filter + sort ─────────────────────────────────────────────
@@ -481,6 +475,17 @@ export default function ProcessingQueue() {
 
         </>}
 
+        {/* ----- Log sources ----- */}
+        {/* One query-backed bridge per expanded document feeds the merge map. */}
+        {[...expandedLogDocs].map((docId) => (
+          <IngestLogsBridge
+            key={docId}
+            libraryRoot={libraryRoot}
+            docId={docId}
+            onRecords={mergeLogsForDoc}
+          />
+        ))}
+
         {/* ----- Task list ----- */}
         {visibleTasks.length === 0 ? (
           <EmptyState
@@ -545,6 +550,30 @@ function isPreferredTask(candidate: IngestTask, current: IngestTask): boolean {
   if (statusRank !== 0) return statusRank < 0
   if (candidate.updated_at !== current.updated_at) return candidate.updated_at > current.updated_at
   return candidate.created_at > current.created_at
+}
+
+/**
+ * Headless bridge that fetches one expanded document's logs through the
+ * `useIngestLogs` query hook and streams them into the parent's merge map.
+ * Mounting it is equivalent to the old on-demand fetch; unmounting (collapse)
+ * simply stops observing.
+ */
+function IngestLogsBridge({
+  libraryRoot,
+  docId,
+  onRecords,
+}: {
+  libraryRoot: string
+  docId: string
+  onRecords: (docId: string, records: IngestLogEvent[]) => void
+}) {
+  const { data } = useIngestLogs(libraryRoot, docId)
+
+  useEffect(() => {
+    if (data) onRecords(docId, data)
+  }, [data, docId, onRecords])
+
+  return null
 }
 
 interface QueueTaskListProps {

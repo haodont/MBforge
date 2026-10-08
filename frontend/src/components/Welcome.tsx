@@ -8,13 +8,14 @@ import { fadeIn, logoEntrance } from '@/hooks/useAnimations'
 import Button from '@/components/ui/Button'
 import PageTitle from '@/components/ui/PageTitle'
 import BodyText from '@/components/ui/BodyText'
-import { configureLibrary } from '@/api/http/library'
+import { useConfigureLibrary } from '@/api/query/hooks'
 import { useAppContext } from '@/context/AppContext'
 import { getUserFacingError } from '@/utils/errors'
 
 export default function Welcome() {
   const { t } = useTranslation()
   const { setLibraryRoot } = useAppContext()
+  const configureLibrary = useConfigureLibrary()
   const [dir, setDir] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -22,7 +23,7 @@ export default function Welcome() {
     if (!dir.trim()) return
     setLoading(true)
     try {
-      const resp = await configureLibrary(dir.trim())
+      const resp = await configureLibrary.mutateAsync(dir.trim())
       if (resp.success && resp.root) {
         setLibraryRoot(resp.root)
       } else {

@@ -4,6 +4,7 @@ import { render, screen, waitFor, act } from '@testing-library/react'
 vi.mock('@/api/query/hooks', () => ({
   useIngestQueue: vi.fn(),
   useIngestStats: vi.fn(),
+  useIngestLogs: vi.fn(),
   useWorkerStatus: vi.fn(),
   useCancelTask: vi.fn(),
   useRetryTask: vi.fn(),
@@ -37,17 +38,10 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-vi.mock('@/api/http/ingest_queue', async () => {
-  const actual = await vi.importActual<typeof import('@/api/http/ingest_queue')>('@/api/http/ingest_queue')
-  return {
-    ...actual,
-    ingestGetLogs: vi.fn().mockResolvedValue([]),
-  }
-})
-
 import {
   useIngestQueue,
   useIngestStats,
+  useIngestLogs,
   useWorkerStatus,
   useCancelTask,
   useRetryTask,
@@ -56,7 +50,6 @@ import {
   useRetryBatch,
   useSetTaskPriority,
 } from '@/api/query/hooks'
-import { ingestGetLogs } from '@/api/http/ingest_queue'
 import ProcessingQueue from '../ProcessingQueue'
 
 function mockMutationHooks() {
@@ -118,6 +111,9 @@ describe('ProcessingQueue', () => {
     vi.mocked(useWorkerStatus).mockReturnValue({
       data: undefined,
     } as unknown as ReturnType<typeof useWorkerStatus>)
+    vi.mocked(useIngestLogs).mockReturnValue({
+      data: undefined,
+    } as unknown as ReturnType<typeof useIngestLogs>)
   })
 
   it('shows loading state', () => {
@@ -157,21 +153,23 @@ describe('ProcessingQueue', () => {
       { id: 't2', status: 'pending', doc_id: 'doc2' },
     ])
     render(<ProcessingQueue />)
-    expect(ingestGetLogs).not.toHaveBeenCalled()
+    expect(useIngestLogs).not.toHaveBeenCalled()
   })
 
-  it('fetches logs on demand when a task row toggles logs', async () => {
-    const mockGetLogs = vi.mocked(ingestGetLogs)
-    mockGetLogs.mockResolvedValue([
-      { doc_id: 'doc1', stage: 'moldet', level: 'info', message: 'hello', ts_ms: 1_000 },
-    ])
+  it('fetches logs on demand through the query hook when a task row toggles logs', async () => {
+    vi.mocked(useIngestLogs).mockReturnValue({
+      data: [
+        { doc_id: 'doc1', stage: 'moldet', level: 'info', message: 'hello', ts_ms: 1_000 },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useIngestLogs>)
     mockQueue([
       { id: 't1', status: 'processing', doc_id: 'doc1' },
     ])
     render(<ProcessingQueue />)
     const toggle = screen.getByText('queue.showLogs')
     act(() => toggle.click())
-    await waitFor(() => expect(mockGetLogs).toHaveBeenCalledWith('/tmp/lib', 'doc1', 200))
+    await waitFor(() => expect(useIngestLogs).toHaveBeenCalledWith('/tmp/lib', 'doc1'))
   })
 
   it('explains the pause and names the models still downloading', () => {
