@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import { SectionTitle, Card, EmptyState, AlertBanner, Button } from '../ui'
-import { molFindActivityCliffs, molScaffoldProfile } from '@/api/http/molecule'
-import type { ActivityCliff, ScaffoldProfile } from '@/api/http/molecule'
+import { useActivityCliffs, useScaffoldProfile } from '@/api/query/hooks'
+import type { ActivityCliff } from '@/api/http/molecule'
 import type { SARSession } from '@/types'
 import { getUserFacingError } from '@/utils/errors'
 
@@ -16,10 +16,6 @@ interface CliffsTabProps {
 export default function CliffsTab({ session, libraryRoot }: CliffsTabProps) {
   const [minSim, setMinSim] = useState(DEFAULT_MIN_SIMILARITY)
   const [minRatio, setMinRatio] = useState(DEFAULT_MIN_RATIO)
-  const [cliffs, setCliffs] = useState<ActivityCliff[] | null>(null)
-  const [profile, setProfile] = useState<ScaffoldProfile | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const inferredScaffold = useMemo(() => {
     const smilesList = session.compounds.map(c => c.esmiles).filter(Boolean)
@@ -39,36 +35,22 @@ export default function CliffsTab({ session, libraryRoot }: CliffsTabProps) {
     return best ? best[0] : null
   }, [session.compounds])
 
-  const run = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      if (!libraryRoot) {
-        setError('项目未打开')
-        return
-      }
-      const cliffResults = await molFindActivityCliffs(libraryRoot, minSim, minRatio)
-      setCliffs(cliffResults)
-      if (inferredScaffold) {
-        try {
-          const p = await molScaffoldProfile(libraryRoot, inferredScaffold)
-          setProfile(p)
-        } catch {
-          setProfile(null)
-        }
-      } else {
-        setProfile(null)
-      }
-    } catch (e) {
-      setError(getUserFacingError(e, '加载 activity cliffs 失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [minSim, minRatio, inferredScaffold, libraryRoot])
+  const cliffsQuery = useActivityCliffs(libraryRoot, minSim, minRatio)
+  const profileQuery = useScaffoldProfile(libraryRoot, inferredScaffold)
 
-  useEffect(() => {
-    void run()
-  }, [run])
+  const cliffs = cliffsQuery.data ?? null
+  const profile = profileQuery.data ?? null
+  const loading = cliffsQuery.isFetching || profileQuery.isFetching
+  const error = !libraryRoot
+    ? '项目未打开'
+    : cliffsQuery.error
+      ? getUserFacingError(cliffsQuery.error, '加载 activity cliffs 失败')
+      : null
+
+  const run = () => {
+    void cliffsQuery.refetch()
+    if (inferredScaffold) void profileQuery.refetch()
+  }
 
   return (
     <div>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import ChatMarkdown from './chat/ChatMarkdown'
-import { getSettings } from '@/api/http/settings'
+import { useSettings } from '@/api/query/hooks'
 import { streamAgentChat, type AgentChatEvent, type AgentLlmConfig } from '@/api/http/agent'
 import {
   BeakerIcon,
@@ -54,22 +54,20 @@ export default function AgentChat() {
   const [error, setError] = useState<string>()
   const abortRef = useRef<AbortController | undefined>(undefined)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const { data: settings } = useSettings()
 
+  // Seed the config form from the persisted LLM settings once they load.
   useEffect(() => {
-    let cancelled = false
-    void getSettings().then((response) => {
-      if (cancelled || !response.settings?.llm) return
-      const llm = response.settings.llm
-      setConfig((current) => ({
-        ...current,
-        provider: llm.provider || current.provider,
-        model: llm.model || current.model,
-        base_url: llm.base_url || current.base_url,
-        api_key: llm.api_key && llm.api_key !== '***' ? llm.api_key : current.api_key,
-      }))
-    })
-    return () => { cancelled = true }
-  }, [])
+    const llm = settings?.settings?.llm
+    if (!llm) return
+    setConfig((current) => ({
+      ...current,
+      provider: llm.provider || current.provider,
+      model: llm.model || current.model,
+      base_url: llm.base_url || current.base_url,
+      api_key: llm.api_key && llm.api_key !== '***' ? llm.api_key : current.api_key,
+    }))
+  }, [settings])
 
   // Keep the newest message pinned to the bottom as the reply streams in.
   useEffect(() => {

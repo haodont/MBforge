@@ -129,4 +129,16 @@ export const queryKeys = {
     jobs: (status: string) => [...queryKeys.docking.all, 'jobs', status] as const,
     job: (jobId: string) => [...queryKeys.docking.all, 'job', jobId] as const,
   },
+
+  sar: {
+    all: ['sar'] as const,
+    cliffs: (libraryRoot: string, minSimilarity: number, minActivityRatio: number) =>
+      [...queryKeys.sar.all, 'cliffs', libraryRoot, minSimilarity, minActivityRatio] as const,
+    scaffoldProfile: (libraryRoot: string, scaffoldEsmiles: string) =>
+      [...queryKeys.sar.all, 'scaffold-profile', libraryRoot, scaffoldEsmiles] as const,
+    matrix: (compounds: readonly unknown[], coreSmiles: string) =>
+      [...queryKeys.sar.all, 'matrix', compounds, coreSmiles] as const,
+    heatmap: (matrix: unknown, lowerIsBetter: boolean) =>
+      [...queryKeys.sar.all, 'heatmap', matrix, lowerIsBetter] as const,
+  },
 } as const

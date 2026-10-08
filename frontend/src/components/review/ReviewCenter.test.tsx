@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({
   reviewClear: vi.fn(),
 }))
 vi.mock('@/api/http/review', () => api)
-vi.mock('@/api/http/molecule', () => ({ smilesToRdkitSvg: vi.fn().mockResolvedValue('<svg />') }))
+vi.mock('@/api/http/molecule_chem', () => ({ smilesToRdkitSvg: vi.fn().mockResolvedValue('<svg />') }))
 vi.mock('@/context/AppContext', () => ({
   useAppContext: () => ({ libraryRoot: '/library', openTab: vi.fn() }),
 }))

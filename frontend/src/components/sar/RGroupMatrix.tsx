@@ -1,11 +1,11 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { Card, EmptyState, Spinner } from '../ui'
 import type { SARCompound } from '@/types'
 import type {
   RGroupMatrix as RGroupMatrixData,
   ActivityHeatmapEntry,
 } from '@/api/http/sar'
-import { sarBuildMatrix, sarHeatmap } from '@/api/http/sar'
+import { useSarBuildMatrix, useSarHeatmap } from '@/api/query/hooks'
 import CoreScaffoldCard from './rgroup/CoreScaffoldCard'
 import MatrixTable from './rgroup/MatrixTable'
 import HeatmapPanel from './rgroup/HeatmapPanel'
@@ -47,83 +47,41 @@ export default function RGroupMatrixView({
   lowerIsBetter = true,
   onCompoundClick,
 }: RGroupMatrixProps) {
-  const [matrix, setMatrix] = useState<RGroupMatrixData | null>(null)
-  const [heatmaps, setHeatmaps] = useState<ActivityHeatmapEntry[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [showHeatmap, setShowHeatmap] = useState(true)
 
   // 后端 matrix 调用 (POST /api/v1/sar/build-matrix)
-  useEffect(() => {
-    if (compounds.length < 2) {
-      setMatrix(null)
-      setHeatmaps([])
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    sarBuildMatrix(
-      compounds.map(c => ({
-        id: c.id,
-        name: c.name,
-        smiles: c.esmiles,
-        activity: c.activity ?? undefined,
-        activity_type: c.activityType ?? undefined,
-        units: c.units ?? undefined,
-      })),
-      coreSmiles,
-    )
-      .then(resp => {
-        if (cancelled) return
-        // Backend may fail-closed with success:false while still returning shape.
-        if ((resp as { success?: boolean; error?: string }).success === false) {
-          setError(
-            (resp as { error?: string }).error
-              ?? 'SAR 分析尚未实现（实验性功能）',
-          )
-          setMatrix(null)
-          return
-        }
-        if (!resp.core_smiles) {
-          setError('未找到共同骨架')
-          setMatrix(null)
-          return
-        }
-        setMatrix(resp)
-      })
-      .catch((_: unknown) => {
-        if (cancelled) return
-        setError('请求失败（SAR 可能尚未实现）')
-        setMatrix(null)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [compounds, coreSmiles])
+  const matrixQuery = useSarBuildMatrix(
+    compounds.map(c => ({
+      id: c.id,
+      name: c.name,
+      smiles: c.esmiles,
+      activity: c.activity ?? undefined,
+      activity_type: c.activityType ?? undefined,
+      units: c.units ?? undefined,
+    })),
+    coreSmiles,
+  )
+  const matrixResult = matrixQuery.data
+  // Backend may fail-closed with success:false while still returning shape.
+  const matrix: RGroupMatrixData | null =
+    matrixResult && matrixResult.success !== false && matrixResult.core_smiles
+      ? matrixResult
+      : null
+  const loading = matrixQuery.isFetching
+  const error = matrixQuery.isError
+    ? '请求失败（SAR 可能尚未实现）'
+    : matrixResult && matrixResult.success === false
+      ? matrixResult.error ?? 'SAR 分析尚未实现（实验性功能）'
+      : matrixResult && !matrixResult.core_smiles
+        ? '未找到共同骨架'
+        : null
 
   // heatmap 调用 (POST /api/v1/sar/heatmap)
-  useEffect(() => {
-    if (!matrix) {
-      setHeatmaps([])
-      return
-    }
-    let cancelled = false
-    sarHeatmap(matrix, lowerIsBetter)
-      .then(resp => {
-        if (cancelled) return
-        setHeatmaps(resp)
-      })
-      .catch(() => {
-        // 热力图失败不阻塞矩阵展示
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [matrix, lowerIsBetter])
+  const heatmapQuery = useSarHeatmap(matrix, lowerIsBetter)
+  const heatmaps = useMemo<ActivityHeatmapEntry[]>(
+    () => heatmapQuery.data ?? [],
+    [heatmapQuery.data],
+  )
 
   // 热力图 pAct 范围（用于图例）
   const heatmapStats = useMemo(() => {

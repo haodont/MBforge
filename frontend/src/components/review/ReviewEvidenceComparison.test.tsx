@@ -1,9 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
+import type { ReactElement } from 'react'
+import { createQueryClient } from '@/api/query/client'
 import type { ReviewQueueItem } from '@/api/http/review'
 
 const api = vi.hoisted(() => ({ smilesToRdkitSvg: vi.fn() }))
-vi.mock('@/api/http/molecule', () => api)
+vi.mock('@/api/http/molecule_chem', () => api)
 
 import ReviewEvidenceComparison from './ReviewEvidenceComparison'
 
@@ -25,12 +28,17 @@ const item: ReviewQueueItem = {
   resolved_at: null,
 }
 
+function renderComparison(ui: ReactElement) {
+  const client = createQueryClient()
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
+
 describe('ReviewEvidenceComparison', () => {
   it('shows source-first evidence and opens its original PDF with the nullable bbox preserved', async () => {
     const onOpenPdf = vi.fn()
     api.smilesToRdkitSvg.mockResolvedValue('<svg><title>ethanol</title></svg>')
 
-    render(
+    renderComparison(
       <ReviewEvidenceComparison
         item={item}
         cropUrl="/api/crops/document-1/crop.png"
@@ -46,8 +54,8 @@ describe('ReviewEvidenceComparison', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开原文' }))
     expect(onOpenPdf).toHaveBeenCalledWith('document-1', 3, [12, 24, 48, 96])
 
-    await waitFor(() => expect(api.smilesToRdkitSvg).toHaveBeenCalledWith('CCO'))
-    expect(screen.getByRole('img', { name: 'RDKit 2D 结构图' })).toHaveAttribute(
+    await waitFor(() => expect(api.smilesToRdkitSvg).toHaveBeenCalledWith('CCO', 360, 240))
+    expect(await screen.findByRole('img', { name: 'RDKit 2D 结构图' })).toHaveAttribute(
       'src',
       expect.stringContaining('data:image/svg+xml;charset=utf-8,'),
     )
@@ -56,7 +64,7 @@ describe('ReviewEvidenceComparison', () => {
   it('states missing source crop and RDKit rendering failure explicitly', async () => {
     api.smilesToRdkitSvg.mockRejectedValue(new Error('render unavailable'))
 
-    render(
+    renderComparison(
       <ReviewEvidenceComparison
         item={{ ...item, doc_id: null, page: null, bbox: null }}
         cropUrl={null}

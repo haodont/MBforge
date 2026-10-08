@@ -1,8 +1,7 @@
 /** Center column: raw evidence + editable structure preview. */
 
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { smilesToRdkitSvg } from '@/api/http/molecule'
+import { useSmilesToRdkitSvg } from '@/api/query/hooks'
 import type { MarkushCandidateDetail } from '@/api/http/markush'
 import EmptyState from '../ui/EmptyState'
 import { ErrorState } from '../ui/ErrorState'
@@ -21,29 +20,13 @@ export default function MarkushEvidencePane({
   error,
 }: MarkushEvidencePaneProps) {
   const { t } = useTranslation()
-  const [rdkitSvg, setRdkitSvg] = useState<string | null>(null)
-  const [renderError, setRenderError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setRdkitSvg(null)
-    setRenderError(null)
-    if (!candidate?.smiles) {
-      return
-    }
-    smilesToRdkitSvg(candidate.smiles)
-      .then((svg) => {
-        if (!cancelled) setRdkitSvg(svg)
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) {
-          setRenderError(e instanceof Error ? e.message : t('markush.evidence.rdkitFailed', 'RDKit 无法渲染'))
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [candidate?.smiles, t])
+  const svgQuery = useSmilesToRdkitSvg(candidate?.smiles)
+  const rdkitSvg = svgQuery.data ?? null
+  const renderError = svgQuery.error
+    ? svgQuery.error instanceof Error
+      ? svgQuery.error.message
+      : t('markush.evidence.rdkitFailed', 'RDKit 无法渲染')
+    : null
 
   if (loading) {
     return (

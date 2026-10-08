@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import ChatMarkdown from '../chat/ChatMarkdown'
 import { showToast } from '@/hooks/useToast'
-import { getSettings } from '@/api/http/settings'
+import { useSettings } from '@/api/query/hooks'
 import { streamAgentChat, type AgentChatEvent, type AgentLlmConfig } from '@/api/http/agent'
 import { BotIcon, SendIcon, XIcon, UserIcon } from '@/components/icons'
 import { Button, TextArea } from '@/components/ui'
@@ -40,22 +40,20 @@ export default function DockingAgentPanel({ contextHint }: Props) {
   const [activity, setActivity] = useState('')
   const abortRef = useRef<AbortController | undefined>(undefined)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const { data: settings } = useSettings()
 
+  // Seed the config from the persisted LLM settings once they load.
   useEffect(() => {
-    let cancelled = false
-    void getSettings().then((response) => {
-      if (cancelled || !response.settings?.llm) return
-      const llm = response.settings.llm
-      setConfig((current) => ({
-        ...current,
-        provider: llm.provider || current.provider,
-        model: llm.model || current.model,
-        base_url: llm.base_url || current.base_url,
-        api_key: llm.api_key && llm.api_key !== '***' ? llm.api_key : current.api_key,
-      }))
-    })
-    return () => { cancelled = true }
-  }, [])
+    const llm = settings?.settings?.llm
+    if (!llm) return
+    setConfig((current) => ({
+      ...current,
+      provider: llm.provider || current.provider,
+      model: llm.model || current.model,
+      base_url: llm.base_url || current.base_url,
+      api_key: llm.api_key && llm.api_key !== '***' ? llm.api_key : current.api_key,
+    }))
+  }, [settings])
 
   useEffect(() => {
     const el = scrollRef.current

@@ -51,6 +51,12 @@ export { useReadinessProbeLlm, useReadinessDemoRun } from './useReadinessActions
 export { useConfigDir } from './useConfigDir'
 export { useLlmModels } from './useLlmModels'
 export {
+  useActivityCliffs,
+  useScaffoldProfile,
+  useSarBuildMatrix,
+  useSarHeatmap,
+} from './useSar'
+export {
   useMoleculePage,
   useMolecule,
   useMoleculesByLocation,

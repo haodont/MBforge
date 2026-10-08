@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
 import type { ReviewQueueItem } from '@/api/http/review'
-import { smilesToRdkitSvg } from '@/api/http/molecule'
+import { useSmilesToRdkitSvg } from '@/api/query/hooks'
 import Button from '@/components/ui/Button'
 
 interface ReviewEvidenceComparisonProps {
@@ -38,26 +37,13 @@ export default function ReviewEvidenceComparison({
   libraryRoot,
   onOpenPdf,
 }: ReviewEvidenceComparisonProps) {
-  const [rdkitSvg, setRdkitSvg] = useState<string | null>(null)
-  const [renderError, setRenderError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    setRdkitSvg(null)
-    setRenderError(null)
-    if (!item.smiles) return () => { cancelled = true }
-
-    smilesToRdkitSvg(item.smiles)
-      .then((svg) => {
-        if (!cancelled) setRdkitSvg(svg)
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setRenderError(error instanceof Error ? error.message : '未知错误')
-        }
-      })
-    return () => { cancelled = true }
-  }, [item.smiles])
+  const svgQuery = useSmilesToRdkitSvg(item.smiles)
+  const rdkitSvg = svgQuery.data ?? null
+  const renderError = svgQuery.error
+    ? svgQuery.error instanceof Error
+      ? svgQuery.error.message
+      : '未知错误'
+    : null
 
   const sourceLabel = item.doc_id
     ? `来源：${item.doc_id}${item.page != null ? ` · 第 ${item.page} 页` : ''}`

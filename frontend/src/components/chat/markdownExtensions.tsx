@@ -1,8 +1,8 @@
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy } from 'react'
 import type { ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import { isSmiles, smilesToImgUrl } from './chatUtils'
-import { smilesToRdkitSvg } from '@/api/http/molecule'
+import { useSmilesToRdkitSvg } from '@/api/query/hooks'
 import { openExternalUrl } from '@/api/http/_utils'
 
 const MermaidCode = lazy(() =>
@@ -22,24 +22,12 @@ function parseMoleCodeMetadata(code: string): { page: number | null; smiles: str
 }
 
 export function RdkitStructure({ smiles }: { smiles: string }) {
-  const [svg, setSvg] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const svgQuery = useSmilesToRdkitSvg(smiles, 420, 260)
+  const svg = svgQuery.data
+    ? DOMPurify.sanitize(svgQuery.data, { USE_PROFILES: { svg: true } })
+    : ''
 
-  useEffect(() => {
-    let cancelled = false
-    setSvg('')
-    setError(null)
-    void smilesToRdkitSvg(smiles, 420, 260)
-      .then(rawSvg => {
-        if (!cancelled) setSvg(DOMPurify.sanitize(rawSvg, { USE_PROFILES: { svg: true } }))
-      })
-      .catch((reason: unknown) => {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
-      })
-    return () => { cancelled = true }
-  }, [smiles])
-
-  if (error) return <pre className="molecode-fallback"><code>{smiles}</code></pre>
+  if (svgQuery.error) return <pre className="molecode-fallback"><code>{smiles}</code></pre>
   if (!svg) return <div className="molecode-loading">正在生成 RDKit 结构图…</div>
   return <div className="molecode-rdkit-svg" dangerouslySetInnerHTML={{ __html: svg }} />
 }
