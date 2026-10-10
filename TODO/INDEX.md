@@ -85,6 +85,13 @@ never import `server`.
 - The molecule↔evidence association is now persisted in `evidence.evidence_id`
   (pointing at the canonical `source_evidence` row); the legacy
   `text_molecule_links` table was dropped.
+- An activity with no molecule is not representable in SQL: `activities.mol_id`
+  is `NOT NULL` and nothing in `src/` inserts, `activity_match` review items have
+  no producer, and `match_activities()` has no production caller. Such a
+  measurement survives only in `patent_facts.json` `measurements[]`. The full
+  cause list — including the silent entry-without-molecule case and the
+  `name`-vs-`properties` label trap — with real text cases is in
+  [docs/wiki/activity-association.md](../docs/wiki/activity-association.md).
 - Import starts processing in the same request and the workspace lists every
   imported document right away: a fresh import rests at `pending` and shows as
   "待处理" while the queue reports the live stage. Deleting a queue task clears
