@@ -117,6 +117,8 @@ jobs:
         run: npm run check
       - name: Build
         run: npm run build
+      - name: Node test runner
+        run: npm test
 
   quality-gate:
     name: Quality gate

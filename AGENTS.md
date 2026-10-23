@@ -1,13 +1,19 @@
 # Repository Guidelines
-function and type restrict is more import than a lot of test!!!
-more structure less test!!!
 MBForge is a local AI workbench that turns molecular-science PDFs into a searchable knowledge base. The current pipeline is `Extract → Markdown → Patent`; Extract runs the layout/text/table producer and the molecule (MolDet + MolParser) pass and mints and persists the canonical SQL `SourceEvidence` rows itself, Markdown assembles the readable document from that evidence, and Patent reads it, publishes the unified facts artifact, and performs deterministic document-local associations. SQL is the only evidence store — there is no branch artifact. Link and Persist are removed from the active path. Read `TODO/INDEX.md` before changing pipeline, storage, or APIs.
+
+## rule to design a test
+- mark accossiated function at top of test_file
+- function and type restrict is more import than a lot of test
+- always try to use a bigger usage test instead of several mini-single test
+- try to reuse test alreday exist 
 
 ## Project Structure & Architecture
 
 - `src/mbforge/`: FastAPI backend, organized as five layers plus one support package. `domain/` owns pure business types and rules; `service/` owns DTOs, use cases, pipeline orchestration, and ports; `db/` owns SQLite/filesystem persistence; `api/http/` validates HTTP requests and delegates; `server/` owns runtime services (process governance, ingest queue/worker, model/resource management) and `server/app.py` is the composition root; `foundation/` is the shared support package (config, paths, errors, logging, small runtime contracts) with the model inference backends under `foundation/inference/`.
 - `frontend/src/`: React and TypeScript UI. Keep REST clients in `api/http/`, React Query hooks in `api/query/`, and components in `components/`.
 - Frontend UI must reuse the existing component library (`components/ui`) for panels, tabs, buttons, badges, loading, and collapse behavior. Before creating a new interaction or visual primitive, check the library and prefer composition; do not reimplement an existing component's behavior locally.
+- Research conversations use SQL `research_sessions` for visible history and library-scoped Pi JSONL for model context. Task/artifact cards consume structured references and the real queue/Patent snapshot; never infer actions from chat text or replay tools when restoring history. Stopping a reply and cancelling a queue task are separate operations.
+- Patent facts reads must use the shared committed-snapshot use case, including the HTTP document endpoint. Projection status is observed on read and excluded from stored payloads; evidence-tool coverage records actual returns and truncation, not semantic verification. LLM Patent analysis remains opt-in pending scientific evaluation.
 - `tests/unit/`: backend tests; frontend tests are colocated as `*.test.ts` or `*.test.tsx`. Long-term documentation belongs in `docs/`.
 
 Dependencies flow downward `api → service → db`; `service`/`db`/`api` may use the `foundation` support package but never a layer above them. `domain/` must not import service, db, api, or server; `service/` must use ports instead of concrete db/runtime adapters; `api/` must use service use cases and ports; `server/app.py` wires the concrete repository/runtime providers. Request bodies must be typed Pydantic models, not raw `dict`s. Use `LibraryLayout` for library and document paths. The database is `{library_root}/library.db`; artifacts are under `{library_root}/storage/{doc_id}/`. `library_root` defaults to `<source_root>/library`, which is also the app data directory for settings, logs and model weights. Document records live in the `documents` table (doc_id = SHA-256 hex of the file bytes, `file_name` unique); the stored PDF sits at `storage/{doc_id}/{file_name}`.

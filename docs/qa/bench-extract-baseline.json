@@ -1,0 +1,340 @@
+{
+  "note": "Extract-stage baseline. Machine-specific: numbers depend on the GPU, driver and the model weights whose sha256 are recorded here.",
+  "generated_at": "2026-10-16T10:18:22",
+  "environment": {
+    "python": "3.12.13",
+    "torch": "2.11.0+cu128",
+    "cuda_available": true,
+    "gpu": "NVIDIA GeForce RTX 3070 Ti Laptop GPU",
+    "config": {
+      "moldet.device": "auto",
+      "moldet.detection_dpi": 200.0,
+      "moldet.detection_batch_size": 0,
+      "moldet.molparser_batch_size": 64,
+      "moldet.ocr_engine": "torch",
+      "moldet.ocr_mode": "inprocess",
+      "layout.cross_model": true,
+      "ingest.max_concurrency": 4
+    },
+    "models_sha256": {
+      "moldet": "45d9fb977a948c9dbfb47eeaaf13123d6277ddb554b0aca94827e3356dbe3b41",
+      "hiro_layout": "bf6677afdbec074bd170f9471c606ee012baffa0e721626a4ceb4803eb4344f9",
+      "molparser": "391f048a599089680992e52891bde4b2f0c63051cc393e9a9b1d690332774cdb",
+      "slanet_table": "8a8aa31bf964c1c05039f02814e5f425a354a37552eaca8e6d5dc513048759f5"
+    },
+    "onnxruntime": "1.26.0",
+    "ultralytics": "8.4.150"
+  },
+  "warm_status": {
+    "moldet": true,
+    "hiro": true,
+    "molparser": "ready",
+    "slanet": "ready",
+    "ocr.page_text": true,
+    "ocr.labels": true
+  },
+  "corpus": [
+    {
+      "file": "CN120329282A.pdf",
+      "sha256": "44b8daedf3076e14e07956b4baa3aa63960a5c60a99b7c6221deb505b434e5f8",
+      "pages": 113
+    },
+    {
+      "file": "US20210128561A1.pdf",
+      "sha256": "fbd7a293b49aa0784c6c0561c9c8c2a757fb5d186701b95a716aac443ad8b65a",
+      "pages": 67
+    },
+    {
+      "file": "WO2022152853A1.pdf",
+      "sha256": "6ef5fe6f25a53bdb877104f5ad7b010620c0cf2d021204543314d6164b6c17d5",
+      "pages": 66
+    }
+  ],
+  "results": {
+    "CN120329282A.pdf": {
+      "wall_ms": {
+        "values": [
+          169192.2,
+          169613.8,
+          179792.9
+        ],
+        "median": 169613.8
+      },
+      "extract_ms": {
+        "values": [
+          169147,
+          169571,
+          179748
+        ],
+        "median": 169571
+      },
+      "pages": 113,
+      "perf": {
+        "hiro": {
+          "calls": [
+            113,
+            113,
+            113
+          ],
+          "median_ms": 13172.7
+        },
+        "moldet": {
+          "calls": [
+            226,
+            226,
+            226
+          ],
+          "median_ms": 27361.9
+        },
+        "molparser": {
+          "calls": [
+            803,
+            803,
+            803
+          ],
+          "median_ms": 60256.3
+        },
+        "ocr.labels": {
+          "calls": [
+            746,
+            746,
+            746
+          ],
+          "median_ms": 154697.5
+        },
+        "ocr.page_text": {
+          "calls": [
+            139,
+            139,
+            139
+          ],
+          "median_ms": 136131.0
+        },
+        "render.layout": {
+          "calls": [
+            113,
+            113,
+            113
+          ],
+          "median_ms": 5500.7
+        },
+        "render.pixmap": {
+          "calls": [
+            226,
+            226,
+            226
+          ],
+          "median_ms": 12666.5
+        },
+        "slanet": {
+          "calls": [
+            26,
+            26,
+            26
+          ],
+          "median_ms": 15530.4
+        }
+      },
+      "fingerprint": {
+        "evidence_rows": 2477,
+        "molecule_rows": 806,
+        "crop_files": 803,
+        "fingerprint_sha256": "10a3a187acf145eca652ad92bee35c5b13dbd5d20079f01fa038ee28598c280e",
+        "geometry_sha256": "f1ba1e90caf42f9bc1f47e6759bb3f22285168d68d929fc8702b809f7a7492c2",
+        "molecules_sha256": "b6e3ea1a6cca8cbe84f804c221e61c06aa8bdd010c15ab4cfe798e955d8deb9f",
+        "crops_sha256": "280c5804c66461bb6e407e448706289fa05d989cc368b88c4ee32a7f04cb968a"
+      },
+      "deterministic": true
+    },
+    "US20210128561A1.pdf": {
+      "wall_ms": {
+        "values": [
+          97677.8,
+          95131.7,
+          96221.8
+        ],
+        "median": 96221.8
+      },
+      "extract_ms": {
+        "values": [
+          97630,
+          95082,
+          96175
+        ],
+        "median": 96175
+      },
+      "pages": 67,
+      "perf": {
+        "hiro": {
+          "calls": [
+            67,
+            67,
+            67
+          ],
+          "median_ms": 7491.5
+        },
+        "moldet": {
+          "calls": [
+            134,
+            134,
+            134
+          ],
+          "median_ms": 16437.4
+        },
+        "molparser": {
+          "calls": [
+            542,
+            542,
+            542
+          ],
+          "median_ms": 34592.7
+        },
+        "ocr.labels": {
+          "calls": [
+            242,
+            242,
+            242
+          ],
+          "median_ms": 51649.9
+        },
+        "ocr.page_text": {
+          "calls": [
+            71,
+            71,
+            71
+          ],
+          "median_ms": 76246.7
+        },
+        "render.layout": {
+          "calls": [
+            67,
+            67,
+            67
+          ],
+          "median_ms": 3200.4
+        },
+        "render.pixmap": {
+          "calls": [
+            134,
+            134,
+            134
+          ],
+          "median_ms": 7311.4
+        },
+        "slanet": {
+          "calls": [
+            4,
+            4,
+            4
+          ],
+          "median_ms": 5193.1
+        }
+      },
+      "fingerprint": {
+        "evidence_rows": 1975,
+        "molecule_rows": 542,
+        "crop_files": 542,
+        "fingerprint_sha256": "b014deff63370d0637441f091e8a9bfb7f2c6a3830af91ecd8b24872d552046d",
+        "geometry_sha256": "b631d80b01950a2a8b297cbeb18028b5028cb41f12dde3df2748e89b9169a76d",
+        "molecules_sha256": "44acaca3faaf8ff204ef65f9acbbe9cfb6b3c7951cd2de045088e5390d3da718",
+        "crops_sha256": "3293bd7c79b56bd0cc8c19e02e8e2ea5a3c2550831e8c83642d011c1b00f5a86"
+      },
+      "deterministic": true
+    },
+    "WO2022152853A1.pdf": {
+      "wall_ms": {
+        "values": [
+          72021.8,
+          72881.1,
+          72152.3
+        ],
+        "median": 72152.3
+      },
+      "extract_ms": {
+        "values": [
+          71915,
+          72835,
+          72110
+        ],
+        "median": 72110
+      },
+      "pages": 66,
+      "perf": {
+        "hiro": {
+          "calls": [
+            66,
+            66,
+            66
+          ],
+          "median_ms": 7138.6
+        },
+        "moldet": {
+          "calls": [
+            132,
+            132,
+            132
+          ],
+          "median_ms": 13840.0
+        },
+        "molparser": {
+          "calls": [
+            115,
+            115,
+            115
+          ],
+          "median_ms": 7606.1
+        },
+        "ocr.labels": {
+          "calls": [
+            58,
+            58,
+            58
+          ],
+          "median_ms": 15925.3
+        },
+        "ocr.page_text": {
+          "calls": [
+            79,
+            79,
+            79
+          ],
+          "median_ms": 54645.1
+        },
+        "render.layout": {
+          "calls": [
+            66,
+            66,
+            66
+          ],
+          "median_ms": 3213.0
+        },
+        "render.pixmap": {
+          "calls": [
+            132,
+            132,
+            132
+          ],
+          "median_ms": 7187.5
+        },
+        "slanet": {
+          "calls": [
+            21,
+            21,
+            21
+          ],
+          "median_ms": 13821.8
+        }
+      },
+      "fingerprint": {
+        "evidence_rows": 712,
+        "molecule_rows": 115,
+        "crop_files": 115,
+        "fingerprint_sha256": "ad770368754a4ba273113e57ca864db556f3c986feec34b13b3f3d1de3c5a9ef",
+        "geometry_sha256": "005340a12bd88622c90ec7d3171d8672ec3616baac6c4eecbb57f21ed5913c0d",
+        "molecules_sha256": "119ff9fde8ec79f02e3f9a344c0778e94e9d633eccaa8d65440d64aaa695d2cd",
+        "crops_sha256": "80d9369223a64d8de5a34af6f75311be9171373f613b5c6eddb0f573aeccf3c1"
+      },
+      "deterministic": true
+    }
+  }
+}

@@ -7,18 +7,35 @@ FastAPI backend.
 
 ## Current scope
 
+- The default UI is a research conversation with a side-by-side resource and
+  evidence workspace. Documents can be selected as chat references, source
+  citations open the existing PDF viewer, and background tasks use the existing
+  queue. Visible research history is stored in per-library SQL, with durable Pi
+  conversation files and an automatic import of legacy browser history. Explicit
+  analysis actions create idempotent task references; result cards retain their
+  original revision while showing the current published facts. The evidence
+  workspace includes assay-aware measurements, source navigation and conflict
+  decisions. Evidence-tool coverage is a read record, not semantic verification.
 - PDF pipeline: Extract → Markdown → Patent. Extract is the single producer: one render drives the local layout/text/table producer and a second drives the molecule pass (MolDet + MolParser), and it mints and persists the canonical SQL `SourceEvidence` rows itself. Markdown assembles the readable document from that evidence; Patent reads it, publishes one facts artifact, and performs deterministic document-local associations. SQL is the only evidence store — there is no branch artifact. Link and Persist have been removed from the active path.
-- Molecule detection and recognition with MolDetv2-YOLO26, MolParser-Mobile
-  (E-SMILES), RDKit, and MoleCode; page layout and text recognition run entirely
-  locally (Hiro-Layout + RapidOCR) — no cloud OCR service is called.
+- Molecule detection and recognition with MolDetv2-YOLO26 and MolParser-Mobile
+  (E-SMILES) plus RDKit; page layout, text and table-structure recognition run
+  entirely locally (Hiro-Layout + RapidOCR + SLANet-1M) — no cloud OCR service is
+  called.
 - Local storage per library: SQLite business data and document artifacts; no
   third-party knowledge-index runtime is required.
-- Knowledge-base search, molecule search, evidence review, and activity data.
+- Knowledge-base search, molecule search, activity data, per-library Markdown
+  notes, and a unified review center covering molecule, Markush, activity-match
+  and evidence items — Markush structures are classified during Extract and
+  reviewed in that center (R-group enumeration is API-only for now).
+- GPU molecular docking (UniDock-Pro): receptor preparation, a job queue, a 3D
+  pose viewer and agent tools. The C++/CUDA engine is built separately — put it
+  on PATH or point `MBFORGE_UNIDOCK_BIN` at it; without a ready engine, jobs stay
+  queued and the API reports `docking_unavailable`.
 - Workspace document import accepts multiple PDFs at once, rejects duplicate
-  filenames, and reports partial failures; each imported document starts
-  processing immediately and appears in the workspace once processing finishes
-  (failures appear marked as errors), and documents can be selected, queued, or
-  deleted in bulk.
+  filenames, and reports partial failures; each imported document is registered
+  and listed right away as 待处理 and starts processing immediately (unless
+  auto-enqueue is disabled), settling at 已提取, 就绪 or 失败; documents can be
+  selected, queued, or deleted in bulk.
 
 The project is a research baseline. Recognition and extracted data require
 human review; model loading can take several seconds on the first request.
@@ -28,16 +45,20 @@ scope. Track active work in [TODO/INDEX.md](TODO/INDEX.md).
 ## Requirements
 
 Python 3.12, [uv](https://github.com/astral-sh/uv), Node.js 24.14.1+ and npm.
-GPU is optional, but required by local MolDet/MolParser inference. The project
-is distributed as its source folder and keeps all runtime state inside it:
-settings, logs, model weights and the default library root all live under
-`library/` next to `src/`. Copying the folder copies the whole installation.
+GPU is optional, but required by local MolDet/MolParser inference and the
+docking engine. The project is distributed as its source folder and keeps all
+runtime state inside it: settings, logs, model weights and the default library
+root all live under `library/` next to `src/`. Copying the folder copies the
+whole installation.
 
-Dependencies are split into a core install plus the `local-models` and `gpu`
-extras (heavy AI/GPU inference). `uv sync` installs the full stack through the
-`dev` group. For a constrained, core-only install use `uv sync --no-dev`; add
-inference support with `pip install "mbforge[gpu,local-models]"`. Startup logs
-a capability summary of which optional modules and CUDA are available.
+Dependencies are split into a core install plus four extras: `local-models` and
+`gpu` (heavy AI/GPU inference), `onnx` (CPU fallback for crop-label OCR; mutually
+exclusive with `gpu` — both provide the `onnxruntime` module), and `docking`
+(Python-side ligand/receptor preparation only). `uv sync` installs the full stack
+through the `dev` group. For a constrained, core-only install use
+`uv sync --no-dev`; add inference support with
+`pip install "mbforge[gpu,local-models,docking]"`. Startup logs a capability
+summary of which optional modules and CUDA are available.
 
 `uv` resolves packages from the Tsinghua TUNA mirror by default (declared as the
 default index in `pyproject.toml`, with `pytorch-cu128` kept as an explicit
@@ -81,11 +102,22 @@ either service exits with an error. Its default backend and frontend ports are
 runtime is the separate Node process under `agent/`; Python only exposes the
 FastAPI tool endpoints it needs.
 
-A standalone `npm --prefix frontend run dev` (Vite alone) also brings up the
-LLM agent automatically and serves its `/v1/chat` API through Vite's
-same-origin `/agent-api` proxy, so the Agent page works without running
-`dev:all`. When an agent is already listening on `18800` (for example under
-`dev:all`), the frontend keeps talking to it directly.
+The sidecar uses Pi `@earendil-works/pi-coding-agent@1.2.0` (the previous
+`@mariozechner` packages are deprecated). Research chat searches extracted SQL
+evidence across documents with `search_library`, then reads source evidence and
+accepted activities. When local information is insufficient, optional Tavily
+tools search the public web and fetch relevant pages through the official
+[`@tavily/pi-extension@0.1.2`](https://www.npmjs.com/package/@tavily/pi-extension).
+Enable **Settings → AI models → LLM → Web research**, enter a Tavily API key,
+and save; it applies to the next message. Web research is disabled by default.
+Search keywords and selected URLs are sent to Tavily and consume its credits.
+Each user turn allows up to four searches and three fetch calls (three URLs per
+fetch). Patent extraction continues to use only its document's evidence.
+
+`npm --prefix frontend run dev` starts Vite only. Run `dev:all` for a complete
+local stack, or start the backend and Node agent separately; Vite does not own
+or stop the agent process. Chat requests use the same-origin `/agent-api` proxy
+when Vite is running.
 
 To use isolated ports (for example, a second worktree), set all values before
 starting. The launcher passes the backend address to the Vite proxy, direct
@@ -140,19 +172,23 @@ one document, and `file_name` is unique. The canonical layout is:
 ├── queue.lock                          # ingest-worker ownership lock
 ├── procs/                              # runtime process registry
 ├── backups/                            # pre-mutation document snapshots
-├── notes/                              # user-editable notes
+├── notes/                              # user-editable notes + notes_index.json
+├── docking/                            # docking receptors/ and jobs/
 └── storage/{doc_id}/                   # document artifacts
-    ├── source.pdf
+    ├── {file_name}                     # the imported PDF, under its original name
     ├── document.md
     ├── report.json
+    ├── patent_facts.json
     ├── pages/page_{n:04d}.json         # per-page OCR text + metadata
     ├── crops/{filename}                # molecule crop images
     ├── artifacts/                      # per-stage state artifacts
     └── runs/                           # published pipeline runs
 ```
 
-Use `LibraryLayout` for library and document paths. Do not construct these
-paths inline.
+`pages/`, `artifacts/` and `runs/` are declared layout paths that the active
+pipeline does not currently write, and `source.pdf` is read only as a legacy
+fallback (tracked in [TODO/INDEX.md](TODO/INDEX.md)). Use `LibraryLayout` for
+library and document paths. Do not construct these paths inline.
 
 ## Documentation
 
@@ -180,6 +216,6 @@ code, verify the code and update the relevant living document.
 
 ## 中文简介
 
-MBForge 是面向分子科学与药物发现的本地 AI 工作台：将 PDF 文献提取为分子、活性数据和可检索知识库，并提供证据复核、分子检索和知识库查询。当前为研究基线，自动识别结果需要人工核验。
+MBForge 是面向分子科学与药物发现的本地 AI 工作台：将 PDF 文献提取为分子、活性数据和可检索知识库，并提供证据复核、分子检索、知识库笔记与 GPU 分子对接。当前为研究基线，自动识别结果需要人工核验。
 
 安装与启动命令见上文；开发约束、架构、任务和历史文档见[文档索引](docs/README.md)。
