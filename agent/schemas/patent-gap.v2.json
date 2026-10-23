@@ -1,0 +1,657 @@
+{
+  "protocol_version": "2",
+  "generated_from": "mbforge.contracts.patent",
+  "models": {
+    "PatentGap": {
+      "additionalProperties": false,
+      "description": "One bounded rule gap handed to the model, with its excerpt.\n\nA gap is how the rules say *where* they stopped: the issue code, the\nevidence it names, the pages, and the verbatim excerpt an answer is judged\nagainst. The model does not choose its own boundary except through one\nbounded ``needs_excerpt`` request.",
+      "properties": {
+        "gap_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Gap Id",
+          "type": "string"
+        },
+        "gap_kind": {
+          "enum": [
+            "table",
+            "prose_measurement",
+            "assay_attribution",
+            "assay_method"
+          ],
+          "title": "Gap Kind",
+          "type": "string"
+        },
+        "code": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Message",
+          "type": "string"
+        },
+        "page_start": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Start"
+        },
+        "page_end": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page End"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "excerpt": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "rule_context": {
+          "additionalProperties": true,
+          "title": "Rule Context",
+          "type": "object"
+        }
+      },
+      "required": [
+        "gap_id",
+        "gap_kind",
+        "code",
+        "evidence_ids"
+      ],
+      "title": "PatentGap",
+      "type": "object"
+    },
+    "PatentGapAnswer": {
+      "$defs": {
+        "DraftAssayMethod": {
+          "additionalProperties": false,
+          "description": "A prose-described assay method the deterministic rules did not see.",
+          "properties": {
+            "local_key": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Local Key",
+              "type": "string"
+            },
+            "section_id": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Section Id"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Target"
+            },
+            "system": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Species/system as printed (e.g. human, mouse). Different systems never merge into one assay.",
+              "title": "System"
+            },
+            "endpoint": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Endpoint"
+            },
+            "assay_type": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Assay Type"
+            },
+            "conditions": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": "Conditions",
+              "type": "object"
+            },
+            "raw_text": {
+              "default": "",
+              "maxLength": 4000,
+              "title": "Raw Text",
+              "type": "string"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page Start"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page End"
+            },
+            "evidence_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "model_confidence": {
+              "anyOf": [
+                {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The model's own confidence, recorded for diagnostics only; never an adoption gate.",
+              "title": "Model Confidence"
+            }
+          },
+          "required": [
+            "local_key",
+            "evidence_ids"
+          ],
+          "title": "DraftAssayMethod",
+          "type": "object"
+        },
+        "DraftMeasurement": {
+          "additionalProperties": false,
+          "description": "One activity record the rules missed, with its source anchors.",
+          "properties": {
+            "local_key": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Local Key",
+              "type": "string"
+            },
+            "metric": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Metric",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/DraftValue"
+            },
+            "compound_label_raw": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Compound Label Raw",
+              "type": "string"
+            },
+            "row_label_raw": {
+              "default": "",
+              "description": "The row designation exactly as printed: '实施例1', '1', 'E020' or a chemistry name. The key alone loses which was printed, and the printed form decides what the designation means.",
+              "maxLength": 200,
+              "title": "Row Label Raw",
+              "type": "string"
+            },
+            "compound_label_key": {
+              "default": "",
+              "description": "Normalized compound reference; final IDs are Python's job.",
+              "maxLength": 64,
+              "title": "Compound Label Key",
+              "type": "string"
+            },
+            "molecule_ref": {
+              "default": "",
+              "description": "Existing candidate label key or mol_id this reading belongs to. Free-form SMILES is never accepted; empty means 'not recognized'.",
+              "maxLength": 256,
+              "title": "Molecule Ref",
+              "type": "string"
+            },
+            "assay_local_key": {
+              "default": "",
+              "description": "Local key of a draft assay method; empty when the assay context is inline on this record.",
+              "maxLength": 64,
+              "title": "Assay Local Key",
+              "type": "string"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Target"
+            },
+            "system": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "System"
+            },
+            "endpoint": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Endpoint"
+            },
+            "conditions": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": "Conditions",
+              "type": "object"
+            },
+            "page": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page"
+            },
+            "evidence_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "model_confidence": {
+              "anyOf": [
+                {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Confidence"
+            }
+          },
+          "required": [
+            "local_key",
+            "metric",
+            "value",
+            "evidence_ids"
+          ],
+          "title": "DraftMeasurement",
+          "type": "object"
+        },
+        "DraftValue": {
+          "additionalProperties": false,
+          "description": "One activity reading, preserving the source expression verbatim.",
+          "properties": {
+            "raw_text": {
+              "description": "Verbatim source expression, e.g. '< 100 nM'.",
+              "maxLength": 4000,
+              "minLength": 1,
+              "title": "Raw Text",
+              "type": "string"
+            },
+            "operator": {
+              "default": "=",
+              "description": "Source comparison operator kept as printed. A bounded value must never be rewritten as exact ('< 100 nM' is not '100 nM').",
+              "maxLength": 8,
+              "title": "Operator",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Printed number without the operator; qualitative only.",
+              "title": "Value"
+            },
+            "unit": {
+              "default": "",
+              "description": "Unit as printed; canonicalization stays in Python.",
+              "maxLength": 64,
+              "title": "Unit",
+              "type": "string"
+            },
+            "qualitative": {
+              "default": "",
+              "description": "Qualitative label, e.g. '++' or 'inactive'.",
+              "maxLength": 64,
+              "title": "Qualitative",
+              "type": "string"
+            },
+            "missing_fields": {
+              "description": "Fields the source does not state; recorded, never guessed.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Missing Fields",
+              "type": "array"
+            }
+          },
+          "required": [
+            "raw_text"
+          ],
+          "title": "DraftValue",
+          "type": "object"
+        },
+        "PatentGapLink": {
+          "additionalProperties": false,
+          "description": "One association the rules could not make: a designation's owner.\n\nThis is the model's *only* association output. It never states a reading, a\nvalue or a structure: it says which already-recognized structure the passage\nthat prints ``label_raw`` belongs to, and cites the excerpt it read that from.\nThe service accepts it only when the cited evidence lies inside the gap and the\nstructure is one this document recognized.",
+          "properties": {
+            "label_raw": {
+              "description": "The designation exactly as the passage prints it ('化合物77').",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Label Raw",
+              "type": "string"
+            },
+            "label_key": {
+              "default": "",
+              "description": "Its normalized key when the printing is unambiguous ('77').",
+              "maxLength": 64,
+              "title": "Label Key",
+              "type": "string"
+            },
+            "mol_id": {
+              "description": "The mol_id of a structure this document recognized.",
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Mol Id",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "rationale": {
+              "default": "",
+              "maxLength": 400,
+              "title": "Rationale",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label_raw",
+            "mol_id"
+          ],
+          "title": "PatentGapLink",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "What the model returns for exactly one gap.\n\nThe status decides what the rest may contain: an answered gap carries items\nor assay methods, an ``unanswerable`` gap carries a reason and no facts, and\n``needs_excerpt`` asks for one bounded follow-up without asserting anything.",
+      "properties": {
+        "protocol_version": {
+          "const": "2",
+          "default": "2",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "gap_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Gap Id",
+          "type": "string"
+        },
+        "gap_kind": {
+          "enum": [
+            "table",
+            "prose_measurement",
+            "assay_attribution",
+            "assay_method"
+          ],
+          "title": "Gap Kind",
+          "type": "string"
+        },
+        "doc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Doc Id",
+          "type": "string"
+        },
+        "attempt_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "evidence_signature": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Evidence Signature",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "answered",
+            "unanswerable",
+            "needs_excerpt"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/DraftMeasurement"
+          },
+          "maxItems": 200,
+          "title": "Items",
+          "type": "array"
+        },
+        "assay_methods": {
+          "items": {
+            "$ref": "#/$defs/DraftAssayMethod"
+          },
+          "maxItems": 50,
+          "title": "Assay Methods",
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/PatentGapLink"
+          },
+          "maxItems": 50,
+          "title": "Links",
+          "type": "array"
+        },
+        "unanswerable_reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "not_a_fact",
+                "no_attribution",
+                "glyph_damaged",
+                "out_of_scope"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unanswerable Reason"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "model_confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Confidence"
+        }
+      },
+      "required": [
+        "gap_id",
+        "gap_kind",
+        "doc_id",
+        "attempt_id",
+        "evidence_signature",
+        "status"
+      ],
+      "title": "PatentGapAnswer",
+      "type": "object"
+    }
+  }
+}

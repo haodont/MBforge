@@ -1,0 +1,878 @@
+{
+  "protocol_version": "1",
+  "generated_from": "mbforge.contracts.patent",
+  "models": {
+    "PatentDraft": {
+      "$defs": {
+        "DraftAssayMethod": {
+          "additionalProperties": false,
+          "description": "A prose-described assay method the deterministic rules did not see.",
+          "properties": {
+            "local_key": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Local Key",
+              "type": "string"
+            },
+            "section_id": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Section Id"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Target"
+            },
+            "system": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Species/system as printed (e.g. human, mouse). Different systems never merge into one assay.",
+              "title": "System"
+            },
+            "endpoint": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Endpoint"
+            },
+            "assay_type": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Assay Type"
+            },
+            "conditions": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": "Conditions",
+              "type": "object"
+            },
+            "raw_text": {
+              "default": "",
+              "maxLength": 4000,
+              "title": "Raw Text",
+              "type": "string"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page Start"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page End"
+            },
+            "evidence_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "model_confidence": {
+              "anyOf": [
+                {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The model's own confidence, recorded for diagnostics only; never an adoption gate.",
+              "title": "Model Confidence"
+            }
+          },
+          "required": [
+            "local_key",
+            "evidence_ids"
+          ],
+          "title": "DraftAssayMethod",
+          "type": "object"
+        },
+        "DraftAssociation": {
+          "additionalProperties": false,
+          "description": "A suggested link from one draft measurement to an existing structure.",
+          "properties": {
+            "local_key": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Local Key",
+              "type": "string"
+            },
+            "measurement_local_key": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Measurement Local Key",
+              "type": "string"
+            },
+            "compound_label_key": {
+              "default": "",
+              "maxLength": 64,
+              "title": "Compound Label Key",
+              "type": "string"
+            },
+            "molecule_ref": {
+              "default": "",
+              "description": "Existing candidate label key or mol_id. Free-form SMILES is never accepted.",
+              "maxLength": 256,
+              "title": "Molecule Ref",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "model_confidence": {
+              "anyOf": [
+                {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Confidence"
+            }
+          },
+          "required": [
+            "local_key",
+            "measurement_local_key",
+            "evidence_ids"
+          ],
+          "title": "DraftAssociation",
+          "type": "object"
+        },
+        "DraftCoverage": {
+          "additionalProperties": false,
+          "description": "Which parts of the document the draft actually examined.",
+          "properties": {
+            "pages_viewed": {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 2000,
+              "title": "Pages Viewed",
+              "type": "array"
+            },
+            "pages_uncovered": {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 2000,
+              "title": "Pages Uncovered",
+              "type": "array"
+            },
+            "notes": {
+              "default": "",
+              "maxLength": 4000,
+              "title": "Notes",
+              "type": "string"
+            }
+          },
+          "required": [
+            "pages_viewed",
+            "pages_uncovered"
+          ],
+          "title": "DraftCoverage",
+          "type": "object"
+        },
+        "DraftMeasurement": {
+          "additionalProperties": false,
+          "description": "One activity record the rules missed, with its source anchors.",
+          "properties": {
+            "local_key": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Local Key",
+              "type": "string"
+            },
+            "metric": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Metric",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/DraftValue"
+            },
+            "compound_label_raw": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Compound Label Raw",
+              "type": "string"
+            },
+            "row_label_raw": {
+              "default": "",
+              "description": "The row designation exactly as printed: '实施例1', '1', 'E020' or a chemistry name. The key alone loses which was printed, and the printed form decides what the designation means.",
+              "maxLength": 200,
+              "title": "Row Label Raw",
+              "type": "string"
+            },
+            "compound_label_key": {
+              "default": "",
+              "description": "Normalized compound reference; final IDs are Python's job.",
+              "maxLength": 64,
+              "title": "Compound Label Key",
+              "type": "string"
+            },
+            "molecule_ref": {
+              "default": "",
+              "description": "Existing candidate label key or mol_id this reading belongs to. Free-form SMILES is never accepted; empty means 'not recognized'.",
+              "maxLength": 256,
+              "title": "Molecule Ref",
+              "type": "string"
+            },
+            "assay_local_key": {
+              "default": "",
+              "description": "Local key of a draft assay method; empty when the assay context is inline on this record.",
+              "maxLength": 64,
+              "title": "Assay Local Key",
+              "type": "string"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Target"
+            },
+            "system": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "System"
+            },
+            "endpoint": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Endpoint"
+            },
+            "conditions": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": "Conditions",
+              "type": "object"
+            },
+            "page": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page"
+            },
+            "evidence_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "model_confidence": {
+              "anyOf": [
+                {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Confidence"
+            }
+          },
+          "required": [
+            "local_key",
+            "metric",
+            "value",
+            "evidence_ids"
+          ],
+          "title": "DraftMeasurement",
+          "type": "object"
+        },
+        "DraftValue": {
+          "additionalProperties": false,
+          "description": "One activity reading, preserving the source expression verbatim.",
+          "properties": {
+            "raw_text": {
+              "description": "Verbatim source expression, e.g. '< 100 nM'.",
+              "maxLength": 4000,
+              "minLength": 1,
+              "title": "Raw Text",
+              "type": "string"
+            },
+            "operator": {
+              "default": "=",
+              "description": "Source comparison operator kept as printed. A bounded value must never be rewritten as exact ('< 100 nM' is not '100 nM').",
+              "maxLength": 8,
+              "title": "Operator",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Printed number without the operator; qualitative only.",
+              "title": "Value"
+            },
+            "unit": {
+              "default": "",
+              "description": "Unit as printed; canonicalization stays in Python.",
+              "maxLength": 64,
+              "title": "Unit",
+              "type": "string"
+            },
+            "qualitative": {
+              "default": "",
+              "description": "Qualitative label, e.g. '++' or 'inactive'.",
+              "maxLength": 64,
+              "title": "Qualitative",
+              "type": "string"
+            },
+            "missing_fields": {
+              "description": "Fields the source does not state; recorded, never guessed.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Missing Fields",
+              "type": "array"
+            }
+          },
+          "required": [
+            "raw_text"
+          ],
+          "title": "DraftValue",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The structured draft the sidecar submits for validation.\n\nReference integrity inside the draft is part of the contract: local keys\nare unique, and every cross-reference resolves. Business IDs, evidence\nmembership and adoption rules are validated later by the service layer.",
+      "properties": {
+        "protocol_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "doc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Doc Id",
+          "type": "string"
+        },
+        "attempt_id": {
+          "description": "Echoed from the run request; a stale attempt is rejected.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "evidence_signature": {
+          "description": "Evidence set the draft was computed from; late drafts whose signature no longer matches are rejected.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Evidence Signature",
+          "type": "string"
+        },
+        "assay_methods": {
+          "items": {
+            "$ref": "#/$defs/DraftAssayMethod"
+          },
+          "maxItems": 200,
+          "title": "Assay Methods",
+          "type": "array"
+        },
+        "measurements": {
+          "items": {
+            "$ref": "#/$defs/DraftMeasurement"
+          },
+          "maxItems": 2000,
+          "title": "Measurements",
+          "type": "array"
+        },
+        "associations": {
+          "items": {
+            "$ref": "#/$defs/DraftAssociation"
+          },
+          "maxItems": 2000,
+          "title": "Associations",
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/DraftCoverage"
+        }
+      },
+      "required": [
+        "doc_id",
+        "attempt_id",
+        "evidence_signature",
+        "coverage"
+      ],
+      "title": "PatentDraft",
+      "type": "object"
+    },
+    "PatentConflict": {
+      "$defs": {
+        "ConflictCandidate": {
+          "additionalProperties": false,
+          "description": "One side of a conflict: a value plus its content signature.",
+          "properties": {
+            "source": {
+              "enum": [
+                "deterministic",
+                "llm",
+                "agreed",
+                "human"
+              ],
+              "title": "Source",
+              "type": "string"
+            },
+            "fields": {
+              "additionalProperties": true,
+              "description": "The compared field values; the signature covers exactly these fields.",
+              "title": "Fields",
+              "type": "object"
+            },
+            "signature": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Signature",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "title": "Evidence Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "source",
+            "fields",
+            "signature"
+          ],
+          "title": "ConflictCandidate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One fact slot holding incompatible candidates.\n\nBoth candidates are preserved and neither enters downstream results until\na human decides. ``conflict_id`` doubles as the review item ID and is\nreused across re-runs while the slot and candidate set stay identical.",
+      "properties": {
+        "conflict_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Conflict Id",
+          "type": "string"
+        },
+        "slot_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Slot Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "measurement",
+            "assay_method"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "doc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Doc Id",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/ConflictCandidate"
+          },
+          "maxItems": 8,
+          "minItems": 2,
+          "title": "Candidates",
+          "type": "array"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        }
+      },
+      "required": [
+        "conflict_id",
+        "slot_id",
+        "kind",
+        "doc_id",
+        "candidates"
+      ],
+      "title": "PatentConflict",
+      "type": "object"
+    },
+    "PatentDecision": {
+      "additionalProperties": false,
+      "description": "One human decision on a conflict slot (append-only; newest wins).\n\nThe decision is reusable only while both signatures still match: a\nre-extract changes the evidence signature and a changed candidate set\nchanges the candidate-set signature, either of which retires it.",
+      "properties": {
+        "slot_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Slot Id",
+          "type": "string"
+        },
+        "choice": {
+          "enum": [
+            "deterministic",
+            "llm",
+            "neither"
+          ],
+          "title": "Choice",
+          "type": "string"
+        },
+        "candidate_set_signature": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Candidate Set Signature",
+          "type": "string"
+        },
+        "evidence_signature": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Evidence Signature",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Reason",
+          "type": "string"
+        },
+        "decided_at": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Decided At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot_id",
+        "choice",
+        "candidate_set_signature",
+        "evidence_signature",
+        "decided_at"
+      ],
+      "title": "PatentDecision",
+      "type": "object"
+    },
+    "PatentAnalysisSnapshot": {
+      "$defs": {
+        "PatentDecision": {
+          "additionalProperties": false,
+          "description": "One human decision on a conflict slot (append-only; newest wins).\n\nThe decision is reusable only while both signatures still match: a\nre-extract changes the evidence signature and a changed candidate set\nchanges the candidate-set signature, either of which retires it.",
+          "properties": {
+            "slot_id": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Slot Id",
+              "type": "string"
+            },
+            "choice": {
+              "enum": [
+                "deterministic",
+                "llm",
+                "neither"
+              ],
+              "title": "Choice",
+              "type": "string"
+            },
+            "candidate_set_signature": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Candidate Set Signature",
+              "type": "string"
+            },
+            "evidence_signature": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Evidence Signature",
+              "type": "string"
+            },
+            "reason": {
+              "default": "",
+              "maxLength": 4000,
+              "title": "Reason",
+              "type": "string"
+            },
+            "decided_at": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Decided At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "slot_id",
+            "choice",
+            "candidate_set_signature",
+            "evidence_signature",
+            "decided_at"
+          ],
+          "title": "PatentDecision",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The committed document-level analysis state (authoritative in SQL).\n\n``patent_facts.json`` is a rebuildable projection of this row. The\n``payload`` is validated by the service layer against the strict fact\ncontract before commit; ``decisions`` maps slot IDs to the human\ndecisions kept for reuse (stale entries are retained, not applied).",
+      "properties": {
+        "doc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Doc Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "evidence_signature": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Evidence Signature",
+          "type": "string"
+        },
+        "analysis_status": {
+          "enum": [
+            "disabled",
+            "succeeded",
+            "partial",
+            "fallback"
+          ],
+          "title": "Analysis Status",
+          "type": "string"
+        },
+        "extraction_mode": {
+          "enum": [
+            "deterministic",
+            "hybrid"
+          ],
+          "title": "Extraction Mode",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "decisions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/PatentDecision"
+          },
+          "title": "Decisions",
+          "type": "object"
+        },
+        "updated_at": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "doc_id",
+        "revision",
+        "evidence_signature",
+        "analysis_status",
+        "extraction_mode",
+        "payload",
+        "updated_at"
+      ],
+      "title": "PatentAnalysisSnapshot",
+      "type": "object"
+    }
+  }
+}
