@@ -30,6 +30,16 @@ class MoldetConfig(BaseModel):
     device: str = "auto"
     molparser_dir: str = ""
     auto_moldet_on_import: bool = True
+    #: Page render DPI for the molecule pass. 200 is the measured optimum, and the
+    #: measurement is a warning rather than a tuning knob: raising it to 300 read
+    #: compound numbers for 32% of boxes instead of 20%, but produced 31 labels
+    #: shared by two or more *different* structures (0 of the 31 pairs shared a
+    #: molecular formula). At 300 DPI the OCR window reaches into the neighbouring
+    #: structure's printed number, so a structure inherits a label that belongs to
+    #: the drawing beside it. That is worse than a missing label: association
+    #: reports ``molecule_candidate_ambiguous`` and attribution fell from 58% to 0.
+    #: A higher-resolution render needs a spatially resolved label-to-structure
+    #: assignment before it can be used; see docs/plan-activity-extraction.md.
     detection_dpi: float = 200.0
     detection_batch_size: int = 0
     # MolParser crops per inference batch; clamped to [1, 64] by the extractor.
@@ -196,6 +206,40 @@ class DockingConfig(BaseModel):
     ligand_prep: LigandPrepConfig = Field(default_factory=LigandPrepConfig)
 
 
+class PatentAnalysisConfig(BaseModel):
+    """Evidence-constrained Patent analysis (LLM-led, deterministic fallback).
+
+    Disabled until the acceptance set passes; the budget values are engineering
+    limits, not scientific thresholds.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    max_model_turns: int = Field(default=24, ge=1, le=200)
+    #: Per-run wall clock. Measured: a slow provider can spend ~2 minutes on a
+    #: single turn, so a multi-gap run needs room to finish rather than being
+    #: cut off mid-worklist (the earlier 600s default truncated two live runs).
+    wall_clock_seconds: int = Field(default=2400, ge=5, le=7200)
+    max_total_tokens: int = Field(default=80_000, ge=1000)
+    digest_char_budget: int = Field(default=60_000, ge=1000)
+    #: Per provider request timeout. The chat timeout (``llm.request_timeout``)
+    #: is tuned for short exchanges; a patent turn may stream a large
+    #: submission, so it gets its own budget instead of inheriting that one.
+    request_timeout_seconds: int = Field(default=600, ge=10, le=7200)
+    #: Patent analyses run one at a time; this is a provider limit, not the
+    #: ingest queue's concurrency.
+    max_concurrency: int = Field(default=1, ge=1, le=4)
+
+
+class WebSearchConfig(BaseModel):
+    """Opt-in Tavily research tools; provider calls belong to the Node sidecar."""
+
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    api_key: str = Field(default="", max_length=4096)
+
+
 class AppConfig(BaseModel):
     """全局应用配置 — 唯一 schema."""
 
@@ -203,6 +247,7 @@ class AppConfig(BaseModel):
 
     # Opaque settings consumed and validated by the Node agent sidecar.
     llm: dict[str, Any] = Field(default_factory=dict)
+    web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     model_cache_dir: str = ""
     theme: str = "dark"
     language: str = "zh"
@@ -217,6 +262,7 @@ class AppConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
     docking: DockingConfig = Field(default_factory=DockingConfig)
+    patent_analysis: PatentAnalysisConfig = Field(default_factory=PatentAnalysisConfig)
 
 
 # 历史文件名（用于一次性迁移）

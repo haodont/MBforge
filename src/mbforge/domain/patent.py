@@ -34,7 +34,7 @@ STATUS_PENDING = "pending"
 STATUS_RESOLVED = "resolved"
 STATUS_FAILED = "failed"
 
-_COMPOUND_TOKEN = r"(?:E\d+|\d+[A-Za-z]?)"
+_COMPOUND_TOKEN = r"(?:E\d+|\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
 _COMPOUND_PREFIX_RE = re.compile(
     rf"^(?:化合物|compound|cmpd|cpd)\s*#?\s*(?P<token>{_COMPOUND_TOKEN})$",
     re.IGNORECASE,
@@ -72,6 +72,36 @@ def label_key_for(label_raw: str) -> str:
         return key
     collapsed = " ".join(label_raw.split())
     return collapsed.rstrip(".")
+
+
+#: Key space for the identity of an example section (``实施例7``). Activity
+#: tables index their rows by example label, so an example designates the
+#: compound it prepares; the prefix keeps that identity out of the compound
+#: number space, where ``7`` and ``实施例7`` are not the same designation.
+EXAMPLE_KEY_PREFIX = "@example:"
+
+
+def example_label_key(token: str) -> str:
+    """Return the identity key of an example section's own label."""
+    return f"{EXAMPLE_KEY_PREFIX}{token}"
+
+
+def designation_key(label_raw: str) -> str:
+    """The key space a printed designation belongs to, or "" when it names none.
+
+    ``化合物77`` → ``77``; ``实施例7`` / ``Example 7`` → ``@example:7``. Callers on
+    both sides of the pipeline use this one derivation, so an association the model
+    proposes and an entry the rules extracted can only meet in the same space.
+    """
+    cleaned = unicodedata.normalize("NFKC", str(label_raw or "")).strip()
+    example_match = re.fullmatch(
+        r"(?i)(?:example\s*#?\s*|实施例\s*|実施例\s*|制备例\s*|对比例\s*)(E?\d+[A-Za-z]?)",
+        re.sub(r"^[#\s>*•·-]+", "", cleaned).strip(),
+    )
+    if example_match:
+        return example_label_key(example_match.group(1))
+    key = compound_label_key(cleaned)
+    return key or ""
 
 
 @dataclass

@@ -12,28 +12,100 @@ from mbforge.foundation.ids import stable_id
 from mbforge.service.pipeline.labels import _explicit_compound_labels
 from mbforge.service.pipeline.markdown.markers import _ESMILES_BLOCK_RE
 
-# The optional numeric prefix is OCR page-margin noise, not part of a title.
+# The optional prefix is either OCR page-margin noise or the publication
+# paragraph marker every modern patent prints (``[0143]``, ``(0143)``, ``143.``).
 # A Chinese heading may omit its colon, but an explicit whitespace/end boundary
 # is required so a body phrase such as ``实施例1方法`` is not cut as a section.
+# Dashes are accepted as separators because published titles join the label and
+# the title with an em dash (``Example 2—Screening of Compounds``).
 _HEADING_RE = re.compile(
-    r"^\s*(?:#+\s*)?(?:\d{1,3}\s*)?"
-    r"(?P<kind>实施例|制备例|对比例|比较例|参考例|Example)\s*"
-    r"(?P<num>\d+[A-Za-z]?)?"
+    r"^\s*(?:#+\s*)?"
+    r"(?:[\[(]\s*\d{1,4}\s*[\])]|\d{1,4}[.、]?)?\s*"
+    r"(?P<kind>实施例|実施例|制备例|对比例|比较例|参考例|Example)\s*"
+    # A trailing letter is part of the label (``Example 1a``) unless a chemical
+    # name continues straight into it (``实施例5N-((1R,3S)-…`` names compound 5).
+    # A lettered label alone is an assay example in US filings (``Example A``):
+    # it stays uppercase so prose (``Examples of …``) is not cut as a section.
+    r"(?P<num>\d+(?:[A-Za-z](?![-–—][(（]))?|(?-i:[A-Z]\d*))?"
     r"(?P<gap>\s*)"
-    r"(?P<separator>[：:])?\s*"
+    r"(?P<separator>[：:—–－.、-])?\s*"
     r"(?P<rest>.*?)\s*$",
     re.IGNORECASE,
 )
 
 _KIND_TO_ROLE = {
     "实施例": "example",
+    "実施例": "example",
     "制备例": "preparation",
     "对比例": "comparison",
     "比较例": "comparison",
     "参考例": "reference",
     "example": "example",
+    "assay": "bioassay",
 }
 _CANDIDATE_HEADER_RE = re.compile(r"^%%\s*candidate=(\S+)\s*$", re.MULTILINE)
+
+# Bioassay sections are numbered or bracketed, never bare prose. Published
+# forms: ``(一)本发明化合物对MRGPRX2的抑制活性``, ``3. 检测结果``,
+# ``[0144]生物活性研究(一)本发明化合物对MRGPRX2的抑制活性``.
+_ASSAY_ENUM_RE = re.compile(
+    r"[（(]\s*[一二三四五六七八九十\d]{1,3}\s*[)）]"
+    r"|[一二三四五六七八九十]{1,3}、"
+    r"|\d{1,2}(?:\.\d{1,2})*[.、]"
+)
+_PARAGRAPH_MARKER_RE = re.compile(r"^\s*(?:[\[(]\s*\d{1,4}\s*[\])]|\d{1,4}[.、]?)\s*")
+#: Protocol prose inside a numbered step: units, pipetting verbs, sentence ends.
+_PROTOCOL_TEXT_RE = re.compile(
+    r"[。；;]|(?:μL|µL|mL|mg|kg|℃|分钟|小时|孵育|移液|加入|置于|室温)"
+)
+#: What makes a numbered line an assay section rather than a protocol step.
+_ASSAY_DOMAIN_RE = re.compile(
+    r"(?:活性|抑制|激动|拮抗|亲和|选择性|测定|检测|筛选|评价|生物学|药理|药效|"
+    r"代谢|稳定性|溶解度|毒性|"
+    r"IC50|EC50|pIC50|pEC50|Kd|Ki|assay|inhibition|antagonis|agonist|potency|screening)",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _Heading:
+    """One recognized heading, from the example or the bioassay vocabulary."""
+
+    kind: str
+    title: str
+    line: str
+
+
+def match_assay_heading(line: str) -> str | None:
+    """Return the title of a numbered bioassay heading, or ``None``.
+
+    Such headings declare a measurement, so they carry the assay a value
+    belongs to. A heading is short and stands alone: protocol sentences
+    (``3. 稳定性测定步骤a. 将198 μL肝细胞…``) and generic numbered steps
+    (``1. 材料与仪器``) stay body text.
+    """
+    stripped = _PARAGRAPH_MARKER_RE.sub("", line).strip()
+    if not stripped or len(stripped) > 45:
+        return None
+    if _ASSAY_ENUM_RE.search(stripped) is None:
+        return None
+    if _PROTOCOL_TEXT_RE.search(stripped):
+        return None
+    title = " ".join(stripped.split())
+    if not _ASSAY_DOMAIN_RE.search(title):
+        return None
+    return title
+
+
+def _match_heading(line: str) -> _Heading | None:
+    """Recognize an example/preparation heading or a bioassay heading."""
+    match = match_section_heading(line)
+    if match is not None:
+        return _Heading(kind=match.group("kind"), title=section_title(match), line=line)
+    title = match_assay_heading(line)
+    if title is not None:
+        return _Heading(kind="assay", title=title, line=line)
+    return None
 
 
 @dataclass
@@ -62,7 +134,15 @@ def match_section_heading(line: str) -> re.Match[str] | None:
     if kind == "example" and not match.group("num"):
         return None
     rest = match.group("rest").strip()
-    if match.group("separator") is None and rest and not match.group("gap"):
+    # A chemical name may follow the number directly (``实施例5N-((…``): an ASCII
+    # capital continues the name, while a Chinese body phrase such as
+    # ``实施例1方法`` is not a heading at all.
+    if (
+        match.group("separator") is None
+        and rest
+        and not match.group("gap")
+        and not re.match(r"[A-Z]", rest)
+    ):
         return None
     if (
         kind != "example"
@@ -90,6 +170,21 @@ def section_title(match: re.Match[str]) -> str:
 def section_role(kind: str) -> str:
     """Return the normalized role for a matched heading keyword."""
     return _KIND_TO_ROLE.get(kind.casefold(), "example")
+
+
+def example_token(section: ParsedSection) -> str | None:
+    """Return the example label a section declares (``实施例5：…`` → ``5``).
+
+    Activity tables index their rows by example label, so ``实施例5`` designates
+    the compound that section prepares — a document-local identity, never a
+    global alias for every compound that happens to share the number.
+    """
+    if section.kind not in ("example", "preparation"):
+        return None
+    match = match_section_heading(section.heading_line)
+    if match is None:
+        return None
+    return (match.group("num") or "").strip() or None
 
 
 def section_id(doc_id: str, page_start: int | None, title: str) -> str:
@@ -158,11 +253,11 @@ def parse_source_evidence_sections(
     def _text_kind(item: Any) -> bool:
         return category_of(item.kind) in TEXT_CATEGORIES and bool(item.raw_text.strip())
 
-    def _heading_match(item: Any) -> re.Match[str] | None:
+    def _heading_match(item: Any) -> _Heading | None:
         for line in item.raw_text.splitlines():
-            match = match_section_heading(line)
-            if match is not None:
-                return match
+            heading = _match_heading(line)
+            if heading is not None:
+                return heading
         return None
 
     head_indices = [
@@ -193,9 +288,9 @@ def parse_source_evidence_sections(
         page_end = getattr(last_block, "page", None) or page_start
         sections.append(
             ParsedSection(
-                section_id=section_id(doc_id, page_start, section_title(heading)),
-                title=section_title(heading),
-                kind=section_role(heading.group("kind")),
+                section_id=section_id(doc_id, page_start, heading.title),
+                title=heading.title,
+                kind=section_role(heading.kind),
                 page_start=page_start,
                 page_end=page_end,
                 raw_text=raw_text,
@@ -203,7 +298,7 @@ def parse_source_evidence_sections(
                 esmiles_candidate_ids=_candidate_ids(raw_text),
                 evidence_ids=_dedupe([block.evidence_id for block in used]),
                 title_evidence_ids=_dedupe([title_block.evidence_id]),
-                heading_line=heading.group(0),
+                heading_line=heading.line,
             )
         )
     return sections
@@ -212,9 +307,11 @@ def parse_source_evidence_sections(
 __all__ = [
     "ParsedSection",
     "_HEADING_RE",
-    "section_id",
+    "example_token",
+    "match_assay_heading",
     "match_section_heading",
     "parse_source_evidence_sections",
+    "section_id",
     "section_role",
     "section_title",
     "segment_page_headings",
