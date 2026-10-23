@@ -20,8 +20,11 @@ from mbforge.db.sqlite.schema import (
     _ACTIVITIES_SCHEMA,
     _DOCKING_SCHEMA,
     _KB_SCHEMA,
+    _MEASUREMENTS_SCHEMA,
     _MOL_FTS,
     _MOL_SCHEMA,
+    _PATENT_ANALYSIS_SCHEMA,
+    _RESEARCH_SCHEMA,
     _REVIEW_V12_SCHEMA,
     _SOURCE_EVIDENCE_SCHEMA,
 )
@@ -73,12 +76,15 @@ class DatabaseManager:
 
     @staticmethod
     def molecule_schema() -> str:
-        """Return SQL for molecule, source-evidence, activity and FTS tables."""
+        """Return SQL for molecule, evidence, activity, patent and FTS tables."""
         return (
             _MOL_SCHEMA
             + _SOURCE_EVIDENCE_SCHEMA
             + _REVIEW_V12_SCHEMA
             + _ACTIVITIES_SCHEMA
+            + _MEASUREMENTS_SCHEMA
+            + _PATENT_ANALYSIS_SCHEMA
+            + _RESEARCH_SCHEMA
             + _MOL_FTS
         )
 
@@ -251,6 +257,11 @@ class DatabaseManager:
             "DELETE FROM markush_review_candidates WHERE doc_id = ?", (doc_id,)
         )
         conn.execute("DELETE FROM activities WHERE doc_id = ?", (doc_id,))
+        # Printed readings are document-scoped and have no molecule FK, so they
+        # are cleared here explicitly: a deleted document must not leave
+        # citable readings behind.
+        conn.execute("DELETE FROM measurement_attribution WHERE doc_id = ?", (doc_id,))
+        conn.execute("DELETE FROM measurements WHERE doc_id = ?", (doc_id,))
         # Pipeline-generated review items are re-derived on every ingest;
         # leaving them behind would present stale queue entries for a
         # document whose molecule rows no longer exist.

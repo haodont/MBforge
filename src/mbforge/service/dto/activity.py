@@ -10,7 +10,7 @@ class ActivityRecordResponse(BaseModel):
 
     activity_id: str | None = None
     review_id: str | None = None
-    source: Literal["activities", "review_items"]
+    source: Literal["measurements", "activities", "review_items"]
     status: Literal["persisted", "pending", "confirmed", "rejected"]
     mol_id: str | None = None
     doc_id: str
@@ -46,3 +46,11 @@ class ActivityRecordResponse(BaseModel):
     raw_text: str | None = None
     created_at: str | None = None
     reasons: list[str] = Field(default_factory=list)
+    evidence_grade: Literal["measured", "predicted", "derived", "suggested"] = (
+        "measured"
+    )
+    """Where the number came from. Only ``measured`` is printed by the source."""
+    review_status: str = "pending"
+    attributed: bool = False
+    """Whether any structure owns this reading. False is normal, not an error."""
+    mol_ids: list[str] = Field(default_factory=list)

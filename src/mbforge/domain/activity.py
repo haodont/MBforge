@@ -66,6 +66,12 @@ class MeasurementValue:
     canonical_value: Decimal | None = None
     canonical_unit: str = ""
     qualitative_value: str = ""
+    #: Ordinal reading of a qualitative bin, with the scale that defines it.
+    #: A bin symbol alone is not interpretable; the scheme names where the
+    #: ordering came from (``plus``, ``word``, or a document legend).
+    qualitative_rank: int | None = None
+    qualitative_scheme: str = ""
+    qualitative_label: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +88,9 @@ class MeasurementValue:
             ),
             "canonical_unit": self.canonical_unit,
             "qualitative_value": self.qualitative_value,
+            "qualitative_rank": self.qualitative_rank,
+            "qualitative_scheme": self.qualitative_scheme,
+            "qualitative_label": self.qualitative_label,
         }
 
     @classmethod
@@ -94,6 +103,9 @@ class MeasurementValue:
             canonical_value=_to_decimal(data.get("canonical_value")),
             canonical_unit=data.get("canonical_unit", ""),
             qualitative_value=data.get("qualitative_value", ""),
+            qualitative_rank=data.get("qualitative_rank"),
+            qualitative_scheme=data.get("qualitative_scheme", ""),
+            qualitative_label=data.get("qualitative_label", ""),
         )
 
 
@@ -174,6 +186,14 @@ class ActivityMeasurement:
     linking_status: str = LINK_PENDING
     evidence_ids: list[str] = field(default_factory=list)
     provenance: dict[str, Any] = field(default_factory=dict)
+    measurement_kind: str = "quantitative"
+    #: Where the reading sits in the document. A reading that cannot point at its
+    #: page and table cell is not citable, so these travel with it instead of
+    #: being recoverable only by joining the evidence row.
+    page_num: int | None = None
+    table_idx: int | None = None
+    row_idx: int | None = None
+    col_idx: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -184,9 +204,14 @@ class ActivityMeasurement:
             "mol_id": self.mol_id,
             "metric": self.metric,
             "linking_status": self.linking_status,
+            "measurement_kind": self.measurement_kind,
             "value": self.value.to_dict(),
             "evidence_ids": list(self.evidence_ids),
             "provenance": self.provenance,
+            "page_num": self.page_num,
+            "table_idx": self.table_idx,
+            "row_idx": self.row_idx,
+            "col_idx": self.col_idx,
         }
 
     @classmethod
@@ -202,4 +227,9 @@ class ActivityMeasurement:
             linking_status=data.get("linking_status", LINK_PENDING),
             evidence_ids=list(data["evidence_ids"]),
             provenance=data.get("provenance") or {},
+            measurement_kind=data.get("measurement_kind", "quantitative"),
+            page_num=data.get("page_num"),
+            table_idx=data.get("table_idx"),
+            row_idx=data.get("row_idx"),
+            col_idx=data.get("col_idx"),
         )

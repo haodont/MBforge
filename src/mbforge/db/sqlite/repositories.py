@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mbforge.contracts.measurement import (
+    MeasurementDatasetStats,
+    MeasurementQuery,
+)
+from mbforge.contracts.research import ResearchSession, ResearchSessionSummary
 from mbforge.db import (
     activity_store,
     docking_store,
@@ -21,7 +26,10 @@ from mbforge.db import (
     markush_enumeration_store,
     markush_sites_store,
     markush_transitions,
+    measurement_store,
     molecule_store,
+    patent_analysis_store,
+    research_store,
     review_store,
     source_evidence,
 )
@@ -153,6 +161,13 @@ class SqliteEvidenceRepository:
     def get(self, evidence_id: str) -> SourceEvidence | None:
         return source_evidence.get_source_evidence(self.library_root, evidence_id)
 
+    def search(
+        self, query: str, *, doc_id: str = "", limit: int = 20, offset: int = 0
+    ) -> list[dict[str, object]]:
+        return source_evidence.search_source_evidence(
+            self.library_root, query, doc_id=doc_id, limit=limit, offset=offset
+        )
+
     def list(
         self,
         doc_id: str,
@@ -250,6 +265,9 @@ class SqliteMoleculeRepository:
 
     def identity_fields(self, mol_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
         return molecule_store.identity_fields(self.library_root, mol_ids)
+
+    def designated_structures(self, doc_id: str) -> list[dict[str, Any]]:
+        return molecule_store.designated_structures(self.library_root, doc_id)
 
     def list_molecule_evidence(
         self, canonical_smiles: Sequence[str]
@@ -550,6 +568,14 @@ class SqliteReviewRepository:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
             review_store.set_molecule_name(conn, mol_id, name)
 
+    def set_molecule_smiles(self, mol_id: str, smiles: str) -> None:
+        molecule_store.update(
+            self.library_root,
+            mol_id,
+            {"smiles": smiles},
+            correction_source="smiles_correction_review",
+        )
+
     def clear_all(self) -> dict[str, int]:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
             return review_store.clear_all(conn)
@@ -557,25 +583,13 @@ class SqliteReviewRepository:
 
 @dataclass
 class SqliteActivityRepository:
-    """Repository for the ``activities`` table and activity review items."""
+    """Repository for activity review items.
+
+    Stored readings are read through ``SqliteMeasurementRepository``; this
+    repository only surfaces the pending review candidates.
+    """
 
     library_root: Path
-
-    def list_activities(
-        self,
-        doc_id: str,
-        *,
-        target: str = "",
-        assay_description: str = "",
-        limit: int = 200,
-    ) -> list[dict[str, Any]]:
-        return activity_store.list_activities(
-            self.library_root,
-            doc_id,
-            target=target,
-            assay_description=assay_description,
-            limit=limit,
-        )
 
     def list_activity_review_items(
         self, doc_id: str, limit: int
@@ -583,6 +597,35 @@ class SqliteActivityRepository:
         return activity_store.list_activity_review_items(
             self.library_root, doc_id, limit
         )
+
+
+@dataclass
+class SqliteMeasurementRepository:
+    """Readings and attributions; a reading needs no structure to be stored."""
+
+    library_root: Path
+
+    def list(self, query: MeasurementQuery) -> list[dict[str, Any]]:
+        return measurement_store.list_measurements(self.library_root, query)
+
+    def attributions_for(
+        self, measurement_ids: Sequence[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        return measurement_store.list_attributions_for(
+            self.library_root, measurement_ids
+        )
+
+    def stats(self, doc_id: str = "") -> MeasurementDatasetStats:
+        return measurement_store.dataset_stats(self.library_root, doc_id)
+
+    def unattributed_readings(self, doc_id: str = "") -> list[dict[str, Any]]:
+        return measurement_store.unattributed_readings(self.library_root, doc_id)
+
+    def document_detection_count(self, doc_id: str) -> int:
+        return molecule_store.document_detection_count(self.library_root, doc_id)
+
+    def document_label_numbers(self, doc_id: str) -> set[str]:
+        return molecule_store.document_label_numbers(self.library_root, doc_id)
 
 
 @dataclass
@@ -691,6 +734,42 @@ class SqliteDocumentRepository:
 
 
 @dataclass
+class SqlitePatentAnalysisRepository:
+    """Repository for the committed Patent-analysis state table."""
+
+    library_root: Path
+
+    def load(self, doc_id: str) -> dict[str, Any] | None:
+        return patent_analysis_store.load_state(self.library_root, doc_id)
+
+    def commit(self, **kwargs: Any) -> int:
+        return patent_analysis_store.commit_document_facts(self.library_root, **kwargs)
+
+    def clear_payload(self, doc_id: str) -> int:
+        return patent_analysis_store.clear_payload(self.library_root, doc_id)
+
+    def delete_document_state(self, doc_id: str) -> int:
+        return patent_analysis_store.delete_document_state(self.library_root, doc_id)
+
+
+@dataclass
+class SqliteResearchRepository:
+    library_root: Path
+
+    def get(self, session_id: str) -> ResearchSession | None:
+        return research_store.load(self.library_root, session_id)
+
+    def list_sessions(self) -> list[ResearchSessionSummary]:
+        return research_store.list_sessions(self.library_root)
+
+    def save(self, session: ResearchSession, expected_revision: int | None) -> None:
+        research_store.save(self.library_root, session, expected_revision)
+
+    def delete(self, session_id: str, expected_revision: int) -> bool:
+        return research_store.delete(self.library_root, session_id, expected_revision)
+
+
+@dataclass
 class SqliteRepositories(LibraryRepositories):
     """Repositories for one library root."""
 
@@ -699,6 +778,7 @@ class SqliteRepositories(LibraryRepositories):
     _markush: SqliteMarkushRepository
     _review: SqliteReviewRepository
     _artifacts: FilesystemArtifactStore
+    _patent_analysis: SqlitePatentAnalysisRepository
 
     @property
     def database(self) -> DatabaseRepository:
@@ -721,6 +801,10 @@ class SqliteRepositories(LibraryRepositories):
         return SqliteActivityRepository(self.library_root)
 
     @property
+    def measurements(self) -> SqliteMeasurementRepository:
+        return SqliteMeasurementRepository(self.library_root)
+
+    @property
     def docking(self) -> SqliteDockingRepository:
         return SqliteDockingRepository(self.library_root)
 
@@ -731,6 +815,14 @@ class SqliteRepositories(LibraryRepositories):
     @property
     def review(self) -> SqliteReviewRepository:
         return self._review
+
+    @property
+    def patent_analysis(self) -> SqlitePatentAnalysisRepository:
+        return self._patent_analysis
+
+    @property
+    def research(self) -> SqliteResearchRepository:
+        return SqliteResearchRepository(self.library_root)
 
     @property
     def artifacts(self) -> FilesystemArtifactStore:
@@ -747,6 +839,7 @@ def create_repositories(library_root: str | Path) -> SqliteRepositories:
         SqliteMarkushRepository(root),
         SqliteReviewRepository(root),
         FilesystemArtifactStore(),
+        SqlitePatentAnalysisRepository(root),
     )
 
 
@@ -755,9 +848,11 @@ __all__ = [
     "SqliteDatabaseRepository",
     "SqliteDocumentRepository",
     "SqliteEvidenceRepository",
+    "SqliteMeasurementRepository",
     "SqliteRepositories",
     "SqliteMarkushRepository",
     "SqliteMoleculeRepository",
+    "SqlitePatentAnalysisRepository",
     "SqliteReviewRepository",
     "FilesystemArtifactStore",
     "create_repositories",

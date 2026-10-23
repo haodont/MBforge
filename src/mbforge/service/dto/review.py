@@ -19,6 +19,8 @@ ReviewKind = Literal[
     "missing_evidence",
     "ambiguous_coref",
     "markush_link",
+    "patent_fact_review",
+    "smiles_correction",
 ]
 ReviewAction = Literal["confirm", "reject", "reopen"]
 
@@ -64,6 +66,9 @@ class ReviewDecisionItem(BaseModel):
     id: str
     # ambiguous_coref only: the reviewer-chosen compound identifier
     choice: str | None = None
+    # patent_fact_review only: the revision the reviewer decided against, so a
+    # stale decision is refused instead of overwriting newer facts.
+    expected_revision: int | None = None
 
 
 class ReviewDecisionRequest(BaseModel):

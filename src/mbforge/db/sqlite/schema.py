@@ -466,6 +466,131 @@ CREATE INDEX IF NOT EXISTS idx_act_doc_row
     ON activities(doc_id, table_idx, row_idx);
 """
 
+# Patent activity readings as first-class rows.
+#
+# The split matters: a printed reading is complete, traceable data whether or
+# not its compound has a recognized structure — a patent frequently prints
+# ``化合物 77-A, IC50 = 12 nM, page 152`` long before anything knows which drawn
+# structure that designation owns. ``measurements`` therefore stores the reading
+# with NO structural requirement, and ``measurement_attribution`` stores the
+# ``reading -> structure`` links as zero-or-more rows that are filled in
+# incrementally. ``entry_id`` (the printed designation) is likewise optional.
+#
+# ``evidence_grade`` separates a figure the document printed from one a model
+# produced. Phase A writes only ``measured``; later compute paths (docking,
+# structure prediction) must never reuse this column to claim a measurement.
+#
+# ``measurements.measurement_id`` is the deterministic id the Patent stage
+# already mints (doc + page + metric + raw value + row label), so a re-run
+# upserts the same row instead of duplicating it.
+_MEASUREMENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS measurements (
+    measurement_id TEXT PRIMARY KEY,
+    doc_id TEXT NOT NULL,
+    entry_id TEXT,                        -- printed designation, nullable
+    assay_method_id TEXT,                 -- owning assay section, nullable
+    metric TEXT,                          -- IC50 / Ki / inhibition %
+    activity_type TEXT NOT NULL DEFAULT 'activity',
+    measurement_kind TEXT DEFAULT 'quantitative',
+    original_value REAL,
+    original_unit TEXT DEFAULT '',
+    canonical_value REAL,
+    canonical_unit TEXT DEFAULT '',
+    operator TEXT DEFAULT '',
+    scale TEXT DEFAULT 'linear',
+    value_text TEXT,
+    qualitative_raw TEXT DEFAULT '',
+    qualitative_rank INTEGER,
+    qualitative_scheme TEXT DEFAULT '',
+    qualitative_label TEXT DEFAULT '',
+    target TEXT,
+    species TEXT,
+    assay_type TEXT,
+    assay_description TEXT,
+    raw_text TEXT DEFAULT '',
+    page_num INTEGER,
+    table_idx INTEGER,
+    row_idx INTEGER,
+    col_idx INTEGER,
+    row_label TEXT DEFAULT '',
+    reference_raw TEXT DEFAULT '',
+    reference_key TEXT DEFAULT '',
+    reference_type TEXT DEFAULT '',
+    evidence_ids TEXT NOT NULL DEFAULT '[]',
+    provenance TEXT NOT NULL DEFAULT '{}',
+    evidence_grade TEXT NOT NULL DEFAULT 'measured',
+    review_status TEXT NOT NULL DEFAULT 'pending',
+    linking_status TEXT NOT NULL DEFAULT 'pending',
+    run_id TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_meas_doc ON measurements(doc_id);
+CREATE INDEX IF NOT EXISTS idx_meas_target ON measurements(target);
+CREATE INDEX IF NOT EXISTS idx_meas_assay ON measurements(assay_description);
+CREATE INDEX IF NOT EXISTS idx_meas_doc_order
+    ON measurements(doc_id, page_num, table_idx, row_idx);
+CREATE INDEX IF NOT EXISTS idx_meas_grade ON measurements(evidence_grade);
+
+CREATE TABLE IF NOT EXISTS measurement_attribution (
+    attribution_id TEXT PRIMARY KEY,
+    measurement_id TEXT NOT NULL,
+    mol_id TEXT NOT NULL,
+    doc_id TEXT NOT NULL,                 -- denormalized for document-scoped cleanup
+    method TEXT NOT NULL DEFAULT 'rule',  -- rule / model / human
+    confidence REAL,
+    evidence_id TEXT,
+    review_status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(measurement_id, mol_id, method),
+    FOREIGN KEY (measurement_id) REFERENCES measurements(measurement_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mat_meas ON measurement_attribution(measurement_id);
+CREATE INDEX IF NOT EXISTS idx_mat_mol ON measurement_attribution(mol_id);
+CREATE INDEX IF NOT EXISTS idx_mat_doc ON measurement_attribution(doc_id);
+"""
+
+# Committed Patent-analysis state: ONE row per document — the authoritative
+# snapshot of its published patent facts plus the human conflict decisions.
+# ``patent_facts.json`` is a rebuildable projection of this row, and
+# ``source_evidence`` remains the only raw-evidence source; model output is
+# never evidence. ``revision`` increments per successful commit;
+# ``evidence_signature`` records the evidence set the snapshot was computed
+# from, so a re-extract makes the row (and any decision whose stored signature
+# no longer matches) stale instead of silently current. Column set is fixed by
+# P0 of docs/plan-patent-agent-harness.md; document deletion clears the row,
+# clearing the review queue does not.
+_RESEARCH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS research_sessions (
+    session_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    updated_at REAL NOT NULL,
+    payload TEXT NOT NULL CHECK (json_valid(payload))
+);
+CREATE INDEX IF NOT EXISTS idx_research_updated ON research_sessions(updated_at DESC);
+CREATE TABLE IF NOT EXISTS research_task_requests (
+    request_key TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES research_sessions(session_id) ON DELETE CASCADE,
+    PRIMARY KEY (request_key, doc_id)
+);
+"""
+
+_PATENT_ANALYSIS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS patent_analysis_state (
+    doc_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL CHECK (revision >= 1),
+    evidence_signature TEXT NOT NULL,
+    analysis_status TEXT NOT NULL,          -- disabled / succeeded / fallback
+    extraction_mode TEXT NOT NULL,          -- deterministic / hybrid
+    payload TEXT NOT NULL,                  -- committed fact snapshot (strict contract)
+    decisions TEXT NOT NULL DEFAULT '{}',   -- slot_id -> PatentDecision
+    updated_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+"""
+
 
 _MOL_FTS = """
 CREATE VIRTUAL TABLE IF NOT EXISTS mol_search USING fts5(

@@ -41,3 +41,10 @@ Thumbs.db
 .agents/
 .codegraph/
 .commandcode/
+
+# Test-run captures and scratch probes (pasted output, not repo content)
+/*_test.txt
+/*_check.txt
+/collect_out.txt
+/_verify_*.py
+/tmp*/

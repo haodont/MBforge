@@ -11,7 +11,12 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from mbforge.contracts.measurement import (
+    MeasurementDatasetStats,
+    MeasurementQuery,
+)
 from mbforge.contracts.molecule import MoleculeListRequest
+from mbforge.contracts.research import ResearchSession, ResearchSessionSummary
 from mbforge.domain.evidence import SourceEvidence
 
 
@@ -63,6 +68,10 @@ class EvidenceRepository(Protocol):
         ...
 
     def get(self, evidence_id: str) -> SourceEvidence | None: ...
+
+    def search(
+        self, query: str, *, doc_id: str = "", limit: int = 20, offset: int = 0
+    ) -> list[dict[str, object]]: ...
 
     def list(
         self,
@@ -128,6 +137,15 @@ class MoleculeRepository(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     def identity_fields(self, mol_ids: Sequence[str]) -> dict[str, dict[str, Any]]: ...
+
+    def designated_structures(self, doc_id: str) -> list[dict[str, Any]]:
+        """Concrete structures of one document, each with its printed designation.
+
+        Returns ``{name, canonical_smiles}`` rows. A Markush scaffold is excluded:
+        its ``name`` is a scheme label (``I-A``), never the number an activity
+        table prints for a finished compound.
+        """
+        ...
 
     def list_molecule_evidence(
         self, canonical_smiles: Sequence[str]
@@ -209,20 +227,38 @@ class DockingRepository(Protocol):
 
 
 class ActivityRepository(Protocol):
-    """Persistence boundary for the ``activities`` table and activity reviews."""
+    """Persistence boundary for activity review items.
 
-    def list_activities(
-        self,
-        doc_id: str,
-        *,
-        target: str = "",
-        assay_description: str = "",
-        limit: int = 200,
-    ) -> list[dict[str, Any]]: ...
+    Stored readings live in :class:`MeasurementRepository`; this port only
+    covers the pending review candidates raised against them.
+    """
 
     def list_activity_review_items(
         self, doc_id: str, limit: int
     ) -> list[dict[str, Any]]: ...
+
+
+class MeasurementRepository(Protocol):
+    """Readings and their structure attributions.
+
+    A reading exists independently of any structure: ``list`` returns rows
+    whether or not they resolve to a molecule, and ``attributed_to`` answers
+    "which structures does this document's data actually reach".
+    """
+
+    def list(self, query: MeasurementQuery) -> list[dict[str, Any]]: ...
+
+    def attributions_for(
+        self, measurement_ids: Sequence[str]
+    ) -> dict[str, list[dict[str, Any]]]: ...
+
+    def stats(self, doc_id: str = "") -> MeasurementDatasetStats: ...
+
+    def unattributed_readings(self, doc_id: str = "") -> list[dict[str, Any]]: ...
+
+    def document_detection_count(self, doc_id: str) -> int: ...
+
+    def document_label_numbers(self, doc_id: str) -> set[str]: ...
 
 
 class MarkushRepository(Protocol):
@@ -355,6 +391,10 @@ class ReviewRepository(Protocol):
 
     def set_molecule_name(self, mol_id: str, name: str) -> None: ...
 
+    def set_molecule_smiles(self, mol_id: str, smiles: str) -> None: ...
+
+    """Apply a reviewer-confirmed structure, keeping ``mol_id`` and its links."""
+
     def clear_all(self) -> dict[str, int]: ...
 
 
@@ -391,6 +431,62 @@ class DocumentRepository(Protocol):
     def delete_many(self, doc_ids: Sequence[str]) -> None: ...
 
 
+class PatentAnalysisRepository(Protocol):
+    """Committed Patent-analysis state: one authoritative snapshot per document.
+
+    ``patent_facts.json`` is a rebuildable projection of this row. A commit
+    writes the snapshot, the human decisions and the permitted derived rows in a
+    single transaction, so the facts and the derived molecules cannot disagree.
+    """
+
+    def load(self, doc_id: str) -> dict[str, Any] | None:
+        """Return the committed state for *doc_id* (``None`` when absent)."""
+        ...
+
+    def commit(
+        self,
+        *,
+        doc_id: str,
+        evidence_signature: str,
+        analysis_status: str,
+        extraction_mode: str,
+        payload: dict[str, Any],
+        candidates: Sequence[Any] = (),
+        activity_updates: Sequence[dict[str, Any]] | None = None,
+        measurements: Sequence[Any] = (),
+        attributions: Sequence[Any] = (),
+        decisions: dict[str, Any] | None = None,
+        forget_decisions: Sequence[str] = (),
+        expected_revision: int | None = None,
+    ) -> int:
+        """Commit one revision; raises ``ConflictError`` when the caller is stale.
+
+        ``decisions`` merges into the stored map and ``forget_decisions`` removes
+        slots whose decision was withdrawn.
+        """
+        ...
+
+    def clear_payload(self, doc_id: str) -> int:
+        """Drop the committed facts but keep the human decisions."""
+        ...
+
+    def delete_document_state(self, doc_id: str) -> int:
+        """Remove the document's state entirely (document deletion)."""
+        ...
+
+
+class ResearchRepository(Protocol):
+    """Visible research history and object references, scoped to one library."""
+
+    def get(self, session_id: str) -> ResearchSession | None: ...
+
+    def list_sessions(self) -> list[ResearchSessionSummary]: ...
+
+    def save(self, session: ResearchSession, expected_revision: int | None) -> None: ...
+
+    def delete(self, session_id: str, expected_revision: int) -> bool: ...
+
+
 class LibraryRepositories(Protocol):
     """Aggregate repository collection for one library root."""
 
@@ -410,6 +506,9 @@ class LibraryRepositories(Protocol):
     def activities(self) -> ActivityRepository: ...
 
     @property
+    def measurements(self) -> MeasurementRepository: ...
+
+    @property
     def docking(self) -> DockingRepository: ...
 
     @property
@@ -417,6 +516,12 @@ class LibraryRepositories(Protocol):
 
     @property
     def review(self) -> ReviewRepository: ...
+
+    @property
+    def patent_analysis(self) -> PatentAnalysisRepository: ...
+
+    @property
+    def research(self) -> ResearchRepository: ...
 
     @property
     def artifacts(self) -> ArtifactStore: ...
@@ -463,8 +568,11 @@ __all__ = [
     "EvidenceRepository",
     "LibraryRepositories",
     "MarkushRepository",
+    "MeasurementRepository",
     "MoleculeRepository",
+    "PatentAnalysisRepository",
     "ReviewRepository",
+    "ResearchRepository",
     "RepositoryFactory",
     "configure_repository_factory",
     "get_database",
