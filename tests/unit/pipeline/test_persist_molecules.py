@@ -35,34 +35,26 @@ def _candidate(smiles: str, *, status: str = "pending") -> Molecule:
     )
 
 
-def test_direct_molecule_persistence_skips_non_complete_role(
+def _molecule_count(database) -> int:
+    return database.execute("SELECT COUNT(*) AS count FROM molecules", db="mol")[0][
+        "count"
+    ]
+
+
+def test_direct_molecule_persistence_cannot_bypass_the_role_gate(
     database, tmp_path
 ) -> None:
-    """Direct callers cannot bypass the role gate and add Markush to molecules."""
+    """Only complete structures reach the main library, even called directly."""
     scaffold = _candidate("*c1ccc(*)cc1")
     scaffold.properties["structure_role"] = "scaffold"
     persist_molecule_candidates(str(tmp_path), "doc-1", [scaffold])
-    assert (
-        database.execute("SELECT COUNT(*) AS count FROM molecules", db="mol")[0][
-            "count"
-        ]
-        == 0
-    )
+    assert _molecule_count(database) == 0
 
-
-def test_direct_molecule_persistence_classifies_unclassified_markush(
-    database, tmp_path
-) -> None:
-    """An unclassified Markush candidate cannot bypass the main-library gate."""
-    scaffold = _candidate("*c1ccc(*)cc1" + "C" * 13)
-    persist_molecule_candidates(str(tmp_path), "doc-1", [scaffold])
-    assert (
-        database.execute("SELECT COUNT(*) AS count FROM molecules", db="mol")[0][
-            "count"
-        ]
-        == 0
-    )
-    assert scaffold.properties["structure_role"] == "scaffold"
+    # An unclassified Markush candidate is classified here rather than stored.
+    unclassified = _candidate("*c1ccc(*)cc1" + "C" * 13)
+    persist_molecule_candidates(str(tmp_path), "doc-1", [unclassified])
+    assert _molecule_count(database) == 0
+    assert unclassified.properties["structure_role"] == "scaffold"
 
 
 def test_persist_stores_source_evidence_link(database, tmp_path) -> None:
@@ -84,3 +76,28 @@ def test_persist_stores_source_evidence_link(database, tmp_path) -> None:
         ).fetchone()
     assert row is not None
     assert row["evidence_id"] == "ev-1"
+
+
+def test_complete_structures_reach_the_library_without_an_activity(
+    database, tmp_path
+) -> None:
+    """A recognized structure is stored even when no reading cites it yet.
+
+    Regression: the Extract stage never called this function. Concrete
+    structures were written to disk as crops and to ``source_evidence``, but
+    never to ``molecules``, so a 113-page patent that recognized 290 structures
+    reported zero molecules. Only the Patent stage's re-persist (which requires a
+    resolvable activity owner) could create rows, which is why documents without
+    bound readings had none at all.
+    """
+    plain = _candidate("CCO")
+    plain.properties["structure_role"] = "complete"
+    markush = _candidate("*c1ccc(*)cc1")
+    markush.properties["structure_role"] = "scaffold"
+
+    persist_molecule_candidates(str(tmp_path), "doc-1", [plain, markush])
+
+    assert _molecule_count(database) == 1
+    with database.mol_conn() as conn:
+        row = conn.execute("SELECT mol_id FROM molecules").fetchone()
+    assert row["mol_id"] == "CCO"

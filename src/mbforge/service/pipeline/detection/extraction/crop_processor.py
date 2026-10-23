@@ -35,8 +35,63 @@ _PREPROCESS_MAX_PIXELS = 1_000_000
 _OCR_WINDOW_EXPAND_FRACTION = 0.15
 
 
-def ocr_label_image(image: Image.Image) -> tuple[list[str], str]:
-    """Read labels from an OCR image and always release the image."""
+def slot_values(slot: list[Any]) -> tuple[list[str], str]:
+    """Return ``(labels, primary)`` from one crop's OCR slot."""
+    if not slot:
+        return [], ""
+    labels = list(slot[0]) if isinstance(slot[0], list) else []
+    primary = slot[1] if len(slot) >= 2 and isinstance(slot[1], str) else ""
+    if primary:
+        labels = [primary, *(label for label in labels if label != primary)]
+    return labels, primary
+
+
+def slot_read_boxes(
+    slot: list[Any],
+    labels: list[str],
+    offset: tuple[float, float],
+) -> list[tuple[str, tuple[float, float, float, float], float]]:
+    """Return page-frame ``(text, bbox, confidence)`` for one crop's OCR reads.
+
+    The OCR image is the expanded window around this drawing, so a read's pixel
+    position is relative to that window. ``offset`` is the window's origin on the
+    page; adding it puts every print in the one frame the drawings are measured
+    in. Without positions there is no geometry to assign by, and the structure is
+    left unlabelled.
+    """
+    if len(slot) < 3 or not isinstance(slot[2], list):
+        return []
+    origin_x, origin_y = offset
+    out: list[tuple[str, tuple[float, float, float, float], float]] = []
+    for entry in slot[2]:
+        if not isinstance(entry, (tuple, list)) or len(entry) < 3:
+            continue
+        text, confidence, box = entry[0], entry[1], entry[2]
+        if not isinstance(text, str) or text not in labels:
+            continue
+        if not isinstance(box, (tuple, list)) or len(box) != 4:
+            continue
+        try:
+            bbox = (
+                float(box[0]) + origin_x,
+                float(box[1]) + origin_y,
+                float(box[2]) + origin_x,
+                float(box[3]) + origin_y,
+            )
+            conf = float(confidence)
+        except (TypeError, ValueError):
+            continue
+        out.append((text, bbox, conf))
+    return out
+
+
+def ocr_label_image(image: Image.Image) -> tuple[list[str], str, list[Any]]:
+    """Read labels from an OCR image and always release the image.
+
+    Returns ``(texts, primary, detailed)`` where ``detailed`` carries each read's
+    position in the OCR image's own pixel frame. Positions are what let the page
+    decide which drawing owns a number; the reader's order alone cannot.
+    """
     from mbforge.service.pipeline.detection.recognition import select_primary_coref
     from mbforge.service.ports import get_runtime
 
@@ -46,25 +101,49 @@ def ocr_label_image(image: Image.Image) -> tuple[list[str], str]:
         primary = select_primary_coref(
             [(text, bbox, iso) for text, _, bbox, iso in reads]
         )
-        return labels, primary
+        detailed = [(text, confidence, bbox) for text, confidence, bbox, _ in reads]
+        return labels, primary, detailed
     except Exception as exc:
         logger.debug("crop-label OCR failed on a label image: %s", exc)
-        return [], ""
+        return [], "", []
     finally:
         image.close()
 
 
 def fill_ocr_slot(slot: list[Any], handle: TaskHandle) -> None:
-    """Store completed OCR data without blocking the MolParser worker."""
+    """Store completed OCR data without blocking the MolParser worker.
+
+    The third element carries each read's own position. Label assignment compares
+    a print's position against the drawings on the page, so a label without a
+    position cannot be placed — it is kept for display, never for assignment.
+    """
     try:
-        labels, primary = handle.result()
+        payload = handle.result()
     except Exception as exc:
         logger.debug("crop-label OCR future failed: %s", exc)
         return
+    if not isinstance(payload, (tuple, list)) or len(payload) < 2:
+        return
+    if not isinstance(payload[1], str):
+        # An OCR reader that reports raw ``(text, confidence, bbox, isolated)``
+        # reads rather than the seam's ``(labels, primary, detailed)`` shape.
+        # Keep its text so the page still gets names, but record no positions:
+        # geometry cannot be reconstructed from a list that never carried them.
+        reads = [entry for entry in payload if isinstance(entry, (tuple, list))]
+        labels = [
+            str(entry[0]) for entry in reads if entry and isinstance(entry[0], str)
+        ]
+        if labels:
+            slot.append(labels)
+        return
+    labels, primary = payload[0], payload[1]
+    detailed = payload[2] if len(payload) >= 3 else None
     if labels:
         slot.append(list(labels))
     if primary:
         slot.append(primary)
+    if detailed:
+        slot.append(list(detailed))
 
 
 @dataclass
@@ -86,6 +165,14 @@ class MoleculeCrop:
     parser_image: Image.Image
     archive_image: Image.Image
     ocr_slot: list[Any]
+    #: The detection box in page-IMAGE pixels, the frame crop-label OCR reports
+    #: its read positions in. Label assignment needs both sides in one frame; the
+    #: PDF-point bbox above cannot be compared with an OCR read's pixels.
+    bbox_image: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    #: Top-left of the OCR window on the page, in page-image pixels. An OCR read
+    #: is positioned relative to that window, so this converts its coordinates
+    #: into the page frame the drawings are measured in.
+    ocr_window_origin: tuple[float, float] = (0.0, 0.0)
 
 
 class MolParserBatcher:
@@ -105,7 +192,7 @@ class MolParserBatcher:
         self.check = check
         self.pending: list[MoleculeCrop] = []
         self.results: list[ExtractionResult] = []
-        self.ocr_bindings: list[tuple[ExtractionResult, list[Any]]] = []
+        self.ocr_bindings: list[tuple[ExtractionResult, list[Any], MoleculeCrop]] = []
 
     def add(self, crop: MoleculeCrop) -> None:
         self.pending.append(crop)
@@ -149,7 +236,7 @@ class MolParserBatcher:
                 self.check()
                 result = self._archive_and_build_result(crop, recognition)
                 self.results.append(result)
-                self.ocr_bindings.append((result, crop.ocr_slot))
+                self.ocr_bindings.append((result, crop.ocr_slot, crop))
         except TaskCancelledError:
             raise
         finally:
@@ -160,16 +247,6 @@ class MolParserBatcher:
         """Release an incomplete batch without invoking MolParser."""
         self._release(self.pending)
         self.pending.clear()
-
-    def enrich_ocr_labels(self) -> None:
-        """Apply labels that completed after a MolParser batch was flushed."""
-        for result, slot in self.ocr_bindings:
-            labels, primary = self._ocr_values(slot)
-            if labels:
-                result.name = labels[0]
-                result.properties["ocr_labels"] = labels
-            if primary:
-                result.properties["ocr_labels_primary"] = primary
 
     def _archive_and_build_result(
         self,
@@ -311,6 +388,93 @@ class CropProcessor:
             if self.error is not None:
                 self.batcher.discard()
 
+    def enrich_ocr_labels(self) -> None:
+        """Apply the designation each structure's own printed number gives it.
+
+        Reading a label out of one expanded box and calling it that structure's
+        name is wrong on a dense page: the expansion reaches the neighbouring
+        drawing's number, so a structure inherits a label it does not own.
+        Measured at 300 DPI this produced 31 labels shared by two or more
+        *different* structures (none of the pairs shared a molecular formula) and
+        collapsed activity attribution from 58% to 0.
+
+        So the whole page is assigned at once, by geometry: the page's settled
+        cases decide its numbering convention, every print then competes for the
+        drawings that convention makes plausible, and anything the geometry does
+        not settle is left unlabelled rather than guessed. A structure with no
+        number is recoverable; a structure with the wrong number is poison.
+        """
+        from mbforge.service.pipeline.detection.label_assignment import (
+            LabelRead,
+            StructureBox,
+            assign_labels,
+        )
+
+        by_page: dict[int, list[tuple[ExtractionResult, list[Any], MoleculeCrop]]] = {}
+        for result, slot, crop in self.batcher.ocr_bindings:
+            by_page.setdefault(result.page_idx, []).append((result, slot, crop))
+
+        for page_idx, bindings in by_page.items():
+            structures = [
+                StructureBox(
+                    structure_id=f"{page_idx}:{crop.mol_idx}",
+                    bbox=crop.bbox_image,
+                )
+                for _result, _slot, crop in bindings
+            ]
+            reads: list[LabelRead] = []
+            for _result, slot, crop in bindings:
+                labels, _primary = slot_values(slot)
+                for text, box, confidence in slot_read_boxes(
+                    slot, labels, crop.ocr_window_origin
+                ):
+                    reads.append(LabelRead(text=text, bbox=box, confidence=confidence))
+
+            if not reads:
+                # This page's reader reported no positions, so there is no
+                # geometry to decide ownership with. Fall back to the crop's own
+                # primary read — the previous behaviour — rather than silently
+                # dropping every label on the page. A page that *does* report
+                # positions is decided by geometry below.
+                for result, slot, _crop in bindings:
+                    labels, primary = slot_values(slot)
+                    if labels:
+                        result.name = primary or labels[0]
+                        result.properties["ocr_labels"] = labels
+                    if primary:
+                        result.properties["ocr_labels_primary"] = primary
+                continue
+
+            assignment = assign_labels(structures, reads)
+            # ``assignments`` maps designation -> structure id; invert it once so
+            # each drawing can ask which number it owns.
+            by_structure = {
+                structure_id: designation
+                for designation, structure_id in assignment.assignments.items()
+            }
+
+            for result, slot, crop in bindings:
+                labels, primary = slot_values(slot)
+                owned = by_structure.get(self._structure_key(crop))
+                if owned is not None:
+                    # The geometry decided which print this drawing owns.
+                    result.name = owned
+                    result.properties["ocr_labels"] = [owned]
+                    result.properties["ocr_labels_primary"] = owned
+                    continue
+                if not labels:
+                    continue
+                # No settled owner. Keep what OCR read as unverified context only:
+                # ``name`` stays empty so nothing downstream treats a proximity
+                # guess as this structure's designation.
+                result.properties["ocr_labels_unassigned"] = labels
+                if primary:
+                    result.properties["ocr_labels_unassigned_primary"] = primary
+
+    @staticmethod
+    def _structure_key(crop: MoleculeCrop) -> str:
+        return f"{crop.page_idx}:{crop.mol_idx}"
+
     def _process_page(self, page: DetectedPage) -> None:
         """Turn every molecule box on *page* into a prepared crop."""
         self.check()
@@ -409,6 +573,8 @@ class CropProcessor:
             parser_image=crop,
             archive_image=wide_crop,
             ocr_slot=ocr_slot,
+            bbox_image=(float(px1), float(py1), float(px2), float(py2)),
+            ocr_window_origin=(float(px1), float(py1)),
         )
 
     def _submit_label_ocr(

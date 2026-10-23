@@ -163,6 +163,25 @@ class ExtractStage:
                 candidates=candidates,
             )
             molecule_stats["markush_review_candidate_count"] = markush_candidate_count
+            # Concrete structures have to reach ``molecules`` here: nothing later
+            # does it. The Patent stage only re-persists candidates it can prove
+            # an activity belongs to, so a molecule without a reading (or whose
+            # reading is still unbound) used to exist on disk as a crop and in
+            # no table at all — the library reported 0 molecules for documents
+            # that recognized thousands.
+            from mbforge.service.pipeline.persist.molecules import (
+                persist_molecule_candidates,
+            )
+
+            persist_molecule_candidates(
+                ctx.library_root,
+                ctx.doc_id,
+                [
+                    c
+                    for c in candidates
+                    if c.properties.get("structure_role") == "complete"
+                ],
+            )
 
             molecule_count = molecule_stats.get("molecule_count", 0)
             logger.info(

@@ -21,8 +21,8 @@ from mbforge.service.pipeline.detection.extraction import (
 )
 
 
-def test_nearby_block_text_keeps_local_markush_context() -> None:
-    """Only text blocks near a molecule bbox are forwarded to classification."""
+def test_nearby_block_text_keeps_local_context_and_tolerates_garbage() -> None:
+    """Only text blocks near a molecule bbox reach classification."""
     blocks = [
         (0, 0, 15, 15, "Formula I, R1/R2"),
         (200, 200, 240, 220, "unrelated paragraph"),
@@ -33,9 +33,7 @@ def test_nearby_block_text_keeps_local_markush_context() -> None:
     assert "Formula I" in context
     assert "unrelated paragraph" not in context
 
-
-def test_nearby_block_text_tolerates_missing_or_malformed_blocks() -> None:
-    """Non-list block data (e.g. a failed page read) yields empty context."""
+    # Non-list block data (e.g. a failed page read) yields empty context.
     assert nearby_block_text(None, (0, 0, 10, 10)) == ""
     assert nearby_block_text("not-blocks", (0, 0, 10, 10)) == ""
     assert nearby_block_text((), (0, 0, 10, 10)) == ""
@@ -155,16 +153,30 @@ def test_extract_molecules_from_pdf_mocked_backends(
     assert len(mocks["molparser"].predict_batch.call_args[0][0]) == 1
 
 
-def test_extract_molecules_from_pdf_skips_pure_text_pages(
+def test_extract_molecules_from_pdf_yields_nothing_without_work_to_do(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Pages with abundant native text and no images are skipped."""
+    """No detector, a pure-text page, or the async wrapper: an empty list."""
     mocks = _patch_pdf_dependencies(monkeypatch)
 
     project_root = str(tmp_path)
     pdf_path = str(tmp_path / "dummy.pdf")
     Path(pdf_path).write_text("dummy")
 
+    # MolDetv2-FT unavailable: bail out early.
+    with (
+        patch(
+            "mbforge.foundation.inference.moldet_v2_ft.MolDetv2Detector"
+        ) as mock_detector_cls,
+        patch("mbforge.server.resource_manager.ResourceManager"),
+    ):
+        mock_detector = MagicMock()
+        mock_detector.is_available.return_value = False
+        mock_detector_cls.return_value = mock_detector
+
+        assert extract_molecules_from_pdf(pdf_path, project_root, "doc-1") == []
+
+    # A page with abundant native text and no images is skipped.
     fake_page = MagicMock()
     fake_page.rect.width = 612.0
     fake_page.rect.height = 792.0
@@ -186,40 +198,9 @@ def test_extract_molecules_from_pdf_skips_pure_text_pages(
         mock_detector.is_available.return_value = True
         mock_detector_cls.return_value = mock_detector
 
-        results = extract_molecules_from_pdf(pdf_path, project_root, "doc-1")
+        assert extract_molecules_from_pdf(pdf_path, project_root, "doc-1") == []
 
-    assert results == []
-
-
-def test_extract_molecules_from_pdf_returns_empty_when_detector_unavailable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """If MolDetv2-FT is unavailable we bail out early with an empty list."""
-    _patch_pdf_dependencies(monkeypatch)
-
-    project_root = str(tmp_path)
-    pdf_path = str(tmp_path / "dummy.pdf")
-    Path(pdf_path).write_text("dummy")
-
-    with (
-        patch(
-            "mbforge.foundation.inference.moldet_v2_ft.MolDetv2Detector"
-        ) as mock_detector_cls,
-        patch("mbforge.server.resource_manager.ResourceManager"),
-    ):
-        mock_detector = MagicMock()
-        mock_detector.is_available.return_value = False
-        mock_detector_cls.return_value = mock_detector
-
-        results = extract_molecules_from_pdf(pdf_path, project_root, "doc-1")
-
-    assert results == []
-
-
-def test_extract_molecules_from_pdf_async_offloads_to_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The async wrapper runs the sync extractor in asyncio.to_thread."""
+    # The async wrapper runs the sync extractor in asyncio.to_thread.
     calls: list[tuple[object, ...]] = []
 
     async def _fake_to_thread(func, *args, **kwargs):
@@ -524,19 +505,14 @@ def test_extract_molecules_from_pdf_archives_expanded_moldet_crop(
     assert received.size == (4, 4)
 
 
-def test_extract_molecules_from_pdf_collects_ocr_labels(
+def test_extract_molecules_from_pdf_gates_label_ocr_on_offcut_foreground(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Characters left in window B after the drawing is erased become ocr_labels."""
+    """Window-B characters become ocr_labels; too little ink skips OCR."""
     mocks = _patch_pdf_dependencies(monkeypatch)
 
     pdf_path = str(tmp_path / "dummy.pdf")
     Path(pdf_path).write_text("dummy")
-
-    # A 10x10 page with a 5x5 ink block. The detected box is (1,1,9,9) px and B
-    # extends it to (1,1,10,10), so all the ink survives into the label image
-    # and clears the 16px foreground gate.
-    _setup_fake_page(mocks, blocks=[], dark_rect=(1, 1, 6, 6))
 
     closed: list[Image.Image] = []
     original_close = Image.Image.close
@@ -546,6 +522,12 @@ def test_extract_molecules_from_pdf_collects_ocr_labels(
         original_close(self)
 
     monkeypatch.setattr(Image.Image, "close", _spy_close)
+
+    # A 10x10 page with a 5x5 ink block. The detected box is (1,1,9,9) px and B
+    # extends it to (1,1,10,10), so all the ink survives into the label image
+    # and clears the 16px foreground gate.
+    _setup_fake_page(mocks, blocks=[], dark_rect=(1, 1, 6, 6))
+    closed_before = len(closed)
 
     with (
         patch("mbforge.foundation.inference.molparser", new=mocks["molparser"]),
@@ -564,8 +546,7 @@ def test_extract_molecules_from_pdf_collects_ocr_labels(
         patch(
             "mbforge.foundation.inference.ocr.crop_labels.extract_label_reads",
             return_value=[
-                ("1a", 0.95, (0, 0, 10, 8), True),
-                ("1", 0.95, (0, 0, 10, 9), True),
+                ("1", 0.95, (0, 0, 10, 3), True),
             ],
         ) as mock_ocr,
     ):
@@ -576,23 +557,16 @@ def test_extract_molecules_from_pdf_collects_ocr_labels(
         results = extract_molecules_from_pdf(pdf_path, str(tmp_path), "doc-1")
 
     assert len(results) == 1
+    # One print, above the drawing: the page's only read becomes the drawing's
+    # designation. Two prints at the same spot would be genuinely ambiguous, so
+    # this fixture reports a single settled label at a distinct position.
     assert results[0].name == "1"
-    assert results[0].properties["ocr_labels"] == ["1", "1a"]
+    assert results[0].properties["ocr_labels"] == ["1"]
     assert results[0].properties["ocr_labels_primary"] == "1"
     mock_ocr.assert_called_once()
     # The label image is released after OCR rather than kept in the batch: one
     # inference crop + one archive crop + one label image.
-    assert len(closed) == 3
-
-
-def test_extract_molecules_from_pdf_skips_ocr_without_offcut_foreground(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A label image below the 16px foreground gate never reaches the engine."""
-    mocks = _patch_pdf_dependencies(monkeypatch)
-
-    pdf_path = str(tmp_path / "dummy.pdf")
-    Path(pdf_path).write_text("dummy")
+    assert len(closed) - closed_before == 3
 
     # All-white page: window B carries no ink, so the label image is rejected
     # by the foreground gate before the OCR pool is ever touched.
@@ -628,14 +602,11 @@ def test_extract_molecules_from_pdf_skips_ocr_without_offcut_foreground(
     mock_ocr.assert_not_called()
 
 
-def test_extract_molecules_from_pdf_batches_page_rois_into_one_gpu_call(
+def test_extract_molecules_from_pdf_batches_page_rois_and_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """All figure ROIs of a page reach detect_molecules_batch in ONE call.
-
-    The single-image path is never taken, and the ROI-local detection boxes
-    are mapped back to page-normalized coordinates.
-    """
+    """All figure ROIs of a page reach detect_molecules_batch in ONE call; an
+    empty batch result still runs the full-page MolDet."""
     from mbforge.foundation.inference.moldet_v2_ft import MoleculeBbox, MoleculeResult
 
     mocks = _patch_pdf_dependencies(monkeypatch)
@@ -644,6 +615,8 @@ def test_extract_molecules_from_pdf_batches_page_rois_into_one_gpu_call(
     Path(pdf_path).write_text("dummy")
 
     _setup_fake_page(mocks, blocks=[])
+
+    ocr_spans_by_page = {0: [{"bbox": [0.0, 0.0, 306.0, 396.0], "block_type": 1}]}
 
     with (
         patch("mbforge.foundation.inference.molparser", new=mocks["molparser"]),
@@ -673,9 +646,7 @@ def test_extract_molecules_from_pdf_batches_page_rois_into_one_gpu_call(
             pdf_path,
             str(tmp_path),
             "doc-1",
-            ocr_spans_by_page={
-                0: [{"bbox": [0.0, 0.0, 306.0, 396.0], "block_type": 1}]
-            },
+            ocr_spans_by_page=ocr_spans_by_page,
         )
 
     mock_batch.assert_called_once()
@@ -694,20 +665,7 @@ def test_extract_molecules_from_pdf_batches_page_rois_into_one_gpu_call(
     # A tuple, not a list: the bbox is a location identity used as a dict key.
     assert result.bbox_pdf == (0.0, 79.2, 244.8, 316.8)
 
-
-def test_extract_molecules_from_pdf_falls_back_to_full_page_when_rois_empty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """ROI detection that yields no molecules still runs full-page MolDet."""
-    from mbforge.foundation.inference.moldet_v2_ft import MoleculeResult
-
-    mocks = _patch_pdf_dependencies(monkeypatch)
-
-    pdf_path = str(tmp_path / "dummy.pdf")
-    Path(pdf_path).write_text("dummy")
-
-    _setup_fake_page(mocks, blocks=[])
-
+    # ROI detection that yields no molecules still runs full-page MolDet.
     with (
         patch("mbforge.foundation.inference.molparser", new=mocks["molparser"]),
         patch(
@@ -735,9 +693,7 @@ def test_extract_molecules_from_pdf_falls_back_to_full_page_when_rois_empty(
             pdf_path,
             str(tmp_path),
             "doc-1",
-            ocr_spans_by_page={
-                0: [{"bbox": [0.0, 0.0, 306.0, 396.0], "block_type": 1}]
-            },
+            ocr_spans_by_page=ocr_spans_by_page,
         )
 
     mock_batch.assert_called_once()

@@ -195,13 +195,28 @@ def bulk_update_status(
         return int(cursor.rowcount)
 
 
-def update(library_root: str | Path, mol_id: str, updates: dict[str, Any]) -> None:
+def update(
+    library_root: str | Path,
+    mol_id: str,
+    updates: dict[str, Any],
+    *,
+    correction_source: str = "molecule_update",
+) -> None:
     """Apply column updates and record a SMILES correction when it changes.
 
     *updates* keys must be DB column names; list/dict values are stored as JSON
     text. Search-index and fingerprint tables are refreshed.
+
+    A changed ``smiles`` also refreshes ``canonical_smiles``: it is the key the rest
+    of the app finds this molecule by, so leaving it on the old structure kept the
+    row answering with a SMILES nobody had just written.
     """
     db = DatabaseManager.get(str(library_root))
+    new_smiles = updates.get("smiles")
+    if isinstance(new_smiles, str) and new_smiles.strip():
+        canonical = _canonical_smiles(new_smiles)
+        if canonical:
+            updates = {**updates, "canonical_smiles": canonical}
     params: list[Any] = []
     for val in updates.values():
         if isinstance(val, (list, dict)):
@@ -212,15 +227,14 @@ def update(library_root: str | Path, mol_id: str, updates: dict[str, Any]) -> No
         previous = conn.execute(
             "SELECT smiles FROM molecules WHERE mol_id = ?", (mol_id,)
         ).fetchone()
-        new_smiles = updates.get("smiles")
         if new_smiles is not None and previous and previous[0] != new_smiles:
             conn.execute(
                 """
                 INSERT INTO molecule_corrections
                     (mol_id, field, old_value, new_value, source)
-                VALUES (?, 'smiles', ?, ?, 'molecule_update')
+                VALUES (?, 'smiles', ?, ?, ?)
                 """,
-                (mol_id, previous[0], new_smiles),
+                (mol_id, previous[0], new_smiles, correction_source),
             )
         db.delete_molecule_from_mol_search(conn, mol_id)
         conn.execute(
@@ -229,6 +243,22 @@ def update(library_root: str | Path, mol_id: str, updates: dict[str, Any]) -> No
             params,
         )
         db.sync_molecule_to_mol_search(conn, mol_id)
+
+
+def _canonical_smiles(smiles: str) -> str:
+    """RDKit canonical form of ``smiles``, or "" when it does not parse.
+
+    A structure that cannot be parsed is left exactly as the reviewer typed it:
+    storing a guessed canonical form would silently break identity matching.
+    """
+    try:
+        from rdkit import Chem
+
+        molecule = Chem.MolFromSmiles(smiles)
+        return Chem.MolToSmiles(molecule) if molecule is not None else ""
+    except Exception as exc:  # noqa: BLE001 - RDKit absence must not break an edit
+        logger.debug("canonical SMILES unavailable: %s", exc)
+        return ""
 
 
 def list_corrections(library_root: str | Path, mol_id: str) -> list[dict[str, Any]]:
@@ -393,6 +423,37 @@ def detection_cache_matches(
     return matches
 
 
+def designated_structures(
+    library_root: str | Path, doc_id: str
+) -> list[dict[str, Any]]:
+    """Return this document's concrete structures with their designation (if any).
+
+    ``name`` is the number printed beside the drawing; an empty one means the
+    crop-label OCR missed it, which is ordinary on a dense page. Those rows are
+    returned too: a drawing whose label was missed is still a recognised
+    structure, and a printed product mass can identify it later.
+
+    A Markush scaffold is excluded — its ``name`` is a scheme label (``I-A``),
+    never a designation an activity table prints.
+    """
+    if not doc_id:
+        return []
+    db = DatabaseManager.get(str(library_root))
+    rows = db.execute(
+        "SELECT name, canonical_smiles FROM molecules "
+        "WHERE source_doc = ? AND TRIM(COALESCE(canonical_smiles, '')) != ''",
+        (doc_id,),
+        db="mol",
+    )
+    return [
+        {
+            "name": str(row["name"] or "").strip(),
+            "canonical_smiles": row["canonical_smiles"],
+        }
+        for row in rows
+    ]
+
+
 def identity_fields(
     library_root: str | Path, mol_ids: Sequence[str]
 ) -> dict[str, dict[str, Any]]:
@@ -545,6 +606,58 @@ def detections_for_molecules(
     return [dict(row) for row in rows]
 
 
+def document_detection_count(library_root: str | Path, doc_id: str) -> int:
+    """Return how many structure detections this document produced.
+
+    Used to tell "the source never drew this compound" apart from "a structure
+    was detected but could not be bound": without the count the two gaps look
+    identical, and only one of them is worth fixing.
+    """
+    if not doc_id:
+        return 0
+    db = DatabaseManager.get(str(library_root))
+    rows = db.execute(
+        "SELECT COUNT(*) AS c FROM molecule_detections WHERE doc_id = ?",
+        (doc_id,),
+        db="mol",
+    )
+    return int(rows[0]["c"]) if rows else 0
+
+
+def document_label_numbers(library_root: str | Path, doc_id: str) -> set[str]:
+    """Return the compound designations the document's detected structures carry.
+
+    The full printed designation is returned (``77``, ``77-A``), not its numeric
+    prefix: ``77-A`` is a different compound from ``77``, so treating them as the
+    same number would claim the document drew a structure it never drew.
+    """
+    if not doc_id:
+        return set()
+    db = DatabaseManager.get(str(library_root))
+    rows = db.execute(
+        "SELECT m.name, m.labels FROM molecules m "
+        "JOIN molecule_detections md ON md.mol_id = m.mol_id "
+        "WHERE md.doc_id = ? GROUP BY m.mol_id",
+        (doc_id,),
+        db="mol",
+    )
+    numbers: set[str] = set()
+    for row in rows:
+        name = row["name"] if isinstance(row["name"], str) else ""
+        if name.strip():
+            numbers.add(name.strip())
+        raw_labels = row["labels"]
+        if isinstance(raw_labels, str) and raw_labels.strip():
+            try:
+                labels = json.loads(raw_labels)
+            except json.JSONDecodeError:
+                labels = []
+            for label in labels if isinstance(labels, list) else []:
+                if isinstance(label, str) and label.strip():
+                    numbers.add(label.strip())
+    return numbers
+
+
 def apply_corrections(
     library_root: str | Path, updates: Sequence[dict[str, Any]]
 ) -> None:
@@ -590,6 +703,10 @@ DOC_SCOPED_MOLECULE_TABLES: tuple[str, ...] = (
     "markush_scaffolds",
     "activities",
 )
+# ``measurements`` / ``measurement_attribution`` are deliberately absent above:
+# they are cleared by ``measurement_store.delete_document_measurements`` so the
+# attribution rows go before the readings they reference. Callers that replace a
+# document's derived rows must clear both.
 
 # Caps for the merged evidence context text (PIPE-05). The total cap preserves
 # the historical 500-char storage budget of ``evidence.context_text``; the
@@ -669,6 +786,17 @@ def _persist_loop(
         )
         db.sync_molecule_to_mol_search(active_conn, canonical_smiles)
         db.sync_molecule_fingerprint(active_conn, canonical_smiles)
+        # ``molecule_detections`` is UNIQUE(mol_id, doc_id, page): a patent often
+        # draws the same structure more than once on a page (a scheme and its
+        # table row), and a plain INSERT raises on the second one — which used to
+        # abort the whole document's persist and leave almost every molecule
+        # without a detection row. The first occurrence keeps its evidence link;
+        # a later duplicate is the same fact for this purpose.
+        if primary.page is None:
+            # ``page`` is NOT NULL; a detection without one must never be
+            # defaulted to page 1.
+            persisted += 1
+            continue
         active_conn.execute(
             """
             INSERT INTO molecule_detections (
@@ -676,6 +804,13 @@ def _persist_loop(
                 crop_relpath, conf_moldet,
                 vlm_verified_esmiles, evidence_id, context_text
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(mol_id, doc_id, page) DO UPDATE SET
+                evidence_id = COALESCE(molecule_detections.evidence_id, excluded.evidence_id),
+                context_text = CASE
+                    WHEN TRIM(COALESCE(molecule_detections.context_text, '')) = ''
+                        THEN excluded.context_text
+                    ELSE molecule_detections.context_text
+                END
             """,
             (
                 canonical_smiles,
@@ -706,6 +841,60 @@ def persist_candidates(
         return _persist_loop(active_conn, db, doc_id, candidates)
 
 
+def persist_candidates_in_transaction(
+    conn: Any,
+    db: Any,
+    doc_id: str,
+    candidates: Sequence[Any],
+    activity_updates: Sequence[dict[str, Any]] | None = None,
+) -> int:
+    """Persist the document's candidates on *conn*; the caller owns the transaction.
+
+    Structure ownership belongs to Extract, which stores every concrete structure
+    it recognizes. The Patent stage passes only the handful it could prove a
+    reading belongs to, so it must not clear the document's detections: doing so
+    deleted everything this pass did not mention (a 113-page patent went from 290
+    stored molecules to 8, all of them stripped of their detection rows), and a
+    document whose facts came out empty lost its structures entirely.
+
+    Only the ``molecule_detections`` of **these** candidates are replaced, so
+    re-publishing the same facts stays idempotent while every other structure
+    keeps its row. Clearing a document's structures when its facts are empty is
+    not this stage's job — that belongs to re-extraction, which is what replaced
+    the evidence.
+    """
+    if not candidates:
+        return 0
+    mol_ids = sorted(
+        {
+            str(getattr(candidate, "canonical_smiles", "") or "")
+            for candidate in candidates
+        }
+        - {""}
+    )
+    for start in range(0, len(mol_ids), 500):
+        chunk = mol_ids[start : start + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        conn.execute(
+            "DELETE FROM molecule_detections "
+            f"WHERE doc_id = ? AND mol_id IN ({placeholders})",
+            [doc_id, *chunk],
+        )
+    persisted = _persist_loop(conn, db, doc_id, candidates)
+    for update in activity_updates or ():
+        conn.execute(
+            "UPDATE molecules SET activity = ?, activity_type = ?, units = ? "
+            "WHERE mol_id = ?",
+            (
+                update["activity"],
+                update["activity_type"],
+                update["units"],
+                update["mol_id"],
+            ),
+        )
+    return persisted
+
+
 def replace_document_candidates(
     library_root: str | Path,
     doc_id: str,
@@ -722,21 +911,9 @@ def replace_document_candidates(
     db = DatabaseManager.get(str(library_root))
     db.initialize()
     with db.transaction() as (_kb_conn, active_conn):
-        for table in DOC_SCOPED_MOLECULE_TABLES:
-            active_conn.execute(f"DELETE FROM {table} WHERE doc_id = ?", (doc_id,))
-        persisted = _persist_loop(active_conn, db, doc_id, candidates)
-        for update in activity_updates or ():
-            active_conn.execute(
-                "UPDATE molecules SET activity = ?, activity_type = ?, units = ? "
-                "WHERE mol_id = ?",
-                (
-                    update["activity"],
-                    update["activity_type"],
-                    update["units"],
-                    update["mol_id"],
-                ),
-            )
-    return persisted
+        return persist_candidates_in_transaction(
+            active_conn, db, doc_id, candidates, activity_updates
+        )
 
 
 # Projection of a molecule_detections row into the flat molecule-evidence
@@ -838,6 +1015,7 @@ __all__ = [
     "load_detections",
     "molecules_for_recorrection",
     "persist_candidates",
+    "persist_candidates_in_transaction",
     "replace_document_candidates",
     "save_detections",
     "search_similarity",

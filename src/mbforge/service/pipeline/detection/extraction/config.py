@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: Render resolution for the MolDet page images, in DPI.
+#: Render resolution for the MolDet page images, in DPI. 200 is measured, not
+#: merely default: 300 DPI read labels for 32% of boxes versus 20% at 200, but
+#: produced 31 labels shared by two or more different structures (none of the 31
+#: pairs shared a molecular formula) because the OCR window reaches into the
+#: neighbouring drawing's number. Association then reports
+#: ``molecule_candidate_ambiguous`` and attribution collapsed from 58% to 0.
+#: Raising this needs a spatially resolved label-to-structure assignment first.
 DEFAULT_RENDER_DPI = 200.0
 #: A page with this many native characters and no images is treated as text
 #: only and skipped, so MolDet never runs on prose.

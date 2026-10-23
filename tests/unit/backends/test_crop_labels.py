@@ -59,13 +59,13 @@ def test_extract_label_reads_keeps_positions_and_isolation(monkeypatch) -> None:
     ]
 
 
-def test_extract_label_reads_returns_empty_on_engine_failure(
-    monkeypatch,
-) -> None:
-    """An OCR engine crash degrades to no reads instead of failing extraction.
+def test_label_ocr_degrades_without_engine(monkeypatch) -> None:
+    """Labelling is enrichment only: an OCR engine crash yields no reads, and a
+    missing onnxruntime backend yields ``None`` — never an exception.
 
     The read-level contract (not the one-line ``extract_label_texts`` wrapper)
-    owns the error boundary: labels are enrichment only and must never raise.
+    owns the error boundary; ``onnx`` is optional now that torch is the primary
+    engine.
     """
 
     class _Boom:
@@ -75,13 +75,6 @@ def test_extract_label_reads_returns_empty_on_engine_failure(
     monkeypatch.setattr(crop_labels, "_ENGINE", _Boom())
     assert extract_label_reads(Image.new("L", (5, 5), 255)) == []
 
-
-def test_create_engine_onnx_returns_none_when_backend_missing(monkeypatch) -> None:
-    """Missing onnxruntime degrades to None (silent empty OCR), never crashes.
-
-    Protects the "labels are enrichment only" contract when rapidocr-onnxruntime
-    is not installed (torch is now the primary engine and onnx is optional).
-    """
     import builtins
 
     real_import = builtins.__import__

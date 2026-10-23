@@ -231,11 +231,12 @@ def extract_molecules_from_pdf(
         raise processor.error
 
     # Label OCR runs on its own pool and feeds the results in as it completes, so
-    # it is joined last: only now is every crop's label set final.
+    # it is joined last: only now is every crop's label set final, which is what
+    # lets the whole page be assigned at once instead of per expanded box.
     for handle in processor.ocr_futures:
         with contextlib.suppress(Exception):
             handle.result()
-    processor.batcher.enrich_ocr_labels()
+    processor.enrich_ocr_labels()
 
     logger.info(
         "Extracted %d molecule image candidates from %s "

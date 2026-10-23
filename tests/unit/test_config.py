@@ -1,9 +1,14 @@
-"""Tests for mbforge.foundation.config schema and helpers."""
+"""Tests for mbforge.foundation.config schema and helpers.
+
+Covers ``AppConfig`` (defaults, validation, dict deserialization),
+``update_settings`` / ``load_global_config`` persistence + normalization, the
+retired-settings compatibility window, and the ``_redact_secrets`` credential
+boundary used by ``GET /api/v1/settings``.
+"""
 
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -32,184 +37,154 @@ def _clear_config_cache() -> None:
     reset_config_cache()
 
 
-class TestDefaultValues:
-    """Default values must match the historical hard-coded fallbacks."""
+def test_sub_config_defaults_match_historical_fallbacks() -> None:
+    """The sub-config defaults must match the historical hard-coded fallbacks."""
+    moldet = MoldetConfig()
+    assert moldet.device == "auto"
+    assert moldet.auto_moldet_on_import is True
+    assert moldet.detection_dpi == pytest.approx(200.0)
+    assert moldet.detection_batch_size == 0
+    assert moldet.text_page_char_threshold == 500
+    assert moldet.max_pages_per_doc is None
 
-    def test_moldet_defaults(self) -> None:
-        cfg = MoldetConfig()
-        assert cfg.device == "auto"
-        assert cfg.auto_moldet_on_import is True
-        assert cfg.detection_dpi == pytest.approx(200.0)
-        assert cfg.detection_batch_size == 0
-        assert cfg.text_page_char_threshold == 500
-        assert cfg.max_pages_per_doc is None
+    ingest = IngestConfig()
+    assert ingest.auto_enqueue_on_import is True
+    assert ingest.default_priority == 0
+    assert ingest.max_retries == 1
 
-    def test_ingest_defaults(self) -> None:
-        cfg = IngestConfig()
-        assert cfg.auto_enqueue_on_import is True
-        assert cfg.default_priority == 0
-        assert cfg.max_retries == 1
-
-    def test_pdf_parse_defaults(self) -> None:
-        cfg = PdfParseConfig()
-        assert cfg.chunk_size == 1000
-        assert cfg.chunk_overlap == 200
+    pdf_parse = PdfParseConfig()
+    assert pdf_parse.chunk_size == 1000
+    assert pdf_parse.chunk_overlap == 200
 
 
-class TestValidation:
-    """Invalid types must raise ValidationError."""
-
-    def test_invalid_detection_dpi_type(self) -> None:
-        with pytest.raises(ValidationError):
-            MoldetConfig(detection_dpi="high")
-
-    def test_app_config_ignores_environment_variables(self, monkeypatch) -> None:
-        """Business settings must come from settings.json, never MBFORGE_* env vars."""
-        monkeypatch.setenv("MBFORGE_THEME", "light")
-
-        assert AppConfig().theme == "dark"
+def test_app_config_rejects_invalid_field_types() -> None:
+    """A wrong-typed business setting must raise ``ValidationError``."""
+    with pytest.raises(ValidationError):
+        MoldetConfig(detection_dpi="high")
 
 
-class TestDictDeserialization:
-    """Legacy dict-shaped settings.json must deserialize correctly."""
+def test_app_config_defaults_ignore_environment_variables(monkeypatch) -> None:
+    """Business settings must come from settings.json, never MBFORGE_* env vars."""
+    monkeypatch.setenv("MBFORGE_THEME", "light")
 
-    def test_app_config_from_nested_dict(self) -> None:
-        data: dict[str, Any] = {
-            "layout": {
-                "conf_threshold": 0.55,
-            },
-            "moldet": {
-                "detection_dpi": 300.0,
-                "detection_batch_size": 2,
-            },
+    assert AppConfig().theme == "dark"
+
+
+def test_settings_dict_round_trip_deep_merges_and_normalizes(
+    monkeypatch, tmp_path
+) -> None:
+    """Nested dicts override only the named fields and settings.json persists
+    normalized values (a non-normalized ``library_root`` is resolved on load)."""
+    from mbforge.foundation import config
+
+    # Nested-dict deserialization: untouched fields keep their defaults.
+    nested = AppConfig.model_validate(
+        {
+            "layout": {"conf_threshold": 0.55},
+            "moldet": {"detection_dpi": 300.0, "detection_batch_size": 2},
         }
-        cfg = AppConfig.model_validate(data)
-        assert cfg.layout.conf_threshold == pytest.approx(0.55)
-        assert cfg.moldet.detection_dpi == pytest.approx(300.0)
-        assert cfg.moldet.detection_batch_size == 2
-
-    def test_update_settings_deep_merge(self, monkeypatch, tmp_path) -> None:
-        from mbforge.foundation import config
-
-        settings_path = tmp_path / "settings.json"
-        monkeypatch.setattr(config, "_SETTINGS_PATH", settings_path)
-        monkeypatch.setattr(config, "GLOBAL_APP_DIR", tmp_path)
-
-        initial = AppConfig()
-        initial.library_root = str(tmp_path)
-        config.save_global_config(initial)
-
-        new_cfg = update_settings(
-            {
-                "layout": {"conf_threshold": 0.55},
-                "moldet": {"device": "cpu"},
-            }
-        )
-        assert new_cfg.layout.conf_threshold == pytest.approx(0.55)
-        assert new_cfg.moldet.device == "cpu"
-        # Other defaults preserved
-        assert new_cfg.layout.cross_model is True
-        assert new_cfg.moldet.detection_dpi == pytest.approx(200.0)
-
-    def test_load_normalizes_and_persists_library_root(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        from mbforge.foundation import config
-
-        settings_path = tmp_path / "settings.json"
-        raw_root = tmp_path / "library" / ".." / "library"
-        settings_path.write_text(
-            json.dumps({"library_root": str(raw_root)}), encoding="utf-8"
-        )
-        monkeypatch.setattr(config, "_SETTINGS_PATH", settings_path)
-        monkeypatch.setattr(config, "GLOBAL_APP_DIR", tmp_path)
-
-        loaded = config.load_global_config()
-        expected = str((tmp_path / "library").resolve())
-
-        assert loaded.library_root == expected
-        persisted = json.loads(settings_path.read_text(encoding="utf-8"))
-        assert persisted["library_root"] == expected
-
-
-class TestSecretRedaction:
-    """GET /api/v1/settings must not leak credentials."""
-
-    @pytest.mark.parametrize(
-        ("key", "value"),
-        [
-            ("api_key", "secret"),
-            ("secret_token", "secret"),
-            ("hf_key", "secret"),
-            ("password", "secret"),
-            ("auth_token", "secret"),
-        ],
     )
-    def test_secret_keys_redacted(self, key: str, value: str) -> None:
-        assert _redact_secrets({key: value}) == {key: "***"}
+    assert nested.layout.conf_threshold == pytest.approx(0.55)
+    assert nested.moldet.detection_dpi == pytest.approx(300.0)
+    assert nested.moldet.detection_batch_size == 2
+    assert nested.layout.cross_model is True
+    assert nested.moldet.device == "auto"
 
-    @pytest.mark.parametrize(
-        ("key", "value"),
-        [
-            ("keyword", "secret"),
-            ("monkey", "secret"),
-            ("secretly", "secret"),
-            ("tokens", "secret"),
-            ("model", "secret"),
-            ("host", "secret"),
-        ],
-    )
-    def test_non_secret_keys_preserved(self, key: str, value: str) -> None:
-        assert _redact_secrets({key: value}) == {key: value}
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(config, "_SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(config, "GLOBAL_APP_DIR", tmp_path)
 
-    def test_nested_redaction(self) -> None:
-        data = {
-            "llm": {"api_key": "ak", "model": "m"},
-            "vlm": {"api_key": "vk"},
+    initial = AppConfig()
+    initial.library_root = str(tmp_path)
+    config.save_global_config(initial)
+
+    new_cfg = update_settings(
+        {
+            "layout": {"conf_threshold": 0.55},
+            "moldet": {"device": "cpu"},
         }
-        redacted = _redact_secrets(data)
-        assert redacted["llm"]["api_key"] == "***"
-        assert redacted["llm"]["model"] == "m"
-        assert redacted["vlm"]["api_key"] == "***"
+    )
+    assert new_cfg.layout.conf_threshold == pytest.approx(0.55)
+    assert new_cfg.moldet.device == "cpu"
+    # Other defaults preserved
+    assert new_cfg.layout.cross_model is True
+    assert new_cfg.moldet.detection_dpi == pytest.approx(200.0)
 
-    def test_redacted_roundtrip_preserves_real_secret(
-        self, monkeypatch, tmp_path
-    ) -> None:
-        """Boot a config with a real api_key, simulate the redacted GET path
-        returning '***', then PUT that redacted payload back — the real
-        secret on disk must survive (B1 regression)."""
-        from mbforge.foundation import config
+    # A non-normalized library_root is normalized and written back on load.
+    raw_root = tmp_path / "library" / ".." / "library"
+    settings_path.write_text(
+        json.dumps({"library_root": str(raw_root)}), encoding="utf-8"
+    )
+    loaded = config.load_global_config()
+    expected = str((tmp_path / "library").resolve())
+    assert loaded.library_root == expected
+    persisted = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert persisted["library_root"] == expected
 
-        settings_path = tmp_path / "settings.json"
-        monkeypatch.setattr(config, "_SETTINGS_PATH", settings_path)
-        monkeypatch.setattr(config, "GLOBAL_APP_DIR", tmp_path)
 
-        # Seed with a real key on disk.
-        initial = AppConfig()
-        initial.library_root = str(tmp_path)
-        initial = initial.model_copy(update={"llm": {"api_key": _DISK_VALUE}})
-        config.save_global_config(initial)
+def test_redact_secrets_masks_only_credential_keys() -> None:
+    """GET /api/v1/settings must not leak credentials — and nothing else.
 
-        # Roundtrip a redacted payload (mimicking what the UI sends after
-        # reading the GET response + not changing the field).
-        new_cfg = update_settings(
-            {
-                "llm": {"api_key": "***", "model": "gpt-4o"},
-                "vlm": {"api_key": "***"},
-            }
-        )
-        assert new_cfg.llm["api_key"] == _DISK_VALUE, (
-            f"*** marker must preserve the disk value, but got {new_cfg.llm['api_key']!r}"
-        )
-        assert new_cfg.llm["model"] == "gpt-4o"
-        # The VLM key was empty on disk → *** marker preserves that empty state
-        assert new_cfg.vlm.api_key == ""
-        # Real PUT (e.g. user typing a new key, or empty to clear) still works.
-        cleared = update_settings({"llm": {"api_key": ""}})
-        assert cleared.llm["api_key"] == ""
+    Secret-shaped key names (and their nested occurrences) become ``***``;
+    lookalike keys keep their value.
+    """
+    for key in ("api_key", "secret_token", "hf_key", "password", "auth_token"):
+        assert _redact_secrets({key: "secret"}) == {key: "***"}, key
+    for key in ("keyword", "monkey", "secretly", "tokens", "model", "host"):
+        assert _redact_secrets({key: "secret"}) == {key: "secret"}, key
 
-        cleared2 = update_settings({"llm": {"api_key": _TYPED_VALUE}})
-        assert cleared2.llm["api_key"] == _TYPED_VALUE
+    data = {
+        "llm": {"api_key": "ak", "model": "m"},
+        "vlm": {"api_key": "vk"},
+    }
+    redacted = _redact_secrets(data)
+    assert redacted["llm"]["api_key"] == "***"
+    assert redacted["llm"]["model"] == "m"
+    assert redacted["vlm"]["api_key"] == "***"
+
+
+def test_redacted_roundtrip_preserves_real_secret(monkeypatch, tmp_path) -> None:
+    """Boot a config with a real api_key, simulate the redacted GET path
+    returning '***', then PUT that redacted payload back — the real
+    secret on disk must survive (B1 regression)."""
+    from mbforge.foundation import config
+
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(config, "_SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(config, "GLOBAL_APP_DIR", tmp_path)
+
+    # Seed with a real key on disk.
+    initial = AppConfig()
+    initial.library_root = str(tmp_path)
+    initial.web_search.enabled = True
+    initial.web_search.api_key = _DISK_VALUE
+    initial = initial.model_copy(update={"llm": {"api_key": _DISK_VALUE}})
+    config.save_global_config(initial)
+
+    # Roundtrip a redacted payload (mimicking what the UI sends after
+    # reading the GET response + not changing the field).
+    new_cfg = update_settings(
+        {
+            "llm": {"api_key": "***", "model": "gpt-4o"},
+            "vlm": {"api_key": "***"},
+            "web_search": {"enabled": False, "api_key": "***"},
+        }
+    )
+    assert new_cfg.llm["api_key"] == _DISK_VALUE, (
+        f"*** marker must preserve the disk value, but got {new_cfg.llm['api_key']!r}"
+    )
+    assert new_cfg.llm["model"] == "gpt-4o"
+    # The VLM key was empty on disk → *** marker preserves that empty state
+    assert new_cfg.vlm.api_key == ""
+    assert new_cfg.web_search.api_key == _DISK_VALUE
+    assert not new_cfg.web_search.enabled
+    assert _redact_secrets(new_cfg.model_dump())["web_search"]["api_key"] == "***"
+    # Real PUT (e.g. user typing a new key, or empty to clear) still works.
+    cleared = update_settings({"llm": {"api_key": ""}})
+    assert cleared.llm["api_key"] == ""
+
+    cleared2 = update_settings({"llm": {"api_key": _TYPED_VALUE}})
+    assert cleared2.llm["api_key"] == _TYPED_VALUE
 
 
 def test_app_config_ignores_retired_project_settings() -> None:
