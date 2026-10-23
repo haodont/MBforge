@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 
-def test_expected_client_disconnect_is_limited_to_winerror_10054() -> None:
-    from mbforge.server.app import _is_expected_client_disconnect
+def test_app_wiring_helpers(monkeypatch) -> None:
+    """Expected client resets are limited to WinError 10054 and dev CORS
+    origins follow the configured frontend host/port."""
+    from mbforge.server.app import (
+        _development_frontend_origins,
+        _is_expected_client_disconnect,
+    )
 
     assert _is_expected_client_disconnect({"exception": ConnectionResetError(10054)})
     assert not _is_expected_client_disconnect({"exception": ConnectionResetError(111)})
     assert not _is_expected_client_disconnect({"exception": RuntimeError("reset")})
-
-
-def test_development_frontend_origins_follow_configured_port(monkeypatch) -> None:
-    from mbforge.server.app import _development_frontend_origins
 
     monkeypatch.setenv("MBFORGE_FRONTEND_HOST", "127.0.0.1")
     monkeypatch.setenv("MBFORGE_FRONTEND_PORT", "25173")

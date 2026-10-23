@@ -69,10 +69,19 @@ def test_detection_cache_get_stats_clear(
     assert after.json()["source"] == "cache_miss"
 
 
-def test_detection_save_unknown_mol_id_falls_back_to_null(
+def test_detection_save_keeps_known_mol_id_and_nulls_unknown(
     app_client: TestClient, tmp_library: Path
 ) -> None:
-    """FE sends display names as mol_id; unknown ids must not trip the FK."""
+    """FE sends display names as mol_id: unknown ids must not trip the FK and
+    fall back to NULL, while ids present in ``molecules`` are preserved."""
+    db = DatabaseManager.get(tmp_library)
+    db.initialize()
+    with db.mol_conn() as conn:
+        conn.execute(
+            "INSERT INTO molecules (mol_id, smiles, source_type) "
+            "VALUES ('CCO', 'CCO', 'image')"
+        )
+
     resp = app_client.post(
         "/api/v1/detection-cache/save",
         json={
@@ -89,38 +98,7 @@ def test_detection_save_unknown_mol_id_falls_back_to_null(
                     "conf_moldet": 0.9,
                     "conf_molscribe": 0.8,
                     "vlm_verified_esmiles": "CCO",
-                }
-            ],
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["success"] is True
-
-    got = app_client.post(
-        "/api/v1/detection-cache/get",
-        json={"library_root": str(tmp_library), "doc_id": "doc1", "page": 2},
-    )
-    assert got.json()["count"] == 1
-    assert got.json()["results"][0]["mol_id"] is None
-    assert got.json()["results"][0]["esmiles"] == "CCO"
-
-
-def test_detection_save_keeps_existing_mol_id(
-    app_client: TestClient, tmp_library: Path
-) -> None:
-    db = DatabaseManager.get(tmp_library)
-    db.initialize()
-    with db.mol_conn() as conn:
-        conn.execute(
-            "INSERT INTO molecules (mol_id, smiles, source_type) "
-            "VALUES ('CCO', 'CCO', 'image')"
-        )
-
-    resp = app_client.post(
-        "/api/v1/detection-cache/save",
-        json={
-            "library_root": str(tmp_library),
-            "detections": [
+                },
                 {
                     "mol_id": "CCO",
                     "doc_id": "doc1",
@@ -130,24 +108,39 @@ def test_detection_save_keeps_existing_mol_id(
                     "bbox_x1": 0.3,
                     "bbox_y1": 0.4,
                     "conf_moldet": 0.9,
-                }
+                },
             ],
         },
     )
     assert resp.status_code == 200
     assert resp.json()["success"] is True
 
-    got = app_client.post(
+    unknown = app_client.post(
+        "/api/v1/detection-cache/get",
+        json={"library_root": str(tmp_library), "doc_id": "doc1", "page": 2},
+    ).json()
+    assert unknown["count"] == 1
+    assert unknown["results"][0]["mol_id"] is None
+    assert unknown["results"][0]["esmiles"] == "CCO"
+
+    known = app_client.post(
         "/api/v1/detection-cache/get",
         json={"library_root": str(tmp_library), "doc_id": "doc1", "page": 3},
-    )
-    assert got.json()["results"][0]["mol_id"] == "CCO"
+    ).json()
+    assert known["results"][0]["mol_id"] == "CCO"
 
 
 def test_detection_cache_extract_page_accepts_frontend_aliases(
     app_client: TestClient, tmp_library: Path
 ) -> None:
-    """Frontend sends ``libraryRoot`` / ``docId`` plus ignored image metadata."""
+    """Frontend sends ``libraryRoot`` / ``docId`` plus ignored image metadata,
+    and ``DetectionInput`` accepts the ``esmiles`` / ``smiles`` aliases."""
+    det = DetectionInput(doc_id="doc1", page=1, esmiles="CCO")
+    assert det.vlm_verified_esmiles == "CCO"
+
+    det2 = DetectionInput(doc_id="doc1", page=1, smiles="CCO")
+    assert det2.vlm_verified_esmiles == "CCO"
+
     _seed_detection(tmp_library)
     resp = app_client.post(
         "/api/v1/detection-cache/extract-page",
@@ -179,12 +172,3 @@ def test_detection_cache_batch_scan_not_implemented(
     assert body["success"] is False
     assert "not implemented" in body["error"]
     assert body["errors"] == ["not_implemented"]
-
-
-def test_detection_input_accepts_esmiles_alias() -> None:
-    """DetectionInput accepts the frontend ``esmiles`` / ``smiles`` aliases."""
-    det = DetectionInput(doc_id="doc1", page=1, esmiles="CCO")
-    assert det.vlm_verified_esmiles == "CCO"
-
-    det2 = DetectionInput(doc_id="doc1", page=1, smiles="CCO")
-    assert det2.vlm_verified_esmiles == "CCO"

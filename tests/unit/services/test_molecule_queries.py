@@ -1,9 +1,9 @@
 """Unit tests for services.molecule.queries read paths.
 
-Focus: ``molecules_by_location`` reading the v2 run branches restored with
+Covers ``molecules_by_location`` reading the v2 run branches restored with
 SQL source evidence — page-basis conversion, the persistable-candidate
-filter, the interactive cache union and the SQL fallback for legacy
-documents without artifacts.
+filter, the interactive cache union (with dedupe of the persist-time
+mirror) and the containment rule shared with the legacy SQL path.
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ from mbforge.service.pipeline.extract.text import ExtractedDocument, PageContent
 from mbforge.service.use_cases.molecule.queries import molecules_by_location
 from tests.unit.v2_artifact_helpers import publish_v2_run
 
-# Router-order bbox tuple (x0, x1, y0, y1); values are PDF points.
+# Router bbox tuple; STORED_BOX contains QUERY on both axes. Values are PDF points.
 QUERY = (15.0, 35.0, 25.0, 55.0)
-STORED_BOX = (10.0, 20.0, 40.0, 60.0)  # contains QUERY on both axes
+STORED_BOX = (10.0, 20.0, 40.0, 60.0)
 
 
 def _candidate(
@@ -82,11 +82,18 @@ def _insert_cache_row(
     )
 
 
-def test_by_location_matches_index_and_dedupes_cache_mirror(tmp_path: Path) -> None:
-    root = str(tmp_path)
-    _save_index(tmp_path, "doc-1", [_candidate()])
+def test_by_location_reads_published_run_with_cache_union(tmp_path: Path) -> None:
+    """One usage run covers every read path of ``molecules_by_location``.
 
-    db = DatabaseManager.get(root)
+    Both sides of the cache union appear (persist-time mirror deduped away,
+    interactive row kept), the artifact page basis converts 0-based → public
+    1-based page, and the persistable-candidate filter decides which branch
+    candidates are returned.
+    """
+    rich_root = tmp_path / "rich"
+    _save_index(rich_root, "doc-1", [_candidate()])
+
+    db = DatabaseManager.get(str(rich_root))
     db.initialize()
     with db.mol_conn() as conn:
         conn.execute(
@@ -99,7 +106,7 @@ def test_by_location_matches_index_and_dedupes_cache_mirror(tmp_path: Path) -> N
         # that still contains the query box.
         _insert_cache_row(conn, None, 2, (12.0, 18.0, 45.0, 65.0))
 
-    matches = molecules_by_location(root, "doc-1", 3, QUERY)
+    matches = molecules_by_location(str(rich_root), "doc-1", 3, QUERY)
 
     assert len(matches) == 2
     index_match = next(m for m in matches if m["mol_id"] == "CCO")
@@ -122,11 +129,10 @@ def test_by_location_matches_index_and_dedupes_cache_mirror(tmp_path: Path) -> N
     assert cache_match["confidence"] == 0.9
     assert cache_match["crop_url"] and "cache.png" in cache_match["crop_url"]
 
-
-def test_by_location_applies_persistable_candidate_filter(tmp_path: Path) -> None:
-    root = str(tmp_path)
+    # --- persistable-candidate filter: a run that also holds dropped rows ---
+    filtered_root = tmp_path / "filtered"
     _save_index(
-        tmp_path,
+        filtered_root,
         "doc-1",
         [
             _candidate(),  # persistable: appears
@@ -143,20 +149,21 @@ def test_by_location_applies_persistable_candidate_filter(tmp_path: Path) -> Non
         ],
     )
 
-    matches = molecules_by_location(root, "doc-1", 3, QUERY)
+    filtered = molecules_by_location(str(filtered_root), "doc-1", 3, QUERY)
 
-    assert [m["mol_id"] for m in matches] == ["CCO"]
+    assert [m["mol_id"] for m in filtered] == ["CCO"]
     # Pre-persist candidates have no molecules row: name falls back to mol_id.
-    assert matches[0]["name"] == "CCO"
-    assert matches[0]["crop_url"] and "etoh.png" in matches[0]["crop_url"]
+    assert filtered[0]["name"] == "CCO"
+    assert filtered[0]["crop_url"] and "etoh.png" in filtered[0]["crop_url"]
 
+    # --- containment: the stored box must CONTAIN the query box, right page ---
+    contain_root = tmp_path / "contain"
+    _save_index(contain_root, "doc-1", [_candidate()])
 
-def test_by_location_requires_containment(tmp_path: Path) -> None:
-    root = str(tmp_path)
-    _save_index(tmp_path, "doc-1", [_candidate()])
-
-    # Partially overlapping query box: the stored box must CONTAIN the query
-    # (same predicate as the legacy SQL path), so this misses.
-    assert molecules_by_location(root, "doc-1", 3, (15.0, 35.0, 25.0, 61.0)) == []
+    # Partially overlapping query box: same predicate as the legacy SQL path.
+    assert (
+        molecules_by_location(str(contain_root), "doc-1", 3, (15.0, 35.0, 25.0, 61.0))
+        == []
+    )
     # Right page required: stored detection page is 0-based 2 → public 3.
-    assert molecules_by_location(root, "doc-1", 2, QUERY) == []
+    assert molecules_by_location(str(contain_root), "doc-1", 2, QUERY) == []

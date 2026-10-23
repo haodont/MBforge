@@ -1,3 +1,9 @@
+"""Unit tests for :mod:`mbforge.domain.paragraphs`.
+
+Covers ``group_paragraphs`` (marker absorption, line grouping by left edge,
+centred headings) plus ``indent_grid`` and ``paragraph_anchors``.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -64,14 +70,16 @@ def test_numbered_paragraph_absorbs_its_cross_page_continuation() -> None:
     assert not first.starts_at(rows[1].evidence_id)
 
 
-def test_section_heading_is_not_absorbed_by_the_paragraph_above_it() -> None:
-    rows = [
+def test_headings_and_labels_are_not_absorbed_into_prose() -> None:
+    """A section heading keeps its own paragraph, and a stray figure label
+    between two prose fragments does not join either of them."""
+    heading_rows = [
         _row(2, 700.0, "[0001] A first paragraph."),
         _row(2, 600.0, "BACKGROUND OF THE INVENTION", kind="sec"),
         _row(2, 500.0, "[0002] A second paragraph."),
     ]
 
-    paragraphs = group_paragraphs(rows)
+    paragraphs = group_paragraphs(heading_rows)
 
     assert [p.text for p in paragraphs] == [
         "[0001] A first paragraph.",
@@ -80,9 +88,7 @@ def test_section_heading_is_not_absorbed_by_the_paragraph_above_it() -> None:
     ]
     assert [p.number for p in paragraphs] == ["0001", None, "0002"]
 
-
-def test_figure_label_between_prose_fragments_is_not_absorbed() -> None:
-    rows = [
+    label_rows = [
         _row(
             2,
             700.0,
@@ -96,7 +102,7 @@ def test_figure_label_between_prose_fragments_is_not_absorbed() -> None:
         ),
     ]
 
-    numbered = [p for p in group_paragraphs(rows) if p.number is not None]
+    numbered = [p for p in group_paragraphs(label_rows) if p.number is not None]
 
     assert len(numbered) == 1
     assert numbered[0].text == (
@@ -106,17 +112,31 @@ def test_figure_label_between_prose_fragments_is_not_absorbed() -> None:
     assert "1 " not in numbered[0].text
 
 
-def test_document_without_markers_keeps_one_paragraph_per_row() -> None:
-    rows = [
-        _row(1, 700.0, "First line."),
-        _row(1, 600.0, "Second line."),
-    ]
-
-    paragraphs = group_paragraphs(rows)
+def test_unmarked_rows_and_centred_blocks() -> None:
+    """Without markers each row is its own paragraph; a centred short block
+    reads as a heading with no marker."""
+    paragraphs = group_paragraphs(
+        [
+            _row(1, 700.0, "First line."),
+            _row(1, 600.0, "Second line."),
+        ]
+    )
 
     assert [p.text for p in paragraphs] == ["First line.", "Second line."]
     assert [p.number for p in paragraphs] == [None, None]
     assert len({p.paragraph_id for p in paragraphs}) == 2
+
+    rows = _rows([(85.0, "body")])
+    rows.append(
+        _row(1, 400.0, "FIELD OF THE INVENTION", kind="sec", left=227.0, right=369.0)
+    )
+
+    centred = group_paragraphs(rows)
+
+    heading = next(p for p in centred if p.lines[0].text == "FIELD OF THE INVENTION")
+    assert heading.centred is True
+    assert heading.number is None
+    assert all(not p.centred for p in centred if p is not heading)
 
 
 def test_indent_grid_reads_levels_from_left_edges_and_rejects_strays() -> None:
@@ -130,14 +150,16 @@ def test_indent_grid_reads_levels_from_left_edges_and_rejects_strays() -> None:
     assert grid.level_of(300.0) == -1
 
 
-def test_sub_items_at_a_deeper_left_edge_become_their_own_lines() -> None:
-    rows = [
+def test_line_grouping_follows_left_edges() -> None:
+    """Deeper-left rows become their own lines; a same-level fragment continues
+    the line above it."""
+    sub_items = [
         _row(1, 700.0, "[0006] One aspect of the invention provides:", left=85.0),
         _row(1, 600.0, "(a) C1-4 alkyl which is substituted", left=125.0),
         _row(1, 500.0, "(b) a cyclic group selected from", left=125.0),
     ]
 
-    paragraph = group_paragraphs(rows)[0]
+    paragraph = group_paragraphs(sub_items)[0]
 
     assert [(line.level, line.text) for line in paragraph.lines] == [
         (0, "[0006] One aspect of the invention provides:"),
@@ -145,32 +167,16 @@ def test_sub_items_at_a_deeper_left_edge_become_their_own_lines() -> None:
         (1, "(b) a cyclic group selected from"),
     ]
 
-
-def test_same_level_fragment_continues_the_line_above_it() -> None:
-    rows = [
+    continuation = [
         _row(1, 700.0, "[0006] One aspect provides a compound", left=85.0),
         _row(1, 600.0, "which is substituted at R¹.", left=85.0),
     ]
 
-    paragraph = group_paragraphs(rows)[0]
+    paragraph = group_paragraphs(continuation)[0]
 
     assert [(line.level, line.text) for line in paragraph.lines] == [
         (0, "[0006] One aspect provides a compound which is substituted at R¹.")
     ]
-
-
-def test_centred_block_reads_as_a_heading() -> None:
-    rows = _rows([(85.0, "body")])
-    rows.append(
-        _row(1, 400.0, "FIELD OF THE INVENTION", kind="sec", left=227.0, right=369.0)
-    )
-
-    paragraphs = group_paragraphs(rows)
-
-    heading = next(p for p in paragraphs if p.lines[0].text == "FIELD OF THE INVENTION")
-    assert heading.centred is True
-    assert heading.number is None
-    assert all(not p.centred for p in paragraphs if p is not heading)
 
 
 def test_paragraph_anchors_report_line_and_level() -> None:

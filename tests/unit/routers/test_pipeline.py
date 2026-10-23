@@ -180,10 +180,14 @@ def test_pipeline_queue_logs_returns_rows_for_doc(
     assert empty.json()["logs"] == []
 
 
-def test_pipeline_worker_status_reports_queue_snapshot(
-    client: TestClient, tmp_path: Path
+def test_pipeline_worker_status_reports_queue_snapshot_and_model_gate(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`GET /worker/status` reports real queue counts, not a liveness stub."""
+    """`GET /worker/status` reports real queue counts (not a stub), carries the
+    model gate so the UI can explain a pause, and degrades the gate to null when
+    its probe explodes."""
+    from mbforge.service.use_cases.pipeline import model_gate as gate_module
+
     root = tmp_path / "library"
     root.mkdir(parents=True, exist_ok=True)
     db = DatabaseManager.get(str(root))
@@ -211,17 +215,7 @@ def test_pipeline_worker_status_reports_queue_snapshot(
     assert body["status"] in {"online", "offline"}
     assert isinstance(body["ts"], int)
 
-
-def test_pipeline_worker_status_reports_why_claiming_is_paused(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`GET /worker/status` carries the model gate so the UI can explain the pause."""
-    from mbforge.service.use_cases.pipeline import model_gate as gate_module
-
-    root = tmp_path / "library"
-    root.mkdir(parents=True, exist_ok=True)
-    DatabaseManager.get(str(root)).initialize()
-
+    # The gate explains why claiming is paused.
     monkeypatch.setattr(
         gate_module,
         "evaluate_model_gate",
@@ -235,13 +229,11 @@ def test_pipeline_worker_status_reports_why_claiming_is_paused(
             ),
         ),
     )
-
-    resp = client.get(
+    gated = client.get(
         "/api/v1/pipeline/worker/status", params={"library_root": str(root)}
     )
-
-    assert resp.status_code == 200
-    assert resp.json()["model_gate"] == {
+    assert gated.status_code == 200
+    assert gated.json()["model_gate"] == {
         "ready": False,
         "required": ["moldet"],
         "missing": [
@@ -255,28 +247,16 @@ def test_pipeline_worker_status_reports_why_claiming_is_paused(
         "reason": "missing models: moldet (not_found)",
     }
 
-
-def test_pipeline_worker_status_survives_a_failing_gate_probe(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A broken gate probe degrades to null instead of failing the status call."""
-    from mbforge.service.use_cases.pipeline import model_gate as gate_module
-
-    root = tmp_path / "library"
-    root.mkdir(parents=True, exist_ok=True)
-    DatabaseManager.get(str(root)).initialize()
-
+    # A broken gate probe degrades to null instead of failing the status call.
     def _boom() -> None:
         raise RuntimeError("probe exploded")
 
     monkeypatch.setattr(gate_module, "evaluate_model_gate", _boom)
-
-    resp = client.get(
+    broken = client.get(
         "/api/v1/pipeline/worker/status", params={"library_root": str(root)}
     )
-
-    assert resp.status_code == 200
-    assert resp.json()["model_gate"] is None
+    assert broken.status_code == 200
+    assert broken.json()["model_gate"] is None
 
 
 def test_pipeline_queue_includes_checkpoint_stage_statuses(
@@ -445,13 +425,12 @@ def _capture_to_thread(monkeypatch: pytest.MonkeyPatch):
     return calls
 
 
-def test_pipeline_queue_offloads_sqlite_to_thread(
+def test_pipeline_queue_routes_offload_sqlite_to_thread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, patch_config_root
 ) -> None:
-    """The /queue route must not run SQLite queries on the event loop."""
-    import asyncio
-
-    from mbforge.api.http.pipeline.pipeline import pipeline_queue
+    """The /queue and /queue/stats routes must not run SQLite queries on the
+    event loop."""
+    from mbforge.api.http.pipeline.pipeline import pipeline_queue, pipeline_queue_stats
     from mbforge.service.dto.pipeline import PipelineQueueRequest
 
     calls = _capture_to_thread(monkeypatch)
@@ -468,28 +447,11 @@ def test_pipeline_queue_offloads_sqlite_to_thread(
     assert result.tasks == []
     assert len(calls) == 1
 
+    calls.clear()
+    stats = asyncio.run(pipeline_queue_stats(PipelineQueueRequest(library_root=root)))
 
-def test_pipeline_queue_stats_offloads_sqlite_to_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, patch_config_root
-) -> None:
-    """The /queue/stats route must not run SQLite queries on the event loop."""
-    import asyncio
-
-    from mbforge.api.http.pipeline.pipeline import pipeline_queue_stats
-    from mbforge.service.dto.pipeline import PipelineQueueRequest
-
-    calls = _capture_to_thread(monkeypatch)
-
-    root = str(tmp_path / "library")
-    Path(root).mkdir(parents=True, exist_ok=True)
-    patch_config_root(root)
-    db = DatabaseManager.get(root)
-    db.initialize()
-
-    result = asyncio.run(pipeline_queue_stats(PipelineQueueRequest(library_root=root)))
-
-    assert result.success is True
-    assert result.stats == {}
+    assert stats.success is True
+    assert stats.stats == {}
     assert len(calls) == 1
 
 

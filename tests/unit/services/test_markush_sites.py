@@ -1,4 +1,9 @@
-"""Unit tests for the Markush attachment-site service (Phase 4)."""
+"""Unit tests for the Markush attachment-site service (Phase 4).
+
+Covers ``services.use_cases.markush.sites`` (``create_site`` / ``update_site`` /
+``create_option`` / ``create_mount`` / ``decide_mount`` and their listings):
+validation gates, idempotency, listing order and the decision audit trail.
+"""
 
 from __future__ import annotations
 
@@ -89,14 +94,16 @@ def _seed_fragment_pending(database, *, fragment_id: str = "fr-p", smiles: str =
         conn.commit()
 
 
-def test_create_site_requires_explicit_atom_map(database, repo) -> None:
+def test_create_site_validates_scaffold_state_and_attachment_points(
+    database, repo
+) -> None:
+    """An explicit in-range atom map is required, and only a confirmed
+    scaffold may carry sites."""
     _seed_scaffold(database)
+    _seed_scaffold_pending(database)
+
     with pytest.raises(MarkushSiteError, match="atom_map_num is required"):
         create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=None)
-
-
-def test_create_site_rejects_out_of_range_atom_map(database, repo) -> None:
-    _seed_scaffold(database)
     with pytest.raises(MarkushSiteError, match="out of range"):
         # scaffold has 2 attachment points; atom_map_num=5 is invalid.
         create_site(
@@ -106,68 +113,91 @@ def test_create_site_rejects_out_of_range_atom_map(database, repo) -> None:
             atom_map_num=5,
             attachment_count=1,
         )
+    with pytest.raises(MarkushSiteError, match="scaffold is not confirmed"):
+        create_site(repo, scaffold_id="sc-p", site_label="R1", atom_map_num=1)
 
 
-def test_create_and_list_sites(database, repo) -> None:
-    _seed_scaffold(database)
-    create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
+def test_sites_list_in_order_mounts_filter_by_scaffold_and_update_applies(
+    database, repo
+) -> None:
+    """Sites keep their creation order, mounts are scoped to their scaffold,
+    and ``update_site`` persists the new attachment count."""
+    _seed_scaffold(database, scaffold_id="sc-1")
+    _seed_scaffold(database, scaffold_id="sc-2")
+    _seed_fragment(database)
+
+    s1 = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
     create_site(repo, scaffold_id="sc-1", site_label="R2", atom_map_num=2)
     sites = list_sites(repo, "sc-1")
     assert [s.site_label for s in sites] == ["R1", "R2"]
     assert [s.atom_map_num for s in sites] == [1, 2]
 
+    other = create_site(repo, scaffold_id="sc-2", site_label="R2", atom_map_num=1)
+    create_mount(repo, site_id=s1.site_id, fragment_id="fr-1")
+    create_mount(repo, site_id=other.site_id, fragment_id="fr-1")
+    mounts = list_mounts(repo, scaffold_id="sc-1")
+    assert len(mounts) == 1
+    assert mounts[0].site_id == s1.site_id
 
-def test_update_site_changes_attachment_count(database, repo) -> None:
-    _seed_scaffold(database)
-    site = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
-    updated = update_site(repo, site_id=site.site_id, attachment_count=2)
+    updated = update_site(repo, site_id=s1.site_id, attachment_count=2)
     assert updated.attachment_count == 2
 
 
-def test_create_option_requires_fragment_or_definition(database, repo) -> None:
+def test_create_option_requires_definition_or_confirmed_fragment(
+    database, repo
+) -> None:
+    """An option needs a fragment or free-text definition, and a presented
+    fragment must already be confirmed."""
     _seed_scaffold(database)
+    _seed_fragment_pending(database)
     site = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
+
     with pytest.raises(MarkushSiteError, match="requires"):
         create_option(repo, site_id=site.site_id)
+    with pytest.raises(MarkushSiteError, match="fragment is not confirmed"):
+        create_option(repo, site_id=site.site_id, fragment_id="fr-p")
 
-
-def test_create_option_with_definition(database, repo) -> None:
-    _seed_scaffold(database)
-    site = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
     option = create_option(repo, site_id=site.site_id, definition_text="C1-6 alkyl")
     options = list_options(repo, site.site_id)
     assert option.definition_text == "C1-6 alkyl"
     assert len(options) == 1
 
 
-def test_create_mount_rejects_attachment_count_mismatch(database, repo) -> None:
+def test_create_mount_checks_attachment_count_confirmation_and_idempotency(
+    database, repo
+) -> None:
+    """Mounts are idempotent per (site, fragment), reject unconfirmed
+    fragments and refuse a fragment whose attachment count mismatches."""
     _seed_scaffold(database)
     _seed_fragment(database, smiles="*C")  # 1 attachment point
-    site = create_site(
-        repo,
-        scaffold_id="sc-1",
-        site_label="R1",
-        atom_map_num=1,
-        attachment_count=2,  # site expects 2
-    )
-    with pytest.raises(MarkushSiteError, match="attachment mismatch"):
-        create_mount(repo, site_id=site.site_id, fragment_id="fr-1")
-
-
-def test_create_mount_is_idempotent(database, repo) -> None:
-    _seed_scaffold(database)
-    _seed_fragment(database)
+    _seed_fragment_pending(database)
     site = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
+
     first = create_mount(repo, site_id=site.site_id, fragment_id="fr-1")
     second = create_mount(repo, site_id=site.site_id, fragment_id="fr-1")
     assert first.mount_id == second.mount_id
 
+    with pytest.raises(MarkushSiteError, match="fragment is not confirmed"):
+        create_mount(repo, site_id=site.site_id, fragment_id="fr-p")
 
-def test_decide_mount_records_audit_row(database, repo) -> None:
+    two_point_site = create_site(
+        repo,
+        scaffold_id="sc-1",
+        site_label="R2",
+        atom_map_num=2,
+        attachment_count=2,  # site expects 2
+    )
+    with pytest.raises(MarkushSiteError, match="attachment mismatch"):
+        create_mount(repo, site_id=two_point_site.site_id, fragment_id="fr-1")
+
+
+def test_decide_mount_records_audit_and_rejects_repeat(database, repo) -> None:
+    """A confirmed mount is audited exactly once; re-confirming it is refused."""
     _seed_scaffold(database)
     _seed_fragment(database)
     site = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
     mount = create_mount(repo, site_id=site.site_id, fragment_id="fr-1")
+
     decided = decide_mount(repo, mount_id=mount.mount_id, action="confirm", reason="ok")
     with database.mol_conn() as conn:
         audit = conn.execute(
@@ -180,54 +210,11 @@ def test_decide_mount_records_audit_row(database, repo) -> None:
     assert audit["new_state"] == "confirmed"
     assert json.loads(audit["snapshot"])["site_id"] == site.site_id
 
-
-def test_list_mounts_filters_by_scaffold(database, repo) -> None:
-    _seed_scaffold(database, scaffold_id="sc-1")
-    _seed_scaffold(database, scaffold_id="sc-2")
-    _seed_fragment(database)
-    s1 = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
-    s2 = create_site(repo, scaffold_id="sc-2", site_label="R2", atom_map_num=1)
-    create_mount(repo, site_id=s1.site_id, fragment_id="fr-1")
-    create_mount(repo, site_id=s2.site_id, fragment_id="fr-1")
-    mounts = list_mounts(repo, scaffold_id="sc-1")
-    assert len(mounts) == 1
-    assert mounts[0].site_id == s1.site_id
-
-
-def test_create_site_requires_confirmed_scaffold(database, repo) -> None:
-    _seed_scaffold_pending(database)
-    with pytest.raises(MarkushSiteError, match="scaffold is not confirmed"):
-        create_site(repo, scaffold_id="sc-p", site_label="R1", atom_map_num=1)
-
-
-def test_create_option_rejects_unconfirmed_fragment(database, repo) -> None:
-    _seed_scaffold(database)
-    _seed_fragment_pending(database)
-    site = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
-    with pytest.raises(MarkushSiteError, match="fragment is not confirmed"):
-        create_option(repo, site_id=site.site_id, fragment_id="fr-p")
-
-
-def test_create_mount_requires_confirmed_site_and_fragment(database, repo) -> None:
-    _seed_scaffold(database)
-    _seed_fragment_pending(database)
-    site = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
-    with pytest.raises(MarkushSiteError, match="fragment is not confirmed"):
-        create_mount(repo, site_id=site.site_id, fragment_id="fr-p")
-
-
-def test_decide_mount_rejects_repeated_confirmed(database, repo) -> None:
-    _seed_scaffold(database)
-    _seed_fragment(database)
-    site = create_site(repo, scaffold_id="sc-1", site_label="R1", atom_map_num=1)
-    mount = create_mount(repo, site_id=site.site_id, fragment_id="fr-1")
-    decided = decide_mount(repo, mount_id=mount.mount_id, action="confirm", reason="ok")
-    assert decided.status == "confirmed"
     with pytest.raises(MarkushSiteError, match="mount is already"):
         decide_mount(repo, mount_id=mount.mount_id, action="confirm", reason="again")
     with database.mol_conn() as conn:
-        audit = conn.execute(
+        decisions = conn.execute(
             "SELECT COUNT(*) FROM markush_decisions WHERE entity_id = ?",
             (mount.mount_id,),
         ).fetchone()[0]
-    assert audit == 1
+    assert decisions == 1

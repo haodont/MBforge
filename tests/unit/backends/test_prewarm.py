@@ -1,3 +1,10 @@
+"""Prewarm status-report contract for the optional local models.
+
+Covers ``mbforge.foundation.inference.prewarm.prewarm_models``: each backend
+contributes its own status (``ready`` / ``error`` / ``unavailable``) so the
+opt-in startup prewarm surfaces which features are usable.
+"""
+
 from unittest.mock import Mock, patch
 
 from mbforge.foundation.inference.prewarm import prewarm_models
@@ -10,6 +17,9 @@ def _ready_detector() -> Mock:
 
 
 def test_prewarm_reports_each_model_status() -> None:
+    """A ready detector reports ``ready``; a raised backend error reports
+    ``error``; a detector that is present but unusable reports ``unavailable``;
+    the molparser health status is passed through unchanged."""
     with (
         patch(
             "mbforge.foundation.inference.moldet_v2_ft.get_moldet",
@@ -23,8 +33,6 @@ def test_prewarm_reports_each_model_status() -> None:
     ):
         assert prewarm_models() == {"moldet": "ready", "molparser": "ready"}
 
-
-def test_prewarm_backend_exception_reported_as_error() -> None:
     with (
         patch(
             "mbforge.foundation.inference.moldet_v2_ft.get_moldet",
@@ -38,8 +46,6 @@ def test_prewarm_backend_exception_reported_as_error() -> None:
     ):
         assert prewarm_models() == {"moldet": "error", "molparser": "ready"}
 
-
-def test_prewarm_marks_unusable_models_unavailable() -> None:
     detector = Mock()
     detector.is_available.return_value = False
     with (

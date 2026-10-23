@@ -1,4 +1,9 @@
-"""Tests for the canonical source-evidence SQL query service."""
+"""Tests for the canonical source-evidence SQL query service.
+
+Covers ``services.use_cases.documents.source_evidence`` (``resolve`` /
+``list_evidence`` / ``at`` / ``find_text`` / ``update_molecule``) plus the
+idempotent persistence contract of ``db.source_evidence.persist_source_evidence``.
+"""
 
 from __future__ import annotations
 
@@ -59,14 +64,20 @@ def test_source_evidence_queries_resolve_text_and_bbox_intersection(
     assert [
         item.evidence_id for item in find_text(tmp_path, "doc-query", "IC50  10 nM")
     ] == [text.evidence_id]
+    from mbforge.service.use_cases.agent_queries import query_evidence
 
+    assert query_evidence(str(tmp_path), doc_id="doc-query", text="IC50", page=2) == []
+    assert (
+        query_evidence(str(tmp_path), doc_id="doc-query", text="IC50", kind="figcx")
+        == []
+    )
 
-def test_source_evidence_at_requires_valid_bbox(tmp_path: Path) -> None:
+    # A bbox-less intersection probe is a caller error, not an empty result.
     with pytest.raises(ValueError, match="bbox"):
         at(tmp_path, "doc-query", 1, None)  # type: ignore[arg-type]
 
 
-def test_source_evidence_persistence_is_idempotent_and_refreshable(
+def test_source_evidence_persistence_is_idempotent_refreshable_and_drop_safe(
     tmp_path: Path,
 ) -> None:
     evidence = SourceEvidence.create(
@@ -96,8 +107,7 @@ def test_source_evidence_persistence_is_idempotent_and_refreshable(
     assert refreshed.raw_text == "changed"
     assert list_evidence(tmp_path, "doc-idempotent") == [refreshed]
 
-
-def test_source_evidence_batch_may_not_drop_existing_ids(tmp_path: Path) -> None:
+    # A batch that omits an already-persisted id would silently lose evidence.
     kept = SourceEvidence.create(
         doc_id="doc-drop",
         page=1,
@@ -116,7 +126,7 @@ def test_source_evidence_batch_may_not_drop_existing_ids(tmp_path: Path) -> None
         persist_source_evidence(tmp_path, [kept])
 
 
-def test_update_molecule_overwrites_same_evidence_id_and_backs_up_source(
+def test_update_molecule_overwrites_payload_and_allows_empty_name(
     tmp_path: Path,
 ) -> None:
     evidence = SourceEvidence.create(
@@ -148,24 +158,23 @@ def test_update_molecule_overwrites_same_evidence_id_and_backs_up_source(
     assert len(backups) == 1
     assert (backups[0] / "database.json").is_file()
 
-
-def test_update_molecule_allows_empty_name(tmp_path: Path) -> None:
-    evidence = SourceEvidence.create(
+    # An empty name is a legitimate edit (the panel clears the label).
+    no_name = SourceEvidence.create(
         doc_id="doc-no-name",
         page=1,
         bbox=(1.0, 2.0, 3.0, 4.0),
         raw_text=json.dumps({"smiles": "CCO"}),
         kind="molecule",
     )
-    persist_source_evidence(tmp_path, [evidence])
+    persist_source_evidence(tmp_path, [no_name])
 
     assert (
-        update_molecule(tmp_path, "doc-no-name", evidence.evidence_id, "", "CCN")
-        == evidence.evidence_id
+        update_molecule(tmp_path, "doc-no-name", no_name.evidence_id, "", "CCN")
+        == no_name.evidence_id
     )
 
-    updated = resolve(tmp_path, evidence.evidence_id)
-    assert updated is not None
-    payload = json.loads(updated.raw_text)
-    assert payload["name"] == ""
-    assert payload["smiles"] == "CCN"
+    renamed = resolve(tmp_path, no_name.evidence_id)
+    assert renamed is not None
+    renamed_payload = json.loads(renamed.raw_text)
+    assert renamed_payload["name"] == ""
+    assert renamed_payload["smiles"] == "CCN"

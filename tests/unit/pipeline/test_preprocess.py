@@ -1,4 +1,10 @@
-"""Unit tests for molecule crop preprocessing (main / others split)."""
+"""Unit tests for molecule crop preprocessing (main / others split).
+
+Covers ``mbforge.service.pipeline.detection.image_preprocessing``:
+``preprocess_mol_image`` keeps the drawing (and its far-apart parts) in
+``main`` while off-cluster labels go to ``others``, and the mask returned by
+``split_molecule_crop`` is exactly the region ``erase_ink_region`` blanks.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +31,9 @@ def _img(rects: list[tuple[int, int, int, int]], size: tuple[int, int] = (120, 1
     return img
 
 
-def test_preprocess_separates_offcluster_label() -> None:
+def test_preprocess_separates_label_noise_and_keeps_structure_ink(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two near strokes form the main cluster; a far label goes to others."""
     img = _img(
         [
@@ -41,25 +49,18 @@ def test_preprocess_separates_offcluster_label() -> None:
     assert int((np.asarray(main) < 200).sum()) == 50 * 4 * 2
     assert int((np.asarray(others) < 200).sum()) == 10 * 10
 
-
-def test_preprocess_single_component_returns_no_others() -> None:
-    """A single connected structure has nothing to separate."""
-    img = _img([(10, 10, 40, 40)])
-
-    main, others = preprocess_mol_image(img)
+    # A single connected structure has nothing to separate.
+    main, others = preprocess_mol_image(_img([(10, 10, 40, 40)]))
 
     assert others is None
     assert int((np.asarray(main) < 200).sum()) == 30 * 30
 
-
-def test_preprocess_keeps_structure_parts_beyond_centroid_distance() -> None:
-    """Atom letters far from any component centroid stay in main.
-
-    Regression: clustering component *centroids* split the molecule when its
-    parts sat more than ``eps`` from the largest component's centroid,
-    discarding 70-95% of the foreground from ``main`` on real patent crops.
-    Ink-pixel DBSCAN keeps every part that is within ``eps`` of structure ink.
-    """
+    # Atom letters far from any component centroid stay in main.
+    #
+    # Regression: clustering component *centroids* split the molecule when its
+    # parts sat more than ``eps`` from the largest component's centroid,
+    # discarding 70-95% of the foreground from ``main`` on real patent crops.
+    # Ink-pixel DBSCAN keeps every part that is within ``eps`` of structure ink.
     img = _img(
         [
             (10, 20, 60, 24),  # core stroke
@@ -73,37 +74,31 @@ def test_preprocess_keeps_structure_parts_beyond_centroid_distance() -> None:
     assert others is None
     assert int((np.asarray(main) < 200).sum()) == 50 * 4 * 2 + 10 * 40
 
-
-def test_preprocess_preserves_gray_values() -> None:
-    """main keeps original gray tones — no 0/255 binarization applied."""
-    img = _img([(10, 10, 40, 40)])
-    px = img.load()
+    # main keeps original gray tones — no 0/255 binarization applied.
+    gray = _img([(10, 10, 40, 40)])
+    px = gray.load()
     for x in range(10, 40):
         px[x, 12] = 150
 
-    main, _ = preprocess_mol_image(img)
+    main, _ = preprocess_mol_image(gray)
 
     assert int((np.asarray(main) == 150).sum()) == 30
 
-
-def test_preprocess_without_scipy_returns_unsplit_grayscale(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Without SciPy the grayscale image is returned unsplit."""
+    # Without SciPy the grayscale image is returned unsplit.
     monkeypatch.setattr(preprocess_module, "_SCIPY_AVAILABLE", False)
-    img = _img([(10, 10, 40, 40), (90, 90, 100, 100)])
 
-    main, others = preprocess_mol_image(img)
+    main, others = preprocess_mol_image(_img([(10, 10, 40, 40), (90, 90, 100, 100)]))
 
     assert others is None
     assert int((np.asarray(main) < 200).sum()) == 30 * 30 + 10 * 10
 
 
-def test_split_exposes_the_largest_cluster_mask() -> None:
+def test_split_and_erase_pin_the_largest_cluster_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The mask covers the drawing only, so a wider window can blank it."""
-    split = split_molecule_crop(
-        _img([(10, 20, 60, 24), (10, 26, 60, 30), (90, 90, 100, 100)])
-    )
+    a = _img([(10, 20, 60, 24), (10, 26, 60, 30), (90, 90, 100, 100)])
+    split = split_molecule_crop(a)
 
     assert split.main_mask is not None
     assert split.main_mask.shape == (120, 120)
@@ -111,26 +106,8 @@ def test_split_exposes_the_largest_cluster_mask() -> None:
     assert not split.main_mask[95, 95]  # the far label is not part of the drawing
     assert split.others is not None
 
-
-def test_split_returns_no_mask_when_clustering_cannot_run(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Without SciPy there is no mask, so callers must not try to erase."""
-    monkeypatch.setattr(preprocess_module, "_SCIPY_AVAILABLE", False)
-
-    split = split_molecule_crop(_img([(10, 10, 40, 40)]))
-
-    assert split.main_mask is None
-    assert split.others is None
-
-
-def test_erase_ink_region_blanks_the_drawing_and_keeps_everything_else() -> None:
-    """Window B keeps A2 and the right/below extension; the drawing turns white."""
-    a = _img([(10, 20, 60, 24), (10, 26, 60, 30), (90, 90, 100, 100)])
-    split = split_molecule_crop(a)
-
-    # B extends A to the right (x >= 120) and below (y >= 120) only, so the
-    # two share the (0, 0) origin and A's mask applies to B unshifted.
+    # Window B extends A to the right (x >= 120) and below (y >= 120) only, so
+    # the two share the (0, 0) origin and A's mask applies to B unshifted.
     b = Image.new("L", (150, 140), 255)
     b.paste(a, (0, 0))
     band = b.load()
@@ -139,7 +116,6 @@ def test_erase_ink_region_blanks_the_drawing_and_keeps_everything_else() -> None
             for x in range(x0, x1):
                 band[x, y] = 0
 
-    assert split.main_mask is not None
     erased = erase_ink_region(b, split.main_mask)
 
     assert erased.size == (150, 140)
@@ -149,3 +125,11 @@ def test_erase_ink_region_blanks_the_drawing_and_keeps_everything_else() -> None
     assert int((np.asarray(erased) < 200).sum()) == 10 * 10 + 16 * 10 + 20 * 10
     # The source window is left alone — the erase is a copy.
     assert int((np.asarray(b) < 200).sum()) == 50 * 4 * 2 + 10 * 10 + 16 * 10 + 20 * 10
+
+    # Without SciPy there is no mask, so callers must not try to erase.
+    monkeypatch.setattr(preprocess_module, "_SCIPY_AVAILABLE", False)
+
+    split = split_molecule_crop(_img([(10, 10, 40, 40)]))
+
+    assert split.main_mask is None
+    assert split.others is None

@@ -122,7 +122,7 @@ def _run(
     if fail_patent_publish:
         patches.append(
             patch(
-                "mbforge.service.pipeline.artifacts.staging.publish_run",
+                "mbforge.service.use_cases.documents.patent_facts.publish_document_facts",
                 side_effect=RuntimeError("disk full"),
             )
         )
@@ -163,7 +163,10 @@ def library_root(tmp_path: Path) -> Path:
     return root
 
 
-def test_cancel_cleans_staging(sample_pdf: Path, library_root: Path) -> None:
+def test_cancelled_and_failed_runs_never_publish_evidence(
+    sample_pdf: Path, library_root: Path
+) -> None:
+    """Cancellation stages nothing; a failed re-ingest keeps the old evidence."""
     resolver = LibraryLayout(library_root)
 
     # Cancel the task before starting; the runner detects it at the
@@ -180,12 +183,7 @@ def test_cancel_cleans_staging(sample_pdf: Path, library_root: Path) -> None:
     # Promoted evidence was never written (pipeline was cancelled).
     assert not (resolver.crops_dir(_DOC_ID) / "crop1.png").exists()
 
-
-def test_failed_reingest_keeps_old_evidence(
-    sample_pdf: Path, library_root: Path
-) -> None:
-    """A failed re-ingest must not overwrite or remove the previous run's evidence."""
-    resolver = LibraryLayout(library_root)
+    # A failed re-ingest must not overwrite or remove the previous run's evidence.
     old_crop = resolver.crops_dir(_DOC_ID) / "crop1.png"
     old_crop.parent.mkdir(parents=True, exist_ok=True)
     old_crop.write_bytes(b"old-crop")

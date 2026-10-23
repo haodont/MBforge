@@ -67,8 +67,8 @@ def _status(
     )
 
 
-def test_gate_blocks_and_reports_every_missing_required_model(monkeypatch) -> None:
-    """A non-ready model blocks the gate and is reported with its status."""
+def test_gate_verdict_tracks_the_model_statuses(monkeypatch) -> None:
+    """A non-ready (or erroring) model blocks and is reported; all-ready passes."""
     _install(
         monkeypatch,
         {
@@ -79,39 +79,34 @@ def test_gate_blocks_and_reports_every_missing_required_model(monkeypatch) -> No
         },
     )
 
-    gate = model_gate.evaluate_model_gate()
+    blocked = model_gate.evaluate_model_gate()
 
-    assert gate.ready is False
+    assert blocked.ready is False
     # The scope comes from the port, not from a hardcoded list in the predicate.
-    assert gate.required == _STUB_IDS
+    assert blocked.required == _STUB_IDS
     # Reported in required order, so the message is stable across polls.
-    assert gate.missing_ids() == ("moldet", "hiro_layout")
-    assert gate.reason() == "missing models: moldet (not_found), hiro_layout (partial)"
-    assert gate.to_dict()["missing"][0] == {
+    assert blocked.missing_ids() == ("moldet", "hiro_layout")
+    assert blocked.reason() == (
+        "missing models: moldet (not_found), hiro_layout (partial)"
+    )
+    assert blocked.to_dict()["missing"][0] == {
         "id": "moldet",
         "name": "MolDetv2-FT",
         "status": "not_found",
         "error": None,
     }
 
-
-def test_gate_is_ready_when_every_required_model_is_ready(monkeypatch) -> None:
-    """All-ready yields no blocking entries and no reason."""
     _install(
         monkeypatch,
         {rid: _status(rid, ResourceStatus.READY) for rid in _STUB_IDS},
     )
+    ready = model_gate.evaluate_model_gate()
 
-    gate = model_gate.evaluate_model_gate()
+    assert ready.ready is True
+    assert ready.missing == ()
+    assert ready.reason() is None
+    assert ready.to_dict()["missing"] == []
 
-    assert gate.ready is True
-    assert gate.missing == ()
-    assert gate.reason() is None
-    assert gate.to_dict()["missing"] == []
-
-
-def test_gate_blocks_when_a_probe_raises(monkeypatch) -> None:
-    """A failing probe must block, never silently unblock, processing."""
     _install(
         monkeypatch,
         {
@@ -119,13 +114,13 @@ def test_gate_blocks_when_a_probe_raises(monkeypatch) -> None:
             "hiro_layout": _status("hiro_layout", ResourceStatus.READY),
         },
     )
+    errored = model_gate.evaluate_model_gate()
 
-    gate = model_gate.evaluate_model_gate()
-
-    assert gate.ready is False
-    assert gate.missing_ids() == ("moldet",)
-    assert gate.missing[0].status == "error"
-    assert gate.missing[0].error == "probe exploded"
+    # A failing probe must block, never silently unblock, processing.
+    assert errored.ready is False
+    assert errored.missing_ids() == ("moldet",)
+    assert errored.missing[0].status == "error"
+    assert errored.missing[0].error == "probe exploded"
 
 
 def test_required_model_set_is_the_extract_dependency_set() -> None:

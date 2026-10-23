@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 _NOTE = {
@@ -18,52 +17,48 @@ _NOTE = {
 }
 
 
-@pytest.mark.parametrize(
-    "case",
-    ["library_root_alias", "camel_case_note_fields", "doc_id_alias"],
-)
 def test_notes_accepts_frontend_aliases(
-    app_client: TestClient, tmp_library: Path, case: str
+    app_client: TestClient, tmp_library: Path
 ) -> None:
     """The frontend alias shapes (libraryRoot, camelCase fields, doc_id) work."""
     root = str(tmp_library)
-    if case == "library_root_alias":
-        resp = app_client.post("/api/v1/notes/list", json={"libraryRoot": root})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-    elif case == "camel_case_note_fields":
-        resp = app_client.post(
-            "/api/v1/notes/save",
-            json={
-                "library_root": root,
-                "note": {
-                    "id": "n-alias",
-                    "title": "Alias",
-                    "content": "c",
-                    "tags": [],
-                    "links": [{"type": "note", "refId": "n2", "refTitle": "Other"}],
-                    "createdAt": "2024-01-01",
-                    "updatedAt": "2024-01-02",
-                },
+
+    resp = app_client.post("/api/v1/notes/list", json={"libraryRoot": root})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+    resp = app_client.post(
+        "/api/v1/notes/save",
+        json={
+            "library_root": root,
+            "note": {
+                "id": "n-alias",
+                "title": "Alias",
+                "content": "c",
+                "tags": [],
+                "links": [{"type": "note", "refId": "n2", "refTitle": "Other"}],
+                "createdAt": "2024-01-01",
+                "updatedAt": "2024-01-02",
             },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["note"]["id"] == "n-alias"
-        assert data["note"]["createdAt"] == "2024-01-01"
-    else:
-        resp = app_client.post(
-            "/api/v1/notes/save",
-            json={"library_root": root, "note": {**_NOTE, "id": "n-doc"}},
-        )
-        assert resp.status_code == 200
-        resp = app_client.post(
-            "/api/v1/notes/get",
-            json={"library_root": root, "doc_id": "n-doc"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["notes"] == "content"
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["note"]["id"] == "n-alias"
+    assert data["note"]["createdAt"] == "2024-01-01"
+
+    resp = app_client.post(
+        "/api/v1/notes/save",
+        json={"library_root": root, "note": {**_NOTE, "id": "n-doc"}},
+    )
+    assert resp.status_code == 200
+    resp = app_client.post(
+        "/api/v1/notes/get",
+        json={"library_root": root, "doc_id": "n-doc"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["notes"] == "content"
 
 
 def test_notes_crud_flow(app_client: TestClient, tmp_library: Path) -> None:

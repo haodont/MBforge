@@ -1,6 +1,17 @@
+"""HTTP-level tests for the molecule router (``mbforge.api.http.molecule.molecule``).
+
+Covered endpoints: list, stats, get, evidence, create, update,
+bulk-status, bulk-delete, delete, search, by-location, corrections.
+
+Protects: the create/get/update/delete round trip and its audited SMILES
+corrections, server-side filtering/sorting/pagination with evidence
+back-fill, the bulk write paths, the central 404/422 error envelopes, the
+text/auto/similarity search modes, and the detection-cache location lookup
+with its 1-based page conversion.
+"""
+
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
 
 from mbforge.db.sqlite.database import DatabaseManager
@@ -14,7 +25,10 @@ def _assert_error(response, expected_status: int, expected_error_code: str) -> d
     return data
 
 
-def test_molecule_create_and_get(app_client: TestClient, tmp_library) -> None:
+def test_molecule_crud_round_trip_with_tags_properties_and_audit(
+    app_client: TestClient, tmp_library
+) -> None:
+    """Create/get/update round-trip persists fields and audits a SMILES correction."""
     root = str(tmp_library)
     resp = app_client.post(
         "/api/v1/molecule/create",
@@ -32,12 +46,102 @@ def test_molecule_create_and_get(app_client: TestClient, tmp_library) -> None:
     assert resp.status_code == 200
     assert resp.json()["molecule"]["smiles"] == "CCO"
 
+    resp = app_client.put(
+        f"/api/v1/molecule/{mol_id}",
+        json={"library_root": root, "name": "Updated"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
 
-def test_molecule_list_applies_server_filters_and_sorting(
+    # Frontend ``tags`` and ``properties`` are persisted and returned parsed.
+    resp = app_client.put(
+        f"/api/v1/molecule/{mol_id}",
+        json={
+            "library_root": root,
+            "tags": ["frag-1", "frag-2"],
+            "properties": {"mw": 46.07},
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+    molecule = app_client.post(
+        "/api/v1/molecule/get",
+        json={"library_root": root, "mol_id": mol_id},
+    ).json()["molecule"]
+    assert molecule["name"] == "Updated"
+    assert molecule["tags"] == ["frag-1", "frag-2"]
+    assert molecule["properties"] == {"mw": 46.07}
+
+    # A SMILES edit is appended to the readable correction audit.
+    response = app_client.put(
+        f"/api/v1/molecule/{mol_id}",
+        json={"library_root": root, "smiles": "CCN"},
+    )
+    assert response.status_code == 200
+    assert (
+        app_client.post(
+            "/api/v1/molecule/get",
+            json={"library_root": root, "mol_id": mol_id},
+        ).json()["molecule"]["smiles"]
+        == "CCN"
+    )
+
+    corrections = app_client.get(
+        f"/api/v1/molecule/{mol_id}/corrections",
+        params={"library_root": root},
+    )
+    assert corrections.status_code == 200
+    assert corrections.json()["corrections"] == [
+        {
+            "correction_id": 1,
+            "mol_id": mol_id,
+            "field": "smiles",
+            "old_value": "CCO",
+            "new_value": "CCN",
+            "source": "molecule_update",
+            "created_at": corrections.json()["corrections"][0]["created_at"],
+        }
+    ]
+
+
+def test_molecule_get_parses_json_text_columns(
     app_client: TestClient, tmp_library
 ) -> None:
+    """JSON-encoded TEXT columns are parsed and ``labels`` is mapped to ``tags``."""
     root = str(tmp_library)
-    for mol_id, name in (("m1", "Zeta"), ("m2", "Alpha"), ("m3", "Beta")):
+    app_client.post(
+        "/api/v1/molecule/create",
+        json={"library_root": root, "smiles": "CCO", "mol_id": "CCO"},
+    )
+    db = DatabaseManager.get(root)
+    with db.mol_conn() as conn:
+        conn.execute(
+            "UPDATE molecules SET labels = ?, properties = ? WHERE mol_id = ?",
+            ('["tag-1"]', '{"mw": 46.07}', "CCO"),
+        )
+
+    resp = app_client.post(
+        "/api/v1/molecule/get",
+        json={"library_root": root, "mol_id": "CCO"},
+    )
+    molecule = resp.json()["molecule"]
+    assert molecule["tags"] == ["tag-1"]
+    assert molecule["properties"] == {"mw": 46.07}
+    assert "labels" not in molecule
+
+
+def test_molecule_list_filters_sorts_backfills_source_doc_and_counts(
+    app_client: TestClient, tmp_library
+) -> None:
+    """List applies server filters/sorting/pagination, back-fills evidence, stats count."""
+    root = str(tmp_library)
+    for mol_id, name in (
+        ("m1", "Zeta"),
+        ("m2", "Alpha"),
+        ("m3", "Beta"),
+        ("CCO", "carbonic"),
+    ):
         response = app_client.post(
             "/api/v1/molecule/create",
             json={
@@ -72,15 +176,6 @@ def test_molecule_list_applies_server_filters_and_sorting(
     assert data["items"][0]["name"] == "Beta"
     assert "manual" in data["source_types"]
 
-
-def test_molecule_list_backfills_source_doc_from_evidence(
-    app_client: TestClient, tmp_library
-) -> None:
-    root = str(tmp_library)
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={"library_root": root, "smiles": "CCO", "mol_id": "CCO"},
-    )
     db = DatabaseManager.get(root)
     with db.mol_conn() as conn:
         conn.execute(
@@ -92,44 +187,25 @@ def test_molecule_list_backfills_source_doc_from_evidence(
             """
         )
 
-    response = app_client.post(
+    listed = app_client.post(
         "/api/v1/molecule/list",
         json={"library_root": root, "page": 1, "page_size": 10},
     )
-
-    assert response.status_code == 200
-    molecule = response.json()["items"][0]
-    assert molecule["source_doc"] == "doc-42"
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["total"] == 4
+    backfilled = next(m for m in body["items"] if m["mol_id"] == "CCO")
+    assert backfilled["source_doc"] == "doc-42"
 
     resp = app_client.post("/api/v1/molecule/stats", json={"library_root": root})
     assert resp.status_code == 200
-    assert resp.json()["total"] == 1
+    assert resp.json()["total"] == 4
 
 
-def test_molecule_update_and_delete(app_client: TestClient, tmp_library) -> None:
-    root = str(tmp_library)
-    resp = app_client.post(
-        "/api/v1/molecule/create",
-        json={"library_root": root, "smiles": "CCO"},
-    )
-    mol_id = resp.json()["mol_id"]
-    resp = app_client.put(
-        f"/api/v1/molecule/{mol_id}",
-        json={"library_root": root, "name": "Updated"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["success"] is True
-
-    resp = app_client.post(
-        "/api/v1/molecule/get",
-        json={"library_root": root, "mol_id": mol_id},
-    )
-    assert resp.json()["molecule"]["name"] == "Updated"
-
-
-def test_molecule_bulk_status_updates_existing_records(
+def test_molecule_bulk_status_and_bulk_delete(
     app_client: TestClient, tmp_library
 ) -> None:
+    """Bulk status skips unknown ids; bulk delete removes the listed records."""
     root = str(tmp_library)
     for mol_id in ("m1", "m2"):
         app_client.post(
@@ -150,24 +226,13 @@ def test_molecule_bulk_status_updates_existing_records(
     assert response.json()["updated"] == 2
     assert response.json()["skipped"] == 1
 
-
-def test_molecule_bulk_delete_removes_records(
-    app_client: TestClient, tmp_library
-) -> None:
-    root = str(tmp_library)
-    for mol_id in ("m1", "m2"):
-        app_client.post(
-            "/api/v1/molecule/create",
-            json={"library_root": root, "mol_id": mol_id, "smiles": "CCO"},
-        )
-
-    response = app_client.post(
+    deleted = app_client.post(
         "/api/v1/molecule/bulk-delete",
         json={"library_root": root, "mol_ids": ["m1", "m2", "missing"]},
     )
 
-    assert response.status_code == 200
-    assert response.json()["deleted"] == 2
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] == 2
     listed = app_client.post(
         "/api/v1/molecule/list",
         json={"library_root": root, "page": 1, "page_size": 10},
@@ -175,28 +240,21 @@ def test_molecule_bulk_delete_removes_records(
     assert listed.json()["total"] == 0
 
 
-@pytest.mark.parametrize(
-    "endpoint,payload",
-    [
-        ("/api/v1/molecule/get", {"mol_id": "no-such-mol"}),
-        ("/api/v1/molecule/evidence", {"canonical_smiles": "no-such-mol"}),
-    ],
-)
-def test_molecule_unknown_returns_404(
-    app_client: TestClient, tmp_library, endpoint: str, payload: dict
-) -> None:
-    root = str(tmp_library)
-    _assert_error(
-        app_client.post(endpoint, json={"library_root": root, **payload}),
-        404,
-        "not_found",
-    )
-
-
-def test_molecule_update_no_fields_returns_422(
+def test_molecule_errors_use_central_envelope(
     app_client: TestClient, tmp_library
 ) -> None:
+    """Unknown ids answer 404/not_found; an empty update answers 422/validation_error."""
     root = str(tmp_library)
+    for endpoint, payload in (
+        ("/api/v1/molecule/get", {"mol_id": "no-such-mol"}),
+        ("/api/v1/molecule/evidence", {"canonical_smiles": "no-such-mol"}),
+    ):
+        _assert_error(
+            app_client.post(endpoint, json={"library_root": root, **payload}),
+            404,
+            "not_found",
+        )
+
     resp = app_client.post(
         "/api/v1/molecule/create",
         json={"library_root": root, "smiles": "CCO"},
@@ -209,86 +267,25 @@ def test_molecule_update_no_fields_returns_422(
     )
 
 
-def test_molecule_update_with_tags_and_properties(
+def test_molecule_search_text_auto_and_similarity_modes(
     app_client: TestClient, tmp_library
 ) -> None:
-    """Frontend ``tags`` and ``properties`` are persisted and returned parsed."""
+    """Text mode uses FTS5, auto treats SMILES as substructure, similarity ranks."""
     root = str(tmp_library)
-    resp = app_client.post(
-        "/api/v1/molecule/create",
-        json={"library_root": root, "smiles": "CCO", "mol_id": "CCO"},
-    )
-    mol_id = resp.json()["mol_id"]
-
-    resp = app_client.put(
-        f"/api/v1/molecule/{mol_id}",
-        json={
-            "library_root": root,
-            "tags": ["frag-1", "frag-2"],
-            "properties": {"mw": 46.07},
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["success"] is True
-
-    resp = app_client.post(
-        "/api/v1/molecule/get",
-        json={"library_root": root, "mol_id": mol_id},
-    )
-    molecule = resp.json()["molecule"]
-    assert molecule["tags"] == ["frag-1", "frag-2"]
-    assert molecule["properties"] == {"mw": 46.07}
-
-
-def test_molecule_get_parses_json_text_columns(
-    app_client: TestClient, tmp_library
-) -> None:
-    """JSON-encoded TEXT columns are parsed and ``labels`` is mapped to ``tags``."""
-    root = str(tmp_library)
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={"library_root": root, "smiles": "CCO", "mol_id": "CCO"},
-    )
-    db = DatabaseManager.get(root)
-    with db.mol_conn() as conn:
-        conn.execute(
-            "UPDATE molecules SET labels = ?, properties = ? WHERE mol_id = ?",
-            ('["tag-1"]', '{"mw": 46.07}', "CCO"),
+    for mol_id, smiles, name in (
+        ("CCO", "CCO", "ethanol"),
+        ("benzene", "c1ccccc1", "benzene"),
+        ("propanol", "CCCO", "propanol"),
+    ):
+        app_client.post(
+            "/api/v1/molecule/create",
+            json={
+                "library_root": root,
+                "smiles": smiles,
+                "mol_id": mol_id,
+                "name": name,
+            },
         )
-
-    resp = app_client.post(
-        "/api/v1/molecule/get",
-        json={"library_root": root, "mol_id": "CCO"},
-    )
-    molecule = resp.json()["molecule"]
-    assert molecule["tags"] == ["tag-1"]
-    assert molecule["properties"] == {"mw": 46.07}
-    assert "labels" not in molecule
-
-
-def test_molecule_search_text_mode_uses_fts5(
-    app_client: TestClient, tmp_library
-) -> None:
-    """Text mode should match compound names via FTS5."""
-    root = str(tmp_library)
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={
-            "library_root": root,
-            "smiles": "CCO",
-            "mol_id": "CCO",
-            "name": "ethanol",
-        },
-    )
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={
-            "library_root": root,
-            "smiles": "c1ccccc1",
-            "mol_id": "benzene",
-            "name": "benzene",
-        },
-    )
 
     resp = app_client.post(
         "/api/v1/molecule/search",
@@ -299,31 +296,6 @@ def test_molecule_search_text_mode_uses_fts5(
     assert len(results) == 1
     assert results[0]["name"] == "ethanol"
 
-
-def test_molecule_search_auto_detects_smiles_as_substructure(
-    app_client: TestClient, tmp_library
-) -> None:
-    """Auto mode should treat a valid SMILES as a substructure query."""
-    root = str(tmp_library)
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={
-            "library_root": root,
-            "smiles": "CCO",
-            "mol_id": "CCO",
-            "name": "ethanol",
-        },
-    )
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={
-            "library_root": root,
-            "smiles": "c1ccccc1",
-            "mol_id": "benzene",
-            "name": "benzene",
-        },
-    )
-
     resp = app_client.post(
         "/api/v1/molecule/search",
         json={"library_root": root, "query": "CCO", "mode": "auto"},
@@ -332,31 +304,6 @@ def test_molecule_search_auto_detects_smiles_as_substructure(
     results = resp.json()["results"]
     assert any(r["mol_id"] == "CCO" for r in results)
     assert not any(r["mol_id"] == "benzene" for r in results)
-
-
-def test_molecule_search_similarity_mode_returns_scores(
-    app_client: TestClient, tmp_library
-) -> None:
-    """Similarity mode should return molecules ranked by Tanimoto similarity."""
-    root = str(tmp_library)
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={
-            "library_root": root,
-            "smiles": "CCO",
-            "mol_id": "CCO",
-            "name": "ethanol",
-        },
-    )
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={
-            "library_root": root,
-            "smiles": "CCCO",
-            "mol_id": "propanol",
-            "name": "propanol",
-        },
-    )
 
     resp = app_client.post(
         "/api/v1/molecule/search",
@@ -369,7 +316,7 @@ def test_molecule_search_similarity_mode_returns_scores(
     )
     assert resp.status_code == 200
     results = resp.json()["results"]
-    assert len(results) == 2
+    assert len(results) == 3
     assert results[0]["similarity"] >= results[1]["similarity"]
 
 
@@ -431,41 +378,3 @@ def test_molecule_by_location_uses_detection_cache_and_converts_page(
     )
     assert miss.status_code == 200
     assert miss.json()["matches"] == []
-
-
-def test_molecule_smiles_correction_is_audited_and_readable(
-    app_client: TestClient, tmp_library
-) -> None:
-    root = str(tmp_library)
-    app_client.post(
-        "/api/v1/molecule/create",
-        json={"library_root": root, "mol_id": "m1", "smiles": "CCO"},
-    )
-
-    response = app_client.put(
-        "/api/v1/molecule/m1",
-        json={"library_root": root, "smiles": "CCN"},
-    )
-    assert response.status_code == 200
-    molecule = app_client.post(
-        "/api/v1/molecule/get",
-        json={"library_root": root, "mol_id": "m1"},
-    ).json()["molecule"]
-    assert molecule["smiles"] == "CCN"
-
-    corrections = app_client.get(
-        "/api/v1/molecule/m1/corrections",
-        params={"library_root": root},
-    )
-    assert corrections.status_code == 200
-    assert corrections.json()["corrections"] == [
-        {
-            "correction_id": 1,
-            "mol_id": "m1",
-            "field": "smiles",
-            "old_value": "CCO",
-            "new_value": "CCN",
-            "source": "molecule_update",
-            "created_at": corrections.json()["corrections"][0]["created_at"],
-        }
-    ]

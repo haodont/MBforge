@@ -1,4 +1,10 @@
-"""Tests for resource catalog integrity verification."""
+"""Tests for resource catalog integrity verification.
+
+Covers ``mbforge.server.resource_manager`` (``_verify_model_path``, the catalog)
+and ``mbforge.server.models.assets.locator`` (``_check_model_file`` /
+``_check_model_snapshot``): hash/size verification, snapshot handling, cache-dir
+scoping and catalog metadata.
+"""
 
 from __future__ import annotations
 
@@ -22,105 +28,88 @@ def _sha256_of_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def test_verify_model_path_file_matching(tmp_path: Path) -> None:
+def _info(**overrides) -> ResourceInfo:
+    base = {
+        "id": "test",
+        "name": "Test",
+        "type": ResourceType.MODEL,
+        "description": "",
+    }
+    base.update(overrides)
+    return ResourceInfo(**base)
+
+
+def test_verify_model_path_checks_hash_size_and_presence(tmp_path: Path) -> None:
+    """``_verify_model_path`` accepts a matching file/snapshot, rejects a hash
+    or size mismatch and a missing snapshot member, and skips when no checksum
+    is declared."""
     data = b"hello model"
     f = tmp_path / "model.pth"
     f.write_bytes(data)
-    info = ResourceInfo(
-        id="test",
-        name="Test",
-        type=ResourceType.MODEL,
-        description="",
-        sha256=_sha256_of_bytes(data),
-        expected_size=len(data),
+    assert (
+        _verify_model_path(
+            f, _info(sha256=_sha256_of_bytes(data), expected_size=len(data))
+        )
+        is True
     )
-    assert _verify_model_path(f, info) is True
 
-
-def test_verify_model_path_file_hash_mismatch(tmp_path: Path) -> None:
-    f = tmp_path / "model.pth"
-    f.write_bytes(b"good data")
-    info = ResourceInfo(
-        id="test",
-        name="Test",
-        type=ResourceType.MODEL,
-        description="",
-        sha256="0" * 64,
-        expected_size=f.stat().st_size,
+    other = tmp_path / "other.pth"
+    other.write_bytes(b"good data")
+    assert (
+        _verify_model_path(
+            other, _info(sha256="0" * 64, expected_size=other.stat().st_size)
+        )
+        is False
     )
-    assert _verify_model_path(f, info) is False
 
-
-def test_verify_model_path_file_size_mismatch(tmp_path: Path) -> None:
-    data = b"exact data"
-    f = tmp_path / "model.pth"
-    f.write_bytes(data)
-    info = ResourceInfo(
-        id="test",
-        name="Test",
-        type=ResourceType.MODEL,
-        description="",
-        expected_size=len(data) + 1,
+    sized = tmp_path / "sized.pth"
+    sized.write_bytes(b"exact data")
+    assert (
+        _verify_model_path(sized, _info(expected_size=len(b"exact data") + 1)) is False
     )
-    assert _verify_model_path(f, info) is False
 
+    unchecked = tmp_path / "unchecked.pth"
+    unchecked.write_bytes(b"anything")
+    assert _verify_model_path(unchecked, _info()) is True
 
-def test_verify_model_path_no_checksum_skips(tmp_path: Path) -> None:
-    f = tmp_path / "model.pth"
-    f.write_bytes(b"anything")
-    info = ResourceInfo(
-        id="test",
-        name="Test",
-        type=ResourceType.MODEL,
-        description="",
-    )
-    assert _verify_model_path(f, info) is True
-
-
-def test_verify_model_path_snapshot_single_file(tmp_path: Path) -> None:
-    data = b"snapshot weights"
-    dest = tmp_path / "MolParser"
-    dest.mkdir()
-    weight = dest / "model.pth"
+    snapshot = tmp_path / "MolParser"
+    snapshot.mkdir()
+    weight = snapshot / "model.pth"
     weight.write_bytes(data)
-    info = ResourceInfo(
-        id="molparser",
-        name="MolParser",
-        type=ResourceType.MODEL,
-        description="",
-        files=["model.pth"],
-        sha256=_sha256_of_bytes(data),
-        expected_size=len(data),
+    assert (
+        _verify_model_path(
+            snapshot,
+            _info(
+                id="molparser",
+                files=["model.pth"],
+                sha256=_sha256_of_bytes(data),
+                expected_size=len(data),
+            ),
+        )
+        is True
     )
-    assert _verify_model_path(dest, info) is True
 
-
-def test_verify_model_path_snapshot_missing_file(tmp_path: Path) -> None:
-    dest = tmp_path / "MolParser"
-    dest.mkdir()
-    info = ResourceInfo(
-        id="molparser",
-        name="MolParser",
-        type=ResourceType.MODEL,
-        description="",
-        files=["missing.pth"],
-        sha256="0" * 64,
-        expected_size=1,
+    missing = tmp_path / "MolParser-missing"
+    missing.mkdir()
+    assert (
+        _verify_model_path(
+            missing,
+            _info(files=["missing.pth"], sha256="0" * 64, expected_size=1),
+        )
+        is False
     )
-    assert _verify_model_path(dest, info) is False
 
 
-def test_check_model_file_flags_size_mismatch(tmp_path: Path) -> None:
-    """_check_model_file should report PARTIAL when the found file size differs."""
+def test_check_model_flags_size_mismatch(tmp_path: Path, monkeypatch) -> None:
+    """``_check_model_file``/``_check_model_snapshot`` report PARTIAL when the
+    found file or directory size differs from the catalog."""
+    import mbforge.server.resource_manager as rm
+
     repo_dir = tmp_path / "MolParser"
     repo_dir.mkdir()
-    weight = repo_dir / "model.pth"
-    weight.write_bytes(b"short")
-    info = ResourceInfo(
+    (repo_dir / "model.pth").write_bytes(b"short")
+    file_info = _info(
         id="molparser",
-        name="MolParser",
-        type=ResourceType.MODEL,
-        description="",
         # The weights live in the repo-named subdirectory, so the probe needs
         # ``ms_repo`` to recognise it — without it the subdirectory name is
         # not a candidate at all.
@@ -129,107 +118,73 @@ def test_check_model_file_flags_size_mismatch(tmp_path: Path) -> None:
         local_name="model.pth",
         expected_size=1000,
     )
-    # Temporarily point the MBForge cache dir to our tmp_path via monkeypatching
-    import mbforge.server.resource_manager as rm
 
-    original_get_model_cache_dir = rm._get_model_cache_dir
-    try:
-        rm._get_model_cache_dir = lambda: tmp_path
-        result = _check_model_file(info)
-        assert result.status == ResourceStatus.PARTIAL, result
-        assert "大小" in result.error or "size" in result.error.lower()
-    finally:
-        rm._get_model_cache_dir = original_get_model_cache_dir
-
-
-def test_check_model_snapshot_flags_size_mismatch(tmp_path: Path) -> None:
-    """_check_model_snapshot should report PARTIAL when directory size differs."""
-    repo_dir = tmp_path / "MolParser-Mobile"
-    repo_dir.mkdir()
-    weight = repo_dir / "model.pth"
-    weight.write_bytes(b"short")
-    info = ResourceInfo(
+    snap_dir = tmp_path / "MolParser-Mobile"
+    snap_dir.mkdir()
+    (snap_dir / "model.pth").write_bytes(b"short")
+    snapshot_info = _info(
         id="molparser",
-        name="MolParser",
-        type=ResourceType.MODEL,
-        description="",
         ms_repo="UniParser/MolParser-Mobile",
         download_type="snapshot",
         local_name="MolParser-Mobile",
         files=["model.pth"],
         expected_size=1000,
     )
+
+    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: tmp_path)
+    for info, checked in (
+        (file_info, _check_model_file),
+        (snapshot_info, _check_model_snapshot),
+    ):
+        result = checked(info)
+        assert result.status == ResourceStatus.PARTIAL, (info.download_type, result)
+        assert "大小" in result.error or "size" in result.error.lower()
+
+
+def test_check_model_snapshot_ignores_sidecar_file_sizes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Snapshot metadata must not make a valid primary weight look partial."""
     import mbforge.server.resource_manager as rm
 
-    original_get_model_cache_dir = rm._get_model_cache_dir
-    try:
-        rm._get_model_cache_dir = lambda: tmp_path
-        result = _check_model_snapshot(info)
-        assert result.status == ResourceStatus.PARTIAL, result
-        assert "大小" in result.error or "size" in result.error.lower()
-    finally:
-        rm._get_model_cache_dir = original_get_model_cache_dir
-
-
-def test_check_model_snapshot_ignores_sidecar_file_sizes(tmp_path: Path) -> None:
-    """Snapshot metadata must not make a valid primary weight look partial."""
-    repo_dir = tmp_path / "MolParser"
+    repo_dir = tmp_path / "MolParser-sidecar"
     repo_dir.mkdir()
     weight = repo_dir / "model.pth"
     weight.write_bytes(b"valid weights")
     (repo_dir / ".msc").write_text("metadata", encoding="utf-8")
-    info = ResourceInfo(
+    info = _info(
         id="molparser",
-        name="MolParser",
-        type=ResourceType.MODEL,
-        description="",
         ms_repo="UniParser/MolParser-Mobile",
         download_type="snapshot",
-        local_name="MolParser",
+        local_name="MolParser-sidecar",
         files=["model.pth"],
         expected_size=weight.stat().st_size,
     )
-    import mbforge.server.resource_manager as rm
 
-    original_get_model_cache_dir = rm._get_model_cache_dir
-    try:
-        rm._get_model_cache_dir = lambda: tmp_path
-        result = _check_model_snapshot(info)
-        assert result.status == ResourceStatus.READY, result
-    finally:
-        rm._get_model_cache_dir = original_get_model_cache_dir
+    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: tmp_path)
+    result = _check_model_snapshot(info)
+    assert result.status == ResourceStatus.READY, result
 
 
-def test_molparser_catalog_has_weight_files() -> None:
-    """The MolParser entry must list the recognizer weight + config files."""
-    info = RESOURCE_CATALOG["molparser"]
-    assert "model.safetensors" in info.files
-    assert info.ms_repo == "UniParser/MolParser-Mobile"
-    assert info.hf_repo == "UniParser/MolParser-Mobile"
+def test_catalog_entries_list_expected_weights() -> None:
+    """The MolParser and moldet entries carry the recognizer/detector weight
+    files and repos the downloader fetches."""
+    molparser = RESOURCE_CATALOG["molparser"]
+    assert "model.safetensors" in molparser.files
+    assert molparser.ms_repo == "UniParser/MolParser-Mobile"
+    assert molparser.hf_repo == "UniParser/MolParser-Mobile"
+
+    moldet = RESOURCE_CATALOG["moldet"]
+    assert "moldet_v2_yolo26n_960_doc.pt" in moldet.files
+    assert "moldet_v2_yolo26n_640_general.pt" in moldet.files
+    assert moldet.ms_repo == "UniParser/MolDetv2-YOLO26"
 
 
-def test_moldet_catalog_has_yolo26_weights() -> None:
-    """The moldet entry must point at the MolDetv2-YOLO26 repo with .pt weights."""
-    info = RESOURCE_CATALOG["moldet"]
-    assert "moldet_v2_yolo26n_960_doc.pt" in info.files
-    assert "moldet_v2_yolo26n_640_general.pt" in info.files
-    assert info.ms_repo == "UniParser/MolDetv2-YOLO26"
-
-
-def test_none_info_is_handled(tmp_path: Path) -> None:
-    """None ResourceInfo must not crash the checkers and must verify as False."""
-    assert _check_model_file(None).status == ResourceStatus.ERROR  # type: ignore[arg-type]
-    assert _check_model_snapshot(None).status == ResourceStatus.ERROR  # type: ignore[arg-type]
-    f = tmp_path / "x.pth"
-    f.write_bytes(b"x")
-    assert _verify_model_path(f, None) is False  # type: ignore[arg-type]
-
-
-def test_model_status_ignores_weights_outside_the_cache_dir(
-    monkeypatch,
-    tmp_path: Path,
+def test_status_checkers_tolerate_none_and_ignore_stray_weights(
+    tmp_path: Path, monkeypatch
 ) -> None:
-    """Only the model cache directory counts as "downloaded".
+    """A None ResourceInfo verifies as False / ERROR instead of crashing, and
+    only the model cache directory counts as "downloaded".
 
     Weights left by other tools (assets/models, a repo-root models/ dir, the
     global HF/ModelScope caches) must not make a model report READY: the cache
@@ -237,6 +192,12 @@ def test_model_status_ignores_weights_outside_the_cache_dir(
     ready status always means the app can load the model straight from there.
     """
     import mbforge.server.resource_manager as rm
+
+    assert _check_model_file(None).status == ResourceStatus.ERROR  # type: ignore[arg-type]
+    assert _check_model_snapshot(None).status == ResourceStatus.ERROR  # type: ignore[arg-type]
+    f = tmp_path / "x.pth"
+    f.write_bytes(b"x")
+    assert _verify_model_path(f, None) is False  # type: ignore[arg-type]
 
     cache = tmp_path / "cache"
     cache.mkdir()

@@ -8,6 +8,9 @@ The service is the persistence-side counterpart of the pipeline's
   same source + different content supersedes the old row and inserts a
   fresh ``pending`` row; new source creates a new ``pending`` row.
 - Appending to ``markush_evidence`` and ``markush_decisions``.
+
+Covers ``mbforge.db.markush_candidates.persist_review_candidates`` and the
+``compute_source_key`` / ``compute_content_hash`` provenance helpers.
 """
 
 from __future__ import annotations
@@ -63,9 +66,9 @@ def _candidate(
     return molecule
 
 
-def test_compute_source_key_is_stable_across_bbox_jitter() -> None:
-    """Bbox coordinates are quantized to 0.1 pt so OCR jitter doesn't
-    produce a different source identity."""
+def test_source_key_and_content_hash_derivation() -> None:
+    """``source_key`` quantizes the bbox to 0.1 pt (OCR jitter keeps identity)
+    but changes with the label; ``content_hash`` changes with the SMILES."""
     raw = compute_source_key(
         doc_id="doc-1",
         page=1,
@@ -78,32 +81,28 @@ def test_compute_source_key_is_stable_across_bbox_jitter() -> None:
         bbox=(10.10, 20.01, 110.13, 220.09),
         normalized_label="R1",
     )
+    relabelled = compute_source_key("doc-1", 1, (10.0, 20.0, 110.0, 220.0), "R2")
     assert raw == jittered
+    assert raw != relabelled
 
-
-def test_compute_source_key_changes_when_label_changes() -> None:
-    a = compute_source_key("doc-1", 1, (10.0, 20.0, 110.0, 220.0), "R1")
-    b = compute_source_key("doc-1", 1, (10.0, 20.0, 110.0, 220.0), "R2")
-    assert a != b
-
-
-def test_compute_content_hash_changes_when_smiles_change() -> None:
-    a = compute_content_hash(
+    hash_a = compute_content_hash(
         canonical_smiles="*c1ccccc1",
         esmiles="*c1ccccc1",
         context="Formula I",
         recognition_version=1,
     )
-    b = compute_content_hash(
+    hash_b = compute_content_hash(
         canonical_smiles="*c1ccncc1",
         esmiles="*c1ccncc1",
         context="Formula I",
         recognition_version=1,
     )
-    assert a != b
+    assert hash_a != hash_b
 
 
-def test_persist_review_candidates_inserts_pending_row(database) -> None:
+def test_persist_review_candidates_writes_row_and_decision_log(database) -> None:
+    """A first-time insert lands as a ``pending`` row with its metadata and
+    writes the ``candidate_created`` audit row."""
     candidates = [_candidate(smiles="*c1ccccc1", label="R1")]
     with database.mol_conn() as conn:
         inserted = persist_review_candidates(
@@ -112,13 +111,16 @@ def test_persist_review_candidates_inserts_pending_row(database) -> None:
             conn=conn,
             recognition_version=1,
         )
-    assert inserted == 1
-    with database.mol_conn() as conn:
         row = conn.execute(
             "SELECT doc_id, predicted_role, normalized_label, label_kind, "
             "review_status, review_version, recognition_status "
             "FROM markush_review_candidates"
         ).fetchone()
+        decision = conn.execute(
+            "SELECT action, new_state, snapshot FROM markush_decisions"
+        ).fetchone()
+
+    assert inserted == 1
     assert row["doc_id"] == "doc-1"
     assert row["predicted_role"] == "review_required"
     assert row["normalized_label"] == "R1"
@@ -127,81 +129,11 @@ def test_persist_review_candidates_inserts_pending_row(database) -> None:
     assert row["review_version"] == 1
     assert row["recognition_status"] == "valid"
 
-
-def test_reimport_same_content_preserves_human_decision(database) -> None:
-    """Re-ingesting the same SMILES + label must NOT reset a confirmed row."""
-    candidates = [_candidate(smiles="*c1ccccc1", label="R1")]
-    with database.mol_conn() as conn:
-        persist_review_candidates("doc-1", candidates, conn=conn, recognition_version=1)
-        # User reviews the row out-of-band
-        conn.execute(
-            "UPDATE markush_review_candidates "
-            "SET review_status = 'confirmed', review_version = 2 "
-            "WHERE source_key = (SELECT source_key FROM markush_review_candidates LIMIT 1)"
-        )
-        conn.commit()
-
-    with database.mol_conn() as conn:
-        inserted = persist_review_candidates(
-            "doc-1", candidates, conn=conn, recognition_version=1
-        )
-    assert inserted == 0, "same source + same content must be a no-op"
-    with database.mol_conn() as conn:
-        row = conn.execute(
-            "SELECT review_status, review_version FROM markush_review_candidates"
-        ).fetchone()
-    assert row["review_status"] == "confirmed"
-    assert row["review_version"] == 2
-
-
-def test_reimport_different_content_supersedes_old(database) -> None:
-    """Same label, different SMILES → supersede old, insert new pending."""
-    first = [_candidate(smiles="*c1ccccc1", label="R1")]
-    second = [_candidate(smiles="*c1ccncc1", label="R1")]
-    with database.mol_conn() as conn:
-        persist_review_candidates("doc-1", first, conn=conn, recognition_version=1)
-        # The pipeline writes ``DELETE FROM markush_*`` for the doc before
-        # re-running, so the prior ``markush_fragments`` rows are gone,
-        # but the review queue should NOT be wiped (it carries human
-        # decisions).
-        inserted = persist_review_candidates(
-            "doc-1", second, conn=conn, recognition_version=1
-        )
-    assert inserted == 1
-    with database.mol_conn() as conn:
-        rows = conn.execute(
-            "SELECT source_key, smiles, review_status, superseded_at "
-            "FROM markush_review_candidates ORDER BY created_at"
-        ).fetchall()
-    assert len(rows) == 2
-    # Old row: superseded
-    old, new = rows
-    assert old["smiles"] == "*c1ccccc1"
-    assert old["review_status"] == "superseded"
-    assert old["superseded_at"] is not None
-    # New row: pending
-    assert new["smiles"] == "*c1ccncc1"
-    assert new["review_status"] == "pending"
-    assert new["superseded_at"] is None
-
-
-def test_reimport_new_label_creates_new_pending(database) -> None:
-    """Different label → entirely new row, old one untouched."""
-    first = [_candidate(smiles="*c1ccccc1", label="R1")]
-    second = [_candidate(smiles="*c1ccccc1", label="R2")]
-    with database.mol_conn() as conn:
-        persist_review_candidates("doc-1", first, conn=conn, recognition_version=1)
-        inserted = persist_review_candidates(
-            "doc-1", second, conn=conn, recognition_version=1
-        )
-    assert inserted == 1
-    with database.mol_conn() as conn:
-        rows = conn.execute(
-            "SELECT normalized_label, review_status "
-            "FROM markush_review_candidates ORDER BY created_at"
-        ).fetchall()
-    assert {row["normalized_label"] for row in rows} == {"R1", "R2"}
-    assert all(row["review_status"] == "pending" for row in rows)
+    assert decision["action"] == "candidate_created"
+    assert decision["new_state"] == "pending"
+    snapshot = json.loads(decision["snapshot"])
+    assert snapshot["normalized_label"] == "R1"
+    assert snapshot["smiles"] == "*c1ccccc1"
 
 
 def test_persist_writes_evidence_per_detection(database) -> None:
@@ -244,16 +176,71 @@ def test_persist_writes_evidence_per_detection(database) -> None:
     assert all(row["entity_type"] == "review_candidate" for row in evidence_rows)
 
 
-def test_persist_writes_decision_log(database) -> None:
-    """A first-time insert writes a ``markush_decisions`` audit row."""
-    candidates = [_candidate(smiles="*c1ccccc1", label="R1")]
+def test_reimport_protection_keeps_human_state_and_supersedes_changed_content(
+    database,
+) -> None:
+    """Re-ingest is idempotent for unchanged content, supersedes a row whose
+    SMILES changed under the same label, and leaves untouched rows alone."""
+    same = [_candidate(smiles="*c1ccccc1", label="R1")]
     with database.mol_conn() as conn:
-        persist_review_candidates("doc-1", candidates, conn=conn, recognition_version=1)
-        decision = conn.execute(
-            "SELECT action, new_state, snapshot FROM markush_decisions"
+        persist_review_candidates("doc-1", same, conn=conn, recognition_version=1)
+        # User reviews the row out-of-band
+        conn.execute(
+            "UPDATE markush_review_candidates "
+            "SET review_status = 'confirmed', review_version = 2 "
+            "WHERE doc_id = 'doc-1'"
+        )
+        conn.commit()
+
+    with database.mol_conn() as conn:
+        inserted = persist_review_candidates(
+            "doc-1", same, conn=conn, recognition_version=1
+        )
+        assert inserted == 0, "same source + same content must be a no-op"
+        row = conn.execute(
+            "SELECT review_status, review_version FROM markush_review_candidates "
+            "WHERE doc_id = 'doc-1'"
         ).fetchone()
-    assert decision["action"] == "candidate_created"
-    assert decision["new_state"] == "pending"
-    snapshot = json.loads(decision["snapshot"])
-    assert snapshot["normalized_label"] == "R1"
-    assert snapshot["smiles"] == "*c1ccccc1"
+    assert row["review_status"] == "confirmed"
+    assert row["review_version"] == 2
+
+    first = [_candidate(smiles="*c1ccccc1", label="R1")]
+    second = [_candidate(smiles="*c1ccncc1", label="R1")]
+    with database.mol_conn() as conn:
+        persist_review_candidates("doc-2", first, conn=conn, recognition_version=1)
+        # The pipeline writes ``DELETE FROM markush_*`` for the doc before
+        # re-running, so the prior ``markush_fragments`` rows are gone,
+        # but the review queue should NOT be wiped (it carries human
+        # decisions).
+        inserted = persist_review_candidates(
+            "doc-2", second, conn=conn, recognition_version=1
+        )
+        assert inserted == 1
+        rows = {
+            r["smiles"]: r
+            for r in conn.execute(
+                "SELECT smiles, review_status, superseded_at "
+                "FROM markush_review_candidates WHERE doc_id = 'doc-2'"
+            )
+        }
+    assert len(rows) == 2
+    old = rows["*c1ccccc1"]
+    new = rows["*c1ccncc1"]
+    assert old["review_status"] == "superseded"
+    assert old["superseded_at"] is not None
+    assert new["review_status"] == "pending"
+    assert new["superseded_at"] is None
+
+    relabel = [_candidate(smiles="*c1ccccc1", label="R2")]
+    with database.mol_conn() as conn:
+        persist_review_candidates("doc-3", first, conn=conn, recognition_version=1)
+        inserted = persist_review_candidates(
+            "doc-3", relabel, conn=conn, recognition_version=1
+        )
+        assert inserted == 1
+        label_rows = conn.execute(
+            "SELECT normalized_label, review_status FROM markush_review_candidates "
+            "WHERE doc_id = 'doc-3'"
+        ).fetchall()
+    assert {row["normalized_label"] for row in label_rows} == {"R1", "R2"}
+    assert all(row["review_status"] == "pending" for row in label_rows)

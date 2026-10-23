@@ -17,40 +17,26 @@ class _FakePredictResult:
     smiles = "CCO"
 
 
-def test_select_primary_coref_prefers_bottom_right() -> None:
-    """Position decides first among isolated reads."""
-    assert (
-        select_primary_coref(
-            [("26-a", (0, 0, 30, 10), True), ("26", (150, 200, 180, 230), True)]
-        )
-        == "26"
-    )
+# (coref reads, expected primary) — isolated reads win over inline fragments,
+# and ties prefer the bare digit.
+_COREF_CASES = [
+    ([("26-a", (0, 0, 30, 10), True), ("26", (150, 200, 180, 230), True)], "26"),
+    # A digit read from a prose line loses to an isolated read even when the
+    # fragment sits further bottom-right (the '3' vs '21' case).
+    ([("21", (10, 0, 30, 12), True), ("3", (150, 200, 170, 214), False)], "21"),
+    ([("26-a", (0, 0, 30, 30), True), ("26", (0, 0, 30, 30), True)], "26"),
+    ([], ""),
+]
 
 
-def test_select_primary_coref_demotes_inline_fragments() -> None:
-    """A digit read from a prose line loses to an isolated read even when
-    the fragment sits further bottom-right (the '3' vs '21' case)."""
-    assert (
-        select_primary_coref(
-            [("21", (10, 0, 30, 12), True), ("3", (150, 200, 170, 214), False)]
-        )
-        == "21"
-    )
+def test_select_primary_coref_ranks_isolated_bottom_right_reads() -> None:
+    """Position decides first; inline fragments are demoted; ties prefer '26'."""
+    for reads, expected in _COREF_CASES:
+        assert select_primary_coref(reads) == expected, reads
 
 
-def test_select_primary_coref_tie_prefers_bare_digit() -> None:
-    """Same spot: bare digits ('26') beat letter-suffixed ids ('26-a')."""
-    assert (
-        select_primary_coref(
-            [("26-a", (0, 0, 30, 30), True), ("26", (0, 0, 30, 30), True)]
-        )
-        == "26"
-    )
-    assert select_primary_coref([]) == ""
-
-
-def test_recognize_molecule_combines_both_backends(monkeypatch) -> None:
-    """main goes to MolParser, others to OCR, results merge into one record."""
+def test_recognize_molecule_merges_backends_and_degrades(monkeypatch) -> None:
+    """MolParser supplies the structure, OCR the labels; failures degrade."""
     image = Image.new("L", (10, 10), 255)
     others_image = Image.new("L", (5, 5), 0)
     seen: dict[str, object] = {}
@@ -85,30 +71,21 @@ def test_recognize_molecule_combines_both_backends(monkeypatch) -> None:
     assert seen["input"] is image
     assert seen["main_is_input"] is True
 
-
-def test_recognize_molecule_without_others_yields_empty_coref(monkeypatch) -> None:
-    """When preprocessing finds no offcut fragments, OCR is skipped entirely."""
-
-    def fake_preprocess(img):
+    # No offcut fragments: OCR is skipped entirely.
+    def fake_preprocess_none(img):
         return img, None
 
     def fail_ocr(img):  # pragma: no cover - must not be called
         raise AssertionError("OCR must not run when others is None")
 
-    monkeypatch.setattr(recognize_mod, "preprocess_mol_image", fake_preprocess)
-    monkeypatch.setattr(
-        recognize_mod.molparser, "predict", lambda img: _FakePredictResult()
-    )
+    monkeypatch.setattr(recognize_mod, "preprocess_mol_image", fake_preprocess_none)
     monkeypatch.setattr(recognize_mod, "extract_label_reads", fail_ocr)
 
     out = recognize_molecule(Image.new("L", (8, 8), 255))
     assert out.coref == [] and out.coref_primary == ""
     assert out.esmiles == "CCO<sep>NH2"
 
-
-def test_recognize_molecule_degrades_when_molparser_unavailable(monkeypatch) -> None:
-    """MolParser failure keeps empty structure fields; OCR labels still arrive."""
-
+    # MolParser failure: empty structure fields, but OCR labels still arrive.
     class _ErrorResult:
         esmiles = ""
         smiles = ""

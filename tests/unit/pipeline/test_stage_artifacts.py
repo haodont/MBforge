@@ -138,8 +138,8 @@ def _mint(
     )
 
 
-def test_mint_mints_layout_regions_under_the_detector_kind(tmp_path: Path) -> None:
-    """Typed regions become evidence under their own label, exactly once."""
+def test_mint_maps_layout_regions_once_in_reading_order(tmp_path: Path) -> None:
+    """Typed regions become evidence under their own label, in reading order."""
     evidence = _mint(tmp_path)
 
     assert {item.kind: item.bbox for item in evidence} == {
@@ -150,9 +150,7 @@ def test_mint_mints_layout_regions_under_the_detector_kind(tmp_path: Path) -> No
     chem = next(item for item in evidence if item.kind == "chem")
     assert chem.raw_text == ""
 
-
-def test_mint_orders_layout_regions_by_reading_order(tmp_path: Path) -> None:
-    """Column order beats the raster order for layout-authored evidence."""
+    # Column order beats the raster order for layout-authored evidence.
     extracted = _layout_extracted()
     left = (10.0, 5.0, 40.0, 15.0)  # left column — later in raster order
     right = (50.0, 10.0, 90.0, 20.0)  # right column — earlier in raster order
@@ -208,44 +206,13 @@ def test_mint_keeps_one_row_per_location(tmp_path: Path) -> None:
     assert molecule.raw_text, "the winner keeps content"
 
 
-def test_mint_keeps_the_content_bearing_molecule_over_an_overlapping_bare_region(
+def test_layout_region_retyped_to_molecule_never_invents_a_detection(
     tmp_path: Path,
 ) -> None:
-    """An overlapping claim without content never displaces one that has it.
-
-    A cross-model layout region re-typed to a molecule carries MolDet's own
-    geometry but no payload, and its box never matches the molecule pass'
-    exactly (different render DPI). Letting it win would drop the SMILES.
-    """
-    _archive_crop(tmp_path)
-    extracted = _layout_extracted()
-    # R3: the ``chem`` figure region becomes the molecule MolDet found in it,
-    # with the slightly larger box the layout render produces.
-    extracted.pages[0].regions[1].update(
-        {"kind": "molecule", "type": "molecule", "bbox": [9.5, 19.5, 30.5, 40.5]}
-    )
-    candidate = _candidate()
-    candidate.detections[0] = replace(
-        candidate.detections[0], bbox=(10.0, 20.0, 30.0, 40.0)
-    )
-
-    evidence = _mint(tmp_path, extracted=extracted, results=[_result(candidate)])
-
-    molecules = [item for item in evidence if item.kind == "molecule"]
-    assert len(molecules) == 1
-    assert molecules[0].raw_text, "the content-bearing molecule keeps its payload"
-    assert molecules[0].bbox == (10.0, 20.0, 30.0, 40.0)
-
-
-def test_molecule_region_without_a_detection_is_not_an_observation(
-    tmp_path: Path,
-) -> None:
-    """A region the layout producer re-typed to molecule declares a location only.
-
-    No molecule detection backs it, so its row carries no payload — and its
-    OCR text is structure-drawing noise that must not be mistaken for one.
-    Readers have to skip it rather than try to decode it as JSON.
-    """
+    """A region-only molecule declares a location; overlap never drops content."""
+    # No molecule detection backs the region, so its row carries no payload —
+    # and its OCR text is structure-drawing noise that must not be mistaken for
+    # one. Readers have to skip it rather than decode it as JSON.
     extracted = _layout_extracted()
     extracted.pages[0].regions[1].update(
         {"kind": "molecule", "type": "molecule", "text": "garbage ocr"}
@@ -260,15 +227,36 @@ def test_molecule_region_without_a_detection_is_not_an_observation(
 
     assert load_detections(tmp_path, DOC) is None
 
+    # An overlapping claim without content never displaces one that has it: the
+    # layout region carries MolDet's own geometry but no payload, and its box
+    # never matches the molecule pass' exactly (different render DPI). Letting
+    # it win would drop the SMILES.
+    _archive_crop(tmp_path)
+    overlapped = _layout_extracted()
+    overlapped.pages[0].regions[1].update(
+        {"kind": "molecule", "type": "molecule", "bbox": [9.5, 19.5, 30.5, 40.5]}
+    )
+    candidate = _candidate()
+    candidate.detections[0] = replace(
+        candidate.detections[0], bbox=(10.0, 20.0, 30.0, 40.0)
+    )
 
-def test_mint_requires_archived_molecule_crop(tmp_path: Path) -> None:
-    """A molecule row may not reference a crop that was never archived."""
+    evidence = _mint(tmp_path, extracted=overlapped, results=[_result(candidate)])
+
+    molecules = [item for item in evidence if item.kind == "molecule"]
+    assert len(molecules) == 1
+    assert molecules[0].raw_text, "the content-bearing molecule keeps its payload"
+    assert molecules[0].bbox == (10.0, 20.0, 30.0, 40.0)
+
+
+def test_molecule_evidence_requires_its_crop_and_round_trips_layer_fields(
+    tmp_path: Path,
+) -> None:
+    """A molecule row may not reference a crop that was never archived, and the
+    SQL-backed reload keeps Layer 1 and Markush metadata distinct."""
     with pytest.raises(ValueError, match="not archived"):
         _mint(tmp_path, results=[_result()])
 
-
-def test_molecule_round_trip_preserves_markush_layer_fields(tmp_path: Path) -> None:
-    """The SQL-backed reload keeps Layer 1 and Markush metadata distinct."""
     _archive_crop(tmp_path)
     candidate = _candidate()
     candidate.esmiles = "CCO<sep>R1-definition"
@@ -285,8 +273,10 @@ def test_molecule_round_trip_preserves_markush_layer_fields(tmp_path: Path) -> N
     assert restored[0].properties["groups"] == "R1=alkyl"
 
 
-def test_load_extracted_reads_minted_pages(tmp_path: Path) -> None:
-    persist_source_evidence(tmp_path, _mint(tmp_path))
+def test_evidence_readers_restore_pages_and_hydrate_context(tmp_path: Path) -> None:
+    """``load_extracted``/``hydrate_context_from_evidence`` rebuild the context."""
+    _archive_crop(tmp_path)
+    persist_source_evidence(tmp_path, _mint(tmp_path, results=[_result()]))
 
     restored = load_extracted(tmp_path, DOC)
 
@@ -296,10 +286,6 @@ def test_load_extracted_reads_minted_pages(tmp_path: Path) -> None:
     assert restored.pages[0].page_num == 1
     assert restored.pages[0].text_spans[0].text == "Compound 1"
 
-
-def test_hydrate_context_fills_missing_fields(tmp_path: Path) -> None:
-    _archive_crop(tmp_path)
-    persist_source_evidence(tmp_path, _mint(tmp_path, results=[_result()]))
     document_md = tmp_path / "storage" / DOC / "document.md"
     document_md.write_text("# T\n", encoding="utf-8")
 
@@ -314,8 +300,7 @@ def test_hydrate_context_fills_missing_fields(tmp_path: Path) -> None:
     assert ctx.candidates[0].properties.get("ocr_labels") == ["4A"]
     assert ctx.document_md_path == document_md
 
-
-def test_source_evidence_rejects_page_only_evidence() -> None:
+    # A location is mandatory: evidence without a bbox is rejected outright.
     with pytest.raises(ValueError, match="bbox"):
         SourceEvidence.create(
             doc_id=DOC,

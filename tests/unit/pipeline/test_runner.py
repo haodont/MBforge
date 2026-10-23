@@ -96,8 +96,8 @@ def _drive_all(
     return result
 
 
-def test_stage_dag_shape() -> None:
-    """Extract is the root; the rest of the pipeline is a linear tail."""
+def test_run_pipeline_selects_the_claimed_stage_from_the_dag(tmp_path: Path) -> None:
+    """The DAG gates which node may run; unknown/missing nodes are rejected."""
     from mbforge.service.pipeline.composition import stage_dependencies
 
     deps = stage_dependencies()
@@ -105,9 +105,22 @@ def test_stage_dag_shape() -> None:
     assert deps["markdown"] == ("extract",)
     assert deps["patent"] == ("markdown",)
 
+    # A node with no (or an unknown) stage cannot run.
+    with pytest.raises(ValueError):
+        run_pipeline(
+            str(tmp_path / "document.pdf"),
+            str(tmp_path / "library"),
+            doc_id="no-stage",
+        )
+    with pytest.raises(ValueError):
+        run_pipeline(
+            str(tmp_path / "document.pdf"),
+            str(tmp_path / "library"),
+            doc_id="bad-stage",
+            stage="not_a_stage",
+        )
 
-def test_run_pipeline_executes_only_the_named_stage(tmp_path: Path) -> None:
-    """Only the claimed node's stage runs in one invocation."""
+    # Only the claimed node's stage runs in one invocation.
     ran: list[str] = []
 
     class ExtractProbe:
@@ -138,23 +151,6 @@ def test_run_pipeline_executes_only_the_named_stage(tmp_path: Path) -> None:
 
     assert ran == ["extract"]
     assert result.current_stage == "extract"
-
-
-def test_run_pipeline_requires_a_registered_stage(tmp_path: Path) -> None:
-    """A node with no (or an unknown) stage cannot run."""
-    with pytest.raises(ValueError):
-        run_pipeline(
-            str(tmp_path / "document.pdf"),
-            str(tmp_path / "library"),
-            doc_id="no-stage",
-        )
-    with pytest.raises(ValueError):
-        run_pipeline(
-            str(tmp_path / "document.pdf"),
-            str(tmp_path / "library"),
-            doc_id="bad-stage",
-            stage="not_a_stage",
-        )
 
 
 def test_drive_all_nodes_persists_markdown(sample_pdf: Path, tmp_path: Path) -> None:
@@ -263,7 +259,7 @@ def test_pipeline_aborts_on_fatal_patent_publish_error(
             },
         ),
         patch(
-            "mbforge.service.pipeline.artifacts.staging.publish_run",
+            "mbforge.service.use_cases.documents.patent_facts.publish_document_facts",
             side_effect=RuntimeError("disk full"),
         ),
         pytest.raises(RuntimeError, match="disk full"),

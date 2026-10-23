@@ -47,7 +47,11 @@ def test_get_moldet_concurrent_first_call_creates_single_instance(monkeypatch):
     assert load_count["n"] == 1
 
 
-def test_detect_molecules_normalizes_and_filters_boxes(monkeypatch):
+def test_detect_molecules_normalizes_filters_and_maps_results(monkeypatch):
+    """``detect_molecules`` normalizes/filters raw boxes, and
+    ``detect_molecules_batch`` forwards the whole image list once and maps one
+    result per image in order — degrading to one empty result per image when
+    the model is unavailable."""
     detector = object.__new__(MolDetv2Detector)
     monkeypatch.setattr(detector, "is_available", lambda: True)
     monkeypatch.setattr(
@@ -61,8 +65,48 @@ def test_detect_molecules_normalizes_and_filters_boxes(monkeypatch):
     )
 
     result = detect_molecules(Image.new("RGB", (100, 200)), detector)
-
     assert result.bboxes == [moldet_module.MoleculeBbox(1, (0.1, 0.1, 0.5, 0.5), 0.9)]
+
+    batch_detector = object.__new__(MolDetv2Detector)
+    monkeypatch.setattr(batch_detector, "is_available", lambda: True)
+    seen: list[tuple[list[Image.Image], int]] = []
+
+    def _fake_detect_batch(images, max_per_call=0):
+        seen.append((list(images), max_per_call))
+        return [
+            [(10.0, 20.0, 50.0, 100.0, 0.9, 1)],
+            [],
+            [(5.0, 5.0, 9.0, 9.0, 0.95, 1)],
+        ]
+
+    monkeypatch.setattr(batch_detector, "detect_batch", _fake_detect_batch)
+
+    images = [
+        Image.new("RGB", (100, 200)),
+        Image.new("RGB", (50, 50)),
+        Image.new("RGB", (10, 10)),
+    ]
+    results = detect_molecules_batch(images, detector=batch_detector)
+
+    assert len(seen) == 1
+    assert seen[0][0] == images
+    assert results[0].bboxes == [
+        moldet_module.MoleculeBbox(1, (0.1, 0.1, 0.5, 0.5), 0.9)
+    ]
+    assert results[1].bboxes == []
+    assert results[2].bboxes == [
+        moldet_module.MoleculeBbox(1, (0.5, 0.5, 0.9, 0.9), 0.95)
+    ]
+
+    # An unavailable model degrades to one empty result per image.
+    unavailable = object.__new__(MolDetv2Detector)
+    unavailable.model = None
+    assert [
+        r.bboxes
+        for r in detect_molecules_batch(
+            [Image.new("RGB", (8, 8)) for _ in range(2)], unavailable
+        )
+    ] == [[], []]
 
 
 def test_detect_batch_chunks_predict_calls(monkeypatch):
@@ -88,49 +132,3 @@ def test_detect_batch_chunks_predict_calls(monkeypatch):
     assert call_sizes == [2, 2, 1]
     assert len(grouped) == 5
     assert all(group == [] for group in grouped)
-
-
-def test_detect_molecules_batch_one_call_preserves_order(monkeypatch):
-    """The whole image list reaches detect_batch once; results map 1:1."""
-    detector = object.__new__(MolDetv2Detector)
-    monkeypatch.setattr(detector, "is_available", lambda: True)
-    seen: list[tuple[list[Image.Image], int]] = []
-
-    def _fake_detect_batch(images, max_per_call=0):
-        seen.append((list(images), max_per_call))
-        return [
-            [(10.0, 20.0, 50.0, 100.0, 0.9, 1)],
-            [],
-            [(5.0, 5.0, 9.0, 9.0, 0.95, 1)],
-        ]
-
-    monkeypatch.setattr(detector, "detect_batch", _fake_detect_batch)
-
-    images = [
-        Image.new("RGB", (100, 200)),
-        Image.new("RGB", (50, 50)),
-        Image.new("RGB", (10, 10)),
-    ]
-    results = detect_molecules_batch(images, detector=detector)
-
-    assert len(seen) == 1
-    assert seen[0][0] == images
-    assert results[0].bboxes == [
-        moldet_module.MoleculeBbox(1, (0.1, 0.1, 0.5, 0.5), 0.9)
-    ]
-    assert results[1].bboxes == []
-    assert results[2].bboxes == [
-        moldet_module.MoleculeBbox(1, (0.5, 0.5, 0.9, 0.9), 0.95)
-    ]
-
-
-def test_detect_molecules_batch_unavailable_yields_empty_per_image():
-    """An unavailable model degrades to one empty result per image."""
-    detector = object.__new__(MolDetv2Detector)
-    detector.model = None
-
-    results = detect_molecules_batch(
-        [Image.new("RGB", (8, 8)) for _ in range(2)], detector
-    )
-
-    assert [r.bboxes for r in results] == [[], []]

@@ -1,4 +1,9 @@
-"""Unit tests for the Markush bounded enumeration service (Phase 6)."""
+"""Unit tests for the Markush bounded enumeration service (Phase 6).
+
+Covers ``services.use_cases.markush.enumeration`` (``run_enumeration``,
+``apply_generated_decision``, ``list_run_results``) plus the counting helpers
+``domain.enumeration.theoretical_count`` / ``preview``.
+"""
 
 from __future__ import annotations
 
@@ -92,31 +97,22 @@ def _seed_confirmed_relations(
         conn.commit()
 
 
-def test_run_resolves_fragment_id_from_database(database, repo):
-    _seed_confirmed_relations(database)
-    result = run_enumeration(
-        repo,
-        scaffold_id="sc-1",
-        selection=[SiteSelection("R1", 1, ["frag-1"])],
-        requested_limit=10,
+def test_theoretical_count_and_preview_truncation(database) -> None:
+    """The theoretical count is the fragment cross-product, and preview flags
+    truncation against the requested limit."""
+    assert (
+        theoretical_count(
+            [
+                SiteSelection(site_label="R1", atom_map_num=1, fragments=["F", "Cl"]),
+                SiteSelection(
+                    site_label="R2", atom_map_num=2, fragments=["A", "B", "C"]
+                ),
+            ]
+        )
+        == 6
     )
-    items = list_run_results(repo, result.run_id)
-    assert result.status == "completed"
-    assert items
-    assert items[0]["assignments"][0]["fragment_id"] == "frag-1"
 
-
-def test_theoretical_count_is_cross_product(database):
-    selections = [
-        SiteSelection(site_label="R1", atom_map_num=1, fragments=["F", "Cl"]),
-        SiteSelection(site_label="R2", atom_map_num=2, fragments=["A", "B", "C"]),
-    ]
-    assert theoretical_count(selections) == 6
-
-
-@pytest.mark.parametrize(
-    "selections,requested_limit,expected_count,truncated",
-    [
+    cases = [
         (
             [
                 SiteSelection(site_label="R1", atom_map_num=1, fragments=["A", "B"]),
@@ -132,17 +128,72 @@ def test_theoretical_count_is_cross_product(database):
             2,
             False,
         ),
-    ],
-)
-def test_preview_reports_truncation(
-    selections, requested_limit, expected_count, truncated
-):
-    info = preview(selections, requested_limit=requested_limit)
-    assert info["theoretical_count"] == expected_count
-    assert info["truncated"] is truncated
+    ]
+    for selections, requested_limit, expected_count, truncated in cases:
+        info = preview(selections, requested_limit=requested_limit)
+        assert info["theoretical_count"] == expected_count, f"{selections!r}"
+        assert info["truncated"] is truncated, f"{selections!r}"
 
 
-def test_run_rejects_when_theoretical_exceeds_limit(database, repo):
+def test_run_enumeration_resolves_fragments_deterministically_and_handles_empty(
+    database, repo
+) -> None:
+    """A run resolves seeded fragment ids, repeats byte-identical canonical
+    sets for the same selection, and reports an empty selection as ``empty``."""
+    _seed_confirmed_relations(
+        database,
+        scaffold_id="sc-1",
+        scaffold_smiles="[*:1]C1CCCCC1",
+        sites={1: [("f-1", "F"), ("f-2", "Cl"), ("f-3", "Br")]},
+    )
+
+    single = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=[SiteSelection("R1", 1, ["f-1"])],
+        requested_limit=10,
+    )
+    single_items = list_run_results(repo, single.run_id)
+    assert single.status == "completed"
+    assert single_items
+    assert single_items[0]["assignments"][0]["fragment_id"] == "f-1"
+
+    selections = [
+        SiteSelection(site_label="R1", atom_map_num=1, fragments=["f-1", "f-2", "f-3"]),
+    ]
+    first = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=selections,
+        requested_limit=50,
+    )
+    second = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=selections,
+        requested_limit=50,
+    )
+    first_canon = sorted(
+        item["canonical_smiles"] for item in list_run_results(repo, first.run_id)
+    )
+    second_canon = sorted(
+        item["canonical_smiles"] for item in list_run_results(repo, second.run_id)
+    )
+    assert first_canon == second_canon
+    assert len(first_canon) == 3  # F, Cl, Br all canonicalize
+
+    empty = run_enumeration(
+        repo,
+        scaffold_id="sc-1",
+        selection=[SiteSelection(site_label="R1", atom_map_num=1, fragments=[])],
+        requested_limit=10,
+    )
+    assert empty.status == "empty"
+    assert empty.written_count == 0
+
+
+def test_run_enumeration_rejects_when_theoretical_exceeds_limit(database, repo) -> None:
+    """An over-limit cross-product is rejected up front and writes no rows."""
     _seed_confirmed_relations(
         database,
         scaffold_id="sc-1",
@@ -169,66 +220,21 @@ def test_run_rejects_when_theoretical_exceeds_limit(database, repo):
     assert result.written_count == 0
 
 
-def test_run_writes_deterministic_canonical_smiles(database, repo):
-    """Two runs against the same selection produce identical canonical sets."""
-    _seed_confirmed_relations(
-        database,
-        scaffold_id="sc-1",
-        scaffold_smiles="[*:1]C1CCCCC1",
-        sites={1: [("f-1", "F"), ("f-2", "Cl"), ("f-3", "Br")]},
-    )
-    selections = [
-        SiteSelection(site_label="R1", atom_map_num=1, fragments=["f-1", "f-2", "f-3"]),
-    ]
-    first = run_enumeration(
-        repo,
-        scaffold_id="sc-1",
-        selection=selections,
-        requested_limit=50,
-    )
-    second = run_enumeration(
-        repo,
-        scaffold_id="sc-1",
-        selection=selections,
-        requested_limit=50,
-    )
-    first_items = list_run_results(repo, first.run_id)
-    second_items = list_run_results(repo, second.run_id)
-    first_canon = sorted(item["canonical_smiles"] for item in first_items)
-    second_canon = sorted(item["canonical_smiles"] for item in second_items)
-    assert first_canon == second_canon
-    assert len(first_canon) == 3  # F, Cl, Br all canonicalize
-
-
-def test_run_empty_selection_writes_zero_rows(database, repo):
-    _seed_confirmed_relations(
-        database,
-        scaffold_id="sc-1",
-        scaffold_smiles="[*:1]C1CCCCC1",
-        sites={1: [("frag-1", "F")]},
-    )
-    selections = [
-        SiteSelection(site_label="R1", atom_map_num=1, fragments=[]),
-    ]
-    result = run_enumeration(
-        repo,
-        scaffold_id="sc-1",
-        selection=selections,
-        requested_limit=10,
-    )
-    assert result.status == "empty"
-    assert result.written_count == 0
-
-
-def test_generated_confirm_writes_molecule_with_provenance(database, repo):
+def test_generated_decision_mints_on_confirm_and_writes_nothing_on_reject(
+    database, repo
+) -> None:
+    """Confirming a generated row mints a molecule carrying generation
+    provenance; rejecting one leaves no molecule behind."""
     _seed_confirmed_relations(database)
-    result = run_enumeration(
+    selection = [SiteSelection("R1", 1, ["frag-1"])]
+
+    run = run_enumeration(
         repo,
         scaffold_id="sc-1",
-        selection=[SiteSelection("R1", 1, ["frag-1"])],
+        selection=selection,
         requested_limit=10,
     )
-    generated_id = list_run_results(repo, result.run_id)[0]["generated_id"]
+    generated_id = list_run_results(repo, run.run_id)[0]["generated_id"]
     decision = apply_generated_decision(
         repo,
         entity_id=generated_id,
@@ -237,7 +243,8 @@ def test_generated_confirm_writes_molecule_with_provenance(database, repo):
     )
     with database.mol_conn() as conn:
         mol = conn.execute(
-            "SELECT properties, review_status, source_doc FROM molecules WHERE mol_id = ?",
+            "SELECT properties, review_status, source_doc FROM molecules "
+            "WHERE mol_id = ?",
             (generated_id,),
         ).fetchone()
     assert decision["review_status"] == "confirmed"
@@ -250,25 +257,22 @@ def test_generated_confirm_writes_molecule_with_provenance(database, repo):
     assert provenance["combination_key"]
     assert provenance["assignments"][0]["fragment_id"] == "frag-1"
 
-
-def test_generated_reject_writes_no_molecule(database, repo):
-    _seed_confirmed_relations(database)
-    result = run_enumeration(
+    rejected_run = run_enumeration(
         repo,
         scaffold_id="sc-1",
-        selection=[SiteSelection("R1", 1, ["frag-1"])],
+        selection=selection,
         requested_limit=10,
     )
-    generated_id = list_run_results(repo, result.run_id)[0]["generated_id"]
-    decision = apply_generated_decision(
+    rejected_id = list_run_results(repo, rejected_run.run_id)[0]["generated_id"]
+    rejected = apply_generated_decision(
         repo,
-        entity_id=generated_id,
+        entity_id=rejected_id,
         action="reject",
         reason="not useful",
     )
     with database.mol_conn() as conn:
-        mol = conn.execute(
-            "SELECT mol_id FROM molecules WHERE mol_id = ?", (generated_id,)
+        rejected_mol = conn.execute(
+            "SELECT mol_id FROM molecules WHERE mol_id = ?", (rejected_id,)
         ).fetchone()
-    assert decision["review_status"] == "rejected"
-    assert mol is None
+    assert rejected["review_status"] == "rejected"
+    assert rejected_mol is None

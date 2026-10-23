@@ -1,16 +1,17 @@
-"""Unit tests for the :class:`mbforge.domain.molecule.Molecule` value object."""
+"""Unit tests for the :class:`mbforge.domain.molecule.Molecule` value object.
+
+Covers ``to_dict``/``from_dict``/``to_json``/``from_json``/``from_row`` bridges
+plus the derived ``is_valid`` / ``fingerprint`` / ``tanimoto_bytes`` operations.
+"""
 
 from __future__ import annotations
 
 from mbforge.domain.molecule import Molecule
 
-# ---------------------------------------------------------------------------
-# Construction
-# ---------------------------------------------------------------------------
 
-
-def test_to_dict_round_trip() -> None:
-    """to_dict -> from_dict preserves all fields (except fingerprint)."""
+def test_dict_and_json_round_trips_preserve_fields() -> None:
+    """to_dict -> from_dict and to_json -> from_json keep every serializable
+    field; the cacheable fingerprint is excluded from the dict form."""
     original = Molecule(
         mol_id="m1",
         canonical_smiles="CCO",
@@ -42,82 +43,66 @@ def test_to_dict_round_trip() -> None:
     assert restored.notes == original.notes
     # fingerprint is excluded from to_dict
     assert "fingerprint" not in original.to_dict()
-    assert restored._fingerprint is None  # fingerprint excluded from to_dict
+    assert restored._fingerprint is None
 
-
-def test_from_dict_handles_json_string_columns() -> None:
-    """from_dict parses JSON-encoded strings for annotation columns."""
-    data = {
-        "mol_id": "m1",
-        "canonical_smiles": "CCO",
-        "properties": '{"a": 1}',
-        "labels": '["x", "y"]',
-        "semantic_tags": '["tag"]',
-    }
-    m = Molecule.from_dict(data)
-    assert m.properties == {"a": 1}
-    assert m.labels == ["x", "y"]
-    assert m.semantic_tags == ["tag"]
-
-
-def test_from_dict_handles_malformed_json_gracefully() -> None:
-    """Malformed JSON strings fall back to defaults."""
-    data = {
-        "mol_id": "m1",
-        "canonical_smiles": "CCO",
-        "properties": "not-json",
-        "labels": "not-json",
-        "semantic_tags": "not-json",
-    }
-    m = Molecule.from_dict(data)
-    assert m.properties == {}
-    assert m.labels == []
-    assert m.semantic_tags == []
-
-
-def test_from_dict_ignores_unknown_keys() -> None:
-    """Extra keys in the input dict are silently ignored."""
-    data = {"mol_id": "m1", "canonical_smiles": "CCO", "unknown_field": 42}
-    m = Molecule.from_dict(data)
-    assert m.mol_id == "m1"
-
-
-def test_from_dict_missing_keys_use_defaults() -> None:
-    """Missing keys fall back to defaults."""
-    m = Molecule.from_dict({"mol_id": "m1"})
-    assert m.canonical_smiles == ""
-    assert m.status == "active"
-    assert m.review_status == "pending"
-    assert m.properties == {}
-
-
-# ---------------------------------------------------------------------------
-# Serialization: JSON
-# ---------------------------------------------------------------------------
-
-
-def test_to_json_from_json_round_trip() -> None:
-    """to_json -> from_json preserves all serializable fields."""
-    original = Molecule(
+    json_original = Molecule(
         mol_id="m1",
         canonical_smiles="CCO",
         name="ethanol",
         properties={"k": "v"},
         labels=["a"],
     )
-    restored = Molecule.from_json(original.to_json())
-    assert restored.mol_id == original.mol_id
-    assert restored.name == original.name
-    assert restored.properties == original.properties
-    assert restored.labels == original.labels
+    json_restored = Molecule.from_json(json_original.to_json())
+    assert json_restored.mol_id == json_original.mol_id
+    assert json_restored.name == json_original.name
+    assert json_restored.properties == json_original.properties
+    assert json_restored.labels == json_original.labels
 
 
-# ---------------------------------------------------------------------------
-# DB row bridge
-# ---------------------------------------------------------------------------
+def test_from_dict_parses_json_columns_and_falls_back_on_bad_input() -> None:
+    """from_dict parses JSON-encoded annotation columns, defaults malformed or
+    missing values, and silently ignores unknown keys."""
+    parsed = Molecule.from_dict(
+        {
+            "mol_id": "m1",
+            "canonical_smiles": "CCO",
+            "properties": '{"a": 1}',
+            "labels": '["x", "y"]',
+            "semantic_tags": '["tag"]',
+        }
+    )
+    assert parsed.properties == {"a": 1}
+    assert parsed.labels == ["x", "y"]
+    assert parsed.semantic_tags == ["tag"]
+
+    malformed = Molecule.from_dict(
+        {
+            "mol_id": "m1",
+            "canonical_smiles": "CCO",
+            "properties": "not-json",
+            "labels": "not-json",
+            "semantic_tags": "not-json",
+        }
+    )
+    assert malformed.properties == {}
+    assert malformed.labels == []
+    assert malformed.semantic_tags == []
+
+    assert (
+        Molecule.from_dict(
+            {"mol_id": "m1", "canonical_smiles": "CCO", "unknown_field": 42}
+        ).mol_id
+        == "m1"
+    )
+
+    defaults = Molecule.from_dict({"mol_id": "m1"})
+    assert defaults.canonical_smiles == ""
+    assert defaults.status == "active"
+    assert defaults.review_status == "pending"
+    assert defaults.properties == {}
 
 
-def test_from_row_with_sqlite_row_shape() -> None:
+def test_from_row_bridges_the_sqlite_row_shape() -> None:
     """from_row accepts a dict mirroring the molecules table schema."""
     row = {
         "mol_id": "m1",
@@ -147,31 +132,16 @@ def test_from_row_with_sqlite_row_shape() -> None:
     assert m.fingerprint == b"\x00"
 
 
-# ---------------------------------------------------------------------------
-# Derived chemical operations
-# ---------------------------------------------------------------------------
+def test_is_valid_only_for_parseable_smiles() -> None:
+    """is_valid is True for a parseable SMILES, False for garbage or empty."""
+    for smiles, expected in (("CCO", True), ("not-a-smiles", False), ("", False)):
+        m = Molecule(mol_id="m1", canonical_smiles=smiles)
+        assert m.is_valid() is expected, f"{smiles!r}"
 
 
-def test_is_valid_true_for_parseable_smiles() -> None:
-    """is_valid returns True for a SMILES RDKit can parse."""
-    m = Molecule(mol_id="m1", canonical_smiles="CCO")
-    assert m.is_valid() is True
-
-
-def test_is_valid_false_for_garbage() -> None:
-    """is_valid returns False for an unparseable SMILES."""
-    m = Molecule(mol_id="m1", canonical_smiles="not-a-smiles")
-    assert m.is_valid() is False
-
-
-def test_is_valid_false_for_empty() -> None:
-    """is_valid returns False for empty SMILES."""
-    m = Molecule(mol_id="m1", canonical_smiles="")
-    assert m.is_valid() is False
-
-
-def test_fingerprint_lazy_computation() -> None:
-    """fingerprint property computes lazily on first access."""
+def test_fingerprint_is_lazily_cached_and_overridable() -> None:
+    """fingerprint computes lazily and caches, returns None for an unparseable
+    SMILES, and the setter bypasses lazy computation."""
     m = Molecule(mol_id="m1", canonical_smiles="CCO")
     assert m._fingerprint is None  # not yet computed
     fp = m.fingerprint
@@ -179,31 +149,20 @@ def test_fingerprint_lazy_computation() -> None:
     assert len(fp) == 256  # 2048 bits packed
     assert m._fingerprint == fp  # cached
 
+    assert Molecule(mol_id="m1", canonical_smiles="not-a-smiles").fingerprint is None
 
-def test_fingerprint_lazy_returns_none_for_invalid() -> None:
-    """fingerprint property returns None for unparseable SMILES."""
-    m = Molecule(mol_id="m1", canonical_smiles="not-a-smiles")
-    assert m.fingerprint is None
-
-
-def test_fingerprint_setter_bypasses_lazy() -> None:
-    """Setting fingerprint via setter prevents lazy computation."""
-    m = Molecule(mol_id="m1", canonical_smiles="CCO")
     custom = b"\xab" * 256
     m.fingerprint = custom
     assert m.fingerprint == custom
 
 
-def test_tanimoto_bytes_self_similarity() -> None:
-    """Tanimoto similarity of a fingerprint with itself is 1.0."""
+def test_tanimoto_bytes_bounds() -> None:
+    """Self-similarity is 1.0; different molecules score in [0, 1)."""
     m = Molecule(mol_id="m1", canonical_smiles="CCO")
     fp = m.fingerprint
     assert fp is not None
     assert Molecule.tanimoto_bytes(fp, fp) == 1.0
 
-
-def test_tanimoto_bytes_different_molecules() -> None:
-    """Tanimoto similarity between different molecules is in [0, 1)."""
     a = Molecule(mol_id="m1", canonical_smiles="CCO").fingerprint
     b = Molecule(mol_id="m2", canonical_smiles="c1ccccc1").fingerprint
     assert a is not None

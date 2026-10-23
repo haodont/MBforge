@@ -1,3 +1,5 @@
+"""Unit tests for :class:`mbforge.domain.evidence.SourceEvidence`."""
+
 from __future__ import annotations
 
 import pytest
@@ -5,7 +7,10 @@ import pytest
 from mbforge.domain.evidence import SourceEvidence
 
 
-def test_source_evidence_id_is_position_based_and_round_trips() -> None:
+def test_source_evidence_create_derives_position_id_and_validates_input() -> None:
+    """``evidence_id`` is derived from the quantized position (so re-OCR of a
+    moved-by-less-than-quantum bbox keeps identity) and round-trips through
+    ``to_dict``/``from_dict``; content-less or bbox-less evidence is refused."""
     first = SourceEvidence.create(
         doc_id="doc",
         page=1,
@@ -29,8 +34,6 @@ def test_source_evidence_id_is_position_based_and_round_trips() -> None:
     assert first.evidence_id != different_position.evidence_id
     assert SourceEvidence.from_dict(first.to_dict()) == first
 
-
-def test_source_evidence_requires_content_and_valid_bbox() -> None:
     with pytest.raises(TypeError, match="bbox"):
         SourceEvidence.create(doc_id="doc", page=1, raw_text="text")
 

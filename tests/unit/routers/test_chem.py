@@ -1,4 +1,11 @@
-"""Unit tests for chemistry endpoints."""
+"""Unit tests for the chemistry endpoints in ``mbforge.api.http.molecule.chem``.
+
+Protects: every async route offloads its blocking RDKit work to
+``asyncio.to_thread``, the request models accept the frontend
+camelCase/short aliases, batch/legacy SMILES validation exposes both the
+legacy and the frontend field names, and substructure/similarity search
+reject an invalid query SMILES instead of returning matches.
+"""
 
 from __future__ import annotations
 
@@ -64,44 +71,45 @@ def _capture_to_thread(monkeypatch: pytest.MonkeyPatch):
     return calls
 
 
-@pytest.mark.parametrize(
-    "handler, sync_func, body",
-    [
-        (validate_smiles, _validate_smiles_sync, ValidateSmilesRequest(smiles="CCO")),
-        (fingerprint, _fingerprint_sync, SmilesRequest(smiles="CCO")),
-        (properties, _properties_sync, SmilesRequest(smiles="CCO")),
-        (canonicalize, _canonicalize_sync, SmilesRequest(smiles="CCO")),
+def test_chem_routes_offload_to_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Async chemistry routes delegate blocking RDKit work to asyncio.to_thread."""
+    cases = [
         (
+            "validate_smiles",
+            validate_smiles,
+            _validate_smiles_sync,
+            ValidateSmilesRequest(smiles="CCO"),
+        ),
+        ("fingerprint", fingerprint, _fingerprint_sync, SmilesRequest(smiles="CCO")),
+        ("properties", properties, _properties_sync, SmilesRequest(smiles="CCO")),
+        ("canonicalize", canonicalize, _canonicalize_sync, SmilesRequest(smiles="CCO")),
+        (
+            "tanimoto",
             tanimoto,
             _tanimoto_sync,
             FingerprintPairRequest(fingerprint_a=[1, 0, 1], fingerprint_b=[1, 1, 0]),
         ),
         (
+            "substructure_search",
             substructure_search,
             _substructure_search_sync,
             SubstructureSearchRequest(query="CCO", candidates=[{"smiles": "CCCO"}]),
         ),
         (
+            "similarity_search",
             similarity_search,
             _similarity_search_sync,
             SimilaritySearchRequest(query="CCO", candidates=[{"smiles": "CCCO"}]),
         ),
-    ],
-)
-def test_chem_routes_offload_to_thread(
-    monkeypatch: pytest.MonkeyPatch,
-    handler,
-    sync_func,
-    body,
-) -> None:
-    """Async chemistry routes delegate blocking RDKit work to asyncio.to_thread."""
+    ]
     calls = _capture_to_thread(monkeypatch)
 
-    result = asyncio.run(handler(body))
+    for index, (name, handler, sync_func, body) in enumerate(cases):
+        result = asyncio.run(handler(body))
 
-    assert result == {"_fake": True}
-    assert len(calls) == 1
-    assert calls[0][0] is sync_func
+        assert result == {"_fake": True}, name
+        assert len(calls) == index + 1, name
+        assert calls[-1][0] is sync_func, name
 
 
 def test_draw_smiles_renders_markush_wildcards_as_svg() -> None:
@@ -118,8 +126,12 @@ def test_smiles_to_image_rejects_invalid_smiles() -> None:
     assert result.error == "invalid SMILES"
 
 
-def test_validate_smiles_batch_and_legacy() -> None:
-    """Batch validation accepts both ``list`` and legacy ``smiles``."""
+def test_validate_smiles_batch_and_legacy_expose_frontend_fields() -> None:
+    """Batch validation accepts both ``list`` and legacy ``smiles``.
+
+    An empty request is a ``ValueError``; each response carries the legacy
+    (``input``/``valid``) and frontend (``smiles``/``canonical_smiles``) names.
+    """
     batch = asyncio.run(
         validate_smiles(ValidateSmilesRequest(list=["CCO", "not-smiles"]))
     )
@@ -132,8 +144,16 @@ def test_validate_smiles_batch_and_legacy() -> None:
     assert len(single) == 1
     assert single[0].valid is True
 
+    valid = _validate_smiles_sync(["CCO"])[0]
+    assert valid.valid is True
+    assert valid.input == "CCO"
+    assert valid.smiles == "CCO"
+    assert valid.canonical_smiles is not None
 
-def test_validate_smiles_request_requires_smiles_or_list() -> None:
+    invalid = _validate_smiles_sync(["not-smiles"])[0]
+    assert invalid.valid is False
+    assert invalid.canonical_smiles is None
+
     with pytest.raises(ValueError):
         ValidateSmilesRequest()
 
@@ -147,7 +167,8 @@ def test_gesim_not_implemented_returns_envelope() -> None:
     assert "not implemented" in mapping.error
 
 
-def test_substructure_search_with_candidates() -> None:
+def test_substructure_search_matches_candidates_and_rejects_invalid_query() -> None:
+    """Substructure search filters by the query and refuses an invalid query SMILES."""
     result = _substructure_search_sync(
         SubstructureSearchRequest(
             query="c1ccccc1",
@@ -159,16 +180,15 @@ def test_substructure_search_with_candidates() -> None:
     assert len(result.results) == 1
     assert result.results[0]["smiles"] == "c1ccccc1C"
 
-
-def test_substructure_search_rejects_invalid_query() -> None:
-    result = _substructure_search_sync(
+    invalid = _substructure_search_sync(
         SubstructureSearchRequest(query="not-a-smiles", candidates=[])
     )
-    assert result.success is False
-    assert "invalid query SMILES" in result.error
+    assert invalid.success is False
+    assert "invalid query SMILES" in invalid.error
 
 
-def test_similarity_search_with_candidates() -> None:
+def test_similarity_search_ranks_candidates_and_rejects_invalid_query() -> None:
+    """Similarity search returns scored candidates and refuses an invalid query SMILES."""
     result = _similarity_search_sync(
         SimilaritySearchRequest(
             query="CCO",
@@ -183,39 +203,24 @@ def test_similarity_search_with_candidates() -> None:
     assert top["smiles"] == "CCO"
     assert top["similarity"] == 1.0
 
-
-def test_similarity_search_rejects_invalid_query() -> None:
-    result = _similarity_search_sync(
+    invalid = _similarity_search_sync(
         SimilaritySearchRequest(query="not-a-smiles", candidates=[])
     )
-    assert result.success is False
-    assert "invalid query SMILES" in result.error
+    assert invalid.success is False
+    assert "invalid query SMILES" in invalid.error
 
 
-@pytest.mark.parametrize(
-    "request_obj,expected",
-    [
-        (SmilesRequest(input="CCO"), {"smiles": "CCO"}),
+def test_chem_requests_accept_frontend_aliases() -> None:
+    """Chem request models accept the frontend camelCase/short aliases."""
+    cases = [
+        ("SmilesRequest", SmilesRequest(input="CCO"), {"smiles": "CCO"}),
         (
+            "GesimAtomMappingRequest",
             GesimAtomMappingRequest(a="CCO", b="CCO"),
             {"smiles_a": "CCO", "smiles_b": "CCO"},
         ),
-    ],
-)
-def test_chem_requests_accept_frontend_aliases(request_obj, expected) -> None:
-    """Chem request models accept the frontend camelCase/short aliases."""
-    for field, value in expected.items():
-        assert getattr(request_obj, field) == value
+    ]
 
-
-def test_validate_one_smiles_response_has_frontend_fields() -> None:
-    """Validation response exposes both legacy and frontend field names."""
-    result = _validate_smiles_sync(["CCO"])[0]
-    assert result.valid is True
-    assert result.input == "CCO"
-    assert result.smiles == "CCO"
-    assert result.canonical_smiles is not None
-
-    invalid = _validate_smiles_sync(["not-smiles"])[0]
-    assert invalid.valid is False
-    assert invalid.canonical_smiles is None
+    for name, request_obj, expected in cases:
+        for field, value in expected.items():
+            assert getattr(request_obj, field) == value, f"{name}.{field}"

@@ -60,10 +60,10 @@ def test_mint_run_id_is_second_grained_and_avoids_existing_run_dirs(
         run_ids_module.datetime = real_datetime  # type: ignore[assignment]
 
 
-def test_ensure_attempt_run_binds_once_and_preserves_progress(
+def test_ensure_attempt_run_binds_once_and_discards_stale_staging(
     tmp_path: Path,
 ) -> None:
-    """Re-binding the same attempt keeps the checkpoint and its stage progress."""
+    """Re-binding the same attempt keeps progress; a new one wipes staging."""
     staging = LibraryLayout(tmp_path).storage_dir(DOC) / ".staging"
     run_id = "20260909123456"
 
@@ -82,23 +82,17 @@ def test_ensure_attempt_run_binds_once_and_preserves_progress(
     # The stage summary file itself is still on disk (staging not discarded).
     assert (staging / "_stage_extract.json").is_file()
 
-
-def test_ensure_attempt_run_discards_stale_staging_for_new_run(
-    tmp_path: Path,
-) -> None:
-    """A new attempt's run id wipes the previous attempt's staged artifacts."""
-    staging = LibraryLayout(tmp_path).storage_dir(DOC) / ".staging"
-
-    ensure_attempt_run(staging, "20260909123456")
+    # A new attempt's run id wipes the previous attempt's staged artifacts.
     marker = staging / "extract.json"
     marker.write_text("{}", encoding="utf-8")
 
-    ensure_attempt_run(staging, "20260909123457")
+    newer_run = "20260909123457"
+    ensure_attempt_run(staging, newer_run)
 
     assert not marker.exists()
     checkpoint = load_run_checkpoint(staging)
     assert checkpoint is not None
-    assert checkpoint["run_id"] == "20260909123457"
+    assert checkpoint["run_id"] == newer_run
 
 
 def test_latest_stage_run_id_resolves_per_stage_and_falls_back_to_run_id(

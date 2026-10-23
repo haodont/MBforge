@@ -1,4 +1,8 @@
-"""Dual-channel model download: ModelScope first, HuggingFace fallback."""
+"""Dual-channel model download: ModelScope first, HuggingFace fallback.
+
+Covers ``mbforge.server.models.assets.downloader`` (``_download_model_from_*``,
+``_modelscope_direct_http``, ``_get``) and ``ResourceManager.ensure``.
+"""
 
 from __future__ import annotations
 
@@ -11,49 +15,45 @@ from mbforge.server.resource_manager import ResourceManager, ResourceStatus
 _FILES = ("moldet_v2_yolo26n_960_doc.pt", "moldet_v2_yolo26n_640_general.pt")
 
 
-def _fake_cache(tmp_path: Path) -> Path:
-    """Write the catalog's moldet weight files under the snapshot dir."""
-    dest = tmp_path / "MolDetv2"
+def _fake_cache(cache_dir: Path) -> Path:
+    """Write the catalog's moldet weight files under the cache's snapshot dir."""
+    dest = cache_dir / "MolDetv2"
     dest.mkdir(parents=True, exist_ok=True)
     for name in _FILES:
         (dest / name).write_bytes(b"weights")
     return dest
 
 
-def test_ensure_falls_back_to_hf_when_modelscope_fails(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """MS channel returning False must trigger the HuggingFace fallback."""
-    monkeypatch.setattr(
-        md,
-        "_download_model_from_modelscope",
-        lambda info, callback: False,
-    )
+def test_ensure_falls_back_between_channels(monkeypatch, tmp_path: Path) -> None:
+    """ModelScope is tried first and stops the chain on success; a ModelScope
+    failure falls back to HuggingFace; both failing reports not_found."""
+    # 1. ModelScope fails → HuggingFace is called and succeeds.
     hf_calls: dict[str, int] = {"n": 0}
+    cache_a = tmp_path / "cache-a"
+    monkeypatch.setattr(
+        md, "_download_model_from_modelscope", lambda info, callback: False
+    )
 
     def _fake_hf(info, callback) -> bool:
         hf_calls["n"] += 1
-        _fake_cache(tmp_path)
+        _fake_cache(cache_a)
         return True
 
     monkeypatch.setattr(md, "_download_model_from_hf", _fake_hf)
-    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: cache_a)
 
     result = ResourceManager.ensure("moldet")
     assert hf_calls["n"] == 1
     assert result.status == ResourceStatus.READY
     assert result.local_path
 
-
-def test_ensure_uses_modelscope_first_when_it_succeeds(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """A successful ModelScope download must not call the HF channel."""
+    # 2. ModelScope succeeds → HuggingFace must not run.
     ms_calls: dict[str, int] = {"n": 0}
+    cache_b = tmp_path / "cache-b"
 
     def _fake_ms(info, callback) -> bool:
         ms_calls["n"] += 1
-        _fake_cache(tmp_path)
+        _fake_cache(cache_b)
         return True
 
     monkeypatch.setattr(md, "_download_model_from_modelscope", _fake_ms)
@@ -62,26 +62,18 @@ def test_ensure_uses_modelscope_first_when_it_succeeds(
         "_download_model_from_hf",
         lambda info, callback: (_ for _ in ()).throw(AssertionError("HF must not run")),
     )
-    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: cache_b)
 
     result = ResourceManager.ensure("moldet")
     assert ms_calls["n"] == 1
     assert result.status == ResourceStatus.READY
 
-
-def test_ensure_fails_when_both_channels_fail(monkeypatch, tmp_path: Path) -> None:
-    """When MS and HF both fail, ensure reports not_found (no crash)."""
+    # 3. Both channels fail → not_found, no crash.
     monkeypatch.setattr(
-        md,
-        "_download_model_from_modelscope",
-        lambda info, callback: False,
+        md, "_download_model_from_modelscope", lambda info, callback: False
     )
-    monkeypatch.setattr(
-        md,
-        "_download_model_from_hf",
-        lambda info, callback: False,
-    )
-    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(md, "_download_model_from_hf", lambda info, callback: False)
+    monkeypatch.setattr(rm, "_get_model_cache_dir", lambda: tmp_path / "cache-c")
 
     result = ResourceManager.ensure("moldet")
     assert result.status == ResourceStatus.NOT_FOUND
@@ -120,8 +112,6 @@ def test_modelscope_http_download_uses_catalog_files_without_listing(
     A missing/unusable listing must not abort the download: the catalog manifest
     is authoritative, so the files are still requested and the snapshot verifies.
     """
-    from mbforge.server.models.assets import downloader as md
-
     info = rm.RESOURCE_CATALOG["moldet"]
     requested: list[str] = []
 
@@ -149,8 +139,6 @@ def test_hf_tls_failure_retries_without_verification(monkeypatch) -> None:
     only — a genuine transport error is not silently retried.
     """
     import requests
-
-    from mbforge.server.models.assets import downloader as md
 
     calls: list[bool] = []
 

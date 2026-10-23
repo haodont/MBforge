@@ -1,4 +1,8 @@
-"""Regression tests for re-ingest idempotency (Phase 1 A2)."""
+"""Regression tests for re-ingest idempotency (Phase 1 A2).
+
+``LibraryStore.clear_pipeline_data`` must leave no state that a second
+ingestion of the same document would collide with.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +13,10 @@ from mbforge.foundation.layout import LibraryLayout
 from mbforge.service.use_cases.documents.library import LibraryStore
 
 
-def test_clear_pipeline_data_removes_molecule_detections(
+def test_clear_pipeline_data_removes_prior_run_state(
     tmp_path: pytest.TempPathFactory,
 ) -> None:
-    """Re-ingesting a document must not hit UNIQUE constraints on molecule_detections."""
+    """Re-ingest cleanup frees detections (no UNIQUE clash) and stale artifacts."""
     root = str(tmp_path / "library")
     store = LibraryStore.get(root)
     src = tmp_path / "library_src" / "test.pdf"
@@ -22,6 +26,14 @@ def test_clear_pipeline_data_removes_molecule_detections(
     doc_id = doc.doc_id
     db = DatabaseManager.get(root)
     db.initialize()
+
+    # Stale canonical artifacts of a previous run.
+    resolver = LibraryLayout(root)
+    resolver.storage_dir(doc_id).mkdir(parents=True, exist_ok=True)
+    resolver.document_md(doc_id).write_text("# old")
+    (resolver.report_json(doc_id)).write_text("{}")
+    resolver.pages_dir(doc_id).mkdir(exist_ok=True)
+    (resolver.page_text(doc_id, 1)).write_text("old text")
 
     with db.mol_conn() as conn:
         conn.execute(
@@ -57,27 +69,6 @@ def test_clear_pipeline_data_removes_molecule_detections(
             "SELECT COUNT(*) FROM molecule_detections WHERE doc_id = ?", (doc_id,)
         ).fetchall()
         assert rows[0][0] == 1
-
-
-def test_clear_pipeline_data_removes_artifacts(
-    tmp_path: pytest.TempPathFactory,
-) -> None:
-    """Re-ingest cleanup must remove stale document Markdown and report.json."""
-    root = str(tmp_path / "library")
-    store = LibraryStore.get(root)
-    src = tmp_path / "library_src" / "test.pdf"
-    src.parent.mkdir(parents=True, exist_ok=True)
-    src.write_bytes(b"%PDF-1.4 dummy")
-    doc = store.add_document(str(src), title="test")
-    doc_id = doc.doc_id
-    resolver = LibraryLayout(root)
-    resolver.storage_dir(doc_id).mkdir(parents=True, exist_ok=True)
-    resolver.document_md(doc_id).write_text("# old")
-    (resolver.report_json(doc_id)).write_text("{}")
-    resolver.pages_dir(doc_id).mkdir(exist_ok=True)
-    (resolver.page_text(doc_id, 1)).write_text("old text")
-
-    store.clear_pipeline_data(doc_id)
 
     assert not resolver.document_md(doc_id).exists()
     assert not resolver.report_json(doc_id).exists()

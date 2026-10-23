@@ -86,29 +86,31 @@ def test_invalid_search_mode_is_rejected(tmp_path: Path, monkeypatch) -> None:
         UnidockProEngine().dock(request)
 
 
-def test_availability_reports_missing_binary(monkeypatch) -> None:
+def test_binary_discovery_and_availability(monkeypatch) -> None:
+    """``_engine_binary`` probes the candidates in order (``udp`` first), and a
+    wholly missing binary reports the engine unavailable without raising."""
+
+    def _which_factory(name: str, calls: list[str]):
+        def _which(candidate: str) -> str | None:
+            calls.append(candidate)
+            return f"/usr/bin/{candidate}" if candidate == name else None
+
+        return _which
+
     monkeypatch.delenv("MBFORGE_UNIDOCK_BIN", raising=False)
+    for name in ("unidockpro", "unidock_pro", "unidock"):
+        calls: list[str] = []
+
+        monkeypatch.setattr(engine_module.shutil, "which", _which_factory(name, calls))
+        binary = engine_module._engine_binary()
+        assert calls[0] == "udp", name
+        assert binary == f"/usr/bin/{name}"
+        assert os.path.basename(binary) == name
+
     monkeypatch.setattr(engine_module.shutil, "which", lambda _name: None)
     available, reason = UnidockProEngine().availability()
     assert available is False
     assert "udp" in reason
-
-
-@pytest.mark.parametrize("name", ["unidockpro", "unidock_pro", "unidock"])
-def test_binary_candidates_are_searched(name: str, monkeypatch) -> None:
-    monkeypatch.delenv("MBFORGE_UNIDOCK_BIN", raising=False)
-    calls: list[str] = []
-
-    def _which(candidate: str) -> str | None:
-        calls.append(candidate)
-        return f"/usr/bin/{candidate}" if candidate == name else None
-
-    monkeypatch.setattr(engine_module.shutil, "which", _which)
-    binary = engine_module._engine_binary()
-    if name == "udp":
-        assert calls[0] == "udp"
-    assert binary == f"/usr/bin/{name}"
-    assert os.path.basename(binary) == name
 
 
 def test_prepare_ligand_pdbqt_writes_a_real_pdbqt(tmp_path: Path) -> None:

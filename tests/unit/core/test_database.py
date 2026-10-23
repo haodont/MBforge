@@ -1,7 +1,14 @@
-"""Unit tests for DatabaseManager — schema init, CRUD, and transaction boundaries."""
+"""Unit tests for DatabaseManager — schema init, CRUD, and transaction boundaries.
+
+Covers ``mbforge.db.sqlite.database`` (``DatabaseManager`` and
+``record_ingest_event``): the initialized schema + indexes, transaction
+commit/rollback across both databases, the shared-connection unified layout,
+threaded access, and the bulk-deletion cleanup paths.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -13,8 +20,9 @@ from mbforge.db.sqlite.database import (
 )
 
 
-def test_database_initializes_schema(tmp_path: Path) -> None:
-    """Initializing a DatabaseManager creates both SQLite files and tables."""
+def test_database_initializes_schema_and_indices(tmp_path: Path) -> None:
+    """Initializing a DatabaseManager creates both SQLite files, the expected
+    tables, and the Markush lookup indexes."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
 
@@ -41,13 +49,6 @@ def test_database_initializes_schema(tmp_path: Path) -> None:
         assert "markush_scaffolds" in tables
         assert "markush_fragments" in tables
 
-
-def test_markush_table_indices(tmp_path: Path) -> None:
-    """New libraries expose Markush indexes."""
-    db = DatabaseManager(str(tmp_path))
-    db.initialize()
-
-    with db.mol_conn() as conn:
         indices = {
             row[0]
             for row in conn.execute(
@@ -55,7 +56,6 @@ def test_markush_table_indices(tmp_path: Path) -> None:
                 "AND (name LIKE 'idx_ms_%' OR name LIKE 'idx_mf_%')"
             )
         }
-
     assert {
         "idx_ms_doc",
         "idx_ms_status",
@@ -84,31 +84,32 @@ def test_transaction_commits_both_databases(tmp_path: Path) -> None:
     assert db.count_molecules() == 1
 
 
-@pytest.mark.parametrize("fail_kb", [True, False])
-def test_transaction_rollback_on_single_database_failure(
-    tmp_path: Path, fail_kb: bool
-) -> None:
-    """A failure in one database rolls back both, leaving no partial state."""
-    db = DatabaseManager(str(tmp_path))
-    db.initialize()
+def test_transaction_rolls_back_both_databases_on_failure(tmp_path: Path) -> None:
+    """A failure on either side of the transaction rolls back both, leaving no
+    partial state."""
+    for fail_kb in (True, False):
+        root = tmp_path / f"rollback-{fail_kb}"
+        root.mkdir()
+        db = DatabaseManager(str(root))
+        db.initialize()
 
-    exc = "Simulated KB failure" if fail_kb else "Simulated mol failure"
-    with (
-        pytest.raises(Exception, match=exc),
-        db.transaction() as (kb_conn, mol_conn),
-    ):
-        kb_conn.execute(
-            "INSERT INTO ingest_queue (id, file_path) VALUES (?, ?)",
-            ("task-1", "/tmp/test.pdf"),
-        )
-        mol_conn.execute(
-            "INSERT INTO molecules (mol_id, smiles) VALUES (?, ?)",
-            ("mol-1", "CCO"),
-        )
-        raise Exception(exc)
+        exc = "Simulated KB failure" if fail_kb else "Simulated mol failure"
+        with (
+            pytest.raises(Exception, match=exc),
+            db.transaction() as (kb_conn, mol_conn),
+        ):
+            kb_conn.execute(
+                "INSERT INTO ingest_queue (id, file_path) VALUES (?, ?)",
+                ("task-1", "/tmp/test.pdf"),
+            )
+            mol_conn.execute(
+                "INSERT INTO molecules (mol_id, smiles) VALUES (?, ?)",
+                ("mol-1", "CCO"),
+            )
+            raise Exception(exc)
 
-    assert db.count_documents() == 0
-    assert db.count_molecules() == 0
+        assert db.count_documents() == 0, f"fail_kb={fail_kb}"
+        assert db.count_molecules() == 0, f"fail_kb={fail_kb}"
 
 
 def test_cached_instance_per_project_root(tmp_path: Path) -> None:
@@ -118,9 +119,10 @@ def test_cached_instance_per_project_root(tmp_path: Path) -> None:
     assert db1 is db2
 
 
-def test_record_ingest_event_writes_log_row_and_mirrors_stage(tmp_path: Path) -> None:
+def test_record_ingest_event_writes_log_and_swallows_failure(tmp_path: Path) -> None:
     """record_ingest_event persists a log row and mirrors the stage onto the
-    matching ingest_queue row; node status is owned by the worker, not here."""
+    matching ingest_queue row (node status stays with the worker); a broken
+    database must not raise to the caller."""
     db = DatabaseManager(str(tmp_path))
     with db.kb_conn() as conn:
         conn.execute(
@@ -140,7 +142,8 @@ def test_record_ingest_event_writes_log_row_and_mirrors_stage(tmp_path: Path) ->
     )
 
     log_rows = db.execute(
-        "SELECT doc_id, stage, level, message, task_id, data FROM ingest_logs WHERE task_id=?",
+        "SELECT doc_id, stage, level, message, task_id, data "
+        "FROM ingest_logs WHERE task_id=?",
         ("task-2",),
         db="kb",
     )
@@ -164,18 +167,13 @@ def test_record_ingest_event_writes_log_row_and_mirrors_stage(tmp_path: Path) ->
     assert queue_row["status"] == "pending"
     assert queue_row["stage"] == "extract"
 
-
-def test_record_ingest_event_swallows_exception(tmp_path: Path) -> None:
-    """A failure while writing the log should not raise to the caller."""
-    db = DatabaseManager(str(tmp_path))
-
-    # Close the underlying DB file by deleting the parent directory so the
-    # next write fails without needing to mock internals.
-    db.initialize()
-    db._kb_path.unlink()
-
+    # A failure while writing the log must not raise to the caller.
+    (tmp_path / "broken").mkdir()
+    broken = DatabaseManager(str(tmp_path / "broken"))
+    broken.initialize()
+    broken._kb_path.unlink()
     record_ingest_event(
-        db,
+        broken,
         task_id="task-3",
         doc_id="doc-3",
         stage="extract",
@@ -184,31 +182,22 @@ def test_record_ingest_event_swallows_exception(tmp_path: Path) -> None:
         data={"error_code": "PERSIST_FAILED"},
     )
 
-    # No exception raised; function returns None on failure.
-    assert True
 
-
-def test_kb_and_mol_conn_share_connection_in_unified_layout(tmp_path: Path) -> None:
-    """In the unified single-DB layout, kb_conn and mol_conn use one connection."""
+def test_unified_layout_shares_one_connection(tmp_path: Path) -> None:
+    """In the single-DB layout kb_conn, mol_conn and transaction() all reuse
+    the one shared connection."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
     with db.kb_conn() as kb, db.mol_conn() as mol:
         assert kb is mol
-
-
-def test_transaction_uses_shared_connection_in_unified_layout(tmp_path: Path) -> None:
-    """transaction() reuses the shared connection when kb_path == mol_path."""
-    db = DatabaseManager(str(tmp_path))
-    db.initialize()
     with db.transaction() as (kb, mol):
         assert kb is mol
 
 
 @pytest.mark.asyncio
-async def test_kb_conn_with_asyncio_to_thread(tmp_path: Path) -> None:
-    """kb_conn works when called via asyncio.to_thread from the event loop."""
-    import asyncio
-
+async def test_connection_is_usable_from_worker_threads(tmp_path: Path) -> None:
+    """kb_conn works through asyncio.to_thread, including concurrently — the
+    pattern ``pipeline_queue`` uses from the event loop."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
 
@@ -216,30 +205,11 @@ async def test_kb_conn_with_asyncio_to_thread(tmp_path: Path) -> None:
         with db.kb_conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM ingest_queue").fetchone()[0]
 
-    # Pre-warm a connection on the main thread.
+    # Pre-warm a connection on the main thread, mirroring real usage.
     with db.kb_conn():
         pass
 
-    count = await asyncio.to_thread(_fetch)
-    assert count == 0
-
-
-@pytest.mark.asyncio
-async def test_concurrent_asyncio_to_thread_db_access(tmp_path: Path) -> None:
-    """Concurrent pipeline_queue-style calls must not raise cross-thread errors.
-
-    ``pipeline_queue`` fetches ``DatabaseManager`` on the event-loop thread
-    and then runs queries via ``asyncio.to_thread``; this verifies that
-    pattern under concurrency.
-    """
-    import asyncio
-
-    db = DatabaseManager(str(tmp_path))
-    db.initialize()
-
-    # Pre-warm a connection on the main thread, mirroring real usage.
-    with db.kb_conn() as conn:
-        conn.execute("SELECT COUNT(*) FROM ingest_queue")
+    assert await asyncio.to_thread(_fetch) == 0
 
     async def _insert(name: str) -> None:
         def _work() -> None:
@@ -257,14 +227,12 @@ async def test_concurrent_asyncio_to_thread_db_access(tmp_path: Path) -> None:
     assert {r["id"] for r in rows} == {f"task-{i}" for i in range(10)}
 
 
-def test_delete_molecule_records_chunked_preselect(tmp_path: Path) -> None:
-    """delete_molecule_records with more than 999 ids must not raise.
-
-    Regression test: the pre-check SELECT used to bind all ids in a single
-    ``IN (?, ...)`` clause, tripping SQLite's SQLITE_MAX_VARIABLE_NUMBER
-    (999) with an ``OperationalError``. The SELECT is now chunked like the
-    DELETEs, so arbitrarily large id lists work.
-    """
+def test_deletion_paths_clean_related_rows_without_binding_limits(
+    tmp_path: Path,
+) -> None:
+    """Bulk molecule deletion must not bind every id in one IN() clause
+    (SQLITE_MAX_VARIABLE_NUMBER), and document deletion must remove the review
+    candidates plus their markush_decisions audit rows."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
 
@@ -282,15 +250,6 @@ def test_delete_molecule_records_chunked_preselect(tmp_path: Path) -> None:
 
     assert deleted == len(mol_ids)
     assert db.count_molecules() == 0
-
-
-def test_delete_document_molecule_data_cleans_markush_decisions_audit_rows(
-    tmp_path: Path,
-) -> None:
-    """Deleting a document's review candidates also removes the audit rows in
-    markush_decisions keyed on those candidate ids."""
-    db = DatabaseManager(str(tmp_path))
-    db.initialize()
 
     with db.mol_conn() as conn:
         conn.execute(

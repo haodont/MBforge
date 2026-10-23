@@ -48,7 +48,10 @@ def test_predict_batch_not_available(_restore_state):
     assert results[0].properties.get("error")
 
 
-def test_predict_batch_returns_esmiles_and_smiles(_restore_state):
+def test_predict_maps_model_captions_to_layers(_restore_state):
+    """Captions map 1:1 to E-SMILES/SMILES: plain captions pass through, a
+    Markush caption splits into layer 2 (full) and layer 1 (parseable), and an
+    isolated trailing ``<sep>`` is stripped."""
     _install_fake(["CCO", "c1ccccc1"])
     results = predict_batch([_img(), _img()])
     assert len(results) == 2
@@ -57,8 +60,6 @@ def test_predict_batch_returns_esmiles_and_smiles(_restore_state):
     assert "sru" not in results[0].properties
     assert results[1].esmiles == "c1ccccc1"
 
-
-def test_predict_separates_markush_layer1(_restore_state):
     _install_fake(["*c1ccccc1<sep><a>0:R[1]</a>"])
     r = predict(_img())
     # Layer 2 keeps the full E-SMILES; Layer 1 exposes the parseable SMILES.
@@ -67,8 +68,6 @@ def test_predict_separates_markush_layer1(_restore_state):
     assert r.properties.get("markush") is True
     assert "sru" not in r.properties
 
-
-def test_predict_strips_isolated_trailing_sep(_restore_state):
     _install_fake(["CCO<sep>"])
     r = predict(_img())
     assert r.esmiles == "CCO"

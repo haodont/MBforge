@@ -1,3 +1,10 @@
+"""Tests for the document library store.
+
+Covers ``services.use_cases.documents.library.LibraryStore``: the add/get/delete
+lifecycle (including the missing-source error and the no-leftover-snapshot
+guarantee) and the literal-substring listing search.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,7 +15,8 @@ from mbforge.foundation.errors import MBForgeError
 from mbforge.service.use_cases.documents.library import LibraryStore
 
 
-def test_add_document_and_get(tmp_path: Path) -> None:
+def test_document_store_add_get_delete_round_trip(tmp_path: Path) -> None:
+    """Adding copies metadata, a missing source raises, deleting removes the doc."""
     store = LibraryStore.get(tmp_path)
     src = tmp_path / "input.pdf"
     src.write_bytes(b"pdf content")
@@ -19,18 +27,9 @@ def test_add_document_and_get(tmp_path: Path) -> None:
     assert retrieved is not None
     assert retrieved.title == "My Paper"
 
-
-def test_add_document_missing_file(tmp_path: Path) -> None:
-    store = LibraryStore.get(tmp_path)
     with pytest.raises(MBForgeError):
         store.add_document(tmp_path / "missing.pdf")
 
-
-def test_delete_document(tmp_path: Path) -> None:
-    store = LibraryStore.get(tmp_path)
-    src = tmp_path / "input.pdf"
-    src.write_bytes(b"pdf")
-    doc = store.add_document(src)
     store.delete_documents([doc.doc_id])
     assert store.get_document(doc.doc_id) is None
     assert not (tmp_path / "storage" / doc.doc_id).exists()
@@ -40,7 +39,7 @@ def test_delete_document(tmp_path: Path) -> None:
     assert not backups.exists() or not list(backups.iterdir())
 
 
-def test_search_documents_substring(tmp_path: Path) -> None:
+def test_search_documents_matches_literal_substring(tmp_path: Path) -> None:
     """Search matches literal substrings in title and file_name.
 
     Search reads the same listing as the workspace, so a document has to have

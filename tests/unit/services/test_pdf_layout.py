@@ -1,4 +1,8 @@
-"""Unit tests for the layout-blocks side of the document overlay."""
+"""Unit tests for the layout-blocks side of the document overlay.
+
+Covers ``services.use_cases.documents.pdf_layout`` (``build_document_overlay``
+for the block payload, ``load_document_bboxes`` for the stage reader).
+"""
 
 from __future__ import annotations
 
@@ -86,8 +90,12 @@ def _save_detections(
     )
 
 
-def test_overlay_blocks_read_sql_evidence_without_flip(tmp_path) -> None:
-    """Blocks come straight from SQL: no y-flip, no branch rebuild."""
+def test_overlay_blocks_read_sql_evidence_in_reading_order(tmp_path) -> None:
+    """Blocks come straight from SQL evidence: no y-flip, no branch rebuild.
+
+    Runs minted by the layout producer and by the joined-evidence helper share
+    one read path, and a missing document degrades to an empty cached payload.
+    """
     _save_synthetic(tmp_path)
     result = build_document_overlay(str(tmp_path), "doc-1", "/p.pdf")
     blocks = result["blocks"]
@@ -110,8 +118,6 @@ def test_overlay_blocks_read_sql_evidence_without_flip(tmp_path) -> None:
     assert [b["index"] for b in blocks] == list(range(len(blocks)))
     assert result["from_cache"] is True
 
-
-def test_overlay_blocks_read_joined_evidence_rows(tmp_path) -> None:
     doc_id = "doc-v2"
     extracted = ExtractedDocument(
         raw_text="text",
@@ -126,15 +132,13 @@ def test_overlay_blocks_read_joined_evidence_rows(tmp_path) -> None:
     )
     publish_v2_run(tmp_path, doc_id, "run-1", extracted, [], width=200.0, height=300.0)
 
-    result = build_document_overlay(str(tmp_path), doc_id, "/p.pdf")
+    joined = build_document_overlay(str(tmp_path), doc_id, "/p.pdf")
 
-    assert result["blocks"][0]["bbox"] == (10.0, 20.0, 30.0, 50.0)
+    assert joined["blocks"][0]["bbox"] == (10.0, 20.0, 30.0, 50.0)
 
-
-def test_overlay_missing_doc_yields_empty_blocks(tmp_path) -> None:
-    result = build_document_overlay(str(tmp_path), "nope", "/p.pdf")
-    assert result["blocks"] == []
-    assert result["from_cache"] is True
+    missing = build_document_overlay(str(tmp_path), "nope", "/p.pdf")
+    assert missing["blocks"] == []
+    assert missing["from_cache"] is True
 
 
 def test_load_document_bboxes_reports_stage_coverage(tmp_path) -> None:

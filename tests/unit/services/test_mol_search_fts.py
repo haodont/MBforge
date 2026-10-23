@@ -1,4 +1,10 @@
-"""Regression tests for the mol_search FTS5 index."""
+"""Regression tests for the mol_search FTS5 index.
+
+Covers ``db.sqlite.database.DatabaseManager`` index maintenance
+(``sync_molecule_to_mol_search`` / ``delete_molecule_from_mol_search`` /
+``sync_molecule_fingerprint``) as observed through
+``services.use_cases.molecule.queries.search_molecules``.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +14,11 @@ from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.service.use_cases.molecule.queries import search_molecules
 
 
-def test_mol_search_populated_after_insert(tmp_path: pytest.TempPathFactory) -> None:
-    """FTS5 external-content table must be kept in sync after molecule writes."""
+def test_mol_search_index_tracks_writes_and_treats_punctuation_literally(
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """The external-content FTS table mirrors insert/update/delete, and
+    user-entered punctuation is matched as literal text, not FTS5 syntax."""
     root = str(tmp_path / "library")
     db = DatabaseManager.get(root)
     db.initialize()
@@ -29,41 +38,15 @@ def test_mol_search_populated_after_insert(tmp_path: pytest.TempPathFactory) -> 
     assert len(results) == 1
     assert results[0]["name"] == "ethanol"
 
-
-def test_mol_search_treats_fts_syntax_as_literal_text(
-    tmp_path: pytest.TempPathFactory,
-) -> None:
-    """User-entered punctuation must not be interpreted as FTS5 syntax."""
-    root = str(tmp_path / "library")
-    db = DatabaseManager.get(root)
-    db.initialize()
-
     with db.mol_conn() as conn:
         conn.execute(
-            "INSERT INTO molecules (mol_id, smiles, name) VALUES (?, ?, ?)",
-            ("mol_1", "CCO", "literal = syntax"),
+            "UPDATE molecules SET name = ?, notes = ? WHERE mol_id = ?",
+            ("literal = syntax", "punctuation", "mol_1"),
         )
         DatabaseManager.sync_molecule_to_mol_search(conn, "mol_1")
 
     results = search_molecules(root, "literal = syntax", top_k=10)
-
     assert [result["mol_id"] for result in results] == ["mol_1"]
-
-
-def test_mol_search_update_and_delete(tmp_path: pytest.TempPathFactory) -> None:
-    """Update and delete must also be reflected in mol_search."""
-    root = str(tmp_path / "library")
-    db = DatabaseManager.get(root)
-    db.initialize()
-
-    with db.mol_conn() as conn:
-        conn.execute(
-            "INSERT INTO molecules (mol_id, smiles, name, notes) VALUES (?, ?, ?, ?)",
-            ("mol_1", "CCO", "ethanol", "old note"),
-        )
-        DatabaseManager.sync_molecule_to_mol_search(conn, "mol_1")
-
-    assert len(search_molecules(root, "ethanol")) == 1
 
     with db.mol_conn() as conn:
         DatabaseManager.delete_molecule_from_mol_search(conn, "mol_1")
@@ -73,7 +56,7 @@ def test_mol_search_update_and_delete(tmp_path: pytest.TempPathFactory) -> None:
         )
         DatabaseManager.sync_molecule_to_mol_search(conn, "mol_1")
 
-    assert len(search_molecules(root, "ethanol")) == 0
+    assert len(search_molecules(root, "literal = syntax")) == 0
     assert len(search_molecules(root, "methanol")) == 1
 
     with db.mol_conn() as conn:

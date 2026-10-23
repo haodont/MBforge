@@ -55,57 +55,51 @@ def test_layout_extract_refuses_a_document_with_no_text(
 
 # --- Title extraction (WIPO bibliographic first pages) ---
 
+_WIPO_CJK_BIBLIOGRAPHY = (
+    "(12) 按照专利合作条约所公布的国际申请\n"
+    "\n"
+    "(19) 世界知识产权组织\n"
+    "国际局\n"
+    "\n"
+    "![](images/logo.jpg)\n"
+    "\n"
+    "(43) 国际公布日\n"
+    "2026年2月19日(19.02.2026)\n"
+    "\n"
+    "(51) 国际专利分类号:\n"
+    "C07D 401/12 (2006.01)\n"
+    "\n"
+    "(71) 申请人: 某制药公司\n"
+    + "\n".join(f" filler line {i}" for i in range(30))
+    + "\n"
+    "(54) Title: COMPOUND SERVING AS MRGPRX2 ANTAGONIST\n"
+    "\n"
+    "(54) 发明名称: 作为MRGPRX2拮抗剂的化合物\n"
+    "\n"
+    "(57) Abstract: ...\n"
+)
 
-def test_extract_title_prefers_cjk_wipo_54_line() -> None:
-    """The (54) 发明名称 line beats both the English (54) Title and any
-    heuristic candidate on WIPO bibliographic pages."""
-    text = (
-        "(12) 按照专利合作条约所公布的国际申请\n"
-        "\n"
-        "(19) 世界知识产权组织\n"
-        "国际局\n"
-        "\n"
-        "![](images/logo.jpg)\n"
-        "\n"
-        "(43) 国际公布日\n"
-        "2026年2月19日(19.02.2026)\n"
-        "\n"
-        "(51) 国际专利分类号:\n"
-        "C07D 401/12 (2006.01)\n"
-        "\n"
-        "(71) 申请人: 某制药公司\n"
-        + "\n".join(f" filler line {i}" for i in range(30))
-        + "\n"
-        "(54) Title: COMPOUND SERVING AS MRGPRX2 ANTAGONIST\n"
-        "\n"
-        "(54) 发明名称: 作为MRGPRX2拮抗剂的化合物\n"
-        "\n"
-        "(57) Abstract: ...\n"
-    )
-    assert _extract_title(text) == "作为MRGPRX2拮抗剂的化合物"
+_WIPO_ENGLISH_BIBLIOGRAPHY = (
+    "(12) INTERNATIONAL APPLICATION PUBLISHED UNDER THE PATENT COOPERATION TREATY (PCT)\n"
+    + "\n".join(f" filler line {i}" for i in range(40))
+    + "\n(54) Title: KINASE INHIBITORS FOR TREATING CANCER\n"
+)
 
-
-def test_extract_title_wipo_54_english_only() -> None:
-    """An English-only (54) Title line is used when no CJK variant exists."""
-    text = (
-        "(12) INTERNATIONAL APPLICATION PUBLISHED UNDER THE PATENT COOPERATION TREATY (PCT)\n"
-        + "\n".join(f" filler line {i}" for i in range(40))
-        + "\n(54) Title: KINASE INHIBITORS FOR TREATING CANCER\n"
-    )
-    assert _extract_title(text) == "KINASE INHIBITORS FOR TREATING CANCER"
-
-
-def test_extract_title_skips_date_like_lines() -> None:
-    """The publication date after ``(43)`` must never become the title."""
-    text = "(43) 国际公布日\n2026年2月19日(19.02.2026)\n\n一种新型的化合物及其用途\n"
-    assert _extract_title(text) == "一种新型的化合物及其用途"
+# (page text, expected title) — the (54) line beats heuristics; dates and
+# image references are never titles.
+_TITLE_CASES = [
+    (_WIPO_CJK_BIBLIOGRAPHY, "作为MRGPRX2拮抗剂的化合物"),
+    (_WIPO_ENGLISH_BIBLIOGRAPHY, "KINASE INHIBITORS FOR TREATING CANCER"),
+    (
+        "(43) 国际公布日\n2026年2月19日(19.02.2026)\n\n一种新型的化合物及其用途\n",
+        "一种新型的化合物及其用途",
+    ),
+    ("Some header\nTitle: My Real Title\nmore text\n", "My Real Title"),
+    ("![](images/abc.jpg)\n\nReal Document Title\n", "Real Document Title"),
+]
 
 
-def test_extract_title_explicit_prefix_still_wins() -> None:
-    text = "Some header\nTitle: My Real Title\nmore text\n"
-    assert _extract_title(text) == "My Real Title"
-
-
-def test_extract_title_skips_image_reference() -> None:
-    text = "![](images/abc.jpg)\n\nReal Document Title\n"
-    assert _extract_title(text) == "Real Document Title"
+def test_extract_title_picks_the_bibliographic_title() -> None:
+    """The (54) line (CJK first) beats heuristics; dates/images are skipped."""
+    for text, expected in _TITLE_CASES:
+        assert _extract_title(text) == expected, text

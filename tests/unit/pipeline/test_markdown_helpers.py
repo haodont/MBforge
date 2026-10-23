@@ -1,3 +1,10 @@
+"""Contract tests for the Markdown assembly of evidence (esmiles_insert).
+
+``insert_esmiles_blocks`` turns the SQL evidence rows plus the molecule
+candidates into ``document.md``: block order, labels and paragraph structure
+are the visible contract the API serves.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,9 +33,10 @@ def _source(
     )
 
 
-def test_markdown_assembles_evidence_by_geometry_and_writes_map(
+def test_markdown_orders_evidence_by_geometry_and_labels_candidates(
     tmp_path: Path,
 ) -> None:
+    """Reading order, image/molecule tie-break and candidate filtering."""
     text_evidence = _source(
         "doc",
         page=1,
@@ -74,20 +82,19 @@ def test_markdown_assembles_evidence_by_geometry_and_writes_map(
     assert "%% candidate=candidate-1" in content
     assert "%% label=4A" in content
 
+    # The evidence map is gone: SQL is the single source of truth.
     assert not (tmp_path / "document.map.json").exists()
 
-
-def test_markdown_tie_breaks_images_before_molecules_and_filters_candidates(
-    tmp_path: Path,
-) -> None:
-    image_evidence = _source(
+    # Same box for an image and a molecule: the image is rendered first, and
+    # only accepted candidates (with a structure) are labelled.
+    tie_image = _source(
         "doc",
         page=1,
         bbox=(20.0, 100.0, 40.0, 120.0),
         kind="figcx",
         raw_text="storage/doc/images/figure.png",
     )
-    molecule_evidence = _source(
+    tie_molecule = _source(
         "doc",
         page=1,
         bbox=(20.0, 100.0, 40.0, 120.0),
@@ -112,7 +119,7 @@ def test_markdown_tie_breaks_images_before_molecules_and_filters_candidates(
         canonical_smiles="CCO",
         esmiles="CCO",
         detections=[
-            DetectionSource(source="image", evidence_id=molecule_evidence.evidence_id)
+            DetectionSource(source="image", evidence_id=tie_molecule.evidence_id)
         ],
         properties={"candidate_id": "accepted"},
     )
@@ -133,64 +140,59 @@ def test_markdown_tie_breaks_images_before_molecules_and_filters_candidates(
         ],
         properties={"candidate_id": "empty"},
     )
-    output_path = tmp_path / "document.md"
+    tie_path = tmp_path / "tie.md"
 
     insert_esmiles_blocks(
-        [image_evidence, molecule_evidence, rejected_evidence, empty_evidence],
-        str(output_path),
+        [tie_image, tie_molecule, rejected_evidence, empty_evidence],
+        str(tie_path),
         candidates=[accepted, rejected, empty],
         pages=[PageFrame(page=1, width=200.0, height=200.0)],
         doc_id="doc",
     )
 
-    content = output_path.read_text(encoding="utf-8")
+    content = tie_path.read_text(encoding="utf-8")
     assert content.index("image evidence=") < content.index("```esmiles")
     assert "%% candidate=accepted" in content
     assert "%% candidate=rejected" not in content
     assert "%% candidate=empty" not in content
 
-
-def test_markdown_renders_candidate_on_page_without_text(tmp_path: Path) -> None:
-    molecule_evidence = _source(
+    # A candidate on a page with no text is still rendered under its page.
+    page_two_molecule = _source(
         "doc",
         page=2,
         bbox=(10.0, 20.0, 40.0, 50.0),
         kind="molecule",
         raw_text="storage/doc/crops/mol.png",
     )
-    candidate = Molecule(
+    page_two_candidate = Molecule(
         canonical_smiles="CCN",
         esmiles="CCN",
         detections=[
-            DetectionSource(source="image", evidence_id=molecule_evidence.evidence_id)
+            DetectionSource(source="image", evidence_id=page_two_molecule.evidence_id)
         ],
         properties={"candidate_id": "candidate-2"},
     )
-    output_path = tmp_path / "document.md"
+    page_two_path = tmp_path / "page-two.md"
 
     insert_esmiles_blocks(
-        [molecule_evidence],
-        str(output_path),
-        candidates=[candidate],
+        [page_two_molecule],
+        str(page_two_path),
+        candidates=[page_two_candidate],
         pages=[PageFrame(page=2, width=200.0, height=200.0)],
         doc_id="doc",
     )
 
-    content = output_path.read_text(encoding="utf-8")
+    content = page_two_path.read_text(encoding="utf-8")
     assert "<!-- PAGE 2 -->" in content
     assert "%% candidate=candidate-2" in content
     assert "CCN" in content
 
 
-def test_markdown_emits_numbered_paragraph_once_on_its_starting_page(
-    tmp_path: Path,
-) -> None:
-    """A patent paragraph split by a page break is one block, not two.
-
-    The layout cut ``[0003]`` at the foot of page 1 and carried the rest onto
-    page 2; the marker is the paragraph's real boundary, so the continuation
-    belongs to the block that already started rather than to a block of its own.
-    """
+def test_markdown_preserves_paragraph_structure(tmp_path: Path) -> None:
+    """Numbered paragraphs stay one block; sub-items and headings keep their level."""
+    # A patent paragraph split by a page break is one block, not two: the
+    # marker is the paragraph's real boundary, so the continuation belongs to
+    # the block that already started rather than to a block of its own.
     opening = _source(
         "doc",
         page=1,
@@ -212,7 +214,7 @@ def test_markdown_emits_numbered_paragraph_once_on_its_starting_page(
         kind="text",
         raw_text="[0004] MRGX2 is potentially involved in host defense.",
     )
-    output_path = tmp_path / "document.md"
+    output_path = tmp_path / "paragraphs.md"
 
     insert_esmiles_blocks(
         [opening, continuation, following],
@@ -232,9 +234,7 @@ def test_markdown_emits_numbered_paragraph_once_on_its_starting_page(
     # Rendered with the page its first fragment sits on, not the page it ends on.
     assert content.index("[0003]") < content.index("<!-- PAGE 2 -->")
 
-
-def test_markdown_renders_indented_sub_items_as_a_nested_list(tmp_path: Path) -> None:
-    """A paragraph's deeper-left-edge fragments keep their level in Markdown."""
+    # A paragraph's deeper-left-edge fragments keep their level in Markdown.
     head = _source(
         "doc",
         page=1,
@@ -256,16 +256,16 @@ def test_markdown_renders_indented_sub_items_as_a_nested_list(tmp_path: Path) ->
         kind="text",
         raw_text="(b) a cyclic group selected from",
     )
-    output_path = tmp_path / "document.md"
+    nested_path = tmp_path / "nested.md"
 
     insert_esmiles_blocks(
         [head, first, second],
-        str(output_path),
+        str(nested_path),
         pages=[PageFrame(page=1, width=600.0, height=900.0)],
         doc_id="doc",
     )
 
-    content = output_path.read_text(encoding="utf-8")
+    content = nested_path.read_text(encoding="utf-8")
     assert (
         "[0006] One aspect of the invention provides a compound:\n"
         "\n"
@@ -273,9 +273,7 @@ def test_markdown_renders_indented_sub_items_as_a_nested_list(tmp_path: Path) ->
         "- (b) a cyclic group selected from\n"
     ) in content
 
-
-def test_markdown_renders_a_centred_block_as_a_heading(tmp_path: Path) -> None:
-    """The layout's centred block is the trustworthy heading signal."""
+    # The layout's centred block is the trustworthy heading signal.
     body = [
         _source(
             "doc",
@@ -293,15 +291,15 @@ def test_markdown_renders_a_centred_block_as_a_heading(tmp_path: Path) -> None:
         kind="sec",
         raw_text="FIELD OF THE INVENTION",
     )
-    output_path = tmp_path / "document.md"
+    heading_path = tmp_path / "heading.md"
 
     insert_esmiles_blocks(
         [*body, heading],
-        str(output_path),
+        str(heading_path),
         pages=[PageFrame(page=1, width=600.0, height=900.0)],
         doc_id="doc",
     )
 
-    content = output_path.read_text(encoding="utf-8")
+    content = heading_path.read_text(encoding="utf-8")
     assert "## FIELD OF THE INVENTION" in content
     assert "Body line 0" in content

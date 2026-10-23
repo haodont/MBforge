@@ -1,13 +1,22 @@
+"""Uvicorn access-log noise filter contract.
+
+Covers ``mbforge.foundation.logger.UvicornAccessLogFilter`` (successful
+requests are dropped from the access log, errors and status-code-less records
+survive) and ``configure_uvicorn_access_logging`` (the filter is installed on
+the access logger and on its handlers).
+"""
+
 from __future__ import annotations
 
 import logging
-
-import pytest
 
 from mbforge.foundation.logger import (
     UvicornAccessLogFilter,
     configure_uvicorn_access_logging,
 )
+
+_SUCCESS_STATUS_CODES = (200, 201, 204, 299)
+_NON_SUCCESS_STATUS_CODES = (100, 301, 400, 404, 500)
 
 
 def _access_record(
@@ -30,28 +39,25 @@ def _access_record(
     return record
 
 
-@pytest.mark.parametrize("as_uvicorn_args", [False, True])
-@pytest.mark.parametrize("status_code", [200, 201, 204, 299])
-def test_successful_access_records_are_filtered(
-    status_code: int, as_uvicorn_args: bool
-) -> None:
-    assert not UvicornAccessLogFilter().filter(
-        _access_record(status_code, as_uvicorn_args=as_uvicorn_args)
+def test_filter_drops_successful_access_records_only() -> None:
+    """2xx records are filtered; non-success and status-code-less records stay.
+
+    Uvicorn sets ``status_code`` either as a record attribute or as the last
+    positional log argument, so both shapes must be handled.
+    """
+    for as_uvicorn_args in (False, True):
+        for status_code in _SUCCESS_STATUS_CODES:
+            assert not UvicornAccessLogFilter().filter(
+                _access_record(status_code, as_uvicorn_args=as_uvicorn_args)
+            ), f"{status_code} (uvicorn_args={as_uvicorn_args}) must be filtered"
+        for status_code in _NON_SUCCESS_STATUS_CODES:
+            assert UvicornAccessLogFilter().filter(
+                _access_record(status_code, as_uvicorn_args=as_uvicorn_args)
+            ), f"{status_code} (uvicorn_args={as_uvicorn_args}) must be kept"
+
+    assert UvicornAccessLogFilter().filter(_access_record(None)), (
+        "record without status_code must be kept"
     )
-
-
-@pytest.mark.parametrize("as_uvicorn_args", [False, True])
-@pytest.mark.parametrize("status_code", [100, 301, 400, 404, 500])
-def test_non_success_access_records_are_kept(
-    status_code: int, as_uvicorn_args: bool
-) -> None:
-    assert UvicornAccessLogFilter().filter(
-        _access_record(status_code, as_uvicorn_args=as_uvicorn_args)
-    )
-
-
-def test_access_record_without_status_code_is_kept() -> None:
-    assert UvicornAccessLogFilter().filter(_access_record(None))
 
 
 def test_configure_installs_filter_on_access_handlers() -> None:

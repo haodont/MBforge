@@ -39,7 +39,7 @@ def test_agent_molecule_tool_resolves_library_server_side(monkeypatch) -> None:
     }
 
 
-def _seed_document(library: Path) -> None:
+def _seed_document(library: Path, doc_id: str = "doc-1") -> None:
     from mbforge.db import document_records
     from mbforge.db.sqlite.database import DatabaseManager
 
@@ -47,8 +47,8 @@ def _seed_document(library: Path) -> None:
     document_records.insert(
         str(library),
         {
-            "doc_id": "doc-1",
-            "file_name": "doc-1.pdf",
+            "doc_id": doc_id,
+            "file_name": f"{doc_id}.pdf",
             "title": "Seed",
             "page_count": 1,
             "created_at": "2026-01-01 00:00:00",
@@ -95,6 +95,81 @@ def test_agent_library_stats_counts_seeded_rows(
     assert stats["documents"]["by_status"] == {"pending": 1}
 
 
+def test_agent_search_library_returns_literal_bounded_evidence_and_pagination(
+    app_client: TestClient,
+    tmp_library: Path,
+) -> None:
+    """Public search covers SQL text with literal terms, provenance and safe limits."""
+    from mbforge.db.source_evidence import persist_source_evidence
+    from mbforge.domain.evidence import SourceEvidence
+
+    _seed_document(tmp_library)
+    _seed_document(tmp_library, "doc-2")
+    rows = [
+        SourceEvidence.create(
+            doc_id="doc-1",
+            page=page,
+            bbox=(1, 2, 3, 4),
+            raw_text="x" * 2500 + " MRGPRX2 IC50 10 nM 100% " + "x" * 2500,
+        )
+        for page in (1, 2)
+    ]
+    persist_source_evidence(tmp_library, rows)
+    persist_source_evidence(
+        tmp_library,
+        [
+            SourceEvidence.create(
+                doc_id="doc-2",
+                page=1,
+                bbox=(1, 2, 3, 4),
+                raw_text="MRGPRX2 review",
+            )
+        ],
+    )
+    response = app_client.post(
+        "/api/v1/agent/tools/search-library", json={"query": "mrgprx2 ic50", "limit": 1}
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["has_more"] and payload["next_offset"] == 1
+    item = payload["results"][0]
+    assert item["evidence_id"] == rows[0].evidence_id
+    assert item["doc_id"] == "doc-1" and item["page"] == 1
+    assert "MRGPRX2 IC50" in item["snippet"]
+    assert len(item["snippet"]) == 2000 and item["truncated"]
+    second = app_client.post(
+        "/api/v1/agent/tools/search-library",
+        json={"query": "MRGPRX2 IC50", "limit": 1, "offset": 1},
+    ).json()
+    assert second["results"][0]["page"] == 2 and not second["has_more"]
+    literal = app_client.post(
+        "/api/v1/agent/tools/search-library", json={"query": "%"}
+    ).json()
+    assert len(literal["results"]) == 2
+    no_wildcard = app_client.post(
+        "/api/v1/agent/tools/search-library", json={"query": "_"}
+    ).json()
+    assert no_wildcard["results"] == []
+    scoped = app_client.post(
+        "/api/v1/agent/tools/search-library",
+        json={"query": "MRGPRX2", "doc_id": "other-doc"},
+    ).json()
+    assert scoped["results"] == []
+    across = app_client.post(
+        "/api/v1/agent/tools/search-library", json={"query": "MRGPRX2"}
+    ).json()
+    assert {row["doc_id"] for row in across["results"]} == {"doc-1", "doc-2"}
+    for body in (
+        {"query": " "},
+        {"query": "x", "limit": 51},
+        {"query": "x", "library_root": "other-library"},
+    ):
+        assert (
+            app_client.post("/api/v1/agent/tools/search-library", json=body).status_code
+            == 422
+        )
+
+
 def test_agent_library_sql_reads_and_refuses_writes(
     app_client: TestClient, tmp_library: Path
 ) -> None:
@@ -104,6 +179,7 @@ def test_agent_library_sql_reads_and_refuses_writes(
     # Empty sql returns the schema so the model can discover tables.
     schema = app_client.post("/api/v1/agent/tools/library-sql", json={"sql": ""}).json()
     assert any(table["table"] == "documents" for table in schema["tables"])
+    assert all(not table["table"].startswith("research_") for table in schema["tables"])
 
     ok = app_client.post(
         "/api/v1/agent/tools/library-sql",
@@ -117,6 +193,7 @@ def test_agent_library_sql_reads_and_refuses_writes(
         "DELETE FROM documents",
         "SELECT 1; DROP TABLE documents",
         "PRAGMA table_info(documents)",
+        "SELECT payload FROM research_sessions",
     ):
         refused = app_client.post(
             "/api/v1/agent/tools/library-sql", json={"sql": bad}

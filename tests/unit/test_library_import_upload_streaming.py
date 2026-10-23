@@ -48,10 +48,12 @@ def _patch_upload_tmpfile(monkeypatch: pytest.MonkeyPatch, library_root: Path) -
     return tmp_dir
 
 
-def test_import_upload_small_succeeds(
-    app_client: TestClient, tmp_library: Path
+def test_import_upload_success_round_trips_and_cleans_tmp(
+    app_client: TestClient, tmp_library: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A 1 MiB body should round-trip through the streaming path."""
+    """A 1 MiB body round-trips through the streaming path into storage, and the
+    streaming temp file is moved (never left behind)."""
+    tmp_dir = _patch_upload_tmpfile(monkeypatch, tmp_library)
     body = b"%PDF-1.4 " + b"x" * (1024 * 1024 - 8)  # exactly 1 MiB
     resp = app_client.post(
         "/api/v1/library/import",
@@ -67,6 +69,8 @@ def test_import_upload_small_succeeds(
     saved = tmp_library / "storage" / doc_id / "small.pdf"
     assert saved.is_file()
     assert saved.read_bytes() == body
+    # The temp file was moved into storage, so nothing is left behind.
+    assert list(tmp_dir.iterdir()) == []
 
 
 async def test_import_upload_oversize_rejected_early(
@@ -136,26 +140,3 @@ async def test_import_upload_oversize_rejected_early(
     # Temp file was cleaned up on the failure path.
     leftover = list(tmp_dir.iterdir())
     assert leftover == [], f"temp file not cleaned after oversize: {leftover}"
-
-
-def test_import_upload_temp_file_consumed_on_success(
-    app_client: TestClient, tmp_library: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A successful upload must not leave a streaming temp file behind.
-
-    The temp file is *moved* into storage, so the temp directory ends up empty
-    and the stored PDF holds the uploaded bytes.
-    """
-    tmp_dir = _patch_upload_tmpfile(monkeypatch, tmp_library)
-    body = b"%PDF-1.4 streaming cleanup"
-    resp = app_client.post(
-        "/api/v1/library/import",
-        files={"file": ("clean.pdf", io.BytesIO(body), "application/pdf")},
-    )
-    assert resp.status_code == 200, resp.text
-
-    doc_id = resp.json()["document"]["doc_id"]
-    saved = tmp_library / "storage" / doc_id / "clean.pdf"
-    assert saved.is_file()
-    assert saved.read_bytes() == body
-    assert list(tmp_dir.iterdir()) == []

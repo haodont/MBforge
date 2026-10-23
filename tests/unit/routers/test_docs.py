@@ -5,7 +5,8 @@ import asyncio
 from mbforge.api.http.documents import project_docs as docs
 
 
-def test_list_wiki_pages_returns_sorted_titles(tmp_path, monkeypatch) -> None:
+def test_wiki_pages_list_and_read(tmp_path, monkeypatch) -> None:
+    """Wiki listing returns pages; reading one returns its slug/title/body."""
     (tmp_path / "README.md").write_text("# Wiki Home\n", encoding="utf-8")
     (tmp_path / "architecture.md").write_text("# Architecture\n", encoding="utf-8")
     monkeypatch.setattr(docs, "_WIKI_ROOT", tmp_path)
@@ -15,13 +16,9 @@ def test_list_wiki_pages_returns_sorted_titles(tmp_path, monkeypatch) -> None:
     assert [page.slug for page in result.pages] == ["readme", "architecture"]
     assert [page.title for page in result.pages] == ["Wiki Home", "Architecture"]
 
-
-def test_get_wiki_page_reads_markdown(tmp_path, monkeypatch) -> None:
     (tmp_path / "pipeline.md").write_text("# Pipeline\n\nBody", encoding="utf-8")
-    monkeypatch.setattr(docs, "_WIKI_ROOT", tmp_path)
+    page = asyncio.run(docs.get_wiki_page("pipeline"))
 
-    result = asyncio.run(docs.get_wiki_page("pipeline"))
-
-    assert result.slug == "pipeline"
-    assert result.title == "Pipeline"
-    assert result.content.endswith("Body")
+    assert page.slug == "pipeline"
+    assert page.title == "Pipeline"
+    assert page.content.endswith("Body")

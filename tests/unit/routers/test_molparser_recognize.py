@@ -18,9 +18,9 @@ def _png_base64() -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def test_recognize_returns_esmiles_smiles_coref(
-    app_client: TestClient,
-) -> None:
+def test_recognize_maps_success_and_molparser_failure(app_client: TestClient) -> None:
+    """A successful recognition returns the esmiles/smiles/coref payload; an
+    empty recognition (molparser unavailable/failed) maps to a 503."""
     with patch(
         "mbforge.api.http.molecule.molparser.recognize_molecule",
         return_value=RecognizedMolecule(
@@ -43,8 +43,6 @@ def test_recognize_returns_esmiles_smiles_coref(
         "success": True,
     }
 
-
-def test_recognize_maps_molparser_failure_to_503(app_client: TestClient) -> None:
     with patch(
         "mbforge.api.http.molecule.molparser.recognize_molecule",
         return_value=RecognizedMolecule(esmiles="", smiles="", coref=[]),

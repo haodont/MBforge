@@ -52,8 +52,9 @@ def _molecule(
     }
 
 
-def test_merge_keeps_the_higher_scoring_duplicate() -> None:
-    """R1: same-label duplicate boxes collapse to the stronger detection."""
+def test_merge_applies_the_detection_rules() -> None:
+    """R1/R5 rule the text boxes; R3/R4 rule the figure/molecule boxes."""
+    # R1: same-label duplicate boxes collapse to the stronger detection.
     regions, stats = merge(
         [
             _region("a", "text", "text", (0, 0, 100, 20), score=0.80),
@@ -62,13 +63,10 @@ def test_merge_keeps_the_higher_scoring_duplicate() -> None:
         page_height_pt=_PAGE_HEIGHT_PT,
         px_per_pt=_PX_PER_PT,
     )
-
     assert [region["score"] for region in regions] == [0.95]
     assert stats["r1_dup_removed"] == 1
 
-
-def test_merge_unions_overlapping_text_boxes() -> None:
-    """R5: overlapping text boxes merge, so one line is read once, not twice."""
+    # R5: overlapping text boxes merge, so one line is read once, not twice.
     regions, stats = merge(
         [
             _region("a", "text", "text", (0, 0, 100, 20)),
@@ -77,36 +75,29 @@ def test_merge_unions_overlapping_text_boxes() -> None:
         page_height_pt=_PAGE_HEIGHT_PT,
         px_per_pt=_PX_PER_PT,
     )
-
     assert len(regions) == 1
     assert regions[0]["bbox_px"] == [0.0, 0.0, 200.0, 25.0]
     assert stats["r5_text_merged"] == 1
 
-
-def test_merge_yields_a_figure_region_to_the_molecule_it_coincides_with() -> None:
-    """R3: a figure region covering one molecule becomes that molecule."""
+    # R3: a figure region covering one molecule becomes that molecule.
     regions, stats = merge(
         [_region("a", "chem", "image", (10, 10, 110, 110))],
         [_molecule("m", (10, 10, 110, 110))],
         page_height_pt=_PAGE_HEIGHT_PT,
         px_per_pt=_PX_PER_PT,
     )
-
     assert len(regions) == 1
     assert regions[0]["type"] == "molecule"
     assert regions[0]["kind"] == "molecule"
     assert stats["r3_yielded"] == 1
 
-
-def test_merge_keeps_a_multi_molecule_figure_as_a_container() -> None:
-    """R4: a figure holding several molecules stays one region, not one molecule."""
+    # R4: a figure holding several molecules stays one region, not one molecule.
     regions, stats = merge(
         [_region("a", "chem", "image", (0, 0, 100, 100))],
         [_molecule("m0", (5, 5, 45, 45)), _molecule("m1", (55, 55, 95, 95))],
         page_height_pt=_PAGE_HEIGHT_PT,
         px_per_pt=_PX_PER_PT,
     )
-
     assert len(regions) == 1
     assert regions[0]["type"] == "image"
     assert [child["kind"] for child in regions[0]["children"]] == [

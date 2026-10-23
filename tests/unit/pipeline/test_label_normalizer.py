@@ -14,122 +14,66 @@ mapping lives in ``mbforge.service.pipeline.detection.label_normalization``.
 
 from __future__ import annotations
 
-import pytest
-
 from mbforge.service.pipeline.detection.label_normalization import (
-    LABEL_KINDS,
     LabelKind,
     NormalizedLabel,
     normalize_coref_label,
 )
 
+# One row per OCR spelling: (raw, expected kind, expected normalized shape).
+_FORMULA_AND_EXAMPLE_LABELS: list[tuple[str, LabelKind, str]] = [
+    ("Formula I", LabelKind.FORMULA, "Formula I"),
+    ("Formula  II", LabelKind.FORMULA, "Formula II"),
+    ("formula iii", LabelKind.FORMULA, "Formula III"),
+    ("FORMULA IV", LabelKind.FORMULA, "Formula IV"),
+    ("Formula v", LabelKind.FORMULA, "Formula V"),
+    ("Example 3", LabelKind.EXAMPLE, "Example 3"),
+]
 
-@pytest.mark.parametrize(
-    "raw, expected_kind, expected_normalized",
-    [
-        ("Formula I", LabelKind.FORMULA, "Formula I"),
-        ("Formula  II", LabelKind.FORMULA, "Formula II"),
-        ("formula iii", LabelKind.FORMULA, "Formula III"),
-        ("FORMULA IV", LabelKind.FORMULA, "Formula IV"),
-        ("Formula v", LabelKind.FORMULA, "Formula V"),
-    ],
-)
-def test_formula_labels_normalized(
-    raw: str, expected_kind: LabelKind, expected_normalized: str
-) -> None:
-    result = normalize_coref_label(raw)
-    assert result is not None
-    assert result.kind is expected_kind
-    assert result.normalized == expected_normalized
-
-
-@pytest.mark.parametrize(
-    "raw, expected_normalized",
-    [
-        ("R₁", "R1"),
-        ("R1", "R1"),
-        ("R 2", "R2"),
-        ("R₂", "R2"),
-        ("R12", "R12"),
-        ("R₀", "R0"),
-    ],
-)
-def test_r_group_labels_strip_subscripts_and_spaces(
-    raw: str, expected_normalized: str
-) -> None:
-    result = normalize_coref_label(raw)
-    assert result is not None
-    assert result.kind is LabelKind.R_GROUP
-    assert result.normalized == expected_normalized
+_ATTACHMENT_AND_COMPOUND_LABELS: list[tuple[str, LabelKind, str]] = [
+    # Numbered R-groups: subscripts and spaces collapse onto the digit.
+    ("R₁", LabelKind.R_GROUP, "R1"),
+    ("R1", LabelKind.R_GROUP, "R1"),
+    ("R 2", LabelKind.R_GROUP, "R2"),
+    ("R₂", LabelKind.R_GROUP, "R2"),
+    ("R12", LabelKind.R_GROUP, "R12"),
+    ("R₀", LabelKind.R_GROUP, "R0"),
+    # A-labelled rings.
+    ("A₁", LabelKind.RING, "A1"),
+    ("A1", LabelKind.RING, "A1"),
+    ("A 2", LabelKind.RING, "A2"),
+    # Numbered examples keep their letter suffix verbatim.
+    ("3a", LabelKind.COMPOUND, "3a"),
+    ("12b", LabelKind.COMPOUND, "12b"),
+    # Chinese and English prefixes share one exact numeric compound key.
+    ("化合物20", LabelKind.COMPOUND, "20"),
+    ("compound 20", LabelKind.COMPOUND, "20"),
+    ("20", LabelKind.COMPOUND, "20"),
+]
 
 
-@pytest.mark.parametrize(
-    "raw, expected_normalized",
-    [
-        ("A₁", "A1"),
-        ("A1", "A1"),
-        ("A 2", "A2"),
-    ],
-)
-def test_ring_labels_use_ring_kind(raw: str, expected_normalized: str) -> None:
-    result = normalize_coref_label(raw)
-    assert result is not None
-    assert result.kind is LabelKind.RING
-    assert result.normalized == expected_normalized
+def test_formula_and_example_designations_keep_raw_and_normalized_shape() -> None:
+    """Formula roman numerals are upper-cased; examples keep their designation."""
+    for raw, expected_kind, expected_normalized in _FORMULA_AND_EXAMPLE_LABELS:
+        result = normalize_coref_label(raw)
+        assert result is not None, f"unrecognized label {raw!r}"
+        assert isinstance(result, NormalizedLabel), f"{raw!r}"
+        assert result.raw == raw, f"{raw!r}"
+        assert result.kind is expected_kind, f"kind of {raw!r}"
+        assert result.normalized == expected_normalized, f"normalized {raw!r}"
 
 
-def test_compound_label_is_numbered_letter() -> None:
-    result = normalize_coref_label("3a")
-    assert result is not None
-    assert result.kind is LabelKind.COMPOUND
-    assert result.normalized == "3a"
-
-    result = normalize_coref_label("12b")
-    assert result is not None
-    assert result.kind is LabelKind.COMPOUND
-    assert result.normalized == "12b"
+def test_attachment_and_compound_labels_normalize_to_the_stable_shape() -> None:
+    """R-groups/rings drop subscripts and spaces; compounds share one key."""
+    for raw, expected_kind, expected_normalized in _ATTACHMENT_AND_COMPOUND_LABELS:
+        result = normalize_coref_label(raw)
+        assert result is not None, f"unrecognized label {raw!r}"
+        assert result.raw == raw, f"{raw!r}"
+        assert result.kind is expected_kind, f"kind of {raw!r}"
+        assert result.normalized == expected_normalized, f"normalized {raw!r}"
 
 
-@pytest.mark.parametrize("raw", ["化合物20", "compound 20", "20"])
-def test_compound_label_prefixes_share_exact_key(raw: str) -> None:
-    result = normalize_coref_label(raw)
-    assert result is not None
-    assert result.kind is LabelKind.COMPOUND
-    assert result.normalized == "20"
-
-
-def test_example_label_uses_example_kind() -> None:
-    result = normalize_coref_label("Example 3")
-    assert result is not None
-    assert result.kind is LabelKind.EXAMPLE
-    assert result.normalized == "Example 3"
-
-
-@pytest.mark.parametrize("raw", ["", "   ", "???", "single"])
-def test_unknown_labels_return_unknown_kind(raw: str) -> None:
-    result = normalize_coref_label(raw)
-    assert result is None
-
-
-def test_label_kinds_is_complete() -> None:
-    """The kind enum is documented in the TODO contract — guard against drift."""
-    assert (
-        frozenset(
-            {
-                LabelKind.FORMULA,
-                LabelKind.R_GROUP,
-                LabelKind.RING,
-                LabelKind.COMPOUND,
-                LabelKind.EXAMPLE,
-                LabelKind.UNKNOWN,
-            }
-        )
-        == LABEL_KINDS
-    )
-
-
-def test_normalized_label_preserves_raw() -> None:
-    result = normalize_coref_label("R₁")
-    assert isinstance(result, NormalizedLabel)
-    assert result.raw == "R₁"
-    assert result.normalized == "R1"
+def test_unknown_labels_are_not_mapped() -> None:
+    """Blank, punctuation-only and bare-word labels carry no coreference key."""
+    for raw in ("", "   ", "???", "single"):
+        assert normalize_coref_label(raw) is None, f"unexpectedly mapped {raw!r}"

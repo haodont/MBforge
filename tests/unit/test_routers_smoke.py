@@ -80,25 +80,19 @@ ROUTES: list[tuple[str, str, dict | None, tuple[int, ...]]] = [
 ]
 
 
-@pytest.mark.parametrize("method, path, payload, expected_status", ROUTES)
-def test_router_endpoint_responds(
-    client: TestClient,
-    method: str,
-    path: str,
-    payload: dict | None,
-    expected_status: tuple[int, ...],
-) -> None:
-    """Each registered router should serve its representative endpoint without 500."""
-    if method == "GET":
-        response = client.get(path)
-    elif method == "POST":
-        response = client.post(path, json=payload or {})
-    else:
-        pytest.fail(f"Unsupported method: {method}")
+def test_every_router_endpoint_responds_without_500(client: TestClient) -> None:
+    """Every registered router serves its representative endpoint without 500."""
+    for method, path, payload, expected_status in ROUTES:
+        if method == "GET":
+            response = client.get(path)
+        elif method == "POST":
+            response = client.post(path, json=payload or {})
+        else:
+            pytest.fail(f"Unsupported method: {method}")
 
-    assert response.status_code in expected_status, (
-        f"{method} {path} returned {response.status_code}: {response.text}"
-    )
+        assert response.status_code in expected_status, (
+            f"{method} {path} returned {response.status_code}: {response.text}"
+        )
 
 
 def test_no_double_prefix_model_routes(client: TestClient) -> None:

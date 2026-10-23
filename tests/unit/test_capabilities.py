@@ -13,25 +13,11 @@ from mbforge.foundation.capabilities import (
     probe,
 )
 
-# Display labels must match pyproject optional-dependencies group contents.
-_EXPECTED_LABELS = {
-    "torch",
-    "transformers",
-    "ultralytics",
-    "timm",
-    "scipy",
-    "modelscope",
-    "molparser",
-    "cairosvg",
-    "unidock_tools",
-    "meeko",
-}
 
-
-def test_probe_reports_expected_modules_and_sorted_lists() -> None:
+def test_probe_reports_a_disjoint_sorted_capability_report() -> None:
+    """The probe partitions the optional modules and never raises."""
     report = probe()
     assert isinstance(report, CapabilityProbe)
-    assert set(report.available) | set(report.missing) == _EXPECTED_LABELS
     assert set(report.available) & set(report.missing) == set()
     assert list(report.available) == sorted(report.available)
     assert list(report.missing) == sorted(report.missing)

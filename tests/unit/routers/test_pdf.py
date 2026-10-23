@@ -9,7 +9,11 @@ from mbforge.foundation.layout import InvalidPathError
 from mbforge.service.dto.pdf import PdfDocumentOverlayRequest
 
 
-def test_document_overlay_returns_empty_payload(tmp_path) -> None:
+def test_document_overlay_returns_empty_payload_and_rejects_blank_doc_id(
+    tmp_path,
+) -> None:
+    """An unreadable page yields an empty overlay; a blank doc_id never reaches
+    the reader (it used to raise a raw layout error)."""
     result = asyncio.run(
         document_overlay(
             PdfDocumentOverlayRequest(
@@ -22,9 +26,6 @@ def test_document_overlay_returns_empty_payload(tmp_path) -> None:
     assert result.pages == {}
     assert result.source == "empty"
 
-
-def test_document_overlay_rejects_blank_doc_id(tmp_path) -> None:
-    # A blank doc_id used to reach the reader and raise a raw layout error.
     with pytest.raises(InvalidPathError):
         asyncio.run(
             document_overlay(

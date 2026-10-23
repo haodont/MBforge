@@ -44,27 +44,24 @@ def _capture_to_thread(monkeypatch: pytest.MonkeyPatch):
     return calls
 
 
-def test_test_model_offloads_to_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The model-test route delegates blocking inference to asyncio.to_thread."""
+def test_model_routes_offload_blocking_work_to_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model-test and render routes delegate their blocking inference /
+    RDKit+PIL drawing work to ``asyncio.to_thread``."""
     calls = _capture_to_thread(monkeypatch)
 
     result = asyncio.run(model_test_handler(ModelTestRequest(model_id="molparser")))
-
     assert result == ModelTestResponse(ok=True, error="", duration_ms=42)
     assert len(calls) == 1
     assert calls[0][0] is run_model_test_sync
 
-
-def test_render_molecule_offloads_to_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The render route delegates RDKit/PIL drawing to asyncio.to_thread."""
-    calls = _capture_to_thread(monkeypatch)
-
-    result = asyncio.run(
+    calls.clear()
+    rendered = asyncio.run(
         render_molecule(MoleculeRenderRequest(smiles="CCO", width=200, height=150))
     )
-
-    assert result.success is True
-    assert result.image_base64 == "fake"
+    assert rendered.success is True
+    assert rendered.image_base64 == "fake"
     assert len(calls) == 1
     assert calls[0][0] is _render_molecule_sync
     assert calls[0][1] == ("CCO", 200, 150)

@@ -12,19 +12,9 @@ import numpy as np
 from mbforge.foundation.inference import table_slanet
 
 
-def test_predict_table_returns_empty_when_model_unavailable(monkeypatch) -> None:
-    """Unavailable model degrades to ``""`` without raising or downloading."""
-    monkeypatch.setattr(table_slanet, "_SESSION", None)
-    monkeypatch.setattr(table_slanet, "_AVAILABLE", False)
-    monkeypatch.setattr(table_slanet, "_ERROR", "not loaded")
-    monkeypatch.setattr(table_slanet, "load", lambda device=None: None)
-
-    image = np.zeros((40, 80, 3), dtype=np.uint8)
-    assert table_slanet.predict_table(image) == ""
-
-
-def test_load_reports_missing_weights_without_download(monkeypatch) -> None:
-    """Missing weights set a clear error state; load never raises."""
+def test_unavailable_model_degrades_without_network(monkeypatch) -> None:
+    """Missing weights record a clear error state on ``load``, and
+    ``predict_table`` then returns ``""`` without raising or downloading."""
     monkeypatch.setattr(table_slanet, "_SESSION", None)
     monkeypatch.setattr(table_slanet, "_AVAILABLE", False)
     monkeypatch.setattr(table_slanet, "_ERROR", "")
@@ -38,7 +28,12 @@ def test_load_reports_missing_weights_without_download(monkeypatch) -> None:
     )
 
     table_slanet.load()
-
     assert table_slanet._SESSION is None
     assert table_slanet._AVAILABLE is False
     assert "not found" in table_slanet._ERROR
+
+    # The predictor degrades to an empty string instead of raising.
+    monkeypatch.setattr(table_slanet, "_ERROR", "not loaded")
+    monkeypatch.setattr(table_slanet, "load", lambda device=None: None)
+    image = np.zeros((40, 80, 3), dtype=np.uint8)
+    assert table_slanet.predict_table(image) == ""

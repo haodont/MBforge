@@ -69,7 +69,8 @@ def _queue_status(library_root: Path, task_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_registry_cancel_unregister_is_idempotent() -> None:
+def test_registry_lifecycle_is_idempotent_and_drains_to_zero() -> None:
+    """Cancelling/releasing twice is harmless; terminal cleanup empties it."""
     registry = CancellationRegistry()
     registry.cancel("a")
     registry.cancel("a")
@@ -82,9 +83,7 @@ def test_registry_cancel_unregister_is_idempotent() -> None:
     assert not registry.is_cancelled(None)
     registry.unregister(None)  # must not raise
 
-
-def test_thousand_dummy_cancellations_drain_to_zero() -> None:
-    """Cancelling 1,000 dummy tasks then hitting terminal cleanup empties the registry."""
+    # Cancelling 1,000 dummy tasks then hitting terminal cleanup empties it.
     task_ids = [f"dummy-{i}" for i in range(1000)]
     for task_id in task_ids:
         cancel_task(task_id)
@@ -140,9 +139,12 @@ def test_cancel_before_start_raises_with_distinct_code(
     # covered by tests/unit/infra/test_queue_worker.py.
 
 
-def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:
-    library_root = tmp_path / "library"
-    library_root.mkdir(parents=True, exist_ok=True)
+def test_registry_cleared_on_success_and_failure(
+    sample_pdf: Path, tmp_path: Path
+) -> None:
+    """Both terminal outcomes release the registry entry; never leak a mark."""
+    success_root = tmp_path / "success"
+    success_root.mkdir(parents=True, exist_ok=True)
 
     with (
         patch(
@@ -164,7 +166,7 @@ def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:
     ):
         run_pipeline(
             str(sample_pdf),
-            str(library_root),
+            str(success_root),
             doc_id="sample_doc",
             stage="extract",
             task_id="success-task",
@@ -173,13 +175,11 @@ def test_registry_cleared_on_success(sample_pdf: Path, tmp_path: Path) -> None:
     assert not is_task_cancelled("success-task")
     assert len(default_registry) == 0
 
-
-def test_registry_cleared_on_failure(sample_pdf: Path, tmp_path: Path) -> None:
-    library_root = tmp_path / "library"
-    library_root.mkdir(parents=True, exist_ok=True)
-
     # With stage-by-stage execution only the first stage (extract) runs,
     # so the failure must happen during extract.
+    failure_root = tmp_path / "failure"
+    failure_root.mkdir(parents=True, exist_ok=True)
+
     with (
         patch(
             "mbforge.service.pipeline.extract.text.extract_layout_text",
@@ -189,7 +189,7 @@ def test_registry_cleared_on_failure(sample_pdf: Path, tmp_path: Path) -> None:
     ):
         run_pipeline(
             str(sample_pdf),
-            str(library_root),
+            str(failure_root),
             doc_id="sample_doc",
             stage="extract",
             task_id="fail-task",
@@ -230,25 +230,25 @@ def test_extract_stage_reraises_cancellation(tmp_path: Path, sample_pdf: Path) -
 # ---------------------------------------------------------------------------
 
 
-def test_router_cancel_pending_future_unregisters(tmp_path: Path) -> None:
+def test_router_cancel_releases_only_unclaimed_tasks(tmp_path: Path) -> None:
+    """Router releases a pending task; a claimed one is left to its runner."""
     from mbforge.api.http.pipeline import pipeline as pipeline_router
+    from mbforge.server.ingest import worker
     from mbforge.service.dto.pipeline import PipelineTaskBatchRequest
 
     library_root = tmp_path / "library"
     library_root.mkdir(parents=True, exist_ok=True)
-    _seed_queue_task(library_root, "pending-task")
 
-    body = PipelineTaskBatchRequest(
-        library_root=str(library_root), run_ids=["pending-task"]
-    )
     # The task is not executing inside this process: no worker has claimed it.
-    from mbforge.server.ingest import worker
-
+    _seed_queue_task(library_root, "pending-task")
     assert not worker.is_task_active("pending-task")
     with patch(
         "mbforge.api.http.pipeline.pipeline.resolve_library_root",
         return_value=library_root,
     ):
+        body = PipelineTaskBatchRequest(
+            library_root=str(library_root), run_ids=["pending-task"]
+        )
         result = asyncio.run(pipeline_router.pipeline_cancel_batch(body))
     assert result.updated == 1
     # Router released the entry because the runner will never start.
@@ -257,19 +257,9 @@ def test_router_cancel_pending_future_unregisters(tmp_path: Path) -> None:
     assert _queue_status(library_root, "pending-task") == "cancelled"
     release_task("pending-task")
 
-
-def test_router_cancel_running_future_leaves_release_to_runner(
-    tmp_path: Path,
-) -> None:
-    from mbforge.api.http.pipeline import pipeline as pipeline_router
-    from mbforge.service.dto.pipeline import PipelineTaskBatchRequest
-
-    library_root = tmp_path / "library"
-    library_root.mkdir(parents=True, exist_ok=True)
+    # A task currently executing in this process (claimed by the queue worker);
+    # the runner owns the registry cleanup, not the router.
     _seed_queue_task(library_root, "running-task")
-
-    # Simulate a task currently executing in this process (claimed by the
-    # queue worker); the runner owns the registry cleanup, not the router.
     with (
         patch(
             "mbforge.api.http.pipeline.pipeline.resolve_library_root",

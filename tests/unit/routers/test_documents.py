@@ -13,7 +13,7 @@ def _assert_error(response, expected_status: int, expected_error_code: str) -> d
     return data
 
 
-def test_documents_list_uses_configured_root(
+def test_documents_list_reflects_configured_root_and_delete(
     app_client: TestClient, tmp_library: Path
 ) -> None:
     # Import a document using the configured library root.
@@ -27,20 +27,31 @@ def test_documents_list_uses_configured_root(
     doc_id = resp.json()["document"]["doc_id"]
 
     # A freshly imported document is visible immediately, resting at ``pending``.
+    # No explicit library_root falls back to global config (tmp_library).
     resp = app_client.post("/api/v1/documents/list", json={})
     assert resp.status_code == 200
     listed = {d["doc_id"]: d for d in resp.json()["documents"]}
     assert listed[doc_id]["status"] == "pending"
 
+    # Once the run records an outcome the status reflects it.
     from mbforge.service.use_cases.documents.library import LibraryStore
 
     LibraryStore.get(str(tmp_library)).update_document_status(doc_id, "ready")
-
-    # List without explicit library_root falls back to global config (tmp_library).
     resp = app_client.post("/api/v1/documents/list", json={})
     assert resp.status_code == 200
+    assert doc_id in {d["doc_id"] for d in resp.json()["documents"]}
+
+    # Deleting removes it from the list.
+    resp = app_client.post(
+        "/api/v1/documents/delete",
+        json={"doc_ids": [doc_id]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+    resp = app_client.post("/api/v1/documents/list", json={})
     ids = {d["doc_id"] for d in resp.json()["documents"]}
-    assert doc_id in ids
+    assert doc_id not in ids
 
 
 def test_documents_reingest_unknown_doc_returns_404(app_client: TestClient) -> None:
@@ -115,35 +126,3 @@ def test_documents_patent_analysis_queues_patent_only_run(
         if task["doc_id"] == doc_id
     }
     assert stages == {"patent"}
-
-
-def test_documents_delete_and_list_roundtrip(
-    app_client: TestClient, tmp_library: Path
-) -> None:
-    pdf_bytes = b"%PDF-1.4 fake pdf"
-    resp = app_client.post(
-        "/api/v1/library/import",
-        data={"title": "Test Paper"},
-        files={"file": ("test.pdf", pdf_bytes, "application/pdf")},
-    )
-    assert resp.status_code == 200
-    doc_id = resp.json()["document"]["doc_id"]
-
-    # Make the document visible first, so "gone from the list" is a real
-    # assertion rather than a consequence of the processing filter.
-    from mbforge.service.use_cases.documents.library import LibraryStore
-
-    LibraryStore.get(str(tmp_library)).update_document_status(doc_id, "ready")
-    resp = app_client.post("/api/v1/documents/list", json={})
-    assert doc_id in {d["doc_id"] for d in resp.json()["documents"]}
-
-    resp = app_client.post(
-        "/api/v1/documents/delete",
-        json={"doc_ids": [doc_id]},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["success"] is True
-
-    resp = app_client.post("/api/v1/documents/list", json={})
-    ids = {d["doc_id"] for d in resp.json()["documents"]}
-    assert doc_id not in ids

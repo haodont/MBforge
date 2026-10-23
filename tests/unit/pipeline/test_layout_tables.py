@@ -69,22 +69,14 @@ def test_parse_page_image_reads_table_regions(monkeypatch) -> None:
     assert page.stats["tables_filled"] == 1
 
 
-def test_parse_page_image_survives_table_recognizer_failure(monkeypatch) -> None:
-    """A failing recognizer leaves the region empty and does not break the page."""
-    runtime = _FakeRuntime(error=RuntimeError("boom"))
-    page = _parse(runtime, monkeypatch)
+def test_parse_page_image_keeps_table_empty_without_usable_html(monkeypatch) -> None:
+    """A failing recognizer or empty output leaves the region empty, page intact."""
+    runtimes = [_FakeRuntime(error=RuntimeError("boom")), _FakeRuntime(html="")]
 
-    region = _table_region(page)
-    assert "html" not in region
-    assert not region.get("text")
-    assert page.stats["tables_filled"] == 0
+    for runtime in runtimes:
+        page = _parse(runtime, monkeypatch)
 
-
-def test_parse_page_image_keeps_table_empty_on_empty_html(monkeypatch) -> None:
-    """Empty recognizer output is treated as 'no table content'."""
-    page = _parse(_FakeRuntime(html=""), monkeypatch)
-
-    region = _table_region(page)
-    assert "html" not in region
-    assert not region.get("text")
-    assert page.stats["tables_filled"] == 0
+        region = _table_region(page)
+        assert "html" not in region
+        assert not region.get("text")
+        assert page.stats["tables_filled"] == 0

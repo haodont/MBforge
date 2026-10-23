@@ -2,7 +2,8 @@
 
 Molecule bboxes come from the same ``source_evidence`` index as the layout
 blocks — ``kind='molecule'`` rows — so these tests seed that table directly
-and assert the per-kind split of the single overlay read.
+and assert the per-kind split of the single overlay read
+(``services.use_cases.documents.pdf_layout.build_document_overlay``).
 """
 
 from __future__ import annotations
@@ -64,64 +65,58 @@ def _overlay(tmp_path: Path, doc_id: str = DOC) -> dict:
     return build_document_overlay(str(tmp_path), doc_id, "/p.pdf")
 
 
-def test_overlay_groups_molecule_pages_in_one_read(tmp_path: Path) -> None:
-    _insert_evidence_row(tmp_path, 1, (10.0, 20.0, 110.0, 120.0))
+def test_overlay_molecule_pages_group_evidence_rows_by_kind(tmp_path: Path) -> None:
+    """Molecule rows group by 1-based visual page and carry crop or context;
+    layout rows stay out of ``pages`` but still feed ``blocks``; an unknown
+    document degrades to an empty payload."""
+    _insert_evidence_row(tmp_path, 1, (10.0, 20.0, 110.0, 120.0), mol_img_path=CROP)
+    _insert_evidence_row(tmp_path, 1, (50.0, 60.0, 90.0, 99.0), raw_text="Compound 7")
     _insert_evidence_row(tmp_path, 2, (1.0, 2.0, 3.0, 4.0))
 
     result = _overlay(tmp_path)
 
     assert result["success"] is True
     assert result["source"] == "source_evidence"
-    assert result["count"] == 2
+    assert result["count"] == 3
     assert sorted(result["pages"].keys()) == ["1", "2"]  # 1-based visual pages
-    page1 = result["pages"]["1"]
+    page1 = sorted(result["pages"]["1"], key=lambda entry: entry["bbox_pdf"][0])
     assert page1[0]["bbox_pdf"] == [10.0, 20.0, 110.0, 120.0]
     assert page1[0]["page_idx"] == 0  # entries stay 0-based
     assert page1[0]["page"] == 0
     assert result["pages"]["2"][0]["bbox_pdf"] == [1.0, 2.0, 3.0, 4.0]
 
-
-def test_overlay_molecule_entries_carry_crop_or_context(tmp_path: Path) -> None:
-    _insert_evidence_row(tmp_path, 1, (10.0, 20.0, 110.0, 120.0), mol_img_path=CROP)
-    _insert_evidence_row(tmp_path, 1, (50.0, 60.0, 90.0, 99.0), raw_text="Compound 7")
-
-    entries = _overlay(tmp_path)["pages"]["1"]
-
-    cropped = next(e for e in entries if e["crop_relpath"])
+    cropped = next(e for e in page1 if e["crop_relpath"])
     assert cropped["source"] == "image"
     assert cropped["mol_img_path"] == CROP
     # Image evidence without structured metadata remains displayable.
     assert cropped["smiles"] == ""
 
-    textual = next(e for e in entries if not e["crop_relpath"])
+    textual = next(e for e in page1 if not e["crop_relpath"])
     assert textual["source"] == "text"
     assert textual["mol_img_path"] is None
     assert textual["context_text"] == "Compound 7"
 
-
-def test_overlay_molecule_pages_exclude_layout_rows(tmp_path: Path) -> None:
-    _insert_evidence_row(tmp_path, 1, (10.0, 20.0, 110.0, 120.0))
     _insert_evidence_row(
         tmp_path, 1, (1.0, 1.0, 9.0, 9.0), kind="text", raw_text="text"
     )
     _insert_evidence_row(tmp_path, 1, (2.0, 2.0, 8.0, 8.0), kind="tab", raw_text="cell")
     _insert_evidence_row(tmp_path, 1, (3.0, 3.0, 7.0, 7.0), kind="figcx")
 
-    result = _overlay(tmp_path)
+    mixed = _overlay(tmp_path)
 
-    assert result["count"] == 1
-    assert len(result["pages"]["1"]) == 1
+    assert mixed["count"] == 3
+    # Only the two molecule rows on page 1 stay in ``pages``; the layout rows
+    # are filtered out of it.
+    assert len(mixed["pages"]["1"]) == 2
     # The same rows still feed the block side of the payload.
-    assert {b["block_type"] for b in result["blocks"]} == {"text", "table", "image"}
+    assert {b["block_type"] for b in mixed["blocks"]} == {"text", "table", "image"}
 
+    empty = _overlay(tmp_path, "nope")
 
-def test_overlay_empty_document_reports_empty(tmp_path: Path) -> None:
-    result = _overlay(tmp_path, "nope")
-
-    assert result["pages"] == {}
-    assert result["count"] == 0
-    assert result["source"] == "empty"
-    assert result["blocks"] == []
+    assert empty["pages"] == {}
+    assert empty["count"] == 0
+    assert empty["source"] == "empty"
+    assert empty["blocks"] == []
 
 
 def test_overlay_serves_blocks_and_molecules_from_one_read(tmp_path: Path) -> None:

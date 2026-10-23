@@ -15,9 +15,12 @@ from fastapi.testclient import TestClient
 from mbforge.db.sqlite.repositories import create_repositories
 from mbforge.foundation import config as app_config
 from mbforge.foundation.config import AppConfig
+from mbforge.server.agent_process import stop_agent_sidecar
+from mbforge.server.patent_analysis import create_patent_task_registry
 from mbforge.server.runtime_provider import create_runtime_provider
 from mbforge.service.pipeline.runtime import create_pipeline_runtime
 from mbforge.service.ports import (
+    configure_patent_task_registry,
     configure_pipeline_runtime,
     configure_repository_factory,
     configure_runtime_provider,
@@ -48,6 +51,7 @@ tempfile.tempdir = str(_TMP_ROOT)
 configure_repository_factory(create_repositories)
 configure_runtime_provider(create_runtime_provider())
 configure_pipeline_runtime(create_pipeline_runtime())
+configure_patent_task_registry(create_patent_task_registry())
 
 
 def _install_config_patch(
@@ -234,4 +238,9 @@ def _clear_singleton_caches() -> None:
     # after every test guarantees a copy mutated in place cannot survive.
     load_global_config.cache_clear()
     get_docking_engine.cache_clear()
+    # An analysis attempt registered by one test must not be resolvable by the
+    # next: a fresh registry keeps credentials scope-local to their test.
+    configure_patent_task_registry(create_patent_task_registry())
+    # A sidecar an injected test started must not survive into the next test.
+    stop_agent_sidecar()
     _reset_model_singletons()

@@ -16,8 +16,9 @@ import pytest
 from mbforge.server.process.tasks import TaskManager, TaskPool
 
 
-def test_shutdown_waits_for_running_task() -> None:
-    """shutdown() blocks until an in-flight task finishes, then reports 0."""
+def test_shutdown_drains_in_flight_work_and_refuses_new_work() -> None:
+    """shutdown() waits for in-flight work, counts what outlives the timeout,
+    and no late caller can spin up a fresh pool afterwards."""
     manager = TaskManager()
     finished = threading.Event()
 
@@ -26,31 +27,20 @@ def test_shutdown_waits_for_running_task() -> None:
         finished.set()
 
     manager.submit(TaskPool.SYNC, slow)
-    remaining = manager.shutdown(timeout=5.0)
-
-    assert remaining == 0
+    assert manager.shutdown(timeout=5.0) == 0
     assert finished.is_set()
 
-
-def test_shutdown_reports_remaining_on_timeout() -> None:
-    """A task outliving the timeout is counted, not silently dropped."""
-    manager = TaskManager()
+    timeout_manager = TaskManager()
     release = threading.Event()
-
-    manager.submit(TaskPool.SYNC, release.wait, 5)
-    remaining = manager.shutdown(timeout=0.2)
+    timeout_manager.submit(TaskPool.SYNC, release.wait, 5)
+    remaining = timeout_manager.shutdown(timeout=0.2)
     release.set()
-
     assert remaining > 0
 
-
-def test_submit_after_shutdown_raises() -> None:
-    """No late caller can spin up a fresh pool past shutdown."""
-    manager = TaskManager()
-    manager.shutdown(timeout=0.1)
-
+    closed_manager = TaskManager()
+    closed_manager.shutdown(timeout=0.1)
     with pytest.raises(RuntimeError):
-        manager.submit(TaskPool.SYNC, lambda: None)
+        closed_manager.submit(TaskPool.SYNC, lambda: None)
 
 
 def test_run_returns_result() -> None:

@@ -53,96 +53,63 @@ def parsed_full():
     )
 
 
-def test_parse_extracts_explicit_attachment_sites(parsed_full):
-    """Each ``[*:N]`` in the Markush SMILES lands in ``parsed.sites``."""
+def test_parse_markush_extracts_sites_definitions_and_warns(parsed_full):
+    """``parse_markush`` maps ``[*:N]`` to ``sites``, keeps caller-supplied
+    ``r_groups`` definitions, and warns on a bare ``*`` (no explicit atom map)."""
     labels = [s.site_label for s in parsed_full.sites]
     assert labels == ["R1", "R2", "R3", "R4"]
     assert [s.atom_map_num for s in parsed_full.sites] == [1, 2, 3, 4]
 
-
-def test_parse_warns_when_atom_map_is_missing():
-    """A ``*`` without ``[*:N]`` must surface an explicit-atom-map warning."""
-    parsed = parse_markush("CCC*CCC")
-    assert parsed.warnings, "expected an explicit-atom-map warning"
-    assert any("explicit atom map" in w for w in parsed.warnings)
-
-
-def test_parse_surfaces_r_group_definitions(parsed_full):
-    """Caller-supplied definitions land on ``r_groups`` with their label intact."""
     label_to_def = {r.label: r.definition for r in parsed_full.r_groups}
     assert label_to_def["R1"] == "H or C1-4 alkyl"
     assert label_to_def["R4"] == "C1-6 alkyl or cycloalkyl"
 
+    unlabelled = parse_markush("CCC*CCC")
+    assert unlabelled.warnings, "expected an explicit-atom-map warning"
+    assert any("explicit atom map" in w for w in unlabelled.warnings)
 
-def test_check_returns_none_when_core_is_absent(parsed_full):
-    """A benzene query has none of the cyclohexane core → ``none``."""
+
+def test_check_markush_coverage_verdicts(parsed_full):
+    """Coverage verdicts: absent core → ``none``; present core without textual
+    R definitions → ``unknown`` (never a silent ``full``); a bare
+    ``[*:N]``-only query → ``full``."""
     match_level, sites, details, _ = check_markush_coverage(parsed_full, "c1ccccc1")
     assert match_level == "none"
     assert sites == []
     assert any("core" in d for d in details)
 
-
-def test_check_returns_unknown_when_query_has_attachment_atoms_but_no_definition():
-    """A core without textual R definitions + a substituted query → unknown.
-
-    We use a Markush pattern (``CC[*:1]CC``) that the SMARTS matcher
-    can substructure-compare against a query without aromatic-vs-Kekulé
-    ambiguities. The verdict must NOT be ``full`` (no definition to
-    certify a non-trivial substituent as in-scope) and must NOT be
-    ``none`` when the core is present.
-    """
-    parsed = parse_markush("CC[*:1]CC")
-    query = "CCN(CC)CC"  # diethylamine - core present, no definition
-    match_level, sites, _, _ = check_markush_coverage(parsed, query)
-    assert match_level in {"unknown", "none"}, (
-        f"expected unknown/none, got {match_level}"
-    )
-    # When the core matched we expect a site entry with an unknown
-    # verdict (substituent beyond the bare scaffold, no rules to
-    # evaluate).
-    if sites:
-        assert all(s.judgment == "unknown" for s in sites)
-
-
-def test_check_recognises_trivial_substituent_within_scope(parsed_full):
-    """A bare ``[*:N]``-only query trivially satisfies every site."""
-    query = "[*:1]C1CCC([*:2])([*:3])C1[*:4]"
-    match_level, sites, _, _ = check_markush_coverage(parsed_full, query)
+    # A bare ``[*:N]``-only query trivially satisfies every site.
+    bare = "[*:1]C1CCC([*:2])([*:3])C1[*:4]"
+    match_level, sites, _, _ = check_markush_coverage(parsed_full, bare)
     assert match_level == "full"
     assert all(s.judgment == "within_scope" for s in sites)
 
+    # Core present but no textual R definitions to certify a substituent:
+    # the verdict must NOT be ``full``.
+    parsed = parse_markush("CC[*:1]CC")
+    match_level, sites, _, _ = check_markush_coverage(parsed, "CCN(CC)CC")
+    assert match_level in {"unknown", "none"}, (
+        f"expected unknown/none, got {match_level}"
+    )
+    if sites:
+        assert all(s.judgment == "unknown" for s in sites)
 
-def test_check_classifies_compound_1_against_formula_i():
-    """Compound 1 (H-substituted variant) classifies as unknown because we
-    have no textual R definitions to evaluate. The core match itself is
-    decisive — the call must NOT return ``none``.
-    """
-    parsed = parse_markush("[*:1]C1CCC(C(=O)N)([*:3])C1[*:4]")
-    # Compound 1 collapses the quinoline + pyrazole tail into
-    # ``C(=O)N`` which is a substituent on the cyclohexane — it does
-    # not match the Markush core (which has its own carbonyl arm).
-    # The point of this test is to pin down behaviour: a generic
-    # ``check_markush_coverage`` call returns ``none`` rather than
-    # silently calling it a match.
-    match_level, _, details, _ = check_markush_coverage(parsed, COMPOUND_1)
-    # Either ``none`` (core absent) or ``unknown`` (core present but
-    # some site unknown). Both are acceptable given our heuristic;
-    # what we MUST reject is silently returning ``full``.
+    # Compound 1 (H-substituted variant) must never be silently called ``full``.
+    compound_core = parse_markush("[*:1]C1CCC(C(=O)N)([*:3])C1[*:4]")
+    match_level, _, details, _ = check_markush_coverage(compound_core, COMPOUND_1)
     assert match_level in {"none", "unknown"}, (
         f"unexpected match_level={match_level}; details={details}"
     )
 
 
-def test_check_handles_invalid_smiles_gracefully():
-    """Garbage SMILES on either side returns ``unknown``, not a crash."""
+def test_check_markush_coverage_degrades_on_bad_input():
+    """Invalid SMILES or an empty Markush → ``unknown`` with a diagnostic, never
+    a crash or a false ``full``."""
     parsed = parse_markush("[*:1]C1CCC([*:2])([*:3])C1[*:4]")
     match_level, _, _, _ = check_markush_coverage(parsed, "not a smiles @@@")
     assert match_level == "unknown"
 
-
-def test_check_handles_empty_inputs():
-    """Empty Markush or empty query → ``unknown`` with a detail message."""
-    parsed = parse_markush("")
-    match_level, _, details, _ = check_markush_coverage(parsed, "CCO")
+    empty = parse_markush("")
+    match_level, _, details, _ = check_markush_coverage(empty, "CCO")
     assert match_level == "unknown"
     assert details, "expected at least one diagnostic detail"

@@ -313,53 +313,14 @@ def test_ensure_worker_registers_and_stops(tmp_path: Path, monkeypatch) -> None:
         worker.stop_queue_workers()
 
 
-def test_worker_claims_and_executes_pending_row(tmp_path: Path, monkeypatch) -> None:
-    """End-to-end: a pending row is claimed and executed through the worker."""
-    root = _library(tmp_path)
-    db = DatabaseManager.get(root)
-    db.initialize()
-    _seed(db, [{"id": "t1", "file_path": str(Path(root) / "doc.pdf")}])
-
-    executed: list[str] = []
-
-    def _fake_run(
-        file_path: str,
-        library_root: str,
-        doc_id: str,
-        task_id: str,
-        stage: str | None = None,
-        run_id: str | None = None,
-    ) -> None:
-        del file_path, library_root, doc_id, stage, run_id
-        executed.append(task_id)
-
-    monkeypatch.setattr(worker, "_run_pipeline_sync", _fake_run)
-    monkeypatch.setattr(worker, "_evaluate_model_gate", _ready_gate)
-
-    async def _scenario() -> None:
-        worker.ensure_queue_worker(root)
-        for _ in range(200):
-            if executed:
-                break
-            await asyncio.sleep(0.02)
-
-    try:
-        asyncio.run(_scenario())
-    finally:
-        worker.stop_queue_workers()
-
-    assert executed == ["t1"]
-    assert _queue_row(db, "t1")["status"] == "pending"
-
-
-def test_worker_holds_pending_rows_until_models_are_ready(
+def test_worker_claims_and_executes_once_model_gate_opens(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """A blocked gate leaves rows queued; the same worker resumes on its own.
+    """Claim→execute ordering under the model gate.
 
-    Protects the user-visible contract of the model gate: with a required
-    model missing, documents stay ``pending`` (not failed, not claimed) and
-    start processing without a restart once the model becomes ready.
+    While the gate is blocked documents stay ``pending`` (not failed, not
+    claimed) and the worker keeps probing; once the required model appears the
+    same worker claims and executes the row without a restart.
     """
     root = _library(tmp_path)
     db = DatabaseManager.get(root)
@@ -421,6 +382,7 @@ def test_worker_holds_pending_rows_until_models_are_ready(
         worker.stop_queue_workers()
 
     assert executed == ["t1"]
+    assert _queue_row(db, "t1")["status"] == "pending"
 
 
 def test_active_task_ids_tracking(tmp_path: Path, monkeypatch) -> None:
@@ -515,86 +477,66 @@ def _document_status(root: str, doc_id: str) -> str | None:
     return None if row is None else row["status"]
 
 
-def test_run_pipeline_sync_marks_document_extracted_without_patent(
+def test_run_pipeline_sync_writes_the_run_outcome_into_document_status(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """A run that did not schedule Patent rests at ``extracted`` (readable, not analyzed)."""
-    import mbforge.service.ports as service_ports
+    """Each run outcome must write ``documents.status``.
 
-    root = _library(tmp_path)
-    DatabaseManager.get(root).initialize()
-    monkeypatch.setattr(service_ports, "get_pipeline_runtime", _FakeRuntime)
-    task_id = _seed_document_and_run(root, "doc-extracted", "run-1", stages=["extract"])
-
-    worker._run_pipeline_sync(
-        "doc-extracted.pdf", root, "doc-extracted", task_id, "extract", "run-1"
-    )
-
-    assert _document_status(root, "doc-extracted") == "extracted"
-
-
-def test_run_pipeline_sync_marks_document_ready_when_run_has_patent(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """A Patent run publishes the document as fully analyzed (``ready``)."""
-    import mbforge.service.ports as service_ports
-
-    root = _library(tmp_path)
-    DatabaseManager.get(root).initialize()
-    monkeypatch.setattr(service_ports, "get_pipeline_runtime", _FakeRuntime)
-    task_id = _seed_document_and_run(root, "doc-ready", "run-1", stages=["patent"])
-
-    worker._run_pipeline_sync(
-        "doc-ready.pdf", root, "doc-ready", task_id, "patent", "run-1"
-    )
-
-    assert _document_status(root, "doc-ready") == "ready"
-
-
-def test_run_pipeline_sync_marks_document_error_on_stage_failure(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """A failed stage surfaces the document as an error instead of hiding it."""
-    import mbforge.service.ports as service_ports
-
-    root = _library(tmp_path)
-    DatabaseManager.get(root).initialize()
-    monkeypatch.setattr(
-        service_ports,
-        "get_pipeline_runtime",
-        lambda: _FakeRuntime(error=RuntimeError("boom")),
-    )
-    task_id = _seed_document_and_run(root, "doc-fail", "run-1")
-
-    worker._run_pipeline_sync(
-        "doc-fail.pdf", root, "doc-fail", task_id, "extract", "run-1"
-    )
-
-    assert _document_status(root, "doc-fail") == "error"
-
-
-def test_run_pipeline_sync_returns_document_to_pending_on_cancel(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """Cancelling hides the document again: no run outcome, no stale ``ready``."""
+    The workspace listing only shows documents whose run reached an outcome,
+    so the terminal transitions are pinned here: ``extracted`` (no Patent
+    scheduled), ``ready`` (Patent run), ``error`` (stage failure), and
+    ``pending`` on cancellation — which also revokes a previously published
+    status and leaves the queue node ``cancelled``.
+    """
     import mbforge.service.ports as service_ports
     from mbforge.db import document_records
 
-    root = _library(tmp_path)
-    DatabaseManager.get(root).initialize()
-    monkeypatch.setattr(
-        service_ports,
-        "get_pipeline_runtime",
+    def _run(
+        name: str,
+        doc_id: str,
+        stage: str,
+        stages: list[str] | None,
+        runtime,
+        *,
+        publish_before: bool = False,
+    ) -> tuple[str, str]:
+        root = _library(tmp_path, name)
+        DatabaseManager.get(root).initialize()
+        monkeypatch.setattr(service_ports, "get_pipeline_runtime", runtime)
+        task_id = _seed_document_and_run(root, doc_id, "run-1", stages=stages)
+        if publish_before:
+            # A previous run had published this document; the cancel revokes it.
+            document_records.update_status(root, doc_id, "ready")
+        worker._run_pipeline_sync(
+            f"{doc_id}.pdf", root, doc_id, task_id, stage, "run-1"
+        )
+        return root, task_id
+
+    root, _ = _run(
+        "lib-extracted", "doc-extracted", "extract", ["extract"], _FakeRuntime
+    )
+    assert _document_status(root, "doc-extracted") == "extracted"
+
+    root, _ = _run("lib-ready", "doc-ready", "patent", ["patent"], _FakeRuntime)
+    assert _document_status(root, "doc-ready") == "ready"
+
+    root, _ = _run(
+        "lib-fail",
+        "doc-fail",
+        "extract",
+        None,
+        lambda: _FakeRuntime(error=RuntimeError("boom")),
+    )
+    assert _document_status(root, "doc-fail") == "error"
+
+    root, task_id = _run(
+        "lib-cancel",
+        "doc-cancel",
+        "extract",
+        None,
         lambda: _FakeRuntime(error=service_ports.TaskCancelledError("stop")),
+        publish_before=True,
     )
-    task_id = _seed_document_and_run(root, "doc-cancel", "run-1")
-    # A previous run had published this document; the cancel must revoke that.
-    document_records.update_status(root, "doc-cancel", "ready")
-
-    worker._run_pipeline_sync(
-        "doc-cancel.pdf", root, "doc-cancel", task_id, "extract", "run-1"
-    )
-
     assert _document_status(root, "doc-cancel") == "pending"
     # The worker owns the queue node's terminal status: a cancelled run leaves
     # the node 'cancelled' (not 'failed' and not stuck at 'processing').

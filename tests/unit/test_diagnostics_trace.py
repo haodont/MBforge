@@ -36,24 +36,25 @@ def _log_record(
     )
 
 
-def test_json_formatter_emits_single_line_with_trace_fields() -> None:
+def test_json_formatter_emits_single_line_trace_fields_and_restores_context() -> None:
+    """Rendered lines carry the structured schema + trace correlation, and
+    ``reset_trace`` restores the previous (empty) correlation."""
     formatter = JsonFormatter()
     token = set_trace(doc_id="doc-42")
     try:
         rendered = formatter.format(_log_record())
+        assert json.loads(rendered)["doc_id"] == "doc-42"
     finally:
         reset_trace(token)
 
-    payload = json.loads(rendered)
     # Single-line JSON must carry the structured schema + trace correlation.
+    payload = json.loads(rendered)
     assert payload["doc_id"] == "doc-42"
     assert payload["level"] == "ERROR"
     assert payload["logger"] == "mbforge.test.trace"
     assert payload["message"] == "boom"
 
-
-def test_set_trace_is_restored_after_reset() -> None:
-    formatter = JsonFormatter()
+    # A second trace is visible while set, and gone after reset.
     token = set_trace(doc_id="doc-1")
     try:
         assert json.loads(formatter.format(_log_record()))["doc_id"] == "doc-1"
@@ -79,9 +80,11 @@ def test_push_diagnostic_preserves_trace_fields(tmp_path: Path) -> None:
     assert rec["doc_id"] == "doc-7"
 
 
-def test_export_endpoint_writes_durable_json_snapshot(
+def test_export_endpoint_writes_durable_snapshot_creating_nested_directory(
     app_client: TestClient, tmp_path: Path
 ) -> None:
+    """``POST /api/v1/diagnostics/export`` writes the ring buffer to a JSON
+    snapshot, creating a nested output directory when needed."""
     from mbforge.foundation.logger import push_diagnostic
 
     push_diagnostic(
@@ -93,7 +96,7 @@ def test_export_endpoint_writes_durable_json_snapshot(
         }
     )
 
-    out_dir = tmp_path / "exports"
+    out_dir = tmp_path / "does" / "not" / "exist"
     response = app_client.post(
         "/api/v1/diagnostics/export",
         json={"directory": str(out_dir), "limit": 100},
@@ -104,23 +107,9 @@ def test_export_endpoint_writes_durable_json_snapshot(
     assert body["path"]
 
     written = Path(body["path"])
+    assert written.parent == out_dir
     assert written.is_file()
     payload = json.loads(written.read_text(encoding="utf-8"))
     assert "exported_at" in payload
     assert "stats" in payload
     assert any(rec.get("category") == "pipeline.runner" for rec in payload["errors"])
-
-
-def test_export_endpoint_creates_nested_output_directory(
-    app_client: TestClient, tmp_path: Path
-) -> None:
-    nested = tmp_path / "does" / "not" / "exist"
-    response = app_client.post(
-        "/api/v1/diagnostics/export",
-        json={"directory": str(nested)},
-    )
-    assert response.status_code == 200
-    body = response.json()
-    written = Path(body["path"])
-    assert written.parent == nested
-    assert written.is_file()

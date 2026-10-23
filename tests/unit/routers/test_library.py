@@ -5,15 +5,16 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 
-def test_library_status(app_client: TestClient) -> None:
+def test_library_status_and_configure(
+    app_client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    """The library surface reports its configuration and accepts a new root."""
     resp = app_client.get("/api/v1/library/status")
     assert resp.status_code == 200
     data = resp.json()
     assert data["configured"] is True
     assert "root" in data
 
-
-def test_library_configure(app_client: TestClient, tmp_path: Path, monkeypatch) -> None:
     # Isolate the global settings file so the test does not overwrite user config.
     from mbforge.foundation import config
 
@@ -27,8 +28,59 @@ def test_library_configure(app_client: TestClient, tmp_path: Path, monkeypatch) 
     assert resp.json()["success"] is True
 
 
-def test_library_import_and_list(app_client: TestClient, tmp_library: Path) -> None:
-    """An import lists the document immediately, resting at ``pending``."""
+def test_document_evidence_resolution_scopes_to_its_document(
+    app_client: TestClient, tmp_library: Path
+) -> None:
+    """Batch resolution keeps only ids of the requested document (dropping
+    foreign/missing ones); single resolution 404s for a foreign document."""
+    from mbforge.db.source_evidence import persist_source_evidence
+    from mbforge.domain.evidence import SourceEvidence
+
+    here = SourceEvidence.create(
+        doc_id="doc-batch", page=3, bbox=(1, 2, 3, 4), raw_text="1H NMR"
+    )
+    also = SourceEvidence.create(
+        doc_id="doc-batch", page=4, bbox=(5, 6, 7, 8), raw_text="MS"
+    )
+    there = SourceEvidence.create(
+        doc_id="doc-elsewhere", page=9, bbox=(0, 0, 1, 1), raw_text="NMR"
+    )
+    persist_source_evidence(tmp_library, [here, also])
+    persist_source_evidence(tmp_library, [there])
+
+    result = app_client.post(
+        "/api/v1/library/documents/doc-batch/evidence/resolve",
+        json={"evidence_ids": [here.evidence_id, there.evidence_id, "missing"]},
+    )
+    assert result.status_code == 200
+    resolved = result.json()
+    assert [item["evidence_id"] for item in resolved] == [here.evidence_id]
+    assert resolved[0]["page"] == 3
+
+    evidence = SourceEvidence.create(
+        doc_id="doc-bound", page=2, bbox=(10, 20, 30, 40), raw_text="< 100 nM"
+    )
+    persist_source_evidence(tmp_library, [evidence])
+
+    bound = app_client.get(
+        f"/api/v1/library/documents/doc-bound/evidence/{evidence.evidence_id}"
+    )
+    assert bound.status_code == 200
+    assert bound.json()["page"] == 2
+    assert bound.json()["bbox"] == [10, 20, 30, 40]
+
+    foreign = app_client.get(
+        f"/api/v1/library/documents/doc-other/evidence/{evidence.evidence_id}"
+    )
+    assert foreign.status_code == 404
+
+
+def test_library_import_registers_and_enqueues_processing_run(
+    app_client: TestClient, tmp_library: Path
+) -> None:
+    """An import lists the document immediately at ``pending`` and submits it
+    for processing in the same request, reporting the created ``run_id``."""
+    from mbforge.db.sqlite.database import DatabaseManager
     from mbforge.service.use_cases.documents.library import LibraryStore
 
     pdf_bytes = b"%PDF-1.4 fake pdf"
@@ -58,31 +110,15 @@ def test_library_import_and_list(app_client: TestClient, tmp_library: Path) -> N
     ids = {d["doc_id"] for d in resp.json()["documents"]}
     assert doc_id in ids
 
-
-def test_library_import_auto_enqueues_processing_run(
-    app_client: TestClient, tmp_library: Path
-) -> None:
-    """Import submits the new document for processing in the same request."""
-    from mbforge.db.sqlite.database import DatabaseManager
-
-    resp = app_client.post(
-        "/api/v1/library/import",
-        files={"file": ("queued.pdf", b"%PDF-1.4 fake pdf", "application/pdf")},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    doc_id = body["document"]["doc_id"]
-    assert body["run_id"]
-
+    # One DAG node per stage, all owned by the run reported to the caller.
     db = DatabaseManager.get(str(tmp_library))
     with db.kb_conn() as conn:
         rows = conn.execute(
             "SELECT doc_id, run_id, status FROM ingest_queue WHERE doc_id = ?",
             (doc_id,),
         ).fetchall()
-    # One DAG node per stage, all owned by the run reported to the caller.
     assert rows
-    assert {row["run_id"] for row in rows} == {body["run_id"]}
+    assert {row["run_id"] for row in rows} == {data["run_id"]}
 
 
 def test_library_import_respects_disabled_auto_enqueue(
@@ -219,11 +255,12 @@ def test_library_get_document_evidence_annotates_patent_paragraphs(
     assert last_item["indent_level"] == 1
 
 
-def test_library_get_document_crop_accepts_absolute_rel_path(
+def test_library_get_document_crop_normalizes_paths_and_404s_missing(
     app_client: TestClient, tmp_library: Path
 ) -> None:
     """Historical data stores absolute crop paths in image_path; the crop
-    endpoint must normalize them to the filename and serve the image."""
+    endpoint must normalize them to the filename and serve the image, and a
+    missing crop is a 404."""
     pdf_bytes = b"%PDF-1.4 fake pdf"
     resp = app_client.post(
         "/api/v1/library/import",
@@ -235,35 +272,18 @@ def test_library_get_document_crop_accepts_absolute_rel_path(
     crops.mkdir(parents=True, exist_ok=True)
     (crops / "page_0001_mol_0001.png").write_bytes(b"fake png bytes")
 
-    # Canonical relative path still works.
-    resp = app_client.get(
-        f"/api/v1/library/documents/{doc_id}/crop",
-        params={"rel_path": "page_0001_mol_0001.png"},
-    )
-    assert resp.status_code == 200
-    assert resp.content == b"fake png bytes"
+    # Canonical relative path still works; an absolute path (as stored by older
+    # pipelines) is normalized to its basename.
+    for rel_path in ("page_0001_mol_0001.png", str(crops / "page_0001_mol_0001.png")):
+        resp = app_client.get(
+            f"/api/v1/library/documents/{doc_id}/crop",
+            params={"rel_path": rel_path},
+        )
+        assert resp.status_code == 200, rel_path
+        assert resp.content == b"fake png bytes"
 
-    # Absolute path (as stored by older pipelines) is normalized to basename.
-    resp = app_client.get(
-        f"/api/v1/library/documents/{doc_id}/crop",
-        params={"rel_path": str(crops / "page_0001_mol_0001.png")},
-    )
-    assert resp.status_code == 200
-    assert resp.content == b"fake png bytes"
-
-
-def test_library_get_document_crop_missing_returns_404(
-    app_client: TestClient, tmp_library: Path
-) -> None:
-    pdf_bytes = b"%PDF-1.4 fake pdf"
-    resp = app_client.post(
-        "/api/v1/library/import",
-        files={"file": ("test.pdf", pdf_bytes, "application/pdf")},
-    )
-    doc_id = resp.json()["document"]["doc_id"]
-
-    resp = app_client.get(
+    missing = app_client.get(
         f"/api/v1/library/documents/{doc_id}/crop",
         params={"rel_path": "no_such_crop.png"},
     )
-    assert resp.status_code == 404
+    assert missing.status_code == 404
