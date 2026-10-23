@@ -1,35 +1,23 @@
-"""Family-core consistency gate for activity assignment.
+"""Family-core derivation for a document's compound series.
 
-A numeric row-label match (``row_label == mol.name``) asserts "this
-structure is the document's final compound N". In scanned patents the
-coref layer occasionally pins a label on the wrong figure — a reagent or
-an intermediate next to the product — and the activity then attaches to
-the wrong molecule. When the document's own Markush scaffolds define a
-common core, a candidate that does not contain that core cannot be a
-final family member. Such candidates are vetoed from activity matching
-(row-label and same-page fallback alike); their records fall through to
-the review queue instead of producing a confidently wrong assignment.
+Scanned patents sometimes pin a label on the wrong figure, so a candidate that
+does not contain the document's own common core cannot be a final family member.
+:func:`derive_family_core` extracts that shared core as a SMARTS pattern from the
+document's Markush scaffold candidates; it returns ``None`` when no reliable core
+exists, and callers must then make no claim about family membership.
 
-The gate is intentionally conservative:
-
-- It activates only when at least two scaffold candidates share a
-  maximum common substructure of >= ``_MIN_CORE_HEAVY`` heavy atoms.
-- Unparseable candidate SMILES are never vetoed (other stages own
-  rejection).
-- With no reliable core the guard is ``None`` and matching is unchanged.
+Extraction stays conservative: a core needs at least ``_MIN_CORE_HEAVY`` heavy
+atoms and at least two candidate structures to be considered real.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Structured reason code logged with each veto.
-FAMILY_CORE_MISMATCH = "FAMILY_CORE_MISMATCH"
 
 _MIN_SCAFFOLD_HEAVY = 12
 _MIN_CORE_HEAVY = 14
@@ -106,34 +94,3 @@ def derive_family_core(candidates: Sequence[Any]) -> str | None:
         )
         return None
     return smarts
-
-
-def make_family_core_guard(
-    core_smarts: str | None,
-) -> Callable[[Any], str | None] | None:
-    """Build the activity-match guard for *core_smarts*.
-
-    The returned callable yields :data:`FAMILY_CORE_MISMATCH` for
-    candidates whose structure does not contain the family core, and
-    ``None`` otherwise. Returns ``None`` when no usable core exists so
-    callers can skip guarding entirely.
-    """
-    if not core_smarts:
-        return None
-    from rdkit import Chem
-
-    core = Chem.MolFromSmarts(core_smarts)
-    if core is None:
-        return None
-
-    def _guard(candidate: Any) -> str | None:
-        mol = _mol_from_smiles(_candidate_smiles(candidate))
-        if mol is None:
-            # Unparseable structures are owned by the rejection path;
-            # the core gate must not veto what it cannot judge.
-            return None
-        if mol.HasSubstructMatch(core):
-            return None
-        return FAMILY_CORE_MISMATCH
-
-    return _guard

@@ -1,4 +1,4 @@
-"""Activity parsing, normalization, and matching helpers."""
+"""Activity parsing and normalization helpers."""
 
 from mbforge.service.pipeline.activity.extraction import (
     ActivityRecord,

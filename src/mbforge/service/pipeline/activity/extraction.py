@@ -15,6 +15,7 @@ from mbforge.domain.evidence import SourceEvidence
 from mbforge.domain.evidence_kind import TABLE, TEXT, category_of
 from mbforge.foundation.logger import get_logger
 from mbforge.service.pipeline.activity.normalization import (
+    extract_qualitative_legend,
     normalize_activity_measurement,
     normalize_activity_metric,
     normalize_reference_label,
@@ -24,6 +25,7 @@ from mbforge.service.pipeline.activity.parsing import (
     _is_activity_table,
     _parse_simple_activity_table,
     _simple_activity_table_is_complete,
+    looks_like_activity_table,
 )
 
 logger = get_logger("mbforge.service.pipeline.activity.extraction")
@@ -100,12 +102,118 @@ _REFERENCE_RE = re.compile(
     r"(?:compound|cmpd|cpd|example)\s*#?\s*[A-Za-z]?\d+[A-Za-z]?)",
     re.IGNORECASE,
 )
-_ACTIVITY_SIGNAL_RE = re.compile(
-    r"%?\s*(?:inhibition|activation|potency|activity|response)\b|"
-    r"\b(?:active|inactive|weak|moderate|strong)\b",
+_KNOWN_UNITS = {"nm", "um", "mm", "pm", "m", "%", "fold", "x"}
+
+# Activity sections define their qualitative scale before the data
+# (``A: IC50 < 500 nM, B: 500 nM ≤ IC50 < 1 uM``, ``注：“+”：IC50>1μM``,
+# ``20nM<IC50<100nM``). Reading a bin bound as a measurement invents a value
+# that no compound reported, so those occurrences are not measurements.
+_SCALE_TAIL_RE = re.compile(
+    rf"(?:{_NUMBER}\s*(?:nM|μM|uM|mM|pM|M|%|x)?\s*[<>≤≥＜＞]"
+    rf"|[“\"'(\[]\s*\+{{1,4}}\s*[”\"')\]]\s*[:：]?"
+    rf"|[<>≤≥＜＞])\s*$"
+)
+# A single letter is only a bin label inside an enumeration (``A: ... B: ...``).
+# Scanned texts render the first letter oddly (``Λ: IC50 < 500 nM``), so the
+# token is any single Latin/Greek letter rather than A-D.
+_SCALE_LETTER_TAIL_RE = re.compile(r"(?<![A-Za-z])[A-Za-zΑ-Ωα-ω]\s*[:：]\s*$")
+_SCALE_LETTER_RE = re.compile(r"(?<![A-Za-z])[A-Za-zΑ-Ωα-ω]\s*[:：]")
+
+# A metric named so that it can be *defined* measures nothing. Claim preambles
+# and glossaries ("术语“IC50”是指…", "the term ... refers to", "用語「アルキル」は…
+# を包含することを意図し") use the same token the prose parser looks for.
+_DEFINITION_RE = re.compile(
+    r"(?:术语|用語|定義|定义)\s*[“\"'「]|"
+    r"\b(?:the\s+term|as\s+used\s+herein|refers?\s+to|is\s+defined\s+as|means)\b|"
+    r"是指|を意味する|を指す|を包含することを意図|의미한다",
     re.IGNORECASE,
 )
-_KNOWN_UNITS = {"nm", "um", "mm", "pm", "m", "%", "fold", "x"}
+# A Markush enumeration ("-CF3，-CH2-CF3，-CF2H…") is a substituent list, not a
+# reading: a single compound name carries one or two fragments, never a run.
+_SUBSTITUENT_FRAGMENT_RE = re.compile(r"-[A-Za-z][A-Za-z]?\d?(?=[-，,、;；\s)）]|$)")
+_ALKYL_WORD_RE = re.compile(r"烷基|芳基|杂芳基|环烷基|アルキル|アリール|알킬")
+
+# Prose that mentions a metric without reporting one. Every family below was read
+# out of the corpus: scale legends (``活性范围表示如下：“A”表示…IC50<50nM``),
+# glossary entries (``[0149] IC50:半数抑制浓度，指…``, ``HC 1：塩酸``), assay
+# protocol text (``cells were seeded … culture medium``), literature background
+# (``Tatemoto et al. have found …``), and synthesis paragraphs (``…1.0当量…``).
+_LEGEND_PHRASE_RE = re.compile(r"表示如下|如下所示|如下定义|定义如下|as follows", re.I)
+# A glossary entry may carry a paragraph number and OCR'd spacing
+# (``[0149] IC50:半数抑制浓度``, ``D MF:N，N-ジメチルホルムアミド``).
+_ENTRY_LINE_RE = re.compile(
+    r"^(?:[\[\(]\s*\d{1,4}\s*[\]\)])?\s*"
+    r"(?:[A-Za-z](?:[A-Za-z\s]|[\d\-]){0,4}|p?\s*(?:IC|EC|ED|GI|AC|CC)\s*\d*)"
+    r"\s*[:：]\s*[^\d\n]{0,14}"
+)
+_PROTOCOL_LINE_RE = re.compile(
+    r"接种|孵育|培养|缓冲液|每孔|室温|稀释|seeded|incubat|culture|"
+    r"assay buffer|buffers?|plates?|wells?|dilut",
+    re.IGNORECASE,
+)
+_CITATION_LINE_RE = re.compile(
+    r"et al\.|have found|has been reported|prior art|参考文献|背景技术|"
+    r"described in|were purchased",
+    re.IGNORECASE,
+)
+# Mass/volume tokens survive OCR with wide spacing (``92 m g``, ``0.2 57 m mο1``).
+_SYNTHESIS_LINE_RE = re.compile(
+    r"合成|收率|製造例|制备例|当量|equiv|mmol|遊離塩基|at room temperature|"
+    r"m\s*m\s*[οo0]?\s*1|m\s*g\s*[、,)]|\d\s*[gm]\s*[、)]",
+    re.IGNORECASE,
+)
+# A sentence that only points at a table holds no reading of its own.
+_TABLE_POINTER_RE = re.compile(
+    r"shown in Table|listed in Table|示于表|见表|参见表|表\s*\d+\s*所示", re.IGNORECASE
+)
+
+
+def _is_scale_definition(line: str, before: str) -> bool:
+    """True when the metric occurrence spells out a qualitative-bin bound."""
+    if _SCALE_TAIL_RE.search(before):
+        return True
+    if not _SCALE_LETTER_TAIL_RE.search(before):
+        return False
+    return len(_SCALE_LETTER_RE.findall(line)) >= 2
+
+
+def _is_definition_sentence(line: str) -> bool:
+    """True when the metric occurrence only *defines* the term.
+
+    Claim preambles and glossaries state what a metric means
+    (``术语“IC50”是指…``, ``the term "IC50" refers to``, ``用語「アルキル」は…
+    を包含することを意図し``). They measure nothing, so they are not a gap.
+    """
+    return bool(_DEFINITION_RE.search(line))
+
+
+def _is_substituent_run(line: str) -> bool:
+    """True when a line is a Markush list rather than a reading.
+
+    ``-CF3，-CH2-CF3，-CF2H…`` is a substituent enumeration OCR'd out of claim
+    text; a compound name carries one or two such fragments, never a list.
+    """
+    if len(_SUBSTITUENT_FRAGMENT_RE.findall(line)) >= 3:
+        return True
+    return len(_ALKYL_WORD_RE.findall(line)) >= 3
+
+
+def _is_non_reading_prose(line: str) -> bool:
+    """True when a line names a metric without reporting one.
+
+    Scale legends, glossary entries, protocol text, literature background and
+    synthesis paragraphs all contain the metric token the prose parser looks
+    for, and none of them measures a compound.
+    """
+    if _LEGEND_PHRASE_RE.search(line):
+        return True
+    if _ENTRY_LINE_RE.match(line.strip()):
+        return True
+    if _CITATION_LINE_RE.search(line) or _SYNTHESIS_LINE_RE.search(line):
+        return True
+    if _TABLE_POINTER_RE.search(line):
+        return True
+    return bool(_PROTOCOL_LINE_RE.search(line) and not _REFERENCE_RE.search(line))
 
 
 def _build_activity_record(
@@ -138,6 +246,14 @@ def _build_activity_record(
         legend=legend,
     )
     reference = normalize_reference_label(row_label)
+    if (
+        item.get("label_space") == "example"
+        and reference.key
+        and reference.reference_type == "compound"
+    ):
+        # The column header declares the space, so a bare ``2`` under
+        # ``实施例编号`` is Example 2 (``@example:2``), never the compound ``2``.
+        reference = normalize_reference_label(f"Example {reference.key}")
     return ActivityRecord(
         activity_type=normalized.metric,
         value=normalized.value_canonical,
@@ -197,15 +313,25 @@ def _issue(
     }
 
 
-def _provenance(reference_raw: str | None) -> dict[str, Any]:
-    if not reference_raw:
-        return {}
-    reference = normalize_reference_label(reference_raw)
-    return {
-        "reference_raw": reference.raw,
-        "reference_key": reference.key,
-        "reference_type": reference.reference_type,
-    }
+def _provenance(reference_raw: str | None, target: str | None = None) -> dict[str, Any]:
+    """The printed reference, plus the column the reading was taken from.
+
+    ``target`` is the header's own assay/substrate name when the column carried one
+    (``CYP3A4(咪达唑仑)抑制率(%)``). Two columns of one table can differ only there,
+    and a measurement has no target field, so this is where the reading keeps the
+    context a reviewer needs to tell them apart.
+    """
+    provenance: dict[str, Any] = {}
+    if reference_raw:
+        reference = normalize_reference_label(reference_raw)
+        provenance = {
+            "reference_raw": reference.raw,
+            "reference_key": reference.key,
+            "reference_type": reference.reference_type,
+        }
+    if target:
+        provenance["column_target"] = target
+    return provenance
 
 
 def _measurement_from_record(
@@ -243,9 +369,17 @@ def _measurement_from_record(
             ),
             canonical_unit=record.unit_canonical or "",
             qualitative_value=record.qualitative_raw or "",
+            qualitative_rank=record.qualitative_rank,
+            qualitative_scheme=record.qualitative_scheme or "",
+            qualitative_label=record.qualitative_label or "",
         ),
         evidence_ids=[evidence_id],
-        provenance=_provenance(record.reference_raw),
+        provenance=_provenance(record.reference_raw, record.target),
+        measurement_kind=record.measurement_kind,
+        page_num=record.page_num,
+        table_idx=record.table_idx,
+        row_idx=record.row_idx,
+        col_idx=record.col_idx,
     )
 
 
@@ -261,14 +395,6 @@ def _table_text(raw_text: str) -> str | None:
     ):
         return raw_text
     return None
-
-
-def _has_activity_signal(text: str) -> bool:
-    return bool(
-        _PROSE_METRIC_RE.search(text)
-        or _ACTIVITY_SIGNAL_RE.search(text)
-        or re.search(r"\b(?:nM|μM|uM|mM|pM)\b", text, re.IGNORECASE)
-    )
 
 
 def _known_unit(unit: str) -> bool:
@@ -315,6 +441,19 @@ def _parse_text_run(
     for metric_match in _PROSE_METRIC_RE.finditer(text):
         metric_raw = metric_match.group("metric")
         metric = normalize_activity_metric(metric_raw)
+        line_start = text.rfind("\n", 0, metric_match.start()) + 1
+        line_end = text.find("\n", metric_match.start())
+        line = text[line_start : line_end if line_end != -1 else len(text)]
+        if _is_scale_definition(line, text[line_start : metric_match.start()]):
+            logger.debug("Skipping scale definition for %s: %s", doc_id, line[:120])
+            continue
+        if (
+            _is_definition_sentence(line)
+            or _is_substituent_run(line)
+            or _is_non_reading_prose(line)
+        ):
+            logger.debug("Skipping non-reading prose for %s: %s", doc_id, line[:120])
+            continue
         tail = text[metric_match.end() : metric_match.end() + 160]
         value_match = _PROSE_VALUE_RE.search(tail)
         context_start = max(0, metric_match.start() - 120)
@@ -326,6 +465,10 @@ def _parse_text_run(
         if value_match is None or re.search(
             r"[.!?。！？]", tail[: value_match.start()]
         ):
+            if not _REFERENCE_RE.search(text[context_start : metric_match.start()]):
+                # A metric mention that names no compound is prose *about* the
+                # metric, not a reading: it is not a gap either.
+                continue
             issues.append(
                 _issue(
                     "activity_value_unparsed",
@@ -383,6 +526,15 @@ def _parse_text_run(
             text[context_start : metric_match.start()]
         )
         reference_raw = reference_match.group(0) if reference_match else None
+        if reference_raw is None:
+            issues.append(
+                _issue(
+                    "activity_reference_missing",
+                    f"{normalized.metric} value names no compound",
+                    used_ids,
+                )
+            )
+            continue
         reference = normalize_reference_label(reference_raw)
         base_id = measurement_id(
             doc_id,
@@ -416,6 +568,9 @@ def _parse_text_run(
                 canonical_value=_decimal(normalized.value_canonical),
                 canonical_unit=normalized.unit_canonical or "",
                 qualitative_value=normalized.qualitative_raw or "",
+                qualitative_rank=normalized.qualitative_rank,
+                qualitative_scheme=normalized.qualitative_scheme or "",
+                qualitative_label=normalized.qualitative_label or "",
             ),
             evidence_ids=used_ids,
             provenance=_provenance(reference_raw),
@@ -449,6 +604,30 @@ def extract_activity_measurements_from_evidence(
     text_blocks: list[SourceEvidence] = []
     table_index = 0
 
+    # A wide table that crosses a layout boundary can be stored as two evidence
+    # rows whose text overlaps: the second begins with the first's content. Read
+    # both and every cell in the overlap becomes a second, duplicate reading of
+    # the same number. Only the longest row of such a run is read.
+    table_texts = [
+        (item.evidence_id, item.raw_text.strip())
+        for item in evidence
+        if category_of(item.kind) == TABLE and item.raw_text.strip()
+    ]
+    superseded: set[str] = {
+        short_id
+        for short_id, short_text in table_texts
+        for long_id, long_text in table_texts
+        if short_id != long_id and long_text.startswith(short_text)
+    }
+
+    # Qualitative bins are declared once per document (``注：“+++”20nM<IC50<100nM``)
+    # and used by tables elsewhere in the document, so the legend is collected
+    # from every prose block before any table is read.
+    legend: dict[str, str] = {}
+    for item in evidence:
+        if category_of(item.kind) == TEXT and item.raw_text.strip():
+            legend.update(extract_qualitative_legend(item.raw_text))
+
     def flush_text() -> None:
         if text_blocks:
             _parse_text_run(doc_id, text_blocks, measurements, issues, ids_seen)
@@ -463,10 +642,14 @@ def extract_activity_measurements_from_evidence(
         flush_text()
         if category != TABLE:
             continue
+        if item.evidence_id in superseded:
+            # This row's text is a prefix of a longer table row; reading it too
+            # would duplicate every cell it shares with that one.
+            continue
         table_index += 1
         table_text = _table_text(item.raw_text)
         if table_text is None:
-            if _has_activity_signal(item.raw_text):
+            if looks_like_activity_table(item.raw_text):
                 issues.append(
                     _issue(
                         "unsupported_table_format",
@@ -479,9 +662,10 @@ def extract_activity_measurements_from_evidence(
             table_text,
             table_idx=table_index - 1,
             page_num=item.page,
+            legend=legend,
         )
         if not _is_activity_table(table_text) or not records:
-            if _has_activity_signal(item.raw_text):
+            if looks_like_activity_table(item.raw_text):
                 issues.append(
                     _issue(
                         "complex_activity_table",

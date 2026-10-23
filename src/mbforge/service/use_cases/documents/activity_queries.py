@@ -1,47 +1,66 @@
 """Domain operations for activity data.
 
-Read-side helpers for the ``activities`` table. Used by the agent SAR
-tools and by any router that needs to surface activity data without
-joining through the ``evidence`` table. The persistence layer owns the SQL.
+Read-side helpers over the ``measurements`` table. A reading is first-class
+data: it is listed whether or not a structure owns it, so a document's printed
+activity is never invisible just because association has not resolved.
+
+The structure links live in ``measurement_attribution`` and are surfaced
+alongside each reading, so a caller can tell "12 nM for 77-A, structure known"
+from "12 nM for 77-A, structure unresolved" without a second query per row.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from mbforge.foundation.files import safe_json_loads
+from mbforge.contracts.measurement import (
+    MeasurementDatasetStats,
+    MeasurementQuery,
+)
 from mbforge.service.ports import get_repositories
 
 
-def list_activities(
+def list_measurements(
     library_root: str | None,
-    doc_id: str,
+    *,
+    doc_id: str = "",
     target: str = "",
     assay_description: str = "",
+    evidence_grade: str = "",
+    review_status: str = "",
+    metric: str = "",
     limit: int = 200,
 ) -> list[dict[str, Any]]:
-    """List activity records for a document, optionally filtered.
-
-    Args:
-        library_root: Project root directory.
-        doc_id: Document identifier.
-        target: Optional target name (case-insensitive substring match).
-        assay_description: Optional assay name (case-insensitive substring
-            match against ``assay_description`` or ``assay_type``).
-        limit: Maximum number of rows to return (default 200).
-
-    Returns:
-        List of activity dicts, ordered by (page_num, table_idx, row_idx)
-        so the agent can read the result in document order.
-    """
-    if not doc_id:
-        return []
-    return get_repositories(library_root).activities.list_activities(
-        doc_id,
-        target=target,
-        assay_description=assay_description,
-        limit=limit,
+    """List printed readings, each with the structures attributed to it."""
+    repositories = get_repositories(library_root)
+    rows = repositories.measurements.list(
+        MeasurementQuery(
+            doc_id=doc_id,
+            target=target,
+            assay_description=assay_description,
+            evidence_grade=evidence_grade,
+            review_status=review_status,
+            metric=metric,
+            limit=limit,
+        )
     )
+    if not rows:
+        return []
+    attributions = repositories.measurements.attributions_for(
+        [row["measurement_id"] for row in rows]
+    )
+    enriched: list[dict[str, Any]] = []
+    for row in rows:
+        links = attributions.get(row["measurement_id"], [])
+        enriched.append(
+            {
+                **row,
+                "attributions": links,
+                "mol_ids": [link["mol_id"] for link in links],
+                "attributed": bool(links),
+            }
+        )
+    return enriched
 
 
 def list_activity_records(
@@ -51,33 +70,76 @@ def list_activity_records(
     assay_description: str = "",
     limit: int = 200,
 ) -> list[dict[str, Any]]:
+    """Activity records for a document, shaped for the HTTP/agent response.
+
+    ``source`` distinguishes a stored reading (``measurements``) from a review
+    candidate awaiting a decision, so a consumer never treats a pending item as
+    a settled fact.
+    """
     if not doc_id:
         return []
-
-    records = [
+    repositories = get_repositories(library_root)
+    readings = list_measurements(
+        library_root,
+        doc_id=doc_id,
+        target=target,
+        assay_description=assay_description,
+        limit=limit,
+    )
+    records: list[dict[str, Any]] = [
         {
-            **record,
+            "activity_id": row["measurement_id"],
             "review_id": None,
-            "source": "activities",
+            "source": "measurements",
             "status": "persisted",
+            "mol_id": (row["mol_ids"][0] if row["mol_ids"] else None),
+            "doc_id": row["doc_id"],
+            "activity_type": row["activity_type"],
+            "value": row["original_value"],
+            "value_original": row["original_value"],
+            "unit_original": row["original_unit"],
+            "operator": row["operator"],
+            "measurement_kind": row["measurement_kind"],
+            "metric": row["metric"],
+            "value_canonical": row["canonical_value"],
+            "unit_canonical": row["canonical_unit"],
+            "operator_original": row["operator"],
+            "scale": row["scale"],
+            "value_text": row["value_text"],
+            "qualitative_raw": row["qualitative_raw"],
+            "qualitative_rank": row["qualitative_rank"],
+            "qualitative_scheme": row["qualitative_scheme"],
+            "qualitative_label": row["qualitative_label"],
+            "reference_raw": row["reference_raw"],
+            "reference_key": row["reference_key"],
+            "reference_type": row["reference_type"],
+            "target": row["target"],
+            "assay_type": row["assay_type"],
+            "assay_description": row["assay_description"],
+            "confidence": None,
+            "page_num": row["page_num"],
+            "table_idx": row["table_idx"],
+            "row_idx": row["row_idx"],
+            "col_idx": row["col_idx"],
+            "row_label": row["row_label"],
+            "row_smiles": None,
+            "raw_text": row["raw_text"],
+            "created_at": row["created_at"],
+            "evidence_grade": row["evidence_grade"],
+            "review_status": row["review_status"],
+            "attributed": row["attributed"],
+            "mol_ids": row["mol_ids"],
             "reasons": [],
         }
-        for record in list_activities(
-            library_root,
-            doc_id,
-            target=target,
-            assay_description=assay_description,
-            limit=limit,
-        )
+        for row in readings
     ]
 
-    review_rows = get_repositories(library_root).activities.list_activity_review_items(
-        doc_id, limit
-    )
-
+    review_rows = repositories.activities.list_activity_review_items(doc_id, limit)
     target_lower = target.lower()
     assay_lower = assay_description.lower()
     for row in review_rows:
+        from mbforge.foundation.files import safe_json_loads
+
         payload = safe_json_loads(row["payload"], {})
         if not isinstance(payload, dict):
             continue
@@ -90,8 +152,6 @@ def list_activity_records(
         if assay_lower and assay_lower not in row_assay.lower():
             continue
         reasons = safe_json_loads(row["reasons"], [])
-        if not isinstance(reasons, list):
-            reasons = []
         records.append(
             {
                 "activity_id": None,
@@ -132,6 +192,10 @@ def list_activity_records(
                 "row_smiles": row["smiles"],
                 "raw_text": row["context_text"],
                 "created_at": row["created_at"],
+                "evidence_grade": "measured",
+                "review_status": row["status"],
+                "attributed": bool(payload.get("mol_id")),
+                "mol_ids": [payload["mol_id"]] if payload.get("mol_id") else [],
                 "reasons": reasons,
             }
         )
@@ -146,3 +210,58 @@ def list_activity_records(
         )
     )
     return records[:limit]
+
+
+def dataset_stats(
+    library_root: str | None, doc_id: str = ""
+) -> MeasurementDatasetStats:
+    """Coverage counts: what the document printed vs what reached a structure.
+
+    ``unattributed`` alone says nothing about whether the gap is fixable, so it
+    is split by reason. The classification needs the artifact's entries and the
+    document's detection count, which is why it happens here rather than in the
+    database layer.
+    """
+    repositories = get_repositories(library_root)
+    stats = repositories.measurements.stats(doc_id)
+    rows = repositories.measurements.unattributed_readings(doc_id)
+
+    by_reason: dict[str, int] = {}
+    attached = 0
+    drawn_by_doc: dict[str, set[str]] = {}
+    for row in rows:
+        if row.get("entry_id") or row.get("reference_key"):
+            attached += 1
+        if row.get("attributed_id"):
+            continue
+        doc = row["doc_id"]
+        if doc not in drawn_by_doc:
+            drawn_by_doc[doc] = repositories.measurements.document_label_numbers(doc)
+        drawn = drawn_by_doc[doc]
+        # Compare the full designation: ``77-A`` is not ``77``, and treating it
+        # as the same number would claim a structure the document never drew.
+        designation = str(row.get("reference_key") or "").strip()
+        if not designation:
+            reason = "no_printed_designation"
+        elif not drawn:
+            # No structure was detected anywhere in this document.
+            reason = "document_has_no_detections"
+        elif designation in drawn:
+            # The document drew a structure under this very designation and still
+            # no rule bound it — recoverable extraction work.
+            reason = "structure_detected_unmatched"
+        else:
+            # Structures were drawn for other compounds; this designation has
+            # none (chiral SFC/LC-MS-only entries such as 77-A / 77-B).
+            reason = "designation_without_structure"
+        by_reason[reason] = by_reason.get(reason, 0) + 1
+
+    return stats.model_copy(
+        update={
+            "attached_to_a_designation": attached,
+            "unattributed_by_reason": by_reason,
+        }
+    )
+
+
+__all__ = ["dataset_stats", "list_activity_records", "list_measurements"]

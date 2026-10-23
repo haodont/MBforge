@@ -1,4 +1,9 @@
-"""Regression tests for activity and molecule-reference normalization."""
+"""Regression tests for activity and molecule-reference normalization.
+
+Covers ``mbforge.service.pipeline.activity.normalization``: log/linear scale
+conversion, qualitative schemes, unit handling, and the single shared
+reference-label key used for activity↔molecule attribution.
+"""
 
 from __future__ import annotations
 
@@ -15,8 +20,27 @@ from mbforge.service.pipeline.activity.normalization import (
     normalize_reference_label,
 )
 
+# (operator, expected comparable operator) — a log metric measures inversely.
+_LOG_OPERATOR_CASES: list[tuple[str, str]] = [
+    ("<", ">"),
+    ("<=", ">="),
+    (">=", "<="),
+    ("=", "="),
+]
 
-def test_pic50_is_converted_to_comparable_nm_and_preserves_raw_scale() -> None:
+# (raw, expected key) — every published spelling shares one compound key.
+_LABEL_KEY_CASES: list[tuple[str, str]] = [
+    ("化合物20", "20"),
+    ("化合物 20", "20"),
+    ("compound 20", "20"),
+    ("20", "20"),
+    ("20a", "20a"),
+    ("20A", "20A"),
+]
+
+
+def test_log_metric_converts_to_nm_and_inverts_the_operator() -> None:
+    """pIC50 becomes nM and its comparison direction flips, raw scale kept."""
     result = normalize_activity_measurement("pIC50", 6.4, "", ">")
 
     assert result.metric == "pIC50"
@@ -27,86 +51,15 @@ def test_pic50_is_converted_to_comparable_nm_and_preserves_raw_scale() -> None:
     assert result.operator_original == ">"
     assert result.operator == "<"
 
+    for operator, expected in _LOG_OPERATOR_CASES:
+        inverted = normalize_activity_measurement("pIC50", 5.0, "", operator)
 
-def test_activity_units_convert_without_losing_original_unit() -> None:
-    result = normalize_activity_measurement("IC50", 1.5, "μM", "=")
+        assert inverted.operator_original == operator, operator
+        assert inverted.operator == expected, operator
+        assert inverted.value_canonical == 10_000.0, operator
+        assert inverted.scale == "log10", operator
 
-    assert result.value_original == 1.5
-    assert result.value_canonical == 1500.0
-    assert result.unit_original == "μM"
-    assert result.unit_canonical == "μM"
-
-
-def test_qualitative_plus_value_is_not_treated_as_numeric() -> None:
-    result = normalize_activity_measurement("activity", "+++", "")
-
-    assert result.measurement_kind == "qualitative"
-    assert result.value_original is None
-    assert result.value_canonical is None
-    assert result.qualitative_raw == "+++"
-    assert result.qualitative_rank == 3
-    assert result.qualitative_scheme == "plus"
-
-
-def test_letter_grade_requires_explicit_legend() -> None:
-    unresolved = normalize_activity_measurement("activity", "A", "")
-    legend = extract_qualitative_legend("A = strong; B = moderate; C = weak")
-    resolved = normalize_activity_measurement("activity", "A", "", legend=legend)
-
-    assert unresolved.qualitative_scheme == "letter_unresolved"
-    assert unresolved.qualitative_rank is None
-    assert resolved.qualitative_scheme == "legend"
-    assert resolved.qualitative_label == "strong"
-    assert resolved.qualitative_rank == 3
-
-
-def test_metric_and_reference_ocr_variants_are_normalized() -> None:
-    assert normalize_activity_metric("pIC ₅₀") == "pIC50"
-    assert normalize_activity_metric("ICso") == "IC50"
-
-    assert normalize_reference_label("## Compound E001").key == "E001"
-    assert normalize_reference_label("Example 5").reference_type == "example"
-    assert normalize_reference_label("A").ambiguous is True
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("化合物20", "20"),
-        ("化合物 20", "20"),
-        ("compound 20", "20"),
-        ("20", "20"),
-        ("20a", "20a"),
-        ("20A", "20A"),
-    ],
-)
-def test_compound_label_key_is_shared_and_exact(raw: str, expected: str) -> None:
-    assert normalize_reference_label(raw).key == expected
-    assert label_key_for(raw) == expected
-
-
-def test_example_label_does_not_become_compound_reference() -> None:
-    reference = normalize_reference_label("Example 20")
-    assert reference.key == "20"
-    assert reference.reference_type == "example"
-
-
-@pytest.mark.parametrize(
-    ("operator", "expected"),
-    [("<", ">"), ("<=", ">="), (">=", "<="), ("=", "=")],
-)
-def test_log_metric_operator_is_inverted_for_comparable_concentration(
-    operator: str, expected: str
-) -> None:
-    result = normalize_activity_measurement("pIC50", 5.0, "", operator)
-
-    assert result.operator_original == operator
-    assert result.operator == expected
-    assert result.value_canonical == 10_000.0
-    assert result.scale == "log10"
-
-
-def test_unicode_operators_normalize_before_log_inversion() -> None:
+    # Unicode operators normalize before the log inversion.
     explicit = normalize_activity_measurement("pIC50", 7.0, "", "≥")
     embedded = normalize_activity_measurement("pIC50", "≤ 5.0", "")
 
@@ -118,70 +71,113 @@ def test_unicode_operators_normalize_before_log_inversion() -> None:
     assert embedded.value_canonical == 10_000.0
 
 
-def test_unicode_operators_normalize_without_inversion_for_linear_units() -> None:
-    result = normalize_activity_measurement("IC50", "≥ 100", "nM")
+def test_linear_units_convert_directly_and_unknown_ones_fall_back_to_nm() -> None:
+    """Original unit/value survive; percent and fold keep their own branch."""
+    converted = normalize_activity_measurement("IC50", 1.5, "μM", "=")
 
-    assert result.operator_original == ">="
-    assert result.operator == ">="
-    assert result.value_canonical == 100.0
-    assert result.scale == "linear"
+    assert converted.value_original == 1.5
+    assert converted.value_canonical == 1500.0
+    assert converted.unit_original == "μM"
+    assert converted.unit_canonical == "μM"
+
+    for unit in ["cells/mL", "ng/mL"]:
+        fallback = normalize_activity_measurement("IC50", 2.5, unit, "=")
+
+        assert fallback.unit_original == unit, unit
+        assert fallback.unit_canonical == "nM", unit
+        assert fallback.value_canonical == 2.5, unit
+        assert fallback.scale == "linear", unit
+
+    unicode_linear = normalize_activity_measurement("IC50", "≥ 100", "nM")
+
+    assert unicode_linear.operator_original == ">="
+    assert unicode_linear.operator == ">="
+    assert unicode_linear.value_canonical == 100.0
+    assert unicode_linear.scale == "linear"
+
+    percent = normalize_activity_measurement("% inhibition", 95.0, "%", ">")
+
+    assert percent.metric == "inhibition_pct"
+    assert percent.value_original == 95.0
+    assert percent.value_canonical == 95.0
+    assert percent.unit_canonical == "%"
+    assert percent.scale == "linear"
+    assert percent.operator == ">"
+
+    plain_percent = normalize_activity_measurement("activity", 50.0, "%", "=")
+
+    assert plain_percent.value_canonical == 50.0
+    assert plain_percent.unit_canonical == "%"
+    assert plain_percent.scale == "linear"
+
+    for unit in ["fold", "x"]:
+        fold = normalize_activity_measurement("fold change", 3.2, unit, "<")
+
+        assert fold.metric == "fold_change", unit
+        assert fold.value_original == 3.2, unit
+        assert fold.value_canonical == 3.2, unit
+        assert fold.unit_original == unit, unit
+        assert fold.unit_canonical == "fold", unit
+        assert fold.scale == "linear", unit
+        assert fold.operator == "<", unit
 
 
-def test_percent_metric_keeps_linear_scale_and_percent_unit() -> None:
-    result = normalize_activity_measurement("% inhibition", 95.0, "%", ">")
+def test_qualitative_values_need_a_legend_to_be_ranked() -> None:
+    """Plus grades are intrinsic; letter grades require an explicit legend."""
+    plus = normalize_activity_measurement("activity", "+++", "")
 
-    assert result.metric == "inhibition_pct"
-    assert result.value_original == 95.0
-    assert result.value_canonical == 95.0
-    assert result.unit_canonical == "%"
-    assert result.scale == "linear"
-    assert result.operator == ">"
+    assert plus.measurement_kind == "qualitative"
+    assert plus.value_original is None
+    assert plus.value_canonical is None
+    assert plus.qualitative_raw == "+++"
+    assert plus.qualitative_rank == 3
+    assert plus.qualitative_scheme == "plus"
 
+    unresolved = normalize_activity_measurement("activity", "A", "")
+    legend = extract_qualitative_legend("A = strong; B = moderate; C = weak")
+    resolved = normalize_activity_measurement("activity", "A", "", legend=legend)
 
-def test_percent_unit_routes_plain_metric_to_percent_branch() -> None:
-    result = normalize_activity_measurement("activity", 50.0, "%", "=")
-
-    assert result.value_canonical == 50.0
-    assert result.unit_canonical == "%"
-    assert result.scale == "linear"
-
-
-@pytest.mark.parametrize("unit", ["fold", "x"])
-def test_fold_units_keep_value_and_fold_unit(unit: str) -> None:
-    result = normalize_activity_measurement("fold change", 3.2, unit, "<")
-
-    assert result.metric == "fold_change"
-    assert result.value_original == 3.2
-    assert result.value_canonical == 3.2
-    assert result.unit_original == unit
-    assert result.unit_canonical == "fold"
-    assert result.scale == "linear"
-    assert result.operator == "<"
+    assert unresolved.qualitative_scheme == "letter_unresolved"
+    assert unresolved.qualitative_rank is None
+    assert resolved.qualitative_scheme == "legend"
+    assert resolved.qualitative_label == "strong"
+    assert resolved.qualitative_rank == 3
 
 
-@pytest.mark.parametrize("unit", ["cells/mL", "ng/mL"])
-def test_unknown_concentration_unit_falls_back_to_nm(unit: str) -> None:
-    result = normalize_activity_measurement("IC50", 2.5, unit, "=")
+def test_metric_and_reference_labels_share_one_normalized_key() -> None:
+    """OCR metric variants and every compound spelling collapse to one key."""
+    assert normalize_activity_metric("pIC ₅₀") == "pIC50"
+    assert normalize_activity_metric("ICso") == "IC50"
 
-    assert result.unit_original == unit
-    assert result.unit_canonical == "nM"
-    assert result.value_canonical == 2.5
-    assert result.scale == "linear"
+    for raw, expected in _LABEL_KEY_CASES:
+        assert normalize_reference_label(raw).key == expected, raw
+        assert label_key_for(raw) == expected, raw
+
+    assert normalize_reference_label("## Compound E001").key == "E001"
+
+    # Example designations are numbered but never compound references.
+    for raw in ("Example 20", "Example 5"):
+        assert normalize_reference_label(raw).reference_type == "example", raw
+    assert normalize_reference_label("Example 20").key == "20"
+
+    assert normalize_reference_label("A").ambiguous is True
+    # Chinese example labels index the activity tables of CN patents.
+    assert normalize_reference_label("实施例5").key == "5"
+    assert normalize_reference_label("实施例5").reference_type == "example"
+    assert normalize_reference_label("制备例3").key == "3"
 
 
-def test_canonical_value_for_legacy_prefers_normalized_value() -> None:
+def test_canonical_value_for_legacy_prefers_normalized_over_legacy_value() -> None:
+    """The comparable value wins; missing/non-finite legacy values yield None."""
     normalized = normalize_activity_measurement("IC50", 1.5, "μM", "=")
-    record = SimpleNamespace(value_canonical=10.0, value=99.0)
 
     assert canonical_value_for_legacy(normalized) == 1500.0
-    assert canonical_value_for_legacy(record) == 10.0
-
-
-def test_canonical_value_for_legacy_reads_legacy_value_field() -> None:
+    assert (
+        canonical_value_for_legacy(SimpleNamespace(value_canonical=10.0, value=99.0))
+        == 10.0
+    )
     assert canonical_value_for_legacy(SimpleNamespace(value=2.5)) == 2.5
 
-
-def test_canonical_value_for_legacy_rejects_missing_or_non_finite_values() -> None:
     qualitative = normalize_activity_measurement("activity", "+++", "")
 
     assert canonical_value_for_legacy(qualitative) is None

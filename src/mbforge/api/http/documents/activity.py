@@ -5,8 +5,10 @@ from fastapi import APIRouter, Query
 from fastapi import Path as ApiPath
 
 from mbforge.api.http._path_utils import resolve_library_root, validate_doc_id
+from mbforge.contracts.measurement import MeasurementDatasetStats
 from mbforge.service.dto.activity import ActivityRecordResponse
 from mbforge.service.use_cases.documents.activity_queries import (
+    dataset_stats,
     list_activity_records,
 )
 
@@ -35,3 +37,22 @@ async def document_activities(
         limit,
     )
     return [ActivityRecordResponse.model_validate(record) for record in records]
+
+
+@router.get(
+    "/documents/{doc_id}/stats",
+    response_model=MeasurementDatasetStats,
+)
+async def document_activity_stats(
+    doc_id: str = ApiPath(..., min_length=1),
+    library_root: str | None = Query(default=None),
+) -> MeasurementDatasetStats:
+    """Coverage of the document's printed readings.
+
+    ``total`` is what the document printed; ``attributed`` is what reached a
+    structure. The difference is the extraction backlog, and it is reported
+    rather than hidden so a dataset consumer knows what the numbers rest on.
+    """
+    root = resolve_library_root(library_root)
+    validate_doc_id(doc_id)
+    return await anyio.to_thread.run_sync(dataset_stats, str(root), doc_id)

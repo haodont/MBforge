@@ -22,10 +22,19 @@ logger = get_logger(__name__)
 
 _NUMBER_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
 _OPERATOR_RE = re.compile(r"^\s*(<=|>=|<|>|=|~|≤|≥|≈)?\s*")
-_METRIC_TOKEN_RE = re.compile(
+#: Metric tokens found in a table header, in source order. Besides the
+#: concentration-style tokens this recognizes the words that *name* an activity in
+#: the CN/WO corpus — ``CYP3A4(咪达唑仑)抑制率(%)``, ``MRGPRX2 抑制``,
+#: ``MRGPRX2拮抗活性``, ``抑制% (300 nM)``. The table gate (``_ACTIVITY_HEADER_RE``)
+#: already accepts those headers, so without these words the layout found no metric
+#: column and refused the whole table: 26 of the corpus's 31 activity tables, 24
+#: measurements in one document. Longest word first, so ``抑制率`` beats ``抑制``.
+METRIC_TOKEN_RE = re.compile(
     r"(?<![A-Za-z])(?:p\s*(?:ic|ec|ed|gi|ac|cc)\s*\d+|"
     r"(?:ic|ec|ed|gi|ac|cc)\s*\d+|p\s*k[di]|k[di])"
-    r"(?![A-Za-z])",
+    r"(?![A-Za-z])|"
+    r"抑制率|抑制活性|激动活性|拮抗活性|结合活性|抑制|激动|拮抗|活性|"
+    r"(?<![A-Za-z])(?:inhibition|activation|potency|activity|response)(?![A-Za-z])",
     re.IGNORECASE,
 )
 
@@ -100,7 +109,7 @@ def find_activity_metrics(text: str) -> list[str]:
     """Find metric tokens in table headers in source order."""
     return [
         normalize_activity_metric(match.group(0))
-        for match in _METRIC_TOKEN_RE.finditer(text)
+        for match in METRIC_TOKEN_RE.finditer(text)
     ]
 
 
@@ -165,13 +174,16 @@ def extract_qualitative_legend(text: str) -> dict[str, str]:
     table.
     """
     legend: dict[str, str] = {}
+    # Published legends quote their bin symbol and separate it with a full-width
+    # colon (``注：“+”：IC50>1μM``), so quotes are optional noise around the key.
     pattern = re.compile(
-        r"(?<![A-Za-z])([A-D]|\+{1,4})\s*(?:=|:|[-–—])\s*"
-        r"([^,;|\n]+)",
+        r"[“\"'(\[]?\s*(?<![A-Za-z])([A-D]|\+{1,4}|[十]{1,4})\s*[”\"')\]]?\s*"
+        r"(?:=|＝|:|：|[-–—])\s*"
+        r"([^,;，；|\n]+)",
         re.IGNORECASE,
     )
     for match in pattern.finditer(text):
-        key = match.group(1).upper()
+        key = match.group(1).upper().replace("十", "+")
         description = " ".join(match.group(2).split()).strip(" .")
         if description:
             legend[key] = description
@@ -367,7 +379,10 @@ def normalize_reference_label(value: object) -> ReferenceLabel:
     cleaned = re.sub(r"^[#\s>*•·-]+", "", raw).strip()
     cleaned = re.sub(r"\s+", " ", cleaned).rstrip(".。 ")
 
-    example_match = re.fullmatch(r"(?i)example\s*#?\s*(E?\d+[A-Za-z]?)", cleaned)
+    example_match = re.fullmatch(
+        r"(?i)(?:example\s*#?\s*|实施例\s*|制备例\s*|对比例\s*)(E?\d+[A-Za-z]?)",
+        cleaned,
+    )
     if example_match:
         return ReferenceLabel(raw, example_match.group(1), "example")
 

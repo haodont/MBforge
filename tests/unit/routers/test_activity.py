@@ -1,22 +1,33 @@
+"""Activity reading endpoints.
+
+A reading is listed whether or not a structure owns it: the document printed it,
+so it is citable data. ``attributed`` reports whether a structure link exists.
+"""
+
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from mbforge.contracts.measurement import (
+    MeasurementAttribution,
+    MeasurementRecord,
+)
+from mbforge.db.measurement_store import replace_document_measurements
 from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.documents.activity_queries import (
-    list_activities,
+    dataset_stats,
     list_activity_records,
+    list_measurements,
 )
 
 
-def _seed_activity_data(library_root: Path) -> None:
-    db = DatabaseManager.get(str(library_root))
+def _seed(tmp_library: Path) -> None:
+    """One attached reading and one that no structure owns."""
+    db = DatabaseManager.get(str(tmp_library))
     db.initialize()
-    repo = get_repositories(str(library_root)).review
     with db.mol_conn() as conn:
         conn.execute(
             """
@@ -27,49 +38,93 @@ def _seed_activity_data(library_root: Path) -> None:
                       'image', 'pending', 'CCO')
             """
         )
-        conn.execute(
-            """
-            INSERT INTO activities (
-                activity_id, mol_id, doc_id, activity_type, value,
-                value_original, unit_original, operator, measurement_kind,
-                metric, value_canonical, unit_canonical, operator_original,
-                scale, value_text, target, assay_type, assay_description,
-                confidence, page_num, table_idx, row_idx, col_idx, row_label,
-                row_smiles, raw_text
-            ) VALUES (
-                'activity-1', 'CCO', 'doc-1', 'IC50', 12.0, 12.0, 'nM',
-                '=', 'quantitative', 'IC50', 12.0, 'nM', '=', 'linear',
-                '12 nM', 'EGFR', 'binding', 'EGFR binding', 0.95, 2, 0, 1,
-                2, 'compound-1', 'CCO', 'IC50 EGFR = 12 nM'
+    replace_document_measurements(
+        tmp_library,
+        "doc-1",
+        [
+            MeasurementRecord(
+                measurement_id="meas-attached",
+                doc_id="doc-1",
+                entry_id="1",
+                metric="IC50",
+                activity_type="IC50",
+                original_value=12.0,
+                original_unit="nM",
+                canonical_value=12.0,
+                canonical_unit="nM",
+                operator="=",
+                target="EGFR",
+                assay_type="binding",
+                assay_description="EGFR binding",
+                raw_text="IC50 EGFR = 12 nM",
+                page_num=2,
+                table_idx=0,
+                row_idx=1,
+                col_idx=2,
+                row_label="compound-1",
+                evidence_ids=["ev-1"],
+            ),
+            MeasurementRecord(
+                measurement_id="meas-orphan",
+                doc_id="doc-1",
+                entry_id="2",
+                metric="IC50",
+                activity_type="IC50",
+                original_value=80.0,
+                original_unit="nM",
+                canonical_value=80.0,
+                canonical_unit="nM",
+                operator="=",
+                target="EGFR",
+                assay_type="binding",
+                assay_description="EGFR binding",
+                raw_text="IC50 EGFR = 80 nM",
+                page_num=3,
+                table_idx=0,
+                row_idx=2,
+                col_idx=2,
+                row_label="compound-2",
+                evidence_ids=["ev-2"],
+            ),
+        ],
+        [
+            MeasurementAttribution(
+                attribution_id="attr-1",
+                measurement_id="meas-attached",
+                mol_id="CCO",
+                doc_id="doc-1",
+                method="rule",
+                evidence_id="ev-1",
             )
-            """
-        )
-        repo.insert_review_item(
-            item_id="review-activity-1",
-            kind="activity_match",
-            doc_id="doc-1",
-            page=3,
-            name="compound-2",
-            confidence=0.35,
-            reasons=["orphan_activity"],
-            context_text="IC50 EGFR = 80 nM",
-            payload={
-                "activity_type": "IC50",
-                "value": 80.0,
-                "value_original": 80.0,
-                "unit_original": "nM",
-                "unit_canonical": "nM",
-                "target": "EGFR",
-                "assay_type": "binding",
-                "mol_id": None,
-            },
-        )
+        ],
+    )
+    get_repositories(str(tmp_library)).review.insert_review_item(
+        item_id="review-activity-1",
+        kind="activity_match",
+        doc_id="doc-1",
+        page=3,
+        name="compound-2",
+        confidence=0.35,
+        reasons=["orphan_activity"],
+        context_text="IC50 EGFR = 80 nM",
+        payload={
+            "activity_type": "IC50",
+            "value": 80.0,
+            "value_original": 80.0,
+            "unit_original": "nM",
+            "unit_canonical": "nM",
+            "target": "EGFR",
+            "assay_type": "binding",
+            "mol_id": None,
+        },
+    )
 
 
-def test_activity_document_endpoint_returns_persisted_and_review_records(
+def test_readings_without_a_structure_are_stored_and_listed(
     app_client: TestClient, tmp_library: Path
 ) -> None:
-    _seed_activity_data(tmp_library)
+    """A reading no structure owns is data, not a rejected row."""
+    _seed(tmp_library)
 
     response = app_client.get(
         "/api/v1/activities/documents/doc-1",
@@ -78,17 +133,29 @@ def test_activity_document_endpoint_returns_persisted_and_review_records(
 
     assert response.status_code == 200, response.text
     records = response.json()
+    assert [record["activity_id"] for record in records] == [
+        "meas-attached",
+        "meas-orphan",
+        None,
+    ]
+    assert records[2]["review_id"] == "review-activity-1"
     assert [record["source"] for record in records] == [
-        "activities",
+        "measurements",
+        "measurements",
         "review_items",
     ]
-    assert records[0]["activity_id"] == "activity-1"
-    assert records[0]["status"] == "persisted"
-    assert records[0]["raw_text"] == "IC50 EGFR = 12 nM"
-    assert records[1]["review_id"] == "review-activity-1"
-    assert records[1]["status"] == "pending"
-    assert records[1]["value"] == 80.0
-    assert records[1]["page_num"] == 3
+    attached, orphan = records[0], records[1]
+    assert attached["attributed"] is True
+    assert attached["mol_ids"] == ["CCO"]
+    assert attached["evidence_grade"] == "measured"
+    assert attached["raw_text"] == "IC50 EGFR = 12 nM"
+    # The whole point: no structure, still a citable, listed reading.
+    assert orphan["attributed"] is False
+    assert orphan["mol_ids"] == []
+    assert orphan["value"] == 80.0
+    assert orphan["unit_original"] == "nM"
+    assert records[2]["status"] == "pending"
+    assert records[2]["page_num"] == 3
 
     filtered = app_client.get(
         "/api/v1/activities/documents/doc-1",
@@ -98,140 +165,125 @@ def test_activity_document_endpoint_returns_persisted_and_review_records(
             "limit": 1,
         },
     )
-
     assert filtered.status_code == 200, filtered.text
     assert filtered.json() == []
 
 
-def test_list_activities_projects_rows_from_legacy_schema_without_optional_columns(
-    app_client: TestClient, tmp_library: Path
+def test_dataset_stats_separate_attributed_from_total(
+    tmp_library: Path,
 ) -> None:
-    library_root = tmp_library
-    db_path = library_root / "library.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path) as conn:
+    """Coverage counts expose the extraction backlog instead of hiding it."""
+    _seed(tmp_library)
+
+    stats = dataset_stats(str(tmp_library), "doc-1")
+
+    assert stats.total == 2
+    assert stats.attributed == 1
+    assert stats.unattributed == 1
+    assert stats.by_target["EGFR"] == 2
+
+
+def test_measurement_filters_select_by_target_and_grade(tmp_library: Path) -> None:
+    _seed(tmp_library)
+
+    by_target = list_measurements(str(tmp_library), doc_id="doc-1", target="egfr")
+    assert [row["measurement_id"] for row in by_target] == [
+        "meas-attached",
+        "meas-orphan",
+    ]
+
+    predicted = list_measurements(
+        str(tmp_library), doc_id="doc-1", evidence_grade="predicted"
+    )
+    assert predicted == []
+
+    by_metric = list_measurements(str(tmp_library), doc_id="doc-1", metric="ic50")
+    assert len(by_metric) == 2
+
+    records = list_activity_records(str(tmp_library), "doc-1", limit=10)
+    # The seeded review candidate is listed too; it is pending, not a fact.
+    assert [record["activity_id"] for record in records] == [
+        "meas-attached",
+        "meas-orphan",
+        None,
+    ]
+    assert [record["source"] for record in records] == [
+        "measurements",
+        "measurements",
+        "review_items",
+    ]
+
+
+def test_attribution_gap_is_split_by_whether_the_structure_exists(
+    tmp_library: Path,
+) -> None:
+    """A gap the source causes and a gap we cause are reported separately.
+
+    ``77-A`` is printed with only SFC/LC-MS data — the document never drew it, so
+    no index can bind it. A designation that *was* drawn but stayed unmatched is
+    a defect. Reporting one "unattributed" number hides that difference.
+    """
+    db = DatabaseManager.get(str(tmp_library))
+    db.initialize()
+    with db.mol_conn() as conn:
         conn.execute(
             """
-            CREATE TABLE activities (
-                activity_id TEXT PRIMARY KEY,
-                mol_id TEXT NOT NULL,
-                doc_id TEXT NOT NULL,
-                activity_type TEXT NOT NULL,
-                value REAL,
-                target TEXT,
-                assay_description TEXT,
-                confidence REAL,
-                table_idx INTEGER,
-                row_idx INTEGER,
-                row_label TEXT
-            )
+            INSERT INTO molecules (mol_id, smiles, name, source_doc,
+                                   source_type, status, canonical_smiles, labels)
+            VALUES ('drawn-47', 'CCO', '47', 'doc-1', 'image', 'active', 'CCO', '[]')
             """
         )
-        conn.executemany(
+        conn.execute(
             """
-            INSERT INTO activities (
-                activity_id, mol_id, doc_id, activity_type, value, target,
-                assay_description, confidence, table_idx, row_idx, row_label
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    "activity-legacy-late",
-                    "mol-legacy-late",
-                    "legacy-doc",
-                    "IC50",
-                    20.0,
-                    "EGFR",
-                    "binding",
-                    0.8,
-                    2,
-                    0,
-                    "compound-late",
-                ),
-                (
-                    "activity-legacy-early",
-                    "mol-legacy-early",
-                    "legacy-doc",
-                    "IC50",
-                    10.0,
-                    "EGFR",
-                    "binding",
-                    0.9,
-                    1,
-                    3,
-                    "compound-early",
-                ),
-            ],
+            INSERT INTO molecule_detections (mol_id, doc_id, page,
+                                             bbox_x0, bbox_y0, bbox_x1, bbox_y1)
+            VALUES ('drawn-47', 'doc-1', 5, 0.0, 0.0, 1.0, 1.0)
+            """
         )
-
-    DatabaseManager.get(str(library_root)).initialize()
-
-    records = list_activities(
-        str(library_root),
-        "legacy-doc",
-        target="egfr",
-        assay_description="BINDING",
+    replace_document_measurements(
+        tmp_library,
+        "doc-1",
+        [
+            # The document drew 47 but no rule bound this reading to it.
+            MeasurementRecord(
+                measurement_id="m-drawn",
+                doc_id="doc-1",
+                entry_id="entry-47",
+                reference_key="47",
+                metric="IC50",
+                activity_type="IC50",
+                original_value=1.0,
+                original_unit="nM",
+            ),
+            # 77-A is printed, but the document never drew its structure.
+            MeasurementRecord(
+                measurement_id="m-undrawn",
+                doc_id="doc-1",
+                entry_id="entry-77a",
+                reference_key="77-A",
+                metric="IC50",
+                activity_type="IC50",
+                original_value=2.0,
+                original_unit="nM",
+            ),
+            # No designation at all.
+            MeasurementRecord(
+                measurement_id="m-bare",
+                doc_id="doc-1",
+                metric="IC50",
+                activity_type="IC50",
+                original_value=3.0,
+                original_unit="nM",
+            ),
+        ],
     )
 
-    assert [
-        (
-            record["activity_id"],
-            record["value"],
-            record["target"],
-            record["assay_description"],
-            record["table_idx"],
-            record["row_idx"],
-        )
-        for record in records
-    ] == [
-        ("activity-legacy-early", 10.0, "EGFR", "binding", 1, 3),
-        ("activity-legacy-late", 20.0, "EGFR", "binding", 2, 0),
-    ]
-    missing_columns = (
-        "value_original",
-        "unit_original",
-        "operator",
-        "metric",
-        "page_num",
-        "col_idx",
-        "row_smiles",
-        "raw_text",
-        "created_at",
-    )
-    assert all(
-        record[column] is None for record in records for column in missing_columns
-    )
-    assert list_activities(str(library_root), "legacy-doc", target="not-present") == []
-    assert (
-        list_activities(str(library_root), "legacy-doc", assay_description="cellular")
-        == []
-    )
+    stats = dataset_stats(str(tmp_library), "doc-1")
 
-    projected_records = list_activity_records(
-        str(library_root),
-        "legacy-doc",
-        target="EGFR",
-        assay_description="binding",
-    )
-    assert [record["activity_id"] for record in projected_records] == [
-        "activity-legacy-early",
-        "activity-legacy-late",
-    ]
-
-    response = app_client.get(
-        "/api/v1/activities/documents/legacy-doc",
-        params={
-            "library_root": str(library_root),
-            "target": "EGFR",
-            "assay_description": "binding",
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    api_records = response.json()
-    assert [record["activity_id"] for record in api_records] == [
-        "activity-legacy-early",
-        "activity-legacy-late",
-    ]
-    assert api_records[0]["value_original"] is None
-    assert api_records[0]["page_num"] is None
+    assert stats.total == 3
+    assert stats.attributed == 0
+    assert stats.unattributed_by_reason == {
+        "structure_detected_unmatched": 1,
+        "designation_without_structure": 1,
+        "no_printed_designation": 1,
+    }
