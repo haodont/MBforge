@@ -1,41 +1,46 @@
+/**
+ * Covers `createPdfDocumentCache` (../pdfDocumentCache): in-flight promise
+ * reuse on cache hits, LRU eviction, and destroy-on-evict of loaded documents.
+ */
 import { describe, expect, it, vi } from 'vitest'
 import { createPdfDocumentCache } from '../pdfDocumentCache'
 
 type FakeDocument = { destroy?: () => unknown }
 
 describe('createPdfDocumentCache', () => {
-  it('evicts least recently used document after capacity is exceeded', async () => {
+  it('caches loaded documents with LRU eviction and destroys evicted ones', async () => {
+    // Capacity overflow evicts the least recently used document and destroys it.
     const documents = new Map<string, FakeDocument>()
     const getDocument = vi.fn((url: string) => {
       const document = { destroy: vi.fn().mockResolvedValue(undefined) }
       documents.set(url, document)
       return { promise: Promise.resolve(document) }
     })
-    const cache = createPdfDocumentCache<FakeDocument>(3, getDocument)
+    const lruCache = createPdfDocumentCache<FakeDocument>(3, getDocument)
 
-    await cache.get('one.pdf')
-    await cache.get('two.pdf')
-    await cache.get('three.pdf')
-    await cache.get('one.pdf')
-    await cache.get('four.pdf')
+    await lruCache.get('one.pdf')
+    await lruCache.get('two.pdf')
+    await lruCache.get('three.pdf')
+    await lruCache.get('one.pdf')
+    await lruCache.get('four.pdf')
 
     expect(documents.get('two.pdf')?.destroy).toHaveBeenCalledOnce()
     expect(documents.get('one.pdf')?.destroy).not.toHaveBeenCalled()
-    expect(cache.keys()).toEqual(['three.pdf', 'one.pdf', 'four.pdf'])
-  })
+    expect(lruCache.keys()).toEqual(['three.pdf', 'one.pdf', 'four.pdf'])
 
-  it('reuses promise on cache hit and destroys evicted document', async () => {
+    // A concurrent second get for the same key reuses the in-flight promise
+    // (only one loader call), and the evicted document is destroyed.
     const document = { destroy: vi.fn().mockResolvedValue(undefined) }
-    const getDocument = vi.fn(() => ({ promise: Promise.resolve(document) }))
-    const cache = createPdfDocumentCache<FakeDocument>(1, getDocument)
+    const loadOnce = vi.fn(() => ({ promise: Promise.resolve(document) }))
+    const hitCache = createPdfDocumentCache<FakeDocument>(1, loadOnce)
 
-    const first = cache.get('same.pdf')
-    const second = cache.get('same.pdf')
-    await cache.get('other.pdf')
+    const first = hitCache.get('same.pdf')
+    const second = hitCache.get('same.pdf')
+    await hitCache.get('other.pdf')
     await Promise.all([first, second])
 
     expect(first).toBe(second)
-    expect(getDocument).toHaveBeenCalledTimes(2)
+    expect(loadOnce).toHaveBeenCalledTimes(2)
     expect(document.destroy).toHaveBeenCalledOnce()
   })
 })

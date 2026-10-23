@@ -41,6 +41,7 @@ export interface AppSettings {
   theme?: string
   language?: string
   llm?: LlmConfig
+  web_search?: { enabled?: boolean; api_key?: string }
   vlm?: VlmConfig
   layout?: LayoutConfig
   model_server?: ModelServerConfig

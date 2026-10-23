@@ -1,29 +1,27 @@
+/**
+ * library.ts — `cropImageUrl` / `importDocument` (covered functions at top).
+ *
+ * Protects two non-trivial contracts: the URL builder that must survive
+ * Windows paths / non-ASCII rel_paths without breaking the query string, and
+ * the multipart import path (no Content-Type override, server errors surfaced).
+ */
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cropImageUrl, importDocument } from '../library'
 
 describe('cropImageUrl', () => {
-  it('joins rel_path and library_root with a single &', () => {
+  it('encodes Windows library roots and non-ASCII rel_paths into one query string', () => {
     const url = cropImageUrl('doc1', 'page_0001_mol_0002.png', 'C:\\MBForge\\lib')
     expect(url).toBe(
       '/api/v1/library/documents/doc1/crop?library_root=C%3A%5CMBForge%5Clib&rel_path=page_0001_mol_0002.png'
     )
     expect(url.split('?').length).toBe(2)
-  })
-
-  it('URL-encodes Windows library_root with a trailing backslash', () => {
-    const url = cropImageUrl('doc-1', 'crop.png', 'D:\\Users\\某\\lib\\')
-    expect(url).toContain('library_root=D%3A%5CUsers%5C%E6%9F%90%5Clib%5C')
-    expect(url).toContain('rel_path=crop.png')
-  })
-
-  it('URL-encodes rel_path with spaces and non-ASCII characters', () => {
-    const url = cropImageUrl('doc1', '图 1.png', 'C:\\lib')
-    expect(url).toContain('rel_path=%E5%9B%BE+1.png')
-  })
-
-  it('preserves backend namespace prefix when an api base is configured', () => {
-    const url = cropImageUrl('doc1', 'crop.png', 'C:\\lib')
-    expect(url.startsWith('/api/v1/library/documents/')).toBe(true)
+    // Trailing backslash and CJK path segments must round-trip through encoding.
+    expect(cropImageUrl('doc-1', 'crop.png', 'D:\\Users\\某\\lib\\'))
+      .toContain('library_root=D%3A%5CUsers%5C%E6%9F%90%5Clib%5C')
+    expect(cropImageUrl('doc1', '图 1.png', 'C:\\lib')).toContain('rel_path=%E5%9B%BE+1.png')
+    // The backend namespace prefix is preserved when an API base is configured.
+    expect(cropImageUrl('doc1', 'crop.png', 'C:\\lib').startsWith('/api/v1/library/documents/')).toBe(true)
   })
 })
 
@@ -47,7 +45,7 @@ describe('importDocument', () => {
     globalThis.fetch = originalFetch
   })
 
-  it('sends a multipart request via httpFetch and returns the server response', async () => {
+  it('posts multipart FormData without overriding Content-Type and surfaces server errors', async () => {
     const document = {
       doc_id: 'doc-1',
       title: 'Test',
@@ -68,23 +66,9 @@ describe('importDocument', () => {
     expect(url).toBe('/api/v1/library/import')
     expect(init?.method).toBe('POST')
     expect(init?.body).toBeInstanceOf(FormData)
-  })
+    expect(new Headers(init?.headers).get('Content-Type')).toBeNull()
 
-  it('does not override the multipart Content-Type header', async () => {
-    fetchMock.mockResolvedValueOnce(mockFetchResponse({ success: true }))
-
-    const file = new File(['bytes'], 'test.pdf')
-    await importDocument(file)
-
-    const [, init] = fetchMock.mock.calls[0]
-    const headers = new Headers(init?.headers)
-    expect(headers.get('Content-Type')).toBeNull()
-  })
-
-  it('throws when the server responds with non-OK status', async () => {
     fetchMock.mockResolvedValueOnce(mockFetchResponse({ success: false, error: 'upload too large' }, 413))
-
-    const file = new File(['bytes'], 'huge.pdf')
-    await expect(importDocument(file)).rejects.toThrow('upload too large')
+    await expect(importDocument(new File(['bytes'], 'huge.pdf'))).rejects.toThrow('upload too large')
   })
 })

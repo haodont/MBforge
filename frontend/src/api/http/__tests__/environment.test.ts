@@ -1,3 +1,10 @@
+/**
+ * environment.ts — resource manager wrappers (covered module at top).
+ *
+ * Keeps the two envelope mappings that are not plain forwarding: the
+ * `{resources}` catalog unwrap and the nullable model-path result.
+ */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../_utils', () => ({
@@ -17,70 +24,36 @@ describe('environment API', () => {
     vi.clearAllMocks()
   })
 
-  describe('resourcesCheck', () => {
-    it('returns environment report', async () => {
-      const report = {
-        python_version: '3.14.2',
-        gpu_available: true,
-        gpu_name: 'RTX 5070',
-        cuda_version: '12.8',
-        summary: '9/11 resources ready',
-        resources: [
-          { id: 'torch', name: 'PyTorch', type: 'python_package', status: 'ready', local_path: '', size_mb: 0, version: '2.11.0', error: '' },
-        ],
-      }
-      mockHttpGet.mockResolvedValue(report)
+  it('unwraps the resource catalog envelope and preserves nullable model paths', async () => {
+    const report = {
+      python_version: '3.14.2',
+      gpu_available: true,
+      gpu_name: 'RTX 5070',
+      cuda_version: '12.8',
+      summary: '9/11 resources ready',
+      resources: [
+        { id: 'torch', name: 'PyTorch', type: 'python_package', status: 'ready', local_path: '', size_mb: 0, version: '2.11.0', error: '' },
+      ],
+    }
+    mockHttpGet.mockResolvedValue(report)
+    const env = await resourcesCheck()
+    expect(httpGet).toHaveBeenCalledWith('/api/v1/environment/check')
+    expect(env.summary).toBe('9/11 resources ready')
 
-      const result = await resourcesCheck()
+    mockHttpPost.mockResolvedValue(report.resources[0])
+    await expect(resourcesStatus('torch')).resolves.toMatchObject({ id: 'torch', status: 'ready' })
 
-      expect(httpGet).toHaveBeenCalledWith('/api/v1/environment/check')
-      expect(result.summary).toBe('9/11 resources ready')
-      expect(result.resources).toHaveLength(1)
-    })
-  })
+    mockHttpPost.mockResolvedValue('/models/embedding')
+    await expect(resourcesGetModelPath('embedding')).resolves.toBe('/models/embedding')
+    mockHttpPost.mockResolvedValue(null)
+    await expect(resourcesGetModelPath('nonexistent')).resolves.toBeNull()
 
-  describe('resourcesStatus', () => {
-    it('returns single resource status', async () => {
-      const status = { id: 'torch', name: 'PyTorch', type: 'python_package', status: 'ready', local_path: '', size_mb: 0, version: '2.11.0', error: '' }
-      mockHttpPost.mockResolvedValue(status)
-
-      const result = await resourcesStatus('torch')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/resources/status', { resource_id: 'torch' })
-      expect(result.status).toBe('ready')
-    })
-  })
-
-  describe('resourcesGetModelPath', () => {
-    it('returns model path when available', async () => {
-      mockHttpPost.mockResolvedValue('/models/embedding')
-
-      const result = await resourcesGetModelPath('embedding')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/resources/model-path', { resource_id: 'embedding' })
-      expect(result).toBe('/models/embedding')
-    })
-
-    it('returns null when not available', async () => {
-      mockHttpPost.mockResolvedValue(null)
-
-      const result = await resourcesGetModelPath('nonexistent')
-
-      expect(result).toBeNull()
-    })
-  })
-
-  describe('resourcesCatalog', () => {
-    it('returns resource catalog', async () => {
-      const catalog = [
+    // Catalog entries are nested under `resources` and must be unwrapped.
+    mockHttpPost.mockResolvedValue({
+      resources: [
         { id: 'embedding', name: 'Qwen3-Embedding', type: 'model', description: 'test', size_mb: 1152, license: 'Apache-2.0', ms_repo: 'Qwen/Qwen3-Embedding-0.6B', pip_name: '' },
-      ]
-      mockHttpPost.mockResolvedValue({ resources: catalog })
-
-      const result = await resourcesCatalog()
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/resources/catalog')
-      expect(result).toHaveLength(1)
+      ],
     })
+    await expect(resourcesCatalog()).resolves.toHaveLength(1)
   })
 })

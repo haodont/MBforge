@@ -127,6 +127,11 @@ export const queryKeys = {
     page: (slug: string) => [...queryKeys.docs.all, 'page', slug] as const,
   },
 
+  research: {
+    sessions: (root: string) => ['research', root, 'sessions'] as const,
+    session: (root: string, id: string) => ['research', root, 'session', id] as const,
+  },
+
   readiness: {
     all: ['readiness'] as const,
     summary: () => [...queryKeys.readiness.all, 'summary'] as const,

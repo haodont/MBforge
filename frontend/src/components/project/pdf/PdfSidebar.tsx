@@ -18,6 +18,8 @@ import MoleculePatentFacts from './MoleculePatentFacts'
 import type { ExtractionResult } from '@/types'
 import type { PatentFactsArtifact } from '@/api/http/library'
 import type { PdfSidePaneTab } from './usePdfSidebarState'
+import PatentAnalysisPane from './PatentAnalysisPane'
+import './PatentAnalysisPane.css'
 
 interface Props {
   docId: string
@@ -32,6 +34,8 @@ interface Props {
   isDetecting: boolean
   canDetect: boolean
   patentFacts: PatentFactsArtifact | null
+  patentFactsLoadError?: boolean
+  onOpenEvidence: (evidenceId: string, page?: number | null) => void
   onDetect: () => void
   setSelectedDetection: Dispatch<SetStateAction<number | null>>
   setEditingDetectionIndex: Dispatch<SetStateAction<number | null>>
@@ -50,6 +54,8 @@ export default function PdfSidebar({
   isDetecting,
   canDetect,
   patentFacts,
+  patentFactsLoadError,
+  onOpenEvidence,
   onDetect,
   setSelectedDetection,
   setEditingDetectionIndex,
@@ -75,9 +81,10 @@ export default function PdfSidebar({
               items={[
                 { key: 'evidence', label: t('pdf.tabEvidence') },
                 { key: 'molecules', label: t('pdf.tabMolecules') },
+                { key: 'analysis', label: t('patentAnalysis.tab') },
               ]}
               activeKey={sidePaneTab}
-              onChange={(key) => setSidePaneTab(key === 'molecules' ? 'molecules' : 'evidence')}
+              onChange={(key) => setSidePaneTab(key === 'molecules' || key === 'analysis' ? key : 'evidence')}
               variant="underline"
               size="sm"
               fullWidth
@@ -118,6 +125,15 @@ export default function PdfSidebar({
                   </button>
                 ))}
               </section>
+            )}
+            {sidePaneTab === 'analysis' && (
+              <PatentAnalysisPane
+                docId={docId}
+                libraryRoot={libraryRoot}
+                facts={patentFacts}
+                loadError={patentFactsLoadError}
+                onOpenEvidence={onOpenEvidence}
+              />
             )}
           </div>
         </>

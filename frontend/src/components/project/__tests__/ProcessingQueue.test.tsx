@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, act } from '@testing-library/react'
 
 vi.mock('@/api/query/hooks', () => ({
   useIngestQueue: vi.fn(),
@@ -116,19 +116,18 @@ describe('ProcessingQueue', () => {
     } as unknown as ReturnType<typeof useIngestLogs>)
   })
 
-  it('shows loading state', () => {
+  it('walks the queue through loading, empty, populated and deduplicated states', () => {
+    // Loading: the default queue/stats mocks have no data yet.
     render(<ProcessingQueue />)
     expect(screen.getByText('Loading...')).toBeInTheDocument()
-  })
+    cleanup()
 
-  it('shows empty state when queue is empty', () => {
     mockQueue([])
     render(<ProcessingQueue />)
     // i18n returns key as-is.
     expect(screen.getByText('queue.emptyHint')).toBeInTheDocument()
-  })
+    cleanup()
 
-  it('renders tasks when present', () => {
     mockQueue([
       { id: 't1', status: 'processing', doc_id: 'doc1' },
       { id: 't2', status: 'pending', doc_id: 'doc2' },
@@ -136,24 +135,15 @@ describe('ProcessingQueue', () => {
     render(<ProcessingQueue />)
     expect(screen.getByText('doc1.pdf')).toBeInTheDocument()
     expect(screen.getByText('doc2.pdf')).toBeInTheDocument()
-  })
+    cleanup()
 
-  it('renders only one task row for duplicate doc ids', () => {
+    // Several task rows for one document still render a single row.
     mockQueue([
       { id: 't1', status: 'processing', doc_id: 'doc1' },
       { id: 't2', status: 'done', doc_id: 'doc1' },
     ])
     render(<ProcessingQueue />)
     expect(screen.getAllByText('doc1.pdf')).toHaveLength(1)
-  })
-
-  it('does not prefetch logs on mount', () => {
-    mockQueue([
-      { id: 't1', status: 'processing', doc_id: 'doc1' },
-      { id: 't2', status: 'pending', doc_id: 'doc2' },
-    ])
-    render(<ProcessingQueue />)
-    expect(useIngestLogs).not.toHaveBeenCalled()
   })
 
   it('fetches logs on demand through the query hook when a task row toggles logs', async () => {
@@ -167,12 +157,16 @@ describe('ProcessingQueue', () => {
       { id: 't1', status: 'processing', doc_id: 'doc1' },
     ])
     render(<ProcessingQueue />)
+
+    // Nothing is prefetched on mount; the toggle is what triggers the query.
+    expect(useIngestLogs).not.toHaveBeenCalled()
+
     const toggle = screen.getByText('queue.showLogs')
     act(() => toggle.click())
     await waitFor(() => expect(useIngestLogs).toHaveBeenCalledWith('/tmp/lib', 'doc1'))
   })
 
-  it('explains the pause and names the models still downloading', () => {
+  it('explains the pause and names the models still downloading until every model is ready', () => {
     mockQueue([{ id: 't1', status: 'pending', doc_id: 'doc1' }])
     vi.mocked(useWorkerStatus).mockReturnValue({
       data: {
@@ -194,10 +188,9 @@ describe('ProcessingQueue', () => {
 
     expect(screen.getByText('queue.modelsBlockedTitle')).toBeInTheDocument()
     expect(screen.getByText(/MolDetv2-FT, MolParser-Mobile/)).toBeInTheDocument()
-  })
 
-  it('hides the pause banner once every model is ready', () => {
-    mockQueue([{ id: 't1', status: 'pending', doc_id: 'doc1' }])
+    cleanup()
+
     vi.mocked(useWorkerStatus).mockReturnValue({
       data: {
         status: 'online',

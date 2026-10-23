@@ -151,7 +151,7 @@ export function ToggleField({
 }) {
   return (
     <SettingItem title={label} description={description} labelWidth={labelWidth} dirty={dirty}>
-      <Switch checked={value} onChange={onChange} size="sm" />
+      <Switch checked={value} onChange={onChange} size="sm" ariaLabel={label} />
     </SettingItem>
   )
 }

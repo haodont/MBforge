@@ -45,6 +45,51 @@ export interface PatentFactsSection {
   evidence_ids: string[]
 }
 
+export interface PatentFactsName {
+  name_id: string
+  label_key: string
+  label_raw: string
+  name_raw: string
+  name_clean: string
+  page: number | null
+  evidence_ids: string[]
+  attribution: 'resolved' | 'unresolved'
+}
+
+export interface PatentFactsCharacterization {
+  characterization_id: string
+  technique: 'nmr' | 'ms' | 'elemental'
+  raw_text: string
+  label_key: string
+  page: number | null
+  evidence_ids: string[]
+  attribution: 'resolved' | 'unresolved'
+}
+
+export interface PatentFactsSynthesisStep {
+  step_no: number
+  text: string
+  evidence_ids: string[]
+}
+
+export interface PatentFactsSynthesisRoute {
+  route_id: string
+  section_id: string
+  kind: string
+  title: string
+  label_raw: string
+  label_key: string
+  product_label: string
+  page_start: number | null
+  page_end: number | null
+  evidence_ids: string[]
+  steps: PatentFactsSynthesisStep[]
+  step_count: number
+  yield_raw: string
+  method_note: string
+  attribution: 'resolved' | 'unresolved'
+}
+
 export interface PatentFactsEntry {
   entry_id: string
   label_raw: string
@@ -104,17 +149,85 @@ export interface PatentFactsExample {
   evidence_ids: string[]
 }
 
+export interface PatentConflictCandidate {
+  source: 'deterministic' | 'llm'
+  fields: Record<string, unknown> & { value_text?: string }
+  signature: string
+  evidence_ids: string[]
+}
+
+export interface PatentConflict {
+  conflict_id: string
+  slot_id: string
+  kind: 'measurement' | 'assay_method'
+  doc_id: string
+  page: number | null
+  evidence_ids: string[]
+  candidates: PatentConflictCandidate[]
+}
+
+export interface PatentReviewCandidate {
+  review_item_id: string
+  reason: string
+  kind: string
+  page: number | null
+  evidence_ids: string[]
+  deterministic: Array<Record<string, unknown> & { value_text?: string; raw_text?: string }> | null
+  llm: (Record<string, unknown> & { value_text?: string; raw_text?: string })
+    | Array<Record<string, unknown> & { value_text?: string; raw_text?: string }>
+    | null
+  conflict: PatentConflict | null
+}
+
+export interface PatentFactsIssue {
+  code?: string
+  message?: string
+  severity?: string
+  evidence_ids?: string[]
+  related_fact_id?: string | null
+}
+
 export interface PatentFactsArtifact {
   doc_id: string
   run_id: string
+  revision?: number
+  projection_status?: 'current' | 'pending' | 'legacy' | null
+  coverage?: {
+    total_evidence: number
+    complete_evidence: number
+    partial_evidence: number
+    complete_pages: number[]
+    partial_pages: number[]
+    unread_pages: number[]
+    no_evidence_pages: number[]
+  } | null
   sections: PatentFactsSection[]
   entries: PatentFactsEntry[]
-  synthesis_steps: Record<string, unknown>[]
+  /** Printed chemistry names for a designation (verbsatim, never derived). */
+  names?: PatentFactsName[]
+  /** Printed spectra / elemental lines, verbatim, with their owner. */
+  characterizations?: PatentFactsCharacterization[]
+  /** Preparation routes: verbatim steps, the printed yield, the section's pages. */
+  synthesis_steps: PatentFactsSynthesisRoute[]
   assay_methods: PatentFactsAssayMethod[]
   examples: PatentFactsExample[]
   measurements: PatentFactsMeasurement[]
-  issues: Record<string, unknown>[]
+  issues: PatentFactsIssue[]
   stats: Record<string, unknown>
+  analysis_status?: 'disabled' | 'succeeded' | 'fallback'
+  extraction_mode?: 'deterministic' | 'hybrid'
+  conflicts?: PatentConflict[]
+  review_candidates?: PatentReviewCandidate[]
+  llm?: {
+    error_code?: string
+    error?: string
+    turns?: number
+    tool_calls?: number
+    tokens?: number | null
+    duration_ms?: number
+    model?: string
+    prompt_version?: string
+  }
 }
 
 export interface LibraryStatus {
@@ -302,6 +415,28 @@ export function cropImageUrl(docId: string, relPath: string, libraryRoot: string
     `/documents/${encodeURIComponent(docId)}/crop`,
     libraryRoot,
     { rel_path: relPath }
+  )
+}
+
+export async function resolveDocumentEvidence(docId: string, evidenceId: string, libraryRoot: string): Promise<DocumentEvidenceItem> {
+  return httpGet<DocumentEvidenceItem>(artifactUrl(`/documents/${encodeURIComponent(docId)}/evidence/${encodeURIComponent(evidenceId)}`, libraryRoot))
+}
+
+/**
+ * Resolve many evidence ids in one request (bounded at 50 by the backend).
+ *
+ * A per-compound view links several passages, and resolving them one by one would
+ * issue one request per passage; unknown or foreign ids simply come back missing.
+ */
+export async function resolveDocumentEvidenceBatch(
+  docId: string,
+  evidenceIds: string[],
+  libraryRoot: string,
+): Promise<DocumentEvidenceItem[]> {
+  if (evidenceIds.length === 0) return []
+  return httpPost<DocumentEvidenceItem[]>(
+    artifactUrl(`/documents/${encodeURIComponent(docId)}/evidence/resolve`, libraryRoot),
+    { evidence_ids: evidenceIds.slice(0, 50) },
   )
 }
 

@@ -75,7 +75,7 @@ describe('usePdfOverlay — one request per document', () => {
     })
   })
 
-  it('primes blocks and every page bbox from a single request', async () => {
+  it('primes blocks and every page bbox from a single request, even under React StrictMode double-invoke', async () => {
     const onLoaded = vi.fn()
     const { rerender } = renderHook(
       () =>
@@ -87,9 +87,11 @@ describe('usePdfOverlay — one request per document', () => {
           enrichResults: enrich,
           onLoaded,
         }),
-      { wrapper: makeWrapper(createQueryClient()) },
+      { wrapper: makeWrapper(createQueryClient(), true) },
     )
 
+    // The request fires once; the second (StrictMode) setup must not swallow
+    // the first response and leave the viewer without any box.
     await waitFor(() => expect(mockedOverlay).toHaveBeenCalledTimes(1))
     expect(mockedOverlay).toHaveBeenCalledWith({
       libraryRoot: '/lib',
@@ -109,34 +111,8 @@ describe('usePdfOverlay — one request per document', () => {
     expect(mockedOverlay).toHaveBeenCalledTimes(1)
   })
 
-  it('still delivers the overlay under React StrictMode double-invoke', async () => {
-    const onLoaded = vi.fn()
-    renderHook(
-      () =>
-        usePdfOverlay({
-          doc,
-          libraryRoot: '/lib',
-          absDocPath: '/lib/a.pdf',
-          skip: false,
-          enrichResults: enrich,
-          onLoaded,
-        }),
-      { wrapper: makeWrapper(createQueryClient(), true) },
-    )
-
-    // The request fires once; the second (StrictMode) setup must not swallow
-    // the first response and leave the viewer without any box.
-    await waitFor(() => expect(onLoaded).toHaveBeenCalledTimes(1))
-    const [, pages] = onLoaded.mock.calls[0] as [
-      OcrBlock[],
-      Map<number, ExtractionResult[]>,
-    ]
-    expect(pages.get(2)?.[0]?.esmiles).toBe('C-2')
-    expect(mockedOverlay).toHaveBeenCalledTimes(1)
-  })
-
-  it('skips the request when a warm snapshot already holds the overlay', () => {
-    renderHook(
+  it('skips the request when a warm snapshot already holds the overlay or no library root is set', () => {
+    const warm = renderHook(
       () =>
         usePdfOverlay({
           doc,
@@ -150,9 +126,8 @@ describe('usePdfOverlay — one request per document', () => {
     )
 
     expect(mockedOverlay).not.toHaveBeenCalled()
-  })
+    warm.unmount()
 
-  it('does not fetch without a library root', () => {
     renderHook(
       () =>
         usePdfOverlay({

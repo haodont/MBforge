@@ -9,6 +9,7 @@ import {
   reviewHistory,
   type ReviewAction,
   type ReviewKind,
+  type ReviewDecisionItem,
   type ReviewQueueItem,
   type ReviewStatus,
 } from '../../http/review'
@@ -46,12 +47,17 @@ export function useReviewDecide() {
   return useMutation({
     mutationFn: (args: {
       libraryRoot: string
-      items: Array<{ kind: ReviewKind; id: string }>
+      items: ReviewDecisionItem[]
       action: ReviewAction
       reason?: string
     }) => reviewDecide(args.libraryRoot, args.items, args.action, args.reason ?? ''),
     onSuccess: (_data, variables) => {
       void qc.invalidateQueries({ queryKey: queryKeys.review.all })
+      if (variables.items.some(item => item.kind === 'patent_fact_review')) {
+        void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
+        void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
+        void qc.invalidateQueries({ queryKey: queryKeys.sar.all })
+      }
       for (const item of variables.items) {
         void qc.invalidateQueries({
           queryKey: queryKeys.review.history(variables.libraryRoot, item.id),

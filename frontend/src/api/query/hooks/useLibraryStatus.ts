@@ -30,7 +30,11 @@ export function useConfigureLibrary() {
 
   return useMutation({
     mutationFn: (root: string) => configureLibrary(root),
-    onSuccess: () => {
+    onSuccess: async (result) => {
+      if (!result.success) return
+      // Document APIs resolve the active library server-side, so discard old scoped data.
+      await qc.cancelQueries({ queryKey: queryKeys.documents.all })
+      qc.removeQueries({ queryKey: queryKeys.documents.all })
       void qc.invalidateQueries({ queryKey: queryKeys.library.all })
     },
   })

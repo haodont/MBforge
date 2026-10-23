@@ -137,6 +137,28 @@ describe('MoleculeDetailPanel', () => {
     return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
   }
 
+  it('lays out the evidence chain, structure comparison and deduplicated related text before the record fields', () => {
+    renderPanel(<MoleculeDetailPanel molecule={molecule} libraryRoot="C:/library" />)
+
+    const panel = screen.getByTestId('molecule-detail-panel')
+
+    // Structure comparison: source crop beside the current E-SMILES render.
+    expect(screen.getByLabelText('结构对照')).toBeInTheDocument()
+    expect(screen.getByText('原始证据')).toBeInTheDocument()
+    expect(screen.getByText('当前 E-SMILES 结构')).toBeInTheDocument()
+    expect(screen.getAllByText('E-SMILES')).toHaveLength(1)
+
+    // Related text is deduplicated across evidence rows.
+    expect(screen.getByText('相关文本')).toBeInTheDocument()
+    expect(screen.getAllByText('Compound 7 inhibited the target at 12 nM.')).toHaveLength(1)
+    const notes = screen.getByText('备注').closest('label')
+    expect(panel.lastElementChild).toBe(notes)
+
+    // The evidence chain stays above the editable record fields.
+    const panelText = panel.textContent
+    expect(panelText.indexOf('证据链 · 2 处')).toBeLessThan(panelText.indexOf('名称'))
+  })
+
   it('persists a visual structure correction without an approval step', async () => {
     const onSaved = vi.fn()
     renderPanel(
@@ -146,8 +168,6 @@ describe('MoleculeDetailPanel', () => {
         onSaved={onSaved}
       />,
     )
-
-    expect(screen.getByTestId('molecule-detail-panel')).toHaveClass('molecule-detail-panel')
 
     fireEvent.click(screen.getByRole('button', { name: /编辑结构/ }))
     expect(screen.getByAltText('editor original image')).toHaveAttribute('src', '/source-crop.png')
@@ -160,37 +180,5 @@ describe('MoleculeDetailPanel', () => {
       )
     })
     expect(onSaved).toHaveBeenCalledOnce()
-  })
-
-  it('deduplicates related evidence text and places notes last', () => {
-    renderPanel(
-      <MoleculeDetailPanel
-        molecule={molecule}
-        libraryRoot="C:/library"
-      />,
-    )
-
-    expect(screen.getByText('相关文本')).toBeInTheDocument()
-    expect(screen.getAllByText('Compound 7 inhibited the target at 12 nM.')).toHaveLength(1)
-
-    const panel = screen.getByTestId('molecule-detail-panel')
-    const notes = screen.getByText('备注').closest('label')
-    expect(panel.lastElementChild).toBe(notes)
-  })
-
-  it('shows the source crop beside the current E-SMILES structure', () => {
-    renderPanel(<MoleculeDetailPanel molecule={molecule} libraryRoot="C:/library" />)
-
-    expect(screen.getByLabelText('结构对照')).toBeInTheDocument()
-    expect(screen.getByText('原始证据')).toBeInTheDocument()
-    expect(screen.getByText('当前 E-SMILES 结构')).toBeInTheDocument()
-    expect(screen.getAllByText('E-SMILES')).toHaveLength(1)
-  })
-
-  it('places the evidence chain before the editable record fields', () => {
-    renderPanel(<MoleculeDetailPanel molecule={molecule} libraryRoot="C:/library" />)
-
-    const panelText = screen.getByTestId('molecule-detail-panel').textContent
-    expect(panelText.indexOf('证据链 · 2 处')).toBeLessThan(panelText.indexOf('名称'))
   })
 })

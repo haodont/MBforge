@@ -35,8 +35,8 @@ const developmentEnv = {
   MBFORGE_FRONTEND_PORT: String(frontendPort),
   MBFORGE_AGENT_HOST: host,
   MBFORGE_AGENT_PORT: String(agentPort),
-  // `dev:all` manages the agent process itself; tell Vite's autostart
-  // plugin not to spawn a second agent on the same port.
+  // `dev:all` is the sole development process owner; the backend must not
+  // independently spawn another agent while this launcher manages one.
   MBFORGE_AGENT_AUTOSTART: '0',
   VITE_AGENT_URL: `http://${host}:${agentPort}`,
 }

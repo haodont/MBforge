@@ -1,3 +1,8 @@
+/**
+ * Covers `AppProvider` / `useAppContext` (../AppContext): the open-tab
+ * lifecycle (add, dedupe, fresh side-pane request, close, StrictMode), the
+ * empty library-root default, and the tab reset when the library root changes.
+ */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { StrictMode } from 'react'
 import { renderHook, act } from '@testing-library/react'
@@ -12,31 +17,92 @@ function renderCtx() {
   })
 }
 
+function renderStrictCtx() {
+  return renderHook(() => useAppContext(), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <StrictMode>
+        <AppProvider>{children}</AppProvider>
+      </StrictMode>
+    ),
+  })
+}
+
+function documentTab(title: string, docId: string, libraryRoot = '/lib') {
+  return {
+    type: 'document' as const,
+    title,
+    doc: { doc_id: docId, path: `${docId}.pdf`, doc_type: 'pdf', title },
+    libraryRoot,
+  }
+}
+
 describe('AppContext', () => {
   beforeEach(() => {
     localStorage.clear()
   })
 
-  it('starts with empty library root', () => {
-    const { result } = renderCtx()
-    expect(result.current.libraryRoot).toBe('')
+  it('opens, deduplicates and closes tabs', () => {
+    const { result, unmount } = renderCtx()
+
+    // A new tab is added and becomes active.
+    act(() => {
+      result.current.openTab(documentTab('Doc 1', 'd1'))
+    })
+    expect(result.current.openTabs.length).toBe(1)
+    const firstId = result.current.openTabs[0].id
+    expect(result.current.activeTabId).toBe(firstId)
+
+    // Reopening the same document activates the existing tab instead of
+    // duplicating it.
+    act(() => {
+      result.current.openTab(documentTab('Doc 1', 'd1'))
+    })
+    expect(result.current.openTabs.length).toBe(1)
+    expect(result.current.activeTabId).toBe(firstId)
+
+    // Reopening an existing PDF with a side-pane request must issue a fresh
+    // navigation request id so the pane re-targets.
+    const pdf = {
+      type: 'pdf' as const,
+      title: 'Patent',
+      doc: { doc_id: 'patent-1', path: 'patent.pdf', doc_type: 'pdf', title: 'Patent' },
+      libraryRoot: '/lib',
+      initialSidePaneTab: 'analysis' as const,
+    }
+    act(() => { result.current.openTab(pdf) })
+    const pdfTabId = result.current.openTabs[1].id
+    const firstRequestId = result.current.openTabs[1].sidePaneRequestId
+    act(() => { result.current.openTab(pdf) })
+
+    expect(result.current.openTabs).toHaveLength(2)
+    expect(result.current.openTabs[1].id).toBe(pdfTabId)
+    expect(result.current.openTabs[1].sidePaneRequestId).not.toBe(firstRequestId)
+
+    // Closing the first tab removes it from the set.
+    act(() => { result.current.closeTab(firstId) })
+    expect(result.current.openTabs.length).toBe(1)
+
+    unmount()
+
+    // StrictMode double-invocation must not desync the active tab from the list.
+    const strict = renderStrictCtx()
+    act(() => {
+      strict.result.current.openTab(documentTab('Strict mode document', 'strict-doc'))
+    })
+    expect(strict.result.current.openTabs).toHaveLength(1)
+    expect(strict.result.current.activeTabId).toBe(strict.result.current.openTabs[0].id)
   })
 
-  it('setLibraryRoot updates root and resets tabs', () => {
+  it('starts with an empty library root and clears tabs when it changes', () => {
     const { result } = renderCtx()
+    expect(result.current.libraryRoot).toBe('')
 
-    // Open a tab first.
+    // Open a tab first, then change the root — the tab set must be cleared.
     act(() => {
-      result.current.openTab({
-        type: 'document',
-        title: 'Test',
-        doc: { doc_id: 'd1', path: 't.pdf', doc_type: 'pdf', title: 'Test' },
-        libraryRoot: '/old',
-      })
+      result.current.openTab(documentTab('Test', 'd1', '/old'))
     })
     expect(result.current.openTabs.length).toBe(1)
 
-    // Change library root — must clear tabs.
     act(() => {
       result.current.setLibraryRoot('/new')
     })
@@ -44,89 +110,4 @@ describe('AppContext', () => {
     expect(result.current.openTabs.length).toBe(0)
     expect(result.current.activeTabId).toBeNull()
   })
-
-  it('openTab adds tab when new', () => {
-    const { result } = renderCtx()
-
-    act(() => {
-      result.current.openTab({
-        type: 'document',
-        title: 'Doc 1',
-        doc: { doc_id: 'd1', path: 't.pdf', doc_type: 'pdf', title: 'Doc 1' },
-        libraryRoot: '/lib',
-      })
-    })
-
-    expect(result.current.openTabs.length).toBe(1)
-    expect(result.current.activeTabId).toBe(result.current.openTabs[0].id)
-  })
-
-  it('keeps the active tab aligned with the tab list under StrictMode', () => {
-    const { result } = renderHook(() => useAppContext(), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <StrictMode>
-          <AppProvider>{children}</AppProvider>
-        </StrictMode>
-      ),
-    })
-
-    act(() => {
-      result.current.openTab({
-        type: 'document',
-        title: 'Strict mode document',
-        doc: { doc_id: 'strict-doc', path: 'strict.pdf', doc_type: 'pdf', title: 'Strict mode document' },
-        libraryRoot: '/lib',
-      })
-    })
-
-    expect(result.current.openTabs).toHaveLength(1)
-    expect(result.current.activeTabId).toBe(result.current.openTabs[0].id)
-  })
-
-  it('openTab activates existing tab instead of duplicating', () => {
-    const { result } = renderCtx()
-
-    act(() => {
-      result.current.openTab({
-        type: 'document',
-        title: 'Same Doc',
-        doc: { doc_id: 'd1', path: 't.pdf', doc_type: 'pdf', title: 'Same Doc' },
-        libraryRoot: '/lib',
-      })
-    })
-    const firstId = result.current.activeTabId
-
-    act(() => {
-      result.current.openTab({
-        type: 'document',
-        title: 'Same Doc',
-        doc: { doc_id: 'd1', path: 't.pdf', doc_type: 'pdf', title: 'Same Doc' },
-        libraryRoot: '/lib',
-      })
-    })
-
-    expect(result.current.openTabs.length).toBe(1)
-    expect(result.current.activeTabId).toBe(firstId)
-  })
-
-  it('closeTab removes tab and activates neighbour', () => {
-    const { result } = renderCtx()
-
-    act(() => {
-      result.current.openTab({
-        type: 'document', title: 'A', libraryRoot: '/lib',
-        doc: { doc_id: 'a', path: 'a.pdf', doc_type: 'pdf', title: 'A' },
-      })
-      result.current.openTab({
-        type: 'document', title: 'B', libraryRoot: '/lib',
-        doc: { doc_id: 'b', path: 'b.pdf', doc_type: 'pdf', title: 'B' },
-      })
-    })
-    expect(result.current.openTabs.length).toBe(2)
-
-    const firstId = result.current.openTabs[0].id
-    act(() => { result.current.closeTab(firstId) })
-    expect(result.current.openTabs.length).toBe(1)
-  })
-
 })

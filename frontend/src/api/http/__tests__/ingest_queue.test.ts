@@ -1,3 +1,10 @@
+/**
+ * ingest_queue.ts — `ingestGetLogs` (covered function at top).
+ *
+ * Protects the `{logs}` envelope unwrap and the null-safe fallback that keeps
+ * the log view iterable when the backend omits `logs`.
+ */
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../_utils', () => ({
@@ -17,7 +24,7 @@ describe('ingestGetLogs', () => {
     vi.clearAllMocks()
   })
 
-  it('unwraps the backend logs envelope into an iterable record list', async () => {
+  it('unwraps the logs envelope and falls back to an empty list when logs are absent', async () => {
     const records = [
       {
         doc_id: 'doc-1',
@@ -35,11 +42,8 @@ describe('ingestGetLogs', () => {
       doc_id: 'doc-1',
       limit: 200,
     })
-  })
 
-  it('returns an empty list when the backend omits logs', async () => {
     mockHttpPost.mockResolvedValue({ success: true, logs: null })
-
     await expect(ingestGetLogs('/library', 'doc-1')).resolves.toEqual([])
   })
 })

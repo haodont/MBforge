@@ -85,29 +85,20 @@ describe('EnumerationPanel', () => {
     vi.clearAllMocks()
   })
 
-  it('renders sites and confirmed fragment options, disabling unconfirmed options', () => {
+  it('renders sites with only confirmed fragment options actionable and gates preview and run on a selection', () => {
     render(<EnumerationPanel libraryRoot="/tmp/lib" scaffoldId="sc-1" />)
+
     expect(screen.getByText('Markush 结构枚举')).toBeInTheDocument()
     const optionInputs = screen.getAllByRole('checkbox')
     // Two options: frag-1 enabled, pending option without fragment_id disabled
     expect(optionInputs).toHaveLength(2)
     expect(optionInputs[0]).toBeEnabled()
     expect(optionInputs[1]).toBeDisabled()
-  })
 
-  it('disables preview and run until a fragment is selected', () => {
-    render(<EnumerationPanel libraryRoot="/tmp/lib" scaffoldId="sc-1" />)
-    const previewBtn = screen.getByRole('button', { name: /预览组合数/ })
-    const runBtn = screen.getByRole('button', { name: /执行枚举/ })
-    expect(previewBtn).toBeDisabled()
-    expect(runBtn).toBeDisabled()
-  })
+    expect(screen.getByRole('button', { name: /预览组合数/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /执行枚举/ })).toBeDisabled()
 
-  it('enables preview after selecting a confirmed fragment', () => {
-    render(<EnumerationPanel libraryRoot="/tmp/lib" scaffoldId="sc-1" />)
-    const optionInputs = screen.getAllByRole('checkbox')
     fireEvent.click(optionInputs[0])
-    const previewBtn = screen.getByRole('button', { name: /预览组合数/ })
-    expect(previewBtn).toBeEnabled()
+    expect(screen.getByRole('button', { name: /预览组合数/ })).toBeEnabled()
   })
 })

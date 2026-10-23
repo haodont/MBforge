@@ -1,5 +1,5 @@
 // Reusable API key input: show/hide toggle + copy to clipboard.
-// Shared across the LLM / VLM / OCR / embedding sections.
+// Shared across model and web-search settings.
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -11,9 +11,10 @@ interface Props {
   value: string
   onChange: (v: string) => void
   placeholder?: string
+  ariaLabel?: string
 }
 
-export default function ApiKeyInput({ value, onChange, placeholder = 'sk-...' }: Props) {
+export default function ApiKeyInput({ value, onChange, placeholder = 'sk-...', ariaLabel }: Props) {
   const { t } = useTranslation()
   const [visible, setVisible] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -36,6 +37,7 @@ export default function ApiKeyInput({ value, onChange, placeholder = 'sk-...' }:
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
+        aria-label={ariaLabel ?? t('settings.llmApiKey')}
         style={{ flex: 1, fontFamily: 'var(--font-mono, monospace)' }}
       />
       <IconButton

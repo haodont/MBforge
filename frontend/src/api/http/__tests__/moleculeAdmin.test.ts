@@ -1,3 +1,13 @@
+/**
+ * molecule_admin.ts — molecule CRUD HTTP wrappers (covered module at top).
+ *
+ * One usage test over the mocked `_utils` boundary: it protects the response
+ * envelopes that are actually *transformed* (list param normalisation, search
+ * result unwrapping, the single-item SMILES validation array) and the
+ * request payload shapes the backend routes require (create subset,
+ * PUT record/status, DELETE body).
+ */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../_utils', () => ({
@@ -14,9 +24,6 @@ import {
   molAdminSearchBySmiles,
   molAdminSearchText,
   molAdminList,
-  molAdminStoreStats,
-  molAdminCheckMarkush,
-  molAdminParseEsmiles,
   molAdminAdd,
   molAdminUpdate,
   molAdminUpdateStatus,
@@ -49,242 +56,103 @@ describe('moleculeAdmin API', () => {
     vi.clearAllMocks()
   })
 
-  describe('molAdminGet', () => {
-    it('calls httpPost with correct params', async () => {
-      mockHttpPost.mockResolvedValue({ success: true, molecule: mockRecord })
-
-      const result = await molAdminGet('/project', 'mol-1')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/molecule/get', {
-        library_root: '/project',
-        mol_id: 'mol-1',
-      })
-      expect(result).toEqual(mockRecord)
+  it('transforms list/search/validation envelopes and preserves the backend payload contract', async () => {
+    // --- read: list normalisation (offset→page, defaults for absent filters)
+    mockHttpPost.mockResolvedValue({ success: true, items: [mockRecord], total: 1 })
+    await expect(molAdminList('/project', 10, 0, 'patent', 'pending')).resolves.toEqual([mockRecord])
+    expect(httpPost).toHaveBeenCalledWith('/api/v1/molecule/list', {
+      library_root: '/project',
+      page: 1,
+      page_size: 10,
+      status: 'pending',
+      source_type: 'patent',
+      source_doc: '',
+      activity_presence: 'all',
+      activity_min: null,
+      activity_max: null,
+      query: '',
+      sort_field: 'created_at',
+      sort_direction: 'desc',
     })
 
-    it('returns null when molecule not found', async () => {
-      mockHttpPost.mockResolvedValue({ success: false })
-
-      const result = await molAdminGet('/project', 'missing')
-
-      expect(result).toBeNull()
+    mockHttpPost.mockResolvedValue({ success: true, items: [], total: 0 })
+    await molAdminList('/project', 5, 0)
+    expect(httpPost).toHaveBeenLastCalledWith('/api/v1/molecule/list', {
+      library_root: '/project',
+      page: 1,
+      page_size: 5,
+      status: '',
+      source_type: '',
+      source_doc: '',
+      activity_presence: 'all',
+      activity_min: null,
+      activity_max: null,
+      query: '',
+      sort_field: 'created_at',
+      sort_direction: 'desc',
     })
 
-    it('propagates httpPost errors', async () => {
-      mockHttpPost.mockRejectedValue(new Error('db locked'))
-
-      await expect(molAdminGet('/project', 'mol-1')).rejects.toThrow('db locked')
-    })
-  })
-
-  describe('molAdminSearchBySmiles', () => {
-    it('calls httpPost with correct params', async () => {
-      mockHttpPost.mockResolvedValue({ success: true, results: [mockRecord] })
-
-      const result = await molAdminSearchBySmiles('/project', 'CCO')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/molecule/search', {
-        library_root: '/project',
-        query: 'CCO',
-      })
-      expect(result).toEqual(mockRecord)
-    })
-  })
-
-  describe('molAdminSearchText', () => {
-    it('calls httpPost with correct params', async () => {
-      mockHttpPost.mockResolvedValue({ success: true, results: [mockRecord] })
-
-      const result = await molAdminSearchText('/project', 'ethanol')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/molecule/search', {
-        library_root: '/project',
-        query: 'ethanol',
-      })
-      expect(result).toEqual([mockRecord])
-    })
-  })
-
-  describe('molAdminList', () => {
-    it('calls httpPost with correct params', async () => {
-      mockHttpPost.mockResolvedValue({ success: true, items: [mockRecord], total: 1 })
-
-      const result = await molAdminList('/project', 10, 0, 'patent', 'pending')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/molecule/list', {
-        library_root: '/project',
-        page: 1,
-        page_size: 10,
-        status: 'pending',
-        source_type: 'patent',
-        source_doc: '',
-        activity_presence: 'all',
-        activity_min: null,
-        activity_max: null,
-        query: '',
-        sort_field: 'created_at',
-        sort_direction: 'desc',
-      })
-      expect(result).toEqual([mockRecord])
+    // --- read: exact-SMILES search unwraps the first hit, text search keeps all
+    mockHttpPost.mockResolvedValue({ success: true, results: [mockRecord, { ...mockRecord, mol_id: 'mol-2' }] })
+    await expect(molAdminSearchBySmiles('/project', 'CCO')).resolves.toEqual(mockRecord)
+    expect(httpPost).toHaveBeenLastCalledWith('/api/v1/molecule/search', {
+      library_root: '/project',
+      query: 'CCO',
     })
 
-    it('works without optional filters', async () => {
-      mockHttpPost.mockResolvedValue({ success: true, items: [], total: 0 })
-
-      await molAdminList('/project', 5, 0)
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/molecule/list', {
-        library_root: '/project',
-        page: 1,
-        page_size: 5,
-        status: '',
-        source_type: '',
-        source_doc: '',
-        activity_presence: 'all',
-        activity_min: null,
-        activity_max: null,
-        query: '',
-        sort_field: 'created_at',
-        sort_direction: 'desc',
-      })
-    })
-  })
-
-  describe('SMILES validation', () => {
-    it('unwraps the one-item validation array returned by the API', async () => {
-      mockHttpPost.mockResolvedValue([{ valid: true, canonical_smiles: 'CCO', error: null }])
-
-      await expect(validateSmiles('CCO')).resolves.toEqual({
-        valid: true,
-        canonical_smiles: 'CCO',
-        issues: [],
-      })
-    })
-  })
-
-  describe('molAdminStoreStats', () => {
-    it('calls httpPost with correct params', async () => {
-      const stats = { total: 1, by_status: {} }
-      mockHttpPost.mockResolvedValue(stats)
-
-      const result = await molAdminStoreStats('/project')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/molecule/stats', {
-        library_root: '/project',
-      })
-      expect(result).toEqual(stats)
-    })
-  })
-
-  describe('molAdminCheckMarkush', () => {
-    it('calls httpPost with correct params', async () => {
-      const overlap = {
-        match_level: 'FullOverlap',
-        core_overlap_ratio: 1,
-        matched_core_atoms: 6,
-        total_core_atoms: 6,
-        r_group_results: [],
-        details: [],
-      }
-      mockHttpPost.mockResolvedValue(overlap)
-
-      const result = await molAdminCheckMarkush('/project', 'C*', 'CCO', 'ctx')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/chem/markush-check', {
-        esmiles: 'C*',
-        query: 'CCO',
-        ctx: 'ctx',
-      })
-      expect(result).toEqual(overlap)
+    await expect(molAdminSearchText('/project', 'ethanol')).resolves.toHaveLength(2)
+    expect(httpPost).toHaveBeenLastCalledWith('/api/v1/molecule/search', {
+      library_root: '/project',
+      query: 'ethanol',
     })
 
-    it('works without optional ctx', async () => {
-      mockHttpPost.mockResolvedValue({ match_level: 'NoOverlap' })
+    // --- read: single-record fetch reports "not found" as null, errors propagate
+    mockHttpPost.mockResolvedValue({ success: true, molecule: mockRecord })
+    await expect(molAdminGet('/project', 'mol-1')).resolves.toEqual(mockRecord)
+    mockHttpPost.mockResolvedValue({ success: false })
+    await expect(molAdminGet('/project', 'missing')).resolves.toBeNull()
+    mockHttpPost.mockRejectedValue(new Error('db locked'))
+    await expect(molAdminGet('/project', 'mol-1')).rejects.toThrow('db locked')
 
-      await molAdminCheckMarkush('/project', 'C*', 'CCO')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/chem/markush-check', {
-        esmiles: 'C*',
-        query: 'CCO',
-        ctx: undefined,
-      })
+    // --- SMILES validation unwraps the one-item array into {valid, canonical_smiles, issues}
+    mockHttpPost.mockResolvedValue([{ valid: true, canonical_smiles: 'CCO', error: null }])
+    await expect(validateSmiles('CCO')).resolves.toEqual({
+      valid: true,
+      canonical_smiles: 'CCO',
+      issues: [],
     })
-  })
 
-  describe('molAdminParseEsmiles', () => {
-    it('calls httpPost with correct params', async () => {
-      const pattern = {
-        core_smiles: 'CCO',
-        r_groups: [],
-        abstract_rings: [],
-        raw: 'CCO',
-      }
-      mockHttpPost.mockResolvedValue(pattern)
-
-      const result = await molAdminParseEsmiles('/project', 'CCO')
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/chem/markush-parse', {
-        input: 'CCO',
-      })
-      expect(result).toEqual(pattern)
+    // --- write: create sends the subset of record fields the route accepts
+    mockHttpPost.mockResolvedValue(undefined)
+    await molAdminAdd('/project', mockRecord)
+    expect(httpPost).toHaveBeenLastCalledWith('/api/v1/molecule/create', {
+      library_root: '/project',
+      mol_id: 'mol-1',
+      smiles: 'CCO',
+      esmiles: 'CCO',
+      name: 'ethanol',
+      source_type: 'patent',
     })
-  })
 
-  describe('molAdminAdd', () => {
-    it('calls httpPost with correct params', async () => {
-      mockHttpPost.mockResolvedValue(undefined)
-
-      await molAdminAdd('/project', mockRecord)
-
-      expect(httpPost).toHaveBeenCalledWith('/api/v1/molecule/create', {
-        library_root: '/project',
-        mol_id: 'mol-1',
-        smiles: 'CCO',
-        esmiles: 'CCO',
-        name: 'ethanol',
-        source_type: 'patent',
-      })
+    // --- write: full update PUTs the whole record, status update PUTs only status
+    mockHttpPut.mockResolvedValue({ success: true })
+    await expect(molAdminUpdate('/project', mockRecord)).resolves.toBe(true)
+    expect(httpPut).toHaveBeenCalledWith('/api/v1/molecule/mol-1', {
+      library_root: '/project',
+      ...mockRecord,
     })
-  })
 
-  describe('molAdminUpdate', () => {
-    it('calls httpPut with correct params', async () => {
-      mockHttpPut.mockResolvedValue({ success: true })
-
-      const result = await molAdminUpdate('/project', mockRecord)
-
-      expect(httpPut).toHaveBeenCalledWith('/api/v1/molecule/mol-1', {
-        library_root: '/project',
-        ...mockRecord,
-      })
-      expect(result).toBe(true)
+    await expect(molAdminUpdateStatus('/project', 'mol-1', 'confirmed')).resolves.toBe(true)
+    expect(httpPut).toHaveBeenLastCalledWith('/api/v1/molecule/mol-1', {
+      library_root: '/project',
+      status: 'confirmed',
     })
-  })
 
-  describe('molAdminUpdateStatus', () => {
-    it('calls httpPut with correct params', async () => {
-      mockHttpPut.mockResolvedValue({ success: true })
-
-      const result = await molAdminUpdateStatus('/project', 'mol-1', 'confirmed')
-
-      expect(httpPut).toHaveBeenCalledWith('/api/v1/molecule/mol-1', {
-        library_root: '/project',
-        status: 'confirmed',
-      })
-      expect(result).toBe(true)
-    })
-  })
-
-  describe('molAdminDelete', () => {
-    it('calls httpDelete with correct params', async () => {
-      mockHttpDelete.mockResolvedValue({ success: true })
-
-      const result = await molAdminDelete('/project', 'mol-1')
-
-      expect(httpDelete).toHaveBeenCalledWith('/api/v1/molecule/mol-1', {
-        library_root: '/project',
-      })
-      expect(result).toBe(true)
+    // --- write: delete sends the library root in the body
+    mockHttpDelete.mockResolvedValue({ success: true })
+    await expect(molAdminDelete('/project', 'mol-1')).resolves.toBe(true)
+    expect(httpDelete).toHaveBeenCalledWith('/api/v1/molecule/mol-1', {
+      library_root: '/project',
     })
   })
 })

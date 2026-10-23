@@ -1,3 +1,8 @@
+/**
+ * Covers `Workspace` (../Workspace): the document-query surface (loading /
+ * empty / processing / error), the document list with summary metrics and
+ * tab-opening, plus the destructive and analysis actions of the document menu.
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 
@@ -63,6 +68,12 @@ function mockDeleteDocuments() {
   } as unknown as ReturnType<typeof useDeleteDocuments>)
 }
 
+function mockIngestQueue(data: { id: string; doc_id: string; status: string }[]) {
+  vi.mocked(useIngestQueue).mockReturnValue({
+    data,
+  } as unknown as ReturnType<typeof useIngestQueue>)
+}
+
 function renderWorkspace() {
   const client = createQueryClient()
   return render(
@@ -89,9 +100,7 @@ describe('Workspace', () => {
     vi.mocked(useEnqueueTask).mockReturnValue({
       mutateAsync: vi.fn(),
     } as unknown as ReturnType<typeof useEnqueueTask>)
-    vi.mocked(useIngestQueue).mockReturnValue({
-      data: [],
-    } as unknown as ReturnType<typeof useIngestQueue>)
+    mockIngestQueue([])
     vi.mocked(usePatentAnalysis).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false,
@@ -99,114 +108,87 @@ describe('Workspace', () => {
     mockDeleteDocuments()
   })
 
-  it('shows loading state', () => {
-    renderWorkspace()
+  it('renders each document-query state: loading, empty, processing and error', () => {
+    // Loading.
+    const loading = renderWorkspace()
     expect(screen.getByTestId('workspace-skeleton')).toHaveAttribute('aria-busy', 'true')
-  })
+    loading.unmount()
 
-  it('shows empty state when no documents', () => {
+    // Empty library: prompt plus the import affordances.
     mockDocuments([])
-    renderWorkspace()
+    const empty = renderWorkspace()
     // i18n t() returns key "library.noDocuments" in test.
     expect(screen.getByText('library.noDocuments')).toBeInTheDocument()
-  })
+    expect(screen.getAllByText('library.importPdf').length).toBeGreaterThanOrEqual(2)
+    empty.unmount()
 
-  it('explains the empty workspace while documents are still processing', () => {
-    // Imported documents are hidden until their run ends, so the workspace
-    // must not look like the import was lost.
+    // Empty while imports are still running: imported documents are hidden
+    // until their run ends, so the workspace must not look like the import
+    // was lost, and the drop zone is replaced by the explanation.
     mockDocuments([])
-    vi.mocked(useIngestQueue).mockReturnValue({
-      data: [
-        { id: 't1', doc_id: 'doc1', status: 'processing' },
-        { id: 't2', doc_id: 'doc2', status: 'pending' },
-      ],
-    } as unknown as ReturnType<typeof useIngestQueue>)
-    renderWorkspace()
-
+    mockIngestQueue([
+      { id: 't1', doc_id: 'doc1', status: 'processing' },
+      { id: 't2', doc_id: 'doc2', status: 'pending' },
+    ])
+    const processing = renderWorkspace()
     expect(screen.getByText('library.processingNote:2')).toBeInTheDocument()
     expect(screen.getByText('library.processingOnlyHint')).toBeInTheDocument()
-    // The import drop zone is replaced by the explanation.
     expect(screen.queryByText('library.emptyImportHint')).not.toBeInTheDocument()
-  })
-
-  it('counts distinct processing documents, not queue stage rows', () => {
-    mockDocuments([])
-    vi.mocked(useIngestQueue).mockReturnValue({
-      data: [
-        { id: 't1', doc_id: 'doc1', status: 'processing' },
-        { id: 't2', doc_id: 'doc1', status: 'pending' },
-      ],
-    } as unknown as ReturnType<typeof useIngestQueue>)
-    renderWorkspace()
+    processing.unmount()
 
     // One document, two stage rows: the note must not read as two documents.
+    mockDocuments([])
+    mockIngestQueue([
+      { id: 't1', doc_id: 'doc1', status: 'processing' },
+      { id: 't2', doc_id: 'doc1', status: 'pending' },
+    ])
+    const distinct = renderWorkspace()
     expect(screen.getByText('library.processingNote:1')).toBeInTheDocument()
-  })
+    distinct.unmount()
 
-  it('renders document list', () => {
-    mockDocuments([
-      { doc_id: 'doc1', title: 'Test Paper 1', status: 'ready' },
-      { doc_id: 'doc2', title: 'Test Paper 2', status: 'pending' },
-    ])
-    renderWorkspace()
-    expect(screen.getByText('Test Paper 1')).toBeInTheDocument()
-    expect(screen.getByText('Test Paper 2')).toBeInTheDocument()
-  })
-
-  it('shows workspace summary metrics', () => {
-    mockDocuments([
-      { doc_id: 'doc1', title: 'Ready Paper', status: 'ready' },
-      { doc_id: 'doc2', title: 'Pending Paper', status: 'pending' },
-    ])
-    renderWorkspace()
-
-    expect(screen.getByLabelText('workspace.summary')).toBeInTheDocument()
-    expect(screen.getByText('workspace.documentCount')).toHaveTextContent('workspace.documentCount')
-    expect(screen.getByText('workspace.pageCount')).toHaveTextContent('workspace.pageCount')
-    expect(screen.getByLabelText('workspace.summary').children).toHaveLength(2)
-  })
-
-  it('shows error state when query fails', () => {
+    // Query failure: message plus retry affordance.
     vi.mocked(useDocuments).mockReturnValue({
       data: undefined,
       isLoading: false,
       isError: true,
       error: new Error('Network error'),
     } as unknown as ReturnType<typeof useDocuments>)
-    renderWorkspace()
+    const error = renderWorkspace()
     expect(screen.getByText('Failed to load documents. Please try again.')).toBeInTheDocument()
     expect(screen.getByText('Retry')).toBeInTheDocument()
+    error.unmount()
   })
 
-  it('shows import buttons in the empty state', () => {
-    mockDocuments([])
-    renderWorkspace()
-    const importBtns = screen.getAllByText('library.importPdf')
-    expect(importBtns.length).toBeGreaterThanOrEqual(2)
-  })
-
-  it('calls openTab when document card is clicked', () => {
+  it('lists documents with summary metrics and opens them by mouse and keyboard', () => {
     const openTab = vi.fn()
     mockAppContext({ openTab })
-    mockDocuments([{ doc_id: 'doc1', title: 'Clickable Doc', status: 'ready' }])
+    mockDocuments([
+      { doc_id: 'doc1', title: 'Test Paper 1', status: 'ready' },
+      { doc_id: 'doc2', title: 'Test Paper 2', status: 'pending' },
+    ])
     renderWorkspace()
-    screen.getByText('Clickable Doc').click()
+
+    // Document list.
+    expect(screen.getByText('Test Paper 1')).toBeInTheDocument()
+    expect(screen.getByText('Test Paper 2')).toBeInTheDocument()
+
+    // Summary metrics: two metric cells, labels rendered through i18n.
+    expect(screen.getByLabelText('workspace.summary')).toBeInTheDocument()
+    expect(screen.getByText('workspace.documentCount')).toHaveTextContent('workspace.documentCount')
+    expect(screen.getByText('workspace.pageCount')).toHaveTextContent('workspace.pageCount')
+    expect(screen.getByLabelText('workspace.summary').children).toHaveLength(2)
+
+    // Mouse activation opens a PDF tab.
+    screen.getByText('Test Paper 1').click()
     expect(openTab).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'pdf', title: 'Clickable Doc' }),
+      expect.objectContaining({ type: 'pdf', title: 'Test Paper 1' }),
     )
-  })
 
-  it('opens a document card with the keyboard', () => {
-    const openTab = vi.fn()
-    mockAppContext({ openTab })
-    mockDocuments([{ doc_id: 'doc1', title: 'Keyboard Doc', status: 'ready' }])
-    renderWorkspace()
-
-    const openButton = screen.getByRole('button', { name: 'Keyboard Doc' })
+    // Keyboard-reachable button activation opens the other document too.
+    const openButton = screen.getByRole('button', { name: 'Test Paper 2' })
     fireEvent.click(openButton)
-
     expect(openTab).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'pdf', title: 'Keyboard Doc' }),
+      expect.objectContaining({ type: 'pdf', title: 'Test Paper 2' }),
     )
   })
 
@@ -244,5 +226,4 @@ describe('Workspace', () => {
 
     expect(patentAnalysis).toHaveBeenCalledWith(['doc1'])
   })
-
 })

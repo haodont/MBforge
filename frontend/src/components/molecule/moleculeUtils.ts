@@ -54,3 +54,33 @@ export function estimateMW(smiles: string): number {
   }
   return Math.round(mw * 10) / 10
 }
+
+/**
+ * 化合物标识 → 匹配键（唯一实现）。
+ *
+ * 原先私有在 MoleculePatentFacts 里；分子详情面板需要同一推导，所以放这里而不是复制一份。
+ */
+export function compoundLabelKey(value: string): string {
+  const cleaned = value
+    .normalize('NFKC')
+    .trim()
+    .replace(/^(?:化合物|compound|cmpd|cpd|mol(?:ecule)?)[#_\-\s]*/i, '')
+    .replace(/\s+/g, '')
+  const match = /^(\d+[a-z]?)$/i.exec(cleaned)
+  return (match?.[1] ?? cleaned).toLowerCase()
+}
+
+/**
+ * 标签在事实工件里的键空间：`实施例7` / `Example 7` 属实施例空间（`@example:7`），
+ * 裸 `化合物7` 属化合物空间。与后端 designation_key 同一套规则。
+ */
+export function designationsFor(label: string): string[] {
+  const cleaned = label.normalize('NFKC').trim()
+  const example =
+    /^(?:example|实施例|実施例|制备例)\s*[#:：]?\s*([0-9]+[a-z]?(?:-[a-z0-9]+)?)$/i.exec(
+      cleaned,
+    )
+  if (example) return [`@example:${example[1].toLowerCase()}`]
+  const key = compoundLabelKey(cleaned)
+  return key ? [key] : []
+}

@@ -1,3 +1,5 @@
+// MoleculeTable usage test: row rendering + selection checkboxes + row click
+// forwarding, plus the status/activity indicators derived from the record.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import MoleculeTable from '../MoleculeTable'
@@ -43,47 +45,37 @@ describe('MoleculeTable', () => {
     vi.clearAllMocks()
   })
 
-  it('renders molecule name', () => {
-    render(<MoleculeTable {...defaultProps} />)
-    expect(screen.getByText('A')).toBeInTheDocument()
-  })
-
-  it('calls onRowClick when row clicked', () => {
+  it('renders molecule rows with selection and status/activity indicators', () => {
     const onRowClick = vi.fn()
-    render(<MoleculeTable {...defaultProps} onRowClick={onRowClick} />)
-    fireEvent.click(screen.getByText('A'))
-    expect(onRowClick).toHaveBeenCalledWith(mockMolecules[0])
-  })
+    const view = render(<MoleculeTable {...defaultProps} onRowClick={onRowClick} />)
 
-  it('renders row and header checkboxes', () => {
-    render(<MoleculeTable {...defaultProps} />)
+    expect(screen.getByText('A')).toBeInTheDocument()
     const checkboxes = screen.getAllByRole('checkbox')
     expect(checkboxes).toHaveLength(2)
     expect(screen.getByRole('checkbox', { name: 'Select A' })).toBeInTheDocument()
-  })
 
-  it('uses the translated label for auto-detected records', () => {
-    render(
+    fireEvent.click(screen.getByText('A'))
+    expect(onRowClick).toHaveBeenCalledWith(mockMolecules[0])
+
+    // Auto-detected records surface the translated status label with its hint.
+    view.rerender(
       <MoleculeTable
         {...defaultProps}
         molecules={[{ ...mockMolecules[0], status: 'pending' }]}
       />,
     )
-
     expect(screen.getByText('mol.status.pending')).toHaveAttribute(
       'title',
       '模型自动识别结果，尚未人工修正',
     )
-  })
 
-  it('marks a record with no activity as needing activity data', () => {
-    render(
+    // Records without activity are flagged as missing it.
+    view.rerender(
       <MoleculeTable
         {...defaultProps}
         molecules={[{ ...mockMolecules[0], activity: null }]}
       />,
     )
-
     expect(screen.getByText('mol.activityMissing')).toBeInTheDocument()
   })
 })

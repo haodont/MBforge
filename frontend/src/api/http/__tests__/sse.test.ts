@@ -1,3 +1,12 @@
+/**
+ * sse.ts — `connectSSE` / `fetchSSE` (covered functions at top).
+ *
+ * Protects the streaming contracts that are not plain forwarding: URL
+ * resolution through API_BASE, exponential reconnect with backoff reset +
+ * cancellation, one-shot completion on a `done` frame, frame reassembly
+ * across split chunks, and abort handling.
+ */
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { connectSSE, fetchSSE, type SSEEvent } from '../sse'
 
@@ -25,73 +34,68 @@ describe('connectSSE', () => {
     vi.useRealTimers()
   })
 
-  it('connects to a relative API path using API_BASE', () => {
+  it('resolves EventSource URLs through API_BASE without duplicating an existing prefix', () => {
     connectSSE('/ingest/events', vi.fn())
     expect(MockEventSource.instances).toHaveLength(1)
     expect(MockEventSource.instances[0].url).toBe('/api/v1/ingest/events')
-  })
 
-  it('does not duplicate an API prefix already present in the path', () => {
     connectSSE('/api/v1/events/stream?query=test', vi.fn())
-    expect(MockEventSource.instances).toHaveLength(1)
-    expect(MockEventSource.instances[0].url).toBe('/api/v1/events/stream?query=test')
+    expect(MockEventSource.instances).toHaveLength(2)
+    expect(MockEventSource.instances[1].url).toBe('/api/v1/events/stream?query=test')
   })
 
-  it('resets the reconnect backoff after a successful connection', () => {
+  it('reconnects with exponential backoff, resets it after a successful open, and cleanup stops the stream', () => {
     const onRetry = vi.fn()
     connectSSE('/ingest/events', vi.fn(), vi.fn(), { baseDelayMs: 100, maxRetries: 5, onRetry })
 
-    const es = MockEventSource.instances[0]
-    // First error schedules a 100ms retry (attempt 0 -> delay 100).
-    es.onerror?.(new Event('error'))
+    // A dropped connection backs off instead of reconnecting immediately.
+    const first = MockEventSource.instances[0]
+    first.onerror?.(new Event('error'))
     expect(MockEventSource.instances).toHaveLength(1)
-
-    // Advance to the reconnect; the second EventSource is created.
     vi.advanceTimersByTime(100)
     expect(MockEventSource.instances).toHaveLength(2)
 
-    // Simulate successful reconnect: backoff resets to 0.
-    MockEventSource.instances[1].onopen?.()
-
-    // The next error should again use the base delay, not 200ms.
-    MockEventSource.instances[1].onerror?.(new Event('error'))
+    // A successful reconnect resets the attempt counter to the base delay.
+    const second = MockEventSource.instances[1]
+    second.onopen?.()
+    second.onerror?.(new Event('error'))
     expect(onRetry).toHaveBeenLastCalledWith(1, 100)
-  })
 
-  it('cleanup closes the EventSource and cancels pending reconnect timers', () => {
+    // Flush the pending retry so later timer advances cannot reopen this stream.
+    vi.advanceTimersByTime(10_000)
+
+    // cleanup closes the live source and cancels pending reconnect timers.
     const cleanup = connectSSE('/ingest/events', vi.fn(), vi.fn(), { baseDelayMs: 1000 })
-    const es = MockEventSource.instances[0]
-    es.onerror?.(new Event('error'))
+    const live = MockEventSource.instances[MockEventSource.instances.length - 1]
     cleanup()
-    expect(es.close).toHaveBeenCalled()
+    expect(live.close).toHaveBeenCalled()
+    const opened = MockEventSource.instances.length
+    vi.advanceTimersByTime(10_000)
+    expect(MockEventSource.instances).toHaveLength(opened)
   })
 
-  it('passes parsed SSE events to the handler', () => {
+  it('parses JSON frames, closes on done, and never reconnects a finished stream', () => {
     const events: SSEEvent[] = []
-    connectSSE('/api/v1/events/stream', (e) => events.push(e))
-    const es = MockEventSource.instances[0]
-    es.onmessage?.(new MessageEvent('message', { data: '{"event":"delta","delta":"hi"}' }))
-    expect(events).toEqual([{ type: 'delta', data: { event: 'delta', delta: 'hi' } }])
-  })
-
-  it('closes without reconnecting after a done event', () => {
     const onRetry = vi.fn()
-    const onEvent = vi.fn()
-    connectSSE('/api/v1/events/stream?query=test', onEvent, vi.fn(), {
+    connectSSE('/api/v1/events/stream?query=test', e => events.push(e), vi.fn(), {
       baseDelayMs: 100,
       onRetry,
     })
     const es = MockEventSource.instances[0]
 
+    es.onmessage?.(new MessageEvent('message', { data: '{"event":"delta","delta":"hi"}' }))
+    expect(events).toEqual([{ type: 'delta', data: { event: 'delta', delta: 'hi' } }])
+
     es.onmessage?.(new MessageEvent('message', { data: '{"type":"done","total":3}' }))
+    expect(events).toEqual([
+      { type: 'delta', data: { event: 'delta', delta: 'hi' } },
+      { type: 'done', data: { type: 'done', total: 3 } },
+    ])
+    expect(es.close).toHaveBeenCalledTimes(1)
+
+    // A late error after `done` must not replay the whole stream.
     es.onerror?.(new Event('error'))
     vi.advanceTimersByTime(1000)
-
-    expect(onEvent).toHaveBeenCalledWith({
-      type: 'done',
-      data: { type: 'done', total: 3 },
-    })
-    expect(es.close).toHaveBeenCalled()
     expect(MockEventSource.instances).toHaveLength(1)
     expect(onRetry).not.toHaveBeenCalled()
   })
@@ -122,7 +126,7 @@ describe('fetchSSE', () => {
     globalThis.fetch = originalFetch
   })
 
-  it('collects SSE data lines and stops on done event', async () => {
+  it('collects SSE data lines, stops on done, and resolves the request URL from API_BASE', async () => {
     const encoder = new TextEncoder()
     const chunks = [
       encoder.encode('data: {"type":"chunk","delta":"a"}\n\n'),
@@ -138,17 +142,9 @@ describe('fetchSSE', () => {
       { type: 'chunk', delta: 'a' },
       { type: 'chunk', delta: 'b' },
     ])
-  })
-
-  it('uses API_BASE for the request URL', async () => {
-    const encoder = new TextEncoder()
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      body: { getReader: () => makeReader([encoder.encode('data: {}\n\n')]) },
-    })
 
     await fetchSSE('/tasks/stream', { foo: 'bar' })
-    expect(globalThis.fetch).toHaveBeenCalledWith(
+    expect(globalThis.fetch).toHaveBeenLastCalledWith(
       expect.stringMatching(/\/api\/v1\/tasks\/stream\?foo=bar$/),
       { signal: undefined },
     )
@@ -185,6 +181,4 @@ describe('fetchSSE', () => {
     await expect(promise).rejects.toThrow('aborted')
     expect(reader.cancel).toHaveBeenCalled()
   })
-
-
 })

@@ -122,9 +122,10 @@ describe('MoleculeLibrary', () => {
     })
   })
 
-  it('keeps results full width until a selected molecule is analyzed', () => {
+  it('drives the analysis panel and view mode from the library surface', () => {
     renderLibrary()
 
+    // Results stay full width until a selected molecule is analyzed.
     expect(screen.getByTestId('molecule-table')).toBeInTheDocument()
     expect(screen.queryByText('Selected 1 / 12')).not.toBeInTheDocument()
     expect(screen.queryByTestId('molecule-analysis-panel')).not.toBeInTheDocument()
@@ -134,13 +135,9 @@ describe('MoleculeLibrary', () => {
 
     fireEvent.click(screen.getByText('Close'))
     expect(screen.queryByTestId('molecule-analysis-panel')).not.toBeInTheDocument()
-  })
 
-  it('switches view mode from the page header', () => {
-    renderLibrary()
-
+    // The page header switches the results view mode.
     fireEvent.click(screen.getByRole('button', { name: 'Card view' }))
-
     expect(setViewMode).toHaveBeenCalledWith('card')
   })
 })

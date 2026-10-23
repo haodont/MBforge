@@ -13,12 +13,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { PageRenderInfo } from './usePdfNavigation'
+import type { PdfSidePaneTab } from '@/types'
 
-export type PdfSidePaneTab = 'evidence' | 'molecules'
+export type { PdfSidePaneTab } from '@/types'
 
 export interface UsePdfSidebarStateArgs {
   /** Current page render info; the source pane locks its width to it once known. */
   pageInfo: PageRenderInfo | null
+  initialSidePaneTab?: PdfSidePaneTab
+  sidePaneRequestId?: string
 }
 
 export interface UsePdfSidebarStateResult {
@@ -37,10 +40,12 @@ export interface UsePdfSidebarStateResult {
 
 export function usePdfSidebarState({
   pageInfo,
+  initialSidePaneTab,
+  sidePaneRequestId,
 }: UsePdfSidebarStateArgs): UsePdfSidebarStateResult {
   const [isResultPaneCollapsed, setIsResultPaneCollapsed] = useState(false)
   const [sourcePaneWidth, setSourcePaneWidth] = useState<number | null>(null)
-  const [sidePaneTab, setSidePaneTab] = useState<PdfSidePaneTab>('evidence')
+  const [sidePaneTab, setSidePaneTab] = useState<PdfSidePaneTab>(initialSidePaneTab ?? 'evidence')
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
   const [editingDetectionIndex, setEditingDetectionIndex] = useState<number | null>(null)
   const [continuousMode, setContinuousMode] = useState(false)
@@ -50,6 +55,13 @@ export function usePdfSidebarState({
     if (!pageInfo || !pageInfo.width || sourcePaneWidth === pageInfo.width) return
     setSourcePaneWidth(pageInfo.width)
   }, [pageInfo, sourcePaneWidth])
+
+  useEffect(() => {
+    if (sidePaneRequestId && initialSidePaneTab) {
+      setSidePaneTab(initialSidePaneTab)
+      setIsResultPaneCollapsed(false)
+    }
+  }, [initialSidePaneTab, sidePaneRequestId])
 
   const toggleContinuousMode = useCallback(() => setContinuousMode(mode => !mode), [])
 

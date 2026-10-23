@@ -1,15 +1,27 @@
+/**
+ * useMoleculeLibrary.ts — molecule library hook (covered module at top).
+ *
+ * Protects the state transitions that callers depend on: the mount fetch
+ * populating data/metadata, selection management (toggle / select-all /
+ * clear / select-all-results beyond the current page) and filter-driven
+ * refetches.
+ */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
 import { useMoleculeLibrary } from '../useMoleculeLibrary'
 import { createQueryClient } from '@/api/query/client'
+import type { MoleculeRecord } from '@/types'
 
 vi.mock('@/api/http/molecule_admin', () => ({
   molAdminListPage: vi.fn(),
 }))
 
 import { molAdminListPage } from '@/api/http/molecule_admin'
+
+const mockList = vi.mocked(molAdminListPage)
 
 const mockMolecule = {
   mol_id: 'm1',
@@ -27,6 +39,8 @@ const mockMolecule = {
   created_at: '2026-01-01',
 }
 
+const secondMolecule = { ...mockMolecule, mol_id: 'm2', name: 'B' }
+
 function renderLibrary(root: string) {
   const client = createQueryClient()
   return renderHook(() => useMoleculeLibrary(root), {
@@ -35,32 +49,35 @@ function renderLibrary(root: string) {
   })
 }
 
+function page(
+  items: MoleculeRecord[],
+  total: number,
+  matchingIds: string[],
+) {
+  return {
+    items,
+    total,
+    matching_ids: matchingIds,
+    source_types: ['text'],
+    source_docs: ['doc1'],
+  }
+}
+
 describe('useMoleculeLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('loads molecules on mount', async () => {
-    const molecules = [mockMolecule]
-    const mockList = molAdminListPage as ReturnType<typeof vi.fn>
-    mockList.mockResolvedValue({ items: molecules, total: 1, matching_ids: ['m1'], source_types: ['text'], source_docs: ['doc1'] })
+  it('loads molecules on mount and manages selection', async () => {
+    mockList.mockResolvedValue(page([mockMolecule, secondMolecule], 2, ['m1', 'm2']))
 
     const { result } = renderLibrary('/project')
 
     expect(result.current.loading).toBe(true)
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.molecules).toEqual(molecules)
-    expect(result.current.totalCount).toBe(1)
+    expect(result.current.molecules).toEqual([mockMolecule, secondMolecule])
+    expect(result.current.totalCount).toBe(2)
     expect(result.current.error).toBeNull()
-  })
-
-  it('toggles selection', async () => {
-    const molecules = [mockMolecule]
-    const mockList = molAdminListPage as ReturnType<typeof vi.fn>
-    mockList.mockResolvedValue({ items: molecules, total: 1, matching_ids: ['m1'], source_types: ['text'], source_docs: ['doc1'] })
-
-    const { result } = renderLibrary('/project')
-    await waitFor(() => expect(result.current.loading).toBe(false))
 
     act(() => {
       result.current.toggleSelection('m1')
@@ -71,18 +88,6 @@ describe('useMoleculeLibrary', () => {
       result.current.toggleSelection('m1')
     })
     expect(result.current.selectedIds.has('m1')).toBe(false)
-  })
-
-  it('clears selection', async () => {
-    const molecules = [
-      mockMolecule,
-      { ...mockMolecule, mol_id: 'm2', name: 'B' },
-    ]
-    const mockList = molAdminListPage as ReturnType<typeof vi.fn>
-    mockList.mockResolvedValue({ items: molecules, total: molecules.length, matching_ids: molecules.map((m) => m.mol_id), source_types: ['text'], source_docs: ['doc1'] })
-
-    const { result } = renderLibrary('/project')
-    await waitFor(() => expect(result.current.loading).toBe(false))
 
     act(() => {
       result.current.selectAll()
@@ -95,15 +100,11 @@ describe('useMoleculeLibrary', () => {
     expect(result.current.selectedIds.size).toBe(0)
   })
 
-  it('selects all matching results beyond the current page', async () => {
-    const molecules = [
-      mockMolecule,
-      { ...mockMolecule, mol_id: 'm2', name: 'B' },
-    ]
-    const mockList = molAdminListPage as ReturnType<typeof vi.fn>
+  it('selects all matching results beyond the current page and refetches on filter change', async () => {
     mockList
-      .mockResolvedValueOnce({ items: molecules, total: 2, matching_ids: ['m1', 'm2'], source_types: ['text'], source_docs: ['doc1'] })
-      .mockResolvedValueOnce({ items: [molecules[0]], total: 2, matching_ids: ['m1', 'm2'], source_types: ['text'], source_docs: ['doc1'] })
+      .mockResolvedValueOnce(page([mockMolecule, secondMolecule], 2, ['m1', 'm2']))
+      .mockResolvedValueOnce(page([mockMolecule], 2, ['m1', 'm2']))
+      .mockResolvedValueOnce(page([{ ...secondMolecule, activity: null }], 1, ['m2']))
 
     const { result } = renderLibrary('/project')
     await waitFor(() => expect(result.current.loading).toBe(false))
@@ -113,32 +114,19 @@ describe('useMoleculeLibrary', () => {
     })
     await waitFor(() => expect(result.current.molecules).toHaveLength(1))
 
+    // Selection follows the server-reported match set, not just the page.
     act(() => {
       result.current.selectAllResults?.()
     })
     expect(result.current.selectedIds).toEqual(new Set(['m1', 'm2']))
-  })
 
-  it('filters records that still need activity data', async () => {
-    const molecules = [
-      mockMolecule,
-      { ...mockMolecule, mol_id: 'm2', name: 'B', activity: null },
-    ]
-    const mockList = molAdminListPage as ReturnType<typeof vi.fn>
-    mockList
-      .mockResolvedValueOnce({ items: molecules, total: 2, matching_ids: ['m1', 'm2'], source_types: ['text'], source_docs: ['doc1'] })
-      .mockResolvedValueOnce({ items: [molecules[1]], total: 1, matching_ids: ['m2'], source_types: ['text'], source_docs: ['doc1'] })
-
-    const { result } = renderLibrary('/project')
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
+    // A filter change refetches and replaces the visible rows.
     act(() => {
       result.current.setFilters((previous) => ({
         ...previous,
         activityPresence: 'missing',
       }))
     })
-
     await waitFor(() => expect(result.current.totalCount).toBe(1))
     expect(result.current.molecules.map((item) => item.mol_id)).toEqual(['m2'])
   })

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('react-i18next', () => ({
@@ -57,50 +57,33 @@ const baseCandidate: MarkushCandidate = {
   updated_at: null,
 }
 
+const baseProps = {
+  title: 'Queue',
+  filterStatus: 'pending',
+  onFilterChange: () => {},
+  selectedCandidateId: null,
+  onSelect: () => {},
+}
+
 describe('MarkushQueue', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('renders the empty state when there are no candidates', () => {
-    render(
-      <MarkushQueue
-        title="Queue"
-        loading={false}
-        error={null}
-        items={[]}
-        total={0}
-        filterStatus="pending"
-        onFilterChange={() => {}}
-        selectedCandidateId={null}
-        onSelect={() => {}}
-      />,
-    )
+  it('renders the loading, error and empty states of the queue', () => {
+    render(<MarkushQueue {...baseProps} loading error={null} items={[]} total={0} />)
+    expect(screen.getByText('加载中…')).toBeInTheDocument()
+    cleanup()
+
+    render(<MarkushQueue {...baseProps} loading={false} error="boom" items={[]} total={0} />)
+    expect(screen.getByText('boom')).toBeInTheDocument()
+    cleanup()
+
+    render(<MarkushQueue {...baseProps} loading={false} error={null} items={[]} total={0} />)
     expect(screen.getByTestId('markush-empty')).toBeInTheDocument()
   })
 
-  it('renders one row per candidate and fires onSelect on click', () => {
-    const onSelect = vi.fn()
-    render(
-      <MarkushQueue
-        title="Queue"
-        loading={false}
-        error={null}
-        items={[baseCandidate]}
-        total={1}
-        filterStatus="pending"
-        onFilterChange={() => {}}
-        selectedCandidateId={null}
-        onSelect={onSelect}
-      />,
-    )
-    const rows = screen.getAllByTestId('markush-queue-row')
-    expect(rows).toHaveLength(1)
-    fireEvent.click(rows[0])
-    expect(onSelect).toHaveBeenCalledWith('c-1')
-  })
-
-  it('groups candidates by explicit formula context and keeps structure roles visible', () => {
+  it('renders one row per candidate, groups them by formula context and fires onSelect on click', () => {
     const formula = {
       ...baseCandidate,
       candidate_id: 'c-formula',
@@ -119,58 +102,27 @@ describe('MarkushQueue', () => {
       candidate_id: 'c-unlinked',
       doc_id: 'doc-2',
     }
+    const onSelect = vi.fn()
+
     render(
       <MarkushQueue
-        title="Queue"
+        {...baseProps}
         loading={false}
         error={null}
-        items={[formula, fragment, unlinked]}
-        total={3}
-        filterStatus="pending"
-        onFilterChange={() => {}}
-        selectedCandidateId={null}
-        onSelect={() => {}}
+        items={[baseCandidate, formula, fragment, unlinked]}
+        total={4}
+        onSelect={onSelect}
       />,
     )
 
+    const rows = screen.getAllByTestId('markush-queue-row')
+    expect(rows).toHaveLength(4)
     expect(screen.getByText('Formula I · doc-1')).toBeInTheDocument()
     expect(screen.getByText('未关联通式 · doc-2')).toBeInTheDocument()
     expect(screen.getByText('骨架')).toBeInTheDocument()
     expect(screen.getByText('片段')).toBeInTheDocument()
-    expect(screen.getAllByTestId('markush-queue-row')).toHaveLength(3)
-  })
 
-  it('shows loading copy when loading', () => {
-    render(
-      <MarkushQueue
-        title="Queue"
-        loading
-        error={null}
-        items={[]}
-        total={0}
-        filterStatus="pending"
-        onFilterChange={() => {}}
-        selectedCandidateId={null}
-        onSelect={() => {}}
-      />,
-    )
-    expect(screen.getByText('加载中…')).toBeInTheDocument()
-  })
-
-  it('surfaces errors verbatim', () => {
-    render(
-      <MarkushQueue
-        title="Queue"
-        loading={false}
-        error="boom"
-        items={[]}
-        total={0}
-        filterStatus="pending"
-        onFilterChange={() => {}}
-        selectedCandidateId={null}
-        onSelect={() => {}}
-      />,
-    )
-    expect(screen.getByText('boom')).toBeInTheDocument()
+    fireEvent.click(rows[0])
+    expect(onSelect).toHaveBeenCalledWith('c-1')
   })
 })

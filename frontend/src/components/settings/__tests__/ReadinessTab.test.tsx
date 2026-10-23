@@ -1,3 +1,6 @@
+// ReadinessTab usage tests: subsystem cards built from the readiness summary,
+// the degraded states an unconfigured library produces, and the re-check /
+// LLM-probe / demo-run actions.
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -111,65 +114,7 @@ describe('ReadinessTab', () => {
     expect(screen.getByText('download interrupted')).toBeTruthy()
   })
 
-  it('shows the General-tab hint when the library is not configured', async () => {
-    vi.mocked(readinessSummary).mockResolvedValue(
-      makeSummary({
-        library: { configured: false, path: null, exists: false, writable: false, error: null },
-      }),
-    )
-
-    renderTab('')
-
-    await waitFor(() => screen.getByText('settings.readiness.libraryHint'))
-    expect(screen.getAllByText('settings.readiness.state.attention').length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('re-fetches the summary when the re-check button is clicked', async () => {
-    vi.mocked(readinessSummary).mockResolvedValue(makeSummary())
-
-    renderTab('C:/lib')
-    await waitFor(() => screen.getByText('settings.readiness.library'))
-    expect(readinessSummary).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.refresh' }))
-    await waitFor(() => expect(readinessSummary).toHaveBeenCalledTimes(2))
-  })
-
-  it('shows latency after a successful LLM probe', async () => {
-    vi.mocked(readinessSummary).mockResolvedValue(makeSummary())
-    vi.mocked(readinessProbeLlm).mockResolvedValue({
-      ok: true,
-      latency_ms: 123,
-      error: null,
-      provider: 'openai',
-      model: 'gpt-4o',
-    })
-
-    renderTab('C:/lib')
-    await waitFor(() => screen.getByText('settings.readiness.library'))
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.probeLlm' }))
-    await waitFor(() => screen.getByText('settings.readiness.probeOk'))
-  })
-
-  it('shows the error after a failed LLM probe', async () => {
-    vi.mocked(readinessSummary).mockResolvedValue(makeSummary())
-    vi.mocked(readinessProbeLlm).mockResolvedValue({
-      ok: false,
-      latency_ms: null,
-      error: 'connection refused',
-      provider: 'openai',
-      model: 'gpt-4o',
-    })
-
-    renderTab('C:/lib')
-    await waitFor(() => screen.getByText('settings.readiness.library'))
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.probeLlm' }))
-    await waitFor(() => screen.getByText('settings.readiness.probeFailed'))
-  })
-
-  it('shows the demo-run error when the library is not configured', async () => {
+  it('reports an unconfigured library in the hint, attention lamp and demo-run error', async () => {
     vi.mocked(readinessSummary).mockResolvedValue(
       makeSummary({
         library: { configured: false, path: null, exists: false, writable: false, error: null },
@@ -183,10 +128,49 @@ describe('ReadinessTab', () => {
     })
 
     renderTab('')
-    await waitFor(() => screen.getByText('settings.readiness.library'))
+
+    await waitFor(() => screen.getByText('settings.readiness.libraryHint'))
+    expect(
+      screen.getAllByText('settings.readiness.state.attention').length,
+    ).toBeGreaterThanOrEqual(1)
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.demoRun' }))
     await waitFor(() => screen.getByText('settings.readiness.demoFailed'))
     expect(readinessDemoRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-checks the summary and reports the LLM probe outcome', async () => {
+    vi.mocked(readinessSummary).mockResolvedValue(makeSummary())
+    vi.mocked(readinessProbeLlm).mockResolvedValue({
+      ok: true,
+      latency_ms: 123,
+      error: null,
+      provider: 'openai',
+      model: 'gpt-4o',
+    })
+
+    const probed = renderTab('C:/lib')
+    await waitFor(() => screen.getByText('settings.readiness.library'))
+    expect(readinessSummary).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.refresh' }))
+    await waitFor(() => expect(readinessSummary).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.probeLlm' }))
+    await waitFor(() => screen.getByText('settings.readiness.probeOk'))
+    probed.unmount()
+
+    vi.mocked(readinessProbeLlm).mockResolvedValue({
+      ok: false,
+      latency_ms: null,
+      error: 'connection refused',
+      provider: 'openai',
+      model: 'gpt-4o',
+    })
+    renderTab('C:/lib')
+    await waitFor(() => screen.getByText('settings.readiness.library'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.probeLlm' }))
+    await waitFor(() => screen.getByText('settings.readiness.probeFailed'))
   })
 })

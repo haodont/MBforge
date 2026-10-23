@@ -1,9 +1,9 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo } from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PdfCanvas from '@/components/PdfCanvas'
 import ScrollColumn from '../ui/ScrollColumn'
 import { LoadingState } from '../ui/LoadingState'
-import type { DocumentEntry, ExtractionResult } from '@/types'
+import type { DocumentEntry, ExtractionResult, PdfSidePaneTab } from '@/types'
 import { usePdfViewer } from './pdf/usePdfViewer'
 import { usePdfSidebarState } from './pdf/usePdfSidebarState'
 import { usePdfDeepLink } from './pdf/usePdfDeepLink'
@@ -13,7 +13,10 @@ import PdfFloatingControls from './pdf/PdfFloatingControls'
 import PdfContinuousView from './pdf/PdfContinuousView'
 import LocationHighlight from './pdf/LocationHighlight'
 import MoleculeEditorDialog from '@/components/molecule/MoleculeEditorDialog'
-import { cropImageUrl } from '@/api/http/library'
+import { cropImageUrl, resolveDocumentEvidence } from '@/api/http/library'
+import type { DocumentEvidenceItem } from '@/api/http/library'
+import { InlineAlert } from '@/components/ui'
+import { getUserFacingError } from '@/utils/errors'
 import { useDocumentPatentFacts } from '@/api/query/hooks'
 
 /** Imperative handle exposed to a parent (DocumentViewer). */
@@ -33,11 +36,13 @@ interface Props {
   initialPage?: number
   initialBbox?: [number, number, number, number]
   initialEvidenceId?: string
+  initialSidePaneTab?: PdfSidePaneTab
+  sidePaneRequestId?: string
   viewerKey?: string
 }
 
 const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
-  { doc, libraryRoot, onClose: _onClose, onMoleculeClick, initialPage, initialBbox, initialEvidenceId, viewerKey },
+  { doc, libraryRoot, onClose: _onClose, onMoleculeClick, initialPage, initialBbox, initialEvidenceId, initialSidePaneTab, sidePaneRequestId, viewerKey },
   ref,
 ) {
   const { t } = useTranslation()
@@ -67,9 +72,24 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
     selectedEvidenceId, setSelectedEvidenceId,
     editingDetectionIndex, setEditingDetectionIndex,
     continuousMode, toggleContinuousMode,
-  } = usePdfSidebarState({ pageInfo })
+  } = usePdfSidebarState({ pageInfo, initialSidePaneTab, sidePaneRequestId })
   const { data: patentFactsResult } = useDocumentPatentFacts(doc.doc_id, libraryRoot)
   const patentFacts = patentFactsResult?.ok ? patentFactsResult.data : null
+  const [evidenceTarget, setEvidenceTarget] = useState<(DocumentEvidenceItem & { requestId: number }) | null>(null)
+  const [evidenceError, setEvidenceError] = useState('')
+  const evidenceRequest = useRef(0)
+  const openPatentEvidence = useCallback((evidenceId: string) => {
+    const request = ++evidenceRequest.current
+    setEvidenceError('')
+    void resolveDocumentEvidence(doc.doc_id, evidenceId, libraryRoot).then(evidence => {
+      if (request !== evidenceRequest.current) return
+      if (evidence.doc_id !== doc.doc_id || evidence.page < 1 || evidence.page > pdfPageCount) throw new Error(t('patentAnalysis.sourceUnavailable'))
+      setEvidenceTarget({ ...evidence, requestId: request })
+      setSidePaneTab('evidence')
+    }).catch((error: unknown) => {
+      if (request === evidenceRequest.current) setEvidenceError(getUserFacingError(error, t('patentAnalysis.sourceUnavailable')))
+    })
+  }, [doc.doc_id, libraryRoot, pdfPageCount, setSidePaneTab, t])
   const pdfCanvasStyle = useMemo(() => ({
     background: '#fff',
     boxShadow: 'var(--shadow-md)',
@@ -83,9 +103,10 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
   const visibleDetections = currentDetections
 
   usePdfDeepLink({
-    initialPage,
-    initialBbox,
-    initialEvidenceId,
+    initialPage: evidenceTarget?.page ?? initialPage,
+    initialBbox: evidenceTarget?.bbox ?? initialBbox,
+    initialEvidenceId: evidenceTarget?.evidence_id ?? initialEvidenceId,
+    navigationRequestId: evidenceTarget?.requestId,
     currentPage,
     setCurrentPage,
     pageInfo,
@@ -102,6 +123,7 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
 
   return (
     <div className="pdf-viewer">
+      {evidenceError && <InlineAlert tone="danger">{evidenceError}</InlineAlert>}
       <div
         className={`pdf-dual-pane${sourcePaneWidth !== null ? ' pdf-dual-pane--source-locked' : ''}${isResultPaneCollapsed ? ' pdf-dual-pane--result-collapsed' : ''}`}
         style={sourcePaneWidth !== null ? { '--pdf-source-width': `${sourcePaneWidth}px` } : undefined}
@@ -222,6 +244,8 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
           isDetecting={isDetecting}
           canDetect={canDetect}
           patentFacts={patentFacts}
+          patentFactsLoadError={patentFactsResult?.ok === false}
+          onOpenEvidence={openPatentEvidence}
           onDetect={() => handleDetectPage(true)}
           setSelectedDetection={setSelectedDetection}
           setEditingDetectionIndex={setEditingDetectionIndex}

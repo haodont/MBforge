@@ -5,7 +5,8 @@ import Button from '@/components/ui/Button'
 import SettingSection, { SettingGroup, SettingItem } from '@/components/ui/SettingSection'
 import { useLlmModels } from '@/api/query/hooks'
 import { getUserFacingError } from '@/utils/errors'
-import { NumberField, ProviderField, SelectField } from '../SettingRow'
+import { NumberField, ProviderField, SelectField, ToggleField } from '../SettingRow'
+import ApiKeyInput from '../ApiKeyInput'
 import { ModelSelector } from '../ModelComponents'
 import {
   LLM_MODELS,
@@ -152,6 +153,16 @@ export default function LlmConfigSection({
               {t('settings.fetchModelsSuccess', { total: fetchedModels.length })}
             </Caption>
           )}
+        </SettingItem>
+      </SettingGroup>
+
+      <SettingGroup title={t('settings.webSearch')}>
+        <ToggleField label={t('settings.webSearchEnabled')} description={t('settings.webSearchDesc')}
+          value={settings.web_search_enabled} dirty={dirtyFields.web_search_enabled}
+          onChange={v => { markDirty('web_search_enabled'); update('web_search_enabled', v) }} />
+        <SettingItem title={t('settings.tavilyApiKey')} description={t('settings.tavilyApiKeyDesc')} layout="stacked" dirty={dirtyFields.web_search_api_key}>
+          <ApiKeyInput value={settings.web_search_api_key} placeholder="tvly-..." ariaLabel={t('settings.tavilyApiKey')}
+            onChange={v => { markDirty('web_search_api_key'); update('web_search_api_key', v) }} />
         </SettingItem>
       </SettingGroup>
 

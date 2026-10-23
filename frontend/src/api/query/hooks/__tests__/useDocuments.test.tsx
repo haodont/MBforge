@@ -7,6 +7,7 @@ import { createQueryClient } from '../../client'
 import { queryKeys } from '../../keys'
 import type { DocumentInfo } from '../../../http/library'
 import { useDeleteDocuments } from '../useDocuments'
+import { useConfigureLibrary } from '../useLibraryStatus'
 
 const deleteDocumentsMock = vi.fn<(docIds: string[]) => Promise<{ success: boolean }>>()
 
@@ -14,6 +15,8 @@ vi.mock('../../../http/library', () => ({
   deleteDocuments: (docIds: string[]) => deleteDocumentsMock(docIds),
   importDocument: vi.fn(),
   listDocuments: vi.fn(),
+  getLibraryStatus: vi.fn(),
+  configureLibrary: vi.fn().mockResolvedValue({ success: true }),
 }))
 
 function makeDocument(docId: string): DocumentInfo {
@@ -33,12 +36,26 @@ function makeWrapper(client: ReturnType<typeof createQueryClient>) {
   }
 }
 
+it('discards old documents and late responses when the active library changes', async () => {
+  const client = createQueryClient()
+  const previous = { documents: [makeDocument('old-library-doc')] }
+  client.setQueryData(queryKeys.documents.list(), previous)
+  let finish!: (value: typeof previous) => void
+  const pending = new Promise<typeof previous>(resolve => { finish = resolve })
+  const request = client.query({ queryKey: queryKeys.documents.list(), queryFn: () => pending, staleTime: 0 }).catch(() => undefined)
+  const { result } = renderHook(() => useConfigureLibrary(), { wrapper: makeWrapper(client) })
+  await act(async () => { await result.current.mutateAsync('new-library') })
+  finish(previous)
+  await request
+  expect(client.getQueryData(queryKeys.documents.list())).toBeUndefined()
+})
+
 describe('useDeleteDocuments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('removes a deleted document from the cached list immediately', async () => {
+  it('removes deletions optimistically, invalidates the review cache, and rolls back on failure', async () => {
     const client = createQueryClient()
     client.setQueryData(queryKeys.documents.list(), {
       documents: [makeDocument('doc-1'), makeDocument('doc-2')],
@@ -65,23 +82,20 @@ describe('useDeleteDocuments', () => {
     await waitFor(() => {
       expect(client.getQueryState(queryKeys.review.all)?.isInvalidated).toBe(true)
     })
-  })
 
-  it('restores cached lists when deletion fails', async () => {
-    const client = createQueryClient()
-    const previous = { documents: [makeDocument('doc-1')] }
-    client.setQueryData(queryKeys.documents.list(), previous)
+    // A failed deletion must restore the snapshot it optimistically removed.
+    const failingClient = createQueryClient()
+    const snapshot = { documents: [makeDocument('doc-1')] }
+    failingClient.setQueryData(queryKeys.documents.list(), snapshot)
     deleteDocumentsMock.mockRejectedValue(new Error('delete failed'))
 
-    const { result } = renderHook(() => useDeleteDocuments(), {
-      wrapper: makeWrapper(client),
+    const failing = renderHook(() => useDeleteDocuments(), {
+      wrapper: makeWrapper(failingClient),
     })
-
     act(() => {
-      result.current.mutate(['doc-1'])
+      failing.result.current.mutate(['doc-1'])
     })
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-    expect(client.getQueryData(queryKeys.documents.list())).toEqual(previous)
+    await waitFor(() => expect(failing.result.current.isError).toBe(true))
+    expect(failingClient.getQueryData(queryKeys.documents.list())).toEqual(snapshot)
   })
 })

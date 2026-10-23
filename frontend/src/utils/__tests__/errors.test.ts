@@ -16,45 +16,33 @@ beforeAll(async () => {
 })
 
 describe('AppError', () => {
-  it('preserves the legacy 2-arg constructor (no opts)', () => {
-    const err = new AppError(ErrorCode.PdfParse, 'parse failed')
-    expect(err.errorCode).toBe(ErrorCode.PdfParse)
-    expect(err.message).toBe('parse failed')
-    expect(err.severity).toBeUndefined()
-    expect(err.category).toBeUndefined()
-    expect(err.context).toBeUndefined()
-  })
+  it('keeps the legacy constructor shapes and serializes every extended field', () => {
+    // 2-arg (no opts): nothing extended is set.
+    const legacy = new AppError(ErrorCode.PdfParse, 'parse failed')
+    expect(legacy.errorCode).toBe(ErrorCode.PdfParse)
+    expect(legacy.message).toBe('parse failed')
+    expect(legacy.severity).toBeUndefined()
+    expect(legacy.category).toBeUndefined()
+    expect(legacy.context).toBeUndefined()
 
-  it('accepts a positional context object as the 3rd arg (back-compat)', () => {
-    // Legacy callers pass a raw context bag like `{ file: 'a.pdf' }`. We
-    // accept this by treating the 3rd arg as context when severity/category/
-    // timestamp are absent.
-    const err = new AppError(ErrorCode.PdfParse, 'parse failed', { file: 'a.pdf' })
-    expect(err.context).toEqual({ file: 'a.pdf' })
-    expect(err.severity).toBeUndefined()
-  })
+    // Legacy callers pass a raw context bag as the 3rd arg; it must be treated
+    // as context when severity/category/timestamp are absent.
+    const withContext = new AppError(ErrorCode.PdfParse, 'parse failed', { file: 'a.pdf' })
+    expect(withContext.context).toEqual({ file: 'a.pdf' })
+    expect(withContext.severity).toBeUndefined()
 
-  it('carries severity/category/context when constructed with opts', () => {
-    const err = new AppError(ErrorCode.ApiError, 'boom', {
-      severity: Severity.Warning,
-      category: 'routers.library',
-      context: { doc_id: 'abc' },
-      timestamp: 1.7,
-    })
-    expect(err.severity).toBe(Severity.Warning)
-    expect(err.category).toBe('routers.library')
-    expect(err.context).toEqual({ doc_id: 'abc' })
-    expect(err.timestamp).toBe(1.7)
-  })
-
-  it('toJSON includes all extended fields', () => {
-    const err = new AppError(ErrorCode.ApiError, 'boom', {
+    const extended = new AppError(ErrorCode.ApiError, 'boom', {
       severity: Severity.Fatal,
       category: 'pipeline.runner',
       context: { step: 3 },
       timestamp: 2.0,
     })
-    expect(err.toJSON()).toEqual({
+    expect(extended.severity).toBe(Severity.Fatal)
+    expect(extended.category).toBe('pipeline.runner')
+    expect(extended.context).toEqual({ step: 3 })
+    expect(extended.timestamp).toBe(2.0)
+
+    expect(extended.toJSON()).toEqual({
       name: 'AppError',
       errorCode: ErrorCode.ApiError,
       message: 'boom',
@@ -67,52 +55,50 @@ describe('AppError', () => {
 })
 
 describe('toAppError', () => {
-  it('returns the same AppError when given one', () => {
+  it('passes AppErrors through and wraps plain/non-Error values with the fallback code', () => {
     const original = new AppError(ErrorCode.PdfParse, 'parse', { severity: Severity.Warning })
     expect(toAppError(original)).toBe(original)
-  })
 
-  it('wraps a plain Error using the fallback code', () => {
     const wrapped = toAppError(new Error('boom'), ErrorCode.Network)
     expect(wrapped.errorCode).toBe(ErrorCode.Network)
     expect(wrapped.message).toBe('boom')
-  })
 
-  it('wraps a non-Error value', () => {
-    expect(toAppError('raw').message).toBe('raw')
-    expect(toAppError(null).message).toBe('null')
-    expect(toAppError(undefined).message).toBe('undefined')
-  })
+    const cases: Array<[unknown, string]> = [
+      ['raw', 'raw'],
+      [null, 'null'],
+      [undefined, 'undefined'],
+    ]
+    for (const [value, expected] of cases) {
+      expect(toAppError(value).message, String(value)).toBe(expected)
+    }
 
-  it('attaches opts (severity) when wrapping a non-AppError', () => {
-    const wrapped = toAppError(new Error('boom'), ErrorCode.Network, {
-      severity: Severity.Fatal,
-    })
-    expect(wrapped.severity).toBe(Severity.Fatal)
+    expect(toAppError(new Error('boom'), ErrorCode.Network, { severity: Severity.Fatal }).severity)
+      .toBe(Severity.Fatal)
   })
 })
 
 describe('severityFromHttpStatus', () => {
-  it.each([
-    [400, Severity.Warning],
-    [403, Severity.Warning],
-    [404, Severity.Info],
-    [422, Severity.Warning],
-    [500, Severity.Error],
-    [503, Severity.Error],
-    [999, Severity.Error],
-  ])('maps status %i to %s', (status, expected) => {
-    expect(severityFromHttpStatus(status)).toBe(expected)
+  it('maps each status band to its severity', () => {
+    const cases: Array<[number, Severity]> = [
+      [400, Severity.Warning],
+      [403, Severity.Warning],
+      [404, Severity.Info],
+      [422, Severity.Warning],
+      [500, Severity.Error],
+      [503, Severity.Error],
+      [999, Severity.Error],
+    ]
+    for (const [status, expected] of cases) {
+      expect(severityFromHttpStatus(status), `status ${status}`).toBe(expected)
+    }
   })
 })
 
 describe('getErrorMessage', () => {
-  it('returns the user-facing string for known codes', () => {
+  it('returns the localized message for known codes and falls back to Unknown', () => {
     expect(getErrorMessage(ErrorCode.Network)).toMatch(/网络/)
     expect(getErrorMessage(ErrorCode.ModelNotAvailable)).toMatch(/模型/)
-  })
 
-  it('falls back to Unknown message for invalid codes', () => {
     // @ts-expect-error — exercise the runtime fallback path
     expect(getErrorMessage('NOT_A_CODE')).toBe(getErrorMessage(ErrorCode.Unknown))
   })

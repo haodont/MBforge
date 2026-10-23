@@ -8,7 +8,7 @@ export interface AgentLlmConfig {
 }
 
 export interface AgentChatEvent {
-  type: 'delta' | 'tool' | 'done' | 'error'
+  type: 'delta' | 'tool' | 'task' | 'artifact' | 'done' | 'error'
   data: Record<string, unknown>
 }
 
@@ -74,7 +74,10 @@ export async function streamAgentChat(
     body: JSON.stringify(input),
     signal,
   })
+  return readChatEvents(response, onEvent)
+}
 
+export async function readChatEvents(response: Response, onEvent: (event: AgentChatEvent) => void): Promise<{ sessionId?: string }> {
   if (!response.ok) {
     const body = await response.text()
     throw new Error(`Agent request failed (${response.status}): ${body.slice(0, 400)}`)

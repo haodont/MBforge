@@ -1,10 +1,16 @@
+/**
+ * Covers the `App` shell bootstrap (`@/App`): the library-status gate between
+ * the Welcome screen and the AppShell, and that switching resources keeps the
+ * research conversation mounted with its draft intact.
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createQueryClient } from '@/api/query/client'
 import { AppProvider } from '@/context/AppContext'
 import { ToastProvider } from '@/components/ui'
+import { getLibraryStatus } from '@/api/http/library'
 import App from '@/App'
 
 // Mock library status endpoint — default to "not configured".
@@ -51,15 +57,13 @@ describe('App', () => {
     vi.clearAllMocks()
   })
 
-  it('renders without crashing when no library is configured', async () => {
-    renderApp()
-    // LibraryBootstrap renders Welcome screen.
+  it('gates the shell on the backend library status', async () => {
+    // Unconfigured backend: LibraryBootstrap renders the Welcome screen.
+    const welcome = renderApp()
     expect(await screen.findByText('library.configureLibrary')).toBeInTheDocument()
-  })
+    welcome.unmount()
 
-  it('renders AppShell when backend reports a configured library', async () => {
     // The backend is the single source of truth for the library root.
-    const { getLibraryStatus } = await import('@/api/http/library')
     vi.mocked(getLibraryStatus).mockResolvedValueOnce({
       configured: true,
       root: '/tmp/test-lib',
@@ -67,8 +71,13 @@ describe('App', () => {
     })
 
     renderApp()
-    // AppShell renders sidebar with navigation items.
-    // The sidebar contains buttons that render i18n keys.
     expect(await screen.findByRole('button', { name: 'nav.workspace' })).toBeInTheDocument()
+    // Resource navigation must not unmount the research conversation/draft.
+    const input = await screen.findByRole('textbox', { name: 'research.placeholder' })
+    fireEvent.change(input, { target: { value: 'Investigate MRGPRX2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'nav.workspace' }))
+    await screen.findByRole('button', { name: 'research.returnChat' })
+    expect(input).toBeInTheDocument()
+    expect(input).toHaveValue('Investigate MRGPRX2')
   })
 })

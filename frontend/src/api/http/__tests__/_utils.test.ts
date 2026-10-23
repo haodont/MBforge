@@ -4,55 +4,37 @@ import { httpFetch, API_BASE, invokeWithError, registerGlobalErrorHandlers } fro
 import { AppError, ErrorCode, Severity } from '@/utils/errors'
 
 describe('invokeWithError', () => {
-  it('returns resolved value on success', async () => {
-    const result = await invokeWithError(() => Promise.resolve('ok'))
+  it('resolves the wrapped value and re-throws AppErrors unchanged', async () => {
+    await expect(invokeWithError(() => Promise.resolve('ok'))).resolves.toBe('ok')
 
-    expect(result).toBe('ok')
+    const original = new AppError(ErrorCode.PdfParse, 'parse failed')
+    await expect(invokeWithError(() => Promise.reject(original))).rejects.toBe(original)
   })
 
-  it('throws AppError on rejection with original message', async () => {
-    await expect(invokeWithError(() => Promise.reject(new Error('boom'))))
-      .rejects
-      .toBeInstanceOf(AppError)
-
-    await expect(invokeWithError(() => Promise.reject(new Error('boom'))))
-      .rejects
-      .toMatchObject({ message: 'boom' })
-  })
-
-  it('uses default Unknown fallback when no fallback provided', async () => {
+  it('wraps any rejection into an AppError with the fallback code and original message', async () => {
     await expect(invokeWithError(() => Promise.reject(new Error('boom'))))
       .rejects
       .toMatchObject({ errorCode: ErrorCode.Unknown, message: 'boom' })
-  })
 
-  it('wraps non-AppError with the fallback error code', async () => {
     await expect(invokeWithError(() => Promise.reject(new Error('boom')), ErrorCode.Network))
       .rejects
       .toMatchObject({ errorCode: ErrorCode.Network, message: 'boom' })
-  })
 
-  it('re-throws AppError without re-wrapping', async () => {
-    const original = new AppError(ErrorCode.PdfParse, 'parse failed')
-
-    await expect(invokeWithError(() => Promise.reject(original)))
-      .rejects
-      .toBe(original)
-  })
-
-  it.each([
-    { label: 'string', value: 'plain string error', expected: 'plain string error' },
-    { label: 'null', value: null, expected: 'null' },
-    { label: 'object', value: { reason: 'structured failure' }, expected: '[object Object]' },
-    { label: 'undefined', value: undefined, expected: 'undefined' },
-  ])('wraps $label rejection value as AppError', async ({ value, expected }) => {
-    await expect(invokeWithError(() => {
-      // Intentionally exercising the non-Error rejection handling path.
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw value
-    }, ErrorCode.ApiError))
-      .rejects
-      .toMatchObject({ errorCode: ErrorCode.ApiError, message: expected })
+    // Non-Error rejections must not crash the wrapper.
+    const cases: Array<{ value: unknown, expected: string }> = [
+      { value: 'plain string error', expected: 'plain string error' },
+      { value: null, expected: 'null' },
+      { value: { reason: 'structured failure' }, expected: '[object Object]' },
+      { value: undefined, expected: 'undefined' },
+    ]
+    for (const { value, expected } of cases) {
+      await expect(invokeWithError(() => {
+        // Intentionally exercising the non-Error rejection handling path.
+        throw value
+      }, ErrorCode.ApiError))
+        .rejects
+        .toMatchObject({ errorCode: ErrorCode.ApiError, message: expected })
+    }
   })
 })
 
@@ -77,9 +59,9 @@ describe('registerGlobalErrorHandlers', () => {
 })
 
 /**
- * httpFetch JSON error-body contract tests.
+ * httpFetch error contract tests.
  *
- * The frontend now extracts `error_code` / `severity` / `category` / `context`
+ * The frontend extracts `error_code` / `severity` / `category` / `context`
  * / `timestamp` from the server JSON body and propagates them into AppError.
  * Non-JSON bodies fall back to the legacy ErrorCode.Network.
  */
@@ -183,6 +165,13 @@ describe('httpFetch (JSON error body)', () => {
 
 describe('httpFetch request construction', () => {
   const originalFetch = globalThis.fetch
+  /** The ``RequestInit`` handed to the most recent ``fetch`` call. */
+  const lastInit = (): RequestInit => {
+    const calls = vi.mocked(globalThis.fetch).mock.calls
+    const init = calls[calls.length - 1]?.[1]
+    if (!init) throw new Error('fetch was not called')
+    return init
+  }
   beforeEach(() => {
     vi.restoreAllMocks()
     globalThis.fetch = vi.fn(() =>
@@ -193,62 +182,55 @@ describe('httpFetch request construction', () => {
     globalThis.fetch = originalFetch
   })
 
-  it('defaults API_BASE to /api/v1', () => {
+  it('builds the URL, headers and signal contract for every request shape', async () => {
     expect(API_BASE).toBe('/api/v1')
-  })
 
-  it('does not duplicate API_BASE when callers pass a full API path', async () => {
+    // A caller-supplied API path is not double-prefixed.
     await httpFetch('/api/v1/sidecar/status', { method: 'GET' })
-    expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/sidecar/status', expect.any(Object))
-  })
+    expect(globalThis.fetch).toHaveBeenLastCalledWith('/api/v1/sidecar/status', expect.any(Object))
 
-  it('uses VITE_API_BASE from import.meta.env when present', async () => {
-    const previous = import.meta.env.VITE_API_BASE
-    import.meta.env.VITE_API_BASE = '/custom/api'
-    // Force a fresh module evaluation so API_BASE is recomputed.
-    vi.resetModules()
-    const { API_BASE: dynamicBase, httpFetch: dynamicFetch } = await import('../_utils')
-    globalThis.fetch = vi.fn(() => Promise.resolve(new Response('{}', { status: 200 })))
-    await dynamicFetch('/ping')
-    expect(dynamicBase).toBe('/custom/api')
-    expect(globalThis.fetch).toHaveBeenCalledWith('/custom/api/ping', expect.any(Object))
-    import.meta.env.VITE_API_BASE = previous
-  })
-
-  it('does not set Content-Type for requests without a body', async () => {
+    // Bodiless request: no Content-Type is injected.
     await httpFetch('/api/v1/test', { method: 'GET' })
-    const init = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit
+    let init = lastInit()
     expect(new Headers(init.headers).get('Content-Type')).toBeNull()
-  })
 
-  it('sets Content-Type to application/json for string bodies', async () => {
+    // String body: JSON content type is injected.
     await httpFetch('/api/v1/test', { method: 'POST', body: '{"foo":1}' })
-    const init = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit
+    init = lastInit()
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
-  })
 
-  it('preserves an explicitly provided Content-Type header', async () => {
+    // An explicit Content-Type always wins.
     await httpFetch('/api/v1/test', {
       method: 'POST',
       body: '{"foo":1}',
       headers: { 'Content-Type': 'application/vnd.mbforge+json' },
     })
-    const init = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit
+    init = lastInit()
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/vnd.mbforge+json')
-  })
 
-  it('does not set Content-Type for FormData bodies', async () => {
+    // FormData must keep the browser-generated multipart boundary.
     const fd = new FormData()
     await httpFetch('/api/v1/upload', { method: 'POST', body: fd })
-    const init = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit
+    init = lastInit()
     expect(new Headers(init.headers).get('Content-Type')).toBeNull()
-  })
 
-  it('passes an AbortSignal to fetch', async () => {
+    // The abort signal is forwarded untouched.
     const controller = new AbortController()
     await httpFetch('/api/v1/test', { signal: controller.signal })
-    const init = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit
+    init = lastInit()
     expect(init.signal).toBe(controller.signal)
+
+    // VITE_API_BASE replaces the default base for freshly evaluated modules.
+    // Static import cannot work here: the module reads the env at evaluation
+    // time, so the boundary must be re-evaluated under a stubbed env value.
+    const previous = import.meta.env.VITE_API_BASE
+    import.meta.env.VITE_API_BASE = '/custom/api'
+    vi.resetModules()
+    const { API_BASE: dynamicBase, httpFetch: dynamicFetch } = await import('../_utils')
+    await dynamicFetch('/ping')
+    expect(dynamicBase).toBe('/custom/api')
+    expect(globalThis.fetch).toHaveBeenLastCalledWith('/custom/api/ping', expect.any(Object))
+    import.meta.env.VITE_API_BASE = previous
   })
 })
 

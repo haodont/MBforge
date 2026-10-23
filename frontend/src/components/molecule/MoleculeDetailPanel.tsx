@@ -8,6 +8,8 @@ import DetectionHeader from './detail/DetectionHeader'
 import MoleculeRecordForm from './detail/MoleculeRecordForm'
 import ReadOnlyMeta from './detail/ReadOnlyMeta'
 import RelatedTextPanel from './detail/RelatedTextPanel'
+import DocumentFactsSection from './detail/DocumentFactsSection'
+import { designationsFor } from './moleculeUtils'
 import DescGrid from './detail/DescGrid'
 import FormField from './detail/FormField'
 import TextArea from '@/components/ui/TextArea'
@@ -213,6 +215,15 @@ export default function MoleculeDetailPanel(props: MoleculeDetailPanelProps) {
 
         {isMoleculeMode && relatedTexts.length > 0 && (
           <RelatedTextPanel texts={relatedTexts} />
+        )}
+
+        {isMoleculeMode && molecule && (
+          <DocumentFactsSection
+            docId={molecule.evidence?.[0]?.doc_id ?? null}
+            labelKeys={designationsFor(molecule.name)}
+            libraryRoot={libraryRoot}
+            onOpenPdf={props.onOpenPdf}
+          />
         )}
 
         {/* Detection 模式下的文献上下文 */}

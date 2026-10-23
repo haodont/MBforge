@@ -1,172 +1,46 @@
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
-import {
-  FlaskIcon,
-  LayoutIcon,
-  SettingsIcon,
-  GlobeIcon,
-  FileTextIcon,
-  QueueIcon,
-  CheckIcon,
-  ChatIcon,
-  TargetIcon,
-} from './icons'
-import Tooltip from '@/components/ui/Tooltip'
+import { FlaskIcon, SettingsIcon, GlobeIcon, FileTextIcon, QueueIcon, CheckIcon, ChatIcon, TargetIcon, SparklesIcon } from './icons'
+import { Button } from '@/components/ui'
 import { useAppContext } from '@/context/AppContext'
 
-interface Props {
-  current: string
-}
-
-interface NavItem {
-  id: string
-  path: string
-  icon: React.FC<{ size?: number }>
-  labelKey: string
-  preload?: () => Promise<unknown>
-}
-
-const PRIMARY_ITEMS: NavItem[] = [
-  { id: 'molecules', path: '/molecules', icon: FlaskIcon, labelKey: 'nav.molecules' },
+const resources = [
+  { id: 'workspace', path: '/workspace', icon: FileTextIcon },
+  { id: 'molecules', path: '/molecules', icon: FlaskIcon },
+  { id: 'queue', path: '/queue', icon: QueueIcon },
+  { id: 'review', path: '/review', icon: CheckIcon },
+  { id: 'docking', path: '/docking', icon: TargetIcon },
+  { id: 'knowledge', path: '/notes', icon: GlobeIcon },
 ]
 
-const SECONDARY_ITEMS: NavItem[] = [
-  { id: 'agent', path: '/agent', icon: ChatIcon, labelKey: 'nav.agent' },
-  {
-    id: 'docking',
-    path: '/docking',
-    icon: TargetIcon,
-    labelKey: 'nav.docking',
-    preload: () => import('@/components/docking/DockingPage'),
-  },
-  {
-    id: 'queue',
-    path: '/queue',
-    icon: QueueIcon,
-    labelKey: 'nav.queue',
-    // Prefetch the lazy route chunk on hover so the first open is instant.
-    preload: () => import('@/components/project/ProcessingQueue'),
-  },
-  { id: 'knowledge', path: '/notes', icon: GlobeIcon, labelKey: 'nav.knowledge' },
-  { id: 'review', path: '/review', icon: CheckIcon, labelKey: 'nav.review' },
-]
-
-const FOOTER_ITEMS: NavItem[] = [
-  { id: 'docs', path: '/docs', icon: FileTextIcon, labelKey: 'nav.docs' },
-]
-
-interface NavButtonProps {
-  active: boolean
-  onClick: () => void
-  label: string
-  icon: React.FC<{ size?: number }>
-  onHover?: () => void
-}
-
-function NavButton({ active, onClick, label, icon: Icon, onHover }: NavButtonProps) {
-  return (
-    <Tooltip text={label}>
-      <motion.button
-        className={`app-sidebar__nav-button${active ? ' is-active' : ''}`}
-        onClick={onClick}
-        onMouseEnter={onHover}
-        whileTap={{ scale: 0.96 }}
-        aria-current={active ? 'page' : undefined}
-      >
-        <Icon size={20} />
-      </motion.button>
-    </Tooltip>
-  )
-}
-
-export default function Sidebar({ current }: Props) {
+export default function Sidebar({ current }: { current: string }) {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const {
-    setActiveTabId,
-  } = useAppContext()
-
-  const handleClick = (item: NavItem) => {
-    setActiveTabId(null)
-    void navigate(item.path)
-  }
-
-  const libraryLabel = t('nav.workspace')
-  const openLibrary = () => {
-    setActiveTabId(null)
-    void navigate('/workspace')
-  }
-
+  const { setActiveTabId, libraryRoot } = useAppContext()
+  const go = (path: string) => { setActiveTabId(null); void navigate(path) }
+  const libraryName = libraryRoot.split(/[\\/]/).filter(Boolean).pop() || t('research.library')
   return (
-    <aside
-      className="app-sidebar"
-    >
-      <Tooltip text={libraryLabel}>
-        <motion.button
-          type="button"
-          onClick={openLibrary}
-          aria-label={libraryLabel}
-          aria-current={current === 'workspace' ? 'page' : undefined}
-          whileTap={{ scale: 0.96 }}
-          className="app-sidebar__brand"
-        >
-          <LayoutIcon size={18} />
-        </motion.button>
-      </Tooltip>
-
-      <nav className="app-sidebar__nav">
-        {PRIMARY_ITEMS.map(item => (
-          <NavButton
-            key={item.id}
-            active={current === item.id}
-            onClick={() => handleClick(item)}
-            label={t(item.labelKey)}
-            icon={item.icon}
-          />
-        ))}
+    <aside className="app-sidebar">
+      <Button variant="ghost" className="app-sidebar__brand" onClick={() => go('/agent')} ariaLabel={t('research.workspace')} icon={<SparklesIcon size={24} />}>
+        <span><strong>MBForge</strong><small>{t('research.brand')}</small></span>
+      </Button>
+      <nav className="app-sidebar__nav" aria-label={t('research.workspace')}>
+        <Button variant="ghost" className={'app-sidebar__nav-button' + (current === 'agent' ? ' is-active' : '')}
+          ariaLabel={t('nav.agent')} ariaPressed={current === 'agent'} onClick={() => go('/agent')} icon={<ChatIcon size={18} />}><span>{t('nav.agent')}</span></Button>
       </nav>
-
-      <div className="app-sidebar__divider" />
-
-      <nav className="app-sidebar__nav">
-        {SECONDARY_ITEMS.map(item => (
-          <NavButton
-            key={item.id}
-            active={current === item.id}
-            onClick={() => handleClick(item)}
-            label={t(item.labelKey)}
-            icon={item.icon}
-            onHover={item.preload ? () => { void item.preload?.() } : undefined}
-          />
-        ))}
+      <span className="app-sidebar__section-label">{t('research.resources')}</span>
+      <nav className="app-sidebar__nav" aria-label={t('research.resources')}>
+        {resources.map(({ id, path, icon: Icon }) => <Button key={id} variant="ghost"
+          className={'app-sidebar__nav-button' + (current === id ? ' is-active' : '')}
+          ariaLabel={t('nav.' + id)} ariaPressed={current === id} title={t('nav.' + id)}
+          onClick={() => go(path)} icon={<Icon size={18} />}><span>{t('nav.' + id)}</span></Button>)}
       </nav>
-
       <div className="app-sidebar__spacer" />
-
-      <nav className="app-sidebar__nav app-sidebar__nav--footer">
-        {FOOTER_ITEMS.map(item => (
-          <NavButton
-            key={item.id}
-            active={current === item.id}
-            onClick={() => handleClick(item)}
-            label={t(item.labelKey)}
-            icon={item.icon}
-          />
-        ))}
+      <div className="app-sidebar__library"><span className="research-model-dot is-configured" /><span title={libraryRoot}>{libraryName}</span></div>
+      <nav className="app-sidebar__nav" aria-label={t('research.support')}>
+        <Button variant="ghost" className={'app-sidebar__nav-button' + (current === 'docs' ? ' is-active' : '')} ariaLabel={t('nav.docs')} ariaPressed={current === 'docs'} onClick={() => go('/docs')} icon={<FileTextIcon size={18} />}><span>{t('nav.docs')}</span></Button>
+        <Button variant="ghost" className={'app-sidebar__nav-button' + (current === 'settings' ? ' is-active' : '')} ariaLabel={t('nav.settings')} ariaPressed={current === 'settings'} onClick={() => go('/settings')} icon={<SettingsIcon size={18} />}><span>{t('nav.settings')}</span></Button>
       </nav>
-
-      <div className="app-sidebar__settings">
-        <NavButton
-          active={current === 'settings'}
-          onClick={() => {
-            setActiveTabId(null)
-            void navigate('/settings')
-          }}
-          label={t('nav.settings')}
-          icon={SettingsIcon}
-        />
-      </div>
     </aside>
   )
 }

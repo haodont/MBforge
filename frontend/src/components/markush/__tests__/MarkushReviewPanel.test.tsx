@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('react-i18next', () => ({
@@ -55,40 +55,32 @@ const candidate: MarkushCandidateDetail = {
   decisions: [],
 }
 
+const baseProps = {
+  loading: false,
+  saving: false,
+  libraryRoot: '/tmp/lib',
+  onDecide: () => {},
+  onUpdate: () => {},
+}
+
 describe('MarkushReviewPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('renders the empty placeholder when no candidate is selected', () => {
-    render(
-      <MarkushReviewPanel
-        candidate={null}
-        loading={false}
-        saving={false}
-        libraryRoot="/tmp/lib"
-        onDecide={() => {}}
-        onUpdate={() => {}}
-      />,
-    )
+  it('shows the empty placeholder and gates the confirm and reject decisions on the review status', () => {
+    render(<MarkushReviewPanel {...baseProps} candidate={null} />)
     expect(screen.getByText('选择候选以进行审查。')).toBeInTheDocument()
-  })
+    cleanup()
 
-  it('disables confirm buttons after the candidate is rejected', () => {
     const onDecide = vi.fn()
-    const rejected: MarkushCandidateDetail = {
-      ...candidate,
-      review_status: 'rejected',
-      review_version: 2,
-    }
+
+    // A non-pending candidate cannot be confirmed again.
     render(
       <MarkushReviewPanel
-        candidate={rejected}
-        loading={false}
-        saving={false}
-        libraryRoot="/tmp/lib"
+        {...baseProps}
+        candidate={{ ...candidate, review_status: 'rejected', review_version: 2 }}
         onDecide={onDecide}
-        onUpdate={() => {}}
       />,
     )
     const confirmButtons = screen.getAllByRole('button')
@@ -98,68 +90,44 @@ describe('MarkushReviewPanel', () => {
         expect(button).toBeDisabled()
       }
     }
-  })
+    cleanup()
 
-  it('fires onDecide when the reject button is clicked', () => {
-    const onDecide = vi.fn()
-    render(
-      <MarkushReviewPanel
-        candidate={candidate}
-        loading={false}
-        saving={false}
-        libraryRoot="/tmp/lib"
-        onDecide={onDecide}
-        onUpdate={() => {}}
-      />,
-    )
-    const buttons = screen.getAllByRole('button')
-    const rejectButton = buttons.find(
-      (btn) => btn.textContent && btn.textContent.includes('驳回'),
-    )
+    // A pending candidate can still be rejected.
+    render(<MarkushReviewPanel {...baseProps} candidate={candidate} onDecide={onDecide} />)
+    const rejectButton = screen
+      .getAllByRole('button')
+      .find((btn) => btn.textContent && btn.textContent.includes('驳回'))
     expect(rejectButton).toBeDefined()
     fireEvent.click(rejectButton as HTMLElement)
     expect(onDecide).toHaveBeenCalledWith('reject')
   })
 
-  it('shows server eligibility reasons and does not render enumeration when blocked', () => {
-    const blocked: MarkushCandidateDetail = {
-      ...candidate,
-      fragment_id: 'frag-1',
-      enumeration_eligible: false,
-      enumeration_block_reasons: ['candidate is not a confirmed scaffold'],
-    }
+  it('shows the server enumeration block reasons and only mounts enumeration when eligible', () => {
     render(
       <MarkushReviewPanel
-        candidate={blocked}
-        loading={false}
-        saving={false}
-        libraryRoot="/tmp/lib"
-        onDecide={() => {}}
-        onUpdate={() => {}}
+        {...baseProps}
+        candidate={{
+          ...candidate,
+          fragment_id: 'frag-1',
+          enumeration_eligible: false,
+          enumeration_block_reasons: ['candidate is not a confirmed scaffold'],
+        }}
       />,
     )
     expect(screen.getByText('枚举暂不可用')).toBeInTheDocument()
-    expect(
-      screen.getByText('· candidate is not a confirmed scaffold'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('· candidate is not a confirmed scaffold')).toBeInTheDocument()
     expect(screen.queryByTestId('markush-enumeration-panel')).not.toBeInTheDocument()
-  })
+    cleanup()
 
-  it('does not show the blocked hint when enumeration is eligible', () => {
-    const eligible: MarkushCandidateDetail = {
-      ...candidate,
-      scaffold_id: 'sc-1',
-      enumeration_eligible: true,
-      enumeration_block_reasons: [],
-    }
     render(
       <MarkushReviewPanel
-        candidate={eligible}
-        loading={false}
-        saving={false}
-        libraryRoot="/tmp/lib"
-        onDecide={() => {}}
-        onUpdate={() => {}}
+        {...baseProps}
+        candidate={{
+          ...candidate,
+          scaffold_id: 'sc-1',
+          enumeration_eligible: true,
+          enumeration_block_reasons: [],
+        }}
       />,
     )
     expect(screen.queryByText('枚举暂不可用')).not.toBeInTheDocument()

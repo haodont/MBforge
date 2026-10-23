@@ -35,27 +35,8 @@ describe('DocumentViewer', () => {
     vi.clearAllMocks()
   })
 
-  it('mounts the PDF workbench that owns the comparison side panel', () => {
-    render(<DocumentViewer doc={mockDoc} libraryRoot="/tmp/lib" onClose={vi.fn()} />, { wrapper })
-    expect(screen.getByTestId('pdf-viewer')).toBeInTheDocument()
-    expect(screen.getByText('PDF').closest('.document-viewer-pane')).toBeInTheDocument()
-    expect(pdfViewerProps.current).toMatchObject({
-      doc: mockDoc,
-      libraryRoot: '/tmp/lib',
-    })
-    expect(pdfViewerProps.current?.onMoleculeClick).toEqual(expect.any(Function))
-  })
-
-  it('keeps the page-navigation callback stable for the comparison pane', () => {
-    const view = render(<DocumentViewer doc={mockDoc} libraryRoot="/tmp/lib" onClose={vi.fn()} />, { wrapper })
-    const firstCallback = pdfViewerProps.current?.onMoleculeClick
-    expect(firstCallback).toEqual(expect.any(Function))
-    view.rerender(<DocumentViewer doc={mockDoc} libraryRoot="/tmp/lib" onClose={vi.fn()} />)
-    expect(pdfViewerProps.current?.onMoleculeClick).toEqual(firstCallback)
-  })
-
-  it('passes PDF deep-link page and bbox to the viewer', () => {
-    render(
+  it('mounts the PDF workbench that owns the comparison side panel, forwards the deep-link target and keeps the navigation callback stable', () => {
+    const view = render(
       <DocumentViewer
         doc={mockDoc}
         libraryRoot="/tmp/lib"
@@ -66,9 +47,19 @@ describe('DocumentViewer', () => {
       { wrapper },
     )
 
+    expect(screen.getByTestId('pdf-viewer')).toBeInTheDocument()
+    expect(screen.getByText('PDF').closest('.document-viewer-pane')).toBeInTheDocument()
     expect(pdfViewerProps.current).toMatchObject({
+      doc: mockDoc,
+      libraryRoot: '/tmp/lib',
       initialPage: 4,
       initialBbox: [10, 20, 40, 60],
     })
+    expect(pdfViewerProps.current?.onMoleculeClick).toEqual(expect.any(Function))
+
+    // Re-rendering the pane must not churn the page-navigation callback.
+    const firstCallback = pdfViewerProps.current?.onMoleculeClick
+    view.rerender(<DocumentViewer doc={mockDoc} libraryRoot="/tmp/lib" onClose={vi.fn()} />)
+    expect(pdfViewerProps.current?.onMoleculeClick).toEqual(firstCallback)
   })
 })

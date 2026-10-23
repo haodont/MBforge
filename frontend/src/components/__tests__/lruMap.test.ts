@@ -1,51 +1,45 @@
+/**
+ * Covers `createLruMap` (../lruMap): capacity-bounded insertion order,
+ * MRU promotion on read and the eviction callback contract.
+ */
 import { describe, expect, it, vi } from 'vitest'
 import { createLruMap } from '../lruMap'
 
 describe('createLruMap', () => {
-  it('evicts least recently used key once capacity is exceeded', () => {
-    const map = createLruMap<string, number>(3)
+  it('evicts the least recently used entry once capacity is exceeded', () => {
+    // Plain insert overflow: the oldest key goes.
+    const simple = createLruMap<string, number>(3)
+    simple.set('a', 1)
+    simple.set('b', 2)
+    simple.set('c', 3)
+    simple.set('d', 4)
+    expect(simple.has('a')).toBe(false)
+    expect(simple.keys()).toEqual(['b', 'c', 'd'])
 
-    map.set('a', 1)
-    map.set('b', 2)
-    map.set('c', 3)
-    map.set('d', 4)
+    // A read promotes the touched key back to most-recent, so the untouched
+    // key becomes the eviction victim.
+    const touched = createLruMap<string, number>(3)
+    touched.set('a', 1)
+    touched.set('b', 2)
+    touched.set('c', 3)
+    touched.get('a')
+    touched.set('d', 4)
+    expect(touched.keys()).toEqual(['c', 'a', 'd'])
+    expect(touched.has('b')).toBe(false)
 
-    expect(map.has('a')).toBe(false)
-    expect(map.keys()).toEqual(['b', 'c', 'd'])
-  })
+    // Re-setting an existing key must not evict the just-set key.
+    const reset = createLruMap<string, number>(2)
+    reset.set('a', 1)
+    reset.set('b', 2)
+    reset.set('a', 11)
+    expect(reset.keys()).toEqual(['b', 'a'])
 
-  it('promotes a touched key back to most-recent', () => {
-    const map = createLruMap<string, number>(3)
-
-    map.set('a', 1)
-    map.set('b', 2)
-    map.set('c', 3)
-    map.get('a')
-    map.set('d', 4)
-
-    expect(map.keys()).toEqual(['c', 'a', 'd'])
-    expect(map.has('b')).toBe(false)
-  })
-
-  it('does not evict the just-set key when it would otherwise overflow', () => {
-    const map = createLruMap<string, number>(2)
-
-    map.set('a', 1)
-    map.set('b', 2)
-    // size would exceed max only because re-set keeps the same key
-    map.set('a', 11)
-
-    expect(map.keys()).toEqual(['b', 'a'])
-  })
-
-  it('invokes onEvict for the evicted key/value pair', () => {
+    // Eviction reports the evicted key/value pair to onEvict.
     const onEvict = vi.fn()
-    const map = createLruMap<string, { tag: string }>(1, { onEvict })
-
-    map.set('only', { tag: 'first' })
-    map.set('other', { tag: 'second' })
-
+    const withCallback = createLruMap<string, { tag: string }>(1, { onEvict })
+    withCallback.set('only', { tag: 'first' })
+    withCallback.set('other', { tag: 'second' })
     expect(onEvict).toHaveBeenCalledWith('only', { tag: 'first' })
-    expect(map.has('only')).toBe(false)
+    expect(withCallback.has('only')).toBe(false)
   })
 })

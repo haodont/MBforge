@@ -15,6 +15,7 @@ export interface UsePdfDeepLinkArgs {
   initialPage?: number
   initialBbox?: [number, number, number, number]
   initialEvidenceId?: string
+  navigationRequestId?: number
   currentPage: number
   setCurrentPage: Dispatch<SetStateAction<number>>
   pageInfo: PageRenderInfo | null
@@ -28,6 +29,7 @@ export function usePdfDeepLink({
   initialPage,
   initialBbox,
   initialEvidenceId,
+  navigationRequestId,
   currentPage,
   setCurrentPage,
   pageInfo,
@@ -38,6 +40,7 @@ export function usePdfDeepLink({
 }: UsePdfDeepLinkArgs): void {
   // Guards re-scrolling to the same deep-linked bbox across renders.
   const deepLinkKeyRef = useRef<string | null>(null)
+  const appliedNavigationRef = useRef<string | null>(null)
 
   // Any page change drops the current evidence / inline-edit / OCR selection.
   useEffect(() => {
@@ -48,11 +51,18 @@ export function usePdfDeepLink({
 
   useEffect(() => {
     if (!initialPage) return
+    const navigationKey = `${initialPage}:${initialEvidenceId ?? ''}:${initialBbox?.join(',') ?? ''}:${navigationRequestId ?? ''}`
+    if (appliedNavigationRef.current !== navigationKey) {
+      appliedNavigationRef.current = navigationKey
+      if (currentPage !== initialPage) {
+        setCurrentPage(initialPage)
+        return
+      }
+    }
     if (currentPage !== initialPage) {
-      setCurrentPage(initialPage)
       return
     }
-    if (!initialBbox || !pageInfo) return
+    if (!initialBbox || !pageInfo || pageInfo.pageNumber !== initialPage) return
     const key = `${initialPage}:${initialBbox.join(',')}`
     if (deepLinkKeyRef.current === key) return
     deepLinkKeyRef.current = key
@@ -68,7 +78,7 @@ export function usePdfDeepLink({
       status: 'confirmed',
       properties: {},
     })
-  }, [initialBbox, initialPage, currentPage, pageInfo, scrollToDetection, setCurrentPage])
+  }, [initialBbox, initialPage, initialEvidenceId, navigationRequestId, currentPage, pageInfo, scrollToDetection, setCurrentPage])
 
   useEffect(() => {
     if (initialEvidenceId && initialPage && currentPage === initialPage) {

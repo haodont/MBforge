@@ -10,8 +10,9 @@ import InlineAlert from '@/components/ui/InlineAlert'
 import Pagination from '@/components/ui/Pagination'
 import Select from '@/components/ui/Select'
 import { cropImageUrl } from '@/api/http/library'
-import { type ReviewAction, type ReviewKind, type ReviewQueueItem, type ReviewStatus } from '@/api/http/review'
+import { type ReviewAction, type ReviewDecisionItem, type ReviewKind, type ReviewQueueItem, type ReviewStatus } from '@/api/http/review'
 import { useReviewClearAll, useReviewDecide, useReviewHistory, useReviewQueue, useReviewStats, toQueueItems } from '@/api/query/hooks/useReview'
+import PatentFactReview from './PatentFactReview'
 import { useAppContext } from '@/context/AppContext'
 import { useReviewHotkeys } from '@/hooks/useReviewHotkeys'
 import { showToast } from '@/hooks/useToast'
@@ -19,7 +20,7 @@ import { getUserFacingError } from '@/utils/errors'
 import ReviewEvidenceComparison from './ReviewEvidenceComparison'
 import './ReviewCenter.css'
 
-const KINDS: Array<'all' | ReviewKind> = ['all', 'low_conf_molecule', 'review_required', 'unparsable_smiles', 'activity_match', 'missing_evidence', 'ambiguous_coref', 'markush_link']
+const KINDS: Array<'all' | ReviewKind> = ['all', 'low_conf_molecule', 'review_required', 'unparsable_smiles', 'activity_match', 'missing_evidence', 'ambiguous_coref', 'markush_link', 'patent_fact_review', 'smiles_correction']
 const PAGE_SIZE = 25
 
 function labelForKind(kind: string, t: (key: string) => string): string {
@@ -79,11 +80,15 @@ export default function ReviewCenter() {
     () => items.filter(item => selected.has(item.id)).map(item => ({ kind: item.kind, id: item.id })),
     [items, selected],
   )
+  const hasPatentFactSelection = selectedItems.some(item => item.kind === 'patent_fact_review')
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const decide = useCallback(async (action: ReviewAction, decisionItems = selectedItems) => {
+  const decide = useCallback(async (action: ReviewAction, decisionItems: ReviewDecisionItem[] = selectedItems) => {
     if (!libraryRoot || decisionItems.length === 0) return
-    await decideMutation.mutateAsync({ libraryRoot, items: decisionItems, action })
-  }, [libraryRoot, decideMutation, selectedItems])
+    const result = await decideMutation.mutateAsync({ libraryRoot, items: decisionItems, action })
+    if (result.skipped > 0 && decisionItems.some(item => item.kind === 'patent_fact_review')) {
+      showToast(t('review.patentFact.stale'), 'error')
+    }
+  }, [libraryRoot, decideMutation, selectedItems, t])
   const move = useCallback((offset: number) => {
     if (items.length === 0) return
     const index = items.findIndex(item => item.id === selectedId)
@@ -93,11 +98,11 @@ export default function ReviewCenter() {
   useReviewHotkeys(Boolean(selectedItem), {
     onNext: () => move(1),
     onPrevious: () => move(-1),
-    onConfirm: () => { if (selectedItem) void decide('confirm', [{ kind: selectedItem.kind, id: selectedItem.id }]) },
-    onReject: () => { if (selectedItem) void decide('reject', [{ kind: selectedItem.kind, id: selectedItem.id }]) },
+    onConfirm: () => { if (selectedItem && selectedItem.kind !== 'patent_fact_review') void decide('confirm', [{ kind: selectedItem.kind, id: selectedItem.id }]) },
+    onReject: () => { if (selectedItem && selectedItem.kind !== 'patent_fact_review') void decide('reject', [{ kind: selectedItem.kind, id: selectedItem.id }]) },
   })
 
-  const openSource = (item: ReviewQueueItem) => {
+  const openSource = (item: ReviewQueueItem, evidenceId?: string) => {
     if (!item.doc_id || !item.page) return
     const bbox = item.bbox
     openTab({
@@ -107,6 +112,7 @@ export default function ReviewCenter() {
       doc: { doc_id: item.doc_id, title: item.doc_id, path: `storage/${item.doc_id}/source.pdf`, doc_type: 'pdf', added_at: '', hash: '' },
       initialPage: item.page,
       initialBbox: bbox && bbox.every(value => value !== null) ? bbox as [number, number, number, number] : undefined,
+      initialEvidenceId: evidenceId,
     })
   }
 
@@ -137,9 +143,10 @@ export default function ReviewCenter() {
       {selected.size > 0 && (
         <div className="review-center__bulk"><span>{t('review.selected', { count: selected.size })}</span>
           <div className="review-center__bulk-actions">
-            <Button size="sm" icon={<CheckIcon size={14} />} onClick={() => void decide('confirm')}>{t('review.confirm')}</Button>
-            <Button size="sm" icon={<XIcon size={14} />} onClick={() => void decide('reject')}>{t('review.reject')}</Button>
+            <Button size="sm" icon={<CheckIcon size={14} />} disabled={hasPatentFactSelection} onClick={() => void decide('confirm')}>{t('review.confirm')}</Button>
+            <Button size="sm" icon={<XIcon size={14} />} disabled={hasPatentFactSelection} onClick={() => void decide('reject')}>{t('review.reject')}</Button>
           </div>
+          {hasPatentFactSelection && <span className="review-center__detail-meta">{t('review.patentFact.individualOnly')}</span>}
         </div>
       )}
       {error && <InlineAlert tone="danger">{error}</InlineAlert>}
@@ -157,14 +164,20 @@ export default function ReviewCenter() {
             <Pagination current={page} total={totalPages} pageSize={PAGE_SIZE} totalItems={total} onChange={setPage} />
           </div>
         </section>
-        <ReviewDetail item={selectedItem} t={t} onDecide={(action, choice) => { if (selectedItem) void decide(action, [{ kind: selectedItem.kind, id: selectedItem.id, ...(choice ? { choice } : {}) }]) }} onOpenSource={openSource} libraryRoot={libraryRoot} />
+        <ReviewDetail item={selectedItem} t={t} onDecide={(action, choice, revision) => {
+          if (!selectedItem) return
+          const decisionItem: ReviewDecisionItem = { kind: selectedItem.kind, id: selectedItem.id }
+          if (choice) decisionItem.choice = choice
+          if (revision !== undefined) decisionItem.expected_revision = revision
+          void decide(action, [decisionItem])
+        }} onOpenSource={openSource} libraryRoot={libraryRoot} busy={decideMutation.isPending} />
       </div>
       <ConfirmDialog open={clearConfirmOpen} title={t('review.clearAll')} message={t('review.clearAllConfirm')} confirmLabel={t('review.clearAll')} danger loading={clearAllMutation.isPending} onConfirm={() => void clearAll()} onCancel={() => setClearConfirmOpen(false)} />
     </main>
   )
 }
 
-function ReviewDetail({ item, t, onDecide, onOpenSource, libraryRoot }: { item: ReviewQueueItem | null; t: (key: string, options?: Record<string, unknown>) => string; onDecide: (action: ReviewAction, choice?: string | null) => void; onOpenSource: (item: ReviewQueueItem) => void; libraryRoot: string }) {
+function ReviewDetail({ item, t, onDecide, onOpenSource, libraryRoot, busy }: { item: ReviewQueueItem | null; t: (key: string, options?: Record<string, unknown>) => string; onDecide: (action: ReviewAction, choice?: string | null, expectedRevision?: number) => void; onOpenSource: (item: ReviewQueueItem, evidenceId?: string) => void; libraryRoot: string; busy: boolean }) {
   const [choice, setChoice] = useState<string | null>(null)
   const itemId = item?.id ?? null
   const { data: history = [] } = useReviewHistory(libraryRoot, item ? item.id : null)
@@ -176,17 +189,29 @@ function ReviewDetail({ item, t, onDecide, onOpenSource, libraryRoot }: { item: 
   return <section className="review-center__detail" aria-label={t('review.detail')}>
     <h2>{item.name || item.smiles || item.id}</h2>
     <div className="review-center__detail-meta">{labelForKind(item.kind, t)} · {t(`review.status.${item.status}`)}{item.confidence !== null ? ` · ${Math.round(item.confidence * 100)}%` : ''}</div>
-    <div className="review-center__detail-actions">
-      <Button size="sm" icon={<CheckIcon size={14} />} disabled={item.status !== 'pending'} onClick={() => onDecide('confirm')}>{t('review.confirm')}</Button>
-      <Button size="sm" icon={<XIcon size={14} />} disabled={item.status !== 'pending'} onClick={() => onDecide('reject')}>{t('review.reject')}</Button>
-      <Button size="sm" variant="ghost" disabled={item.status === 'pending'} onClick={() => onDecide('reopen')}>{t('review.reopen')}</Button>
-      {item.doc_id && item.page && <Button size="sm" variant="ghost" icon={<ExternalLinkIcon size={14} />} onClick={() => onOpenSource(item)}>{t('review.openSource')}</Button>}
-    </div>
-    <ReviewEvidenceComparison item={item} cropUrl={cropUrl} libraryRoot={libraryRoot} onOpenPdf={(docId, page, bbox) => onOpenSource({ ...item, doc_id: docId, page, bbox })} />
-    {coref && Array.isArray(coref.ocr_labels) && coref.ocr_labels.length > 0 && <div><strong>{t('review.corefLabels')}</strong><div role="radiogroup" aria-label={t('review.corefLabels')}>{coref.ocr_labels.map(label => <label key={label} style={{ display: 'block' }}><input type="radio" name={`coref-${item.id}`} checked={choice === label} onChange={() => setChoice(label)} /> {label}{label === coref.coref_primary ? ` · ${t('review.corefSuggested')}` : ''}</label>)}</div></div>}
-    {item.smiles && <p><strong>SMILES</strong><br />{item.smiles}</p>}
-    {item.reasons.length > 0 && <p><strong>{t('review.reasons')}</strong><br />{item.reasons.join(' · ')}</p>}
-    {item.context_text && <div><strong>{t('review.context')}</strong><pre>{item.context_text}</pre></div>}
+    {item.kind === 'patent_fact_review' ? (
+      <PatentFactReview
+        item={item}
+        busy={busy}
+        onChoose={(factChoice, revision) => onDecide('confirm', factChoice, revision)}
+        onReopen={revision => onDecide('reopen', undefined, revision)}
+        onOpenEvidence={(evidenceId, page) => onOpenSource({ ...item, page }, evidenceId)}
+      />
+    ) : (
+      <>
+        <div className="review-center__detail-actions">
+          <Button size="sm" icon={<CheckIcon size={14} />} disabled={item.status !== 'pending' || busy} onClick={() => onDecide('confirm')}>{t('review.confirm')}</Button>
+          <Button size="sm" icon={<XIcon size={14} />} disabled={item.status !== 'pending' || busy} onClick={() => onDecide('reject')}>{t('review.reject')}</Button>
+          <Button size="sm" variant="ghost" disabled={item.status === 'pending' || busy} onClick={() => onDecide('reopen')}>{t('review.reopen')}</Button>
+          {item.doc_id && item.page && <Button size="sm" variant="ghost" icon={<ExternalLinkIcon size={14} />} onClick={() => onOpenSource(item)}>{t('review.openSource')}</Button>}
+        </div>
+        <ReviewEvidenceComparison item={item} cropUrl={cropUrl} libraryRoot={libraryRoot} onOpenPdf={(docId, page, bbox) => onOpenSource({ ...item, doc_id: docId, page, bbox })} />
+        {coref && Array.isArray(coref.ocr_labels) && coref.ocr_labels.length > 0 && <div><strong>{t('review.corefLabels')}</strong><div role="radiogroup" aria-label={t('review.corefLabels')}>{coref.ocr_labels.map(label => <label key={label} style={{ display: 'block' }}><input type="radio" name={'coref-' + item.id} checked={choice === label} onChange={() => setChoice(label)} /> {label}{label === coref.coref_primary ? ' · ' + t('review.corefSuggested') : ''}</label>)}</div></div>}
+        {item.smiles && <p><strong>SMILES</strong><br />{item.smiles}</p>}
+        {item.reasons.length > 0 && <p><strong>{t('review.reasons')}</strong><br />{item.reasons.join(' · ')}</p>}
+        {item.context_text && <div><strong>{t('review.context')}</strong><pre>{item.context_text}</pre></div>}
+      </>
+    )}
     <div><strong>{t('review.history')}</strong>{history.length === 0 ? <p className="review-center__detail-meta">{t('review.noHistory')}</p> : <ul>{history.map((entry, index) => <li key={index}>{display(entry.action)} · {display(entry.created_at)}{entry.reason ? ` · ${display(entry.reason)}` : ''}</li>)}</ul>}</div>
   </section>
 }

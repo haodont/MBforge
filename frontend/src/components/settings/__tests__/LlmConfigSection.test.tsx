@@ -12,8 +12,10 @@ vi.mock('react-i18next', () => ({
 
 const { fetchLlmModelsMock } = vi.hoisted(() => ({ fetchLlmModelsMock: vi.fn() }))
 
+import type * as SettingsHttp from '@/api/http/settings'
+
 vi.mock('@/api/http/settings', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/api/http/settings')>()
+  const actual = await importOriginal<typeof SettingsHttp>()
   return { ...actual, fetchLlmModels: fetchLlmModelsMock }
 })
 
@@ -21,7 +23,7 @@ import LlmConfigSection from '../model/LlmConfigSection'
 
 const renderSection = () => {
   const client = createQueryClient()
-  render(
+  return render(
     <QueryClientProvider client={client}>
       <LlmConfigSection
         settings={DEFAULT_SETTINGS}
@@ -33,15 +35,16 @@ const renderSection = () => {
   )
 }
 
+const datalistValues = () =>
+  Array.from(document.querySelectorAll('datalist option')).map(o => (o as HTMLOptionElement).value)
+
 describe('LlmConfigSection — fetch model list from provider', () => {
   beforeEach(() => {
     fetchLlmModelsMock.mockReset()
   })
 
-  const datalistValues = () =>
-    Array.from(document.querySelectorAll('datalist option')).map(o => (o as HTMLOptionElement).value)
-
-  it('fetches the provider model list and merges it into the datalist', async () => {
+  it('reflects the provider model-list probe in the datalist and status message', async () => {
+    // Success: provider models are merged into the datalist next to the presets.
     fetchLlmModelsMock.mockResolvedValue({
       success: true,
       models: [
@@ -49,7 +52,7 @@ describe('LlmConfigSection — fetch model list from provider', () => {
         { value: 'deepseek-chat', label: 'DeepSeek Chat' },
       ],
     })
-    renderSection()
+    const success = renderSection()
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.fetchModelsDesc' }))
 
@@ -60,7 +63,6 @@ describe('LlmConfigSection — fetch model list from provider', () => {
         api_key: DEFAULT_SETTINGS.llm_api_key,
       })
     })
-
     await waitFor(() => {
       expect(screen.getByText('settings.fetchModelsSuccess')).toBeTruthy()
     })
@@ -70,28 +72,26 @@ describe('LlmConfigSection — fetch model list from provider', () => {
     expect(options).toContain('deepseek-chat')
     // preset suggestions remain as a fallback
     expect(options).toContain('gpt-4o')
-  })
+    success.unmount()
 
-  it('shows the provider error message when the probe fails', async () => {
+    // Provider error: the section reports the failure instead of models.
     fetchLlmModelsMock.mockResolvedValue({
       success: false,
       error: 'authentication failed (HTTP 401) - check the API key',
     })
-    renderSection()
+    const failed = renderSection()
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.fetchModelsDesc' }))
-
     await waitFor(() => {
       expect(screen.getByText('settings.fetchModelsError')).toBeTruthy()
     })
-  })
+    failed.unmount()
 
-  it('shows an empty hint when the provider returns no models', async () => {
+    // Empty model list: the section shows the empty hint.
     fetchLlmModelsMock.mockResolvedValue({ success: true, models: [] })
     renderSection()
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.fetchModelsDesc' }))
-
     await waitFor(() => {
       expect(screen.getByText('settings.fetchModelsEmpty')).toBeTruthy()
     })

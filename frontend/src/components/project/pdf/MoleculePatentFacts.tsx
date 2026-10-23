@@ -1,17 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import Badge from '@/components/ui/Badge'
+import { compoundLabelKey } from '@/components/molecule/moleculeUtils'
 import type { PatentFactsArtifact, PatentFactsMeasurement } from '@/api/http/library'
 import type { ExtractionResult } from '@/types'
-
-function compoundLabelKey(value: string): string {
-  const cleaned = value
-    .normalize('NFKC')
-    .trim()
-    .replace(/^(?:化合物|compound|cmpd|cpd|mol(?:ecule)?)[#_\-\s]*/i, '')
-    .replace(/\s+/g, '')
-  const match = /^(\d+[a-z]?)$/i.exec(cleaned)
-  return (match?.[1] ?? cleaned).toLowerCase()
-}
 
 function measurementLabel(measurement: PatentFactsMeasurement): string {
   const value = measurement.value

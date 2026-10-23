@@ -2,6 +2,7 @@
 
 import { httpGet, httpPost, invokeWithError } from './_utils'
 import { ErrorCode } from '@/utils/errors'
+import type { PatentConflict } from './library'
 
 export type ReviewKind =
   | 'low_conf_molecule'
@@ -11,10 +12,19 @@ export type ReviewKind =
   | 'missing_evidence'
   | 'ambiguous_coref'
   | 'markush_link'
+  | 'patent_fact_review'
+  | 'smiles_correction'
 export type ReviewStatus = 'pending' | 'confirmed' | 'rejected'
 export type ReviewAction = 'confirm' | 'reject' | 'reopen'
 
 export type ReviewBbox = [number | null, number | null, number | null, number | null]
+
+export interface PatentFactReviewPayload {
+  slot_id?: string
+  doc_id?: string
+  revision?: number
+  conflict?: PatentConflict
+}
 
 /** Payload keyed by review kind — add/refine per kind as backend fields stabilize. */
 export type ReviewPayload =
@@ -25,6 +35,7 @@ export type ReviewPayload =
   | { kind: 'missing_evidence'; notes?: string }
   | { kind: 'ambiguous_coref'; mol_id?: string; ocr_labels?: string[]; coref_primary?: string }
   | { kind: 'markush_link'; markush?: unknown }
+  | ({ kind: 'patent_fact_review' } & PatentFactReviewPayload)
 
 export interface ReviewQueueItem {
   id: string
@@ -75,8 +86,16 @@ export interface ReviewDecisionResult {
   id: string
   kind: ReviewKind
   status?: ReviewStatus
+  revision?: number
   error?: string
   [key: string]: unknown
+}
+
+export interface ReviewDecisionItem {
+  kind: ReviewKind
+  id: string
+  choice?: string | null
+  expected_revision?: number
 }
 
 export interface ReviewDecisionResponse {
@@ -137,7 +156,7 @@ export async function reviewHistory(libraryRoot: string, entityId: string): Prom
 
 export async function reviewDecide(
   libraryRoot: string,
-  items: Array<{ kind: ReviewKind; id: string; choice?: string | null }>,
+  items: ReviewDecisionItem[],
   action: ReviewAction,
   reason = '',
 ): Promise<ReviewDecisionResponse> {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
@@ -34,7 +34,7 @@ function renderComparison(ui: ReactElement) {
 }
 
 describe('ReviewEvidenceComparison', () => {
-  it('shows source-first evidence and opens its original PDF with the nullable bbox preserved', async () => {
+  it('shows source-first evidence and its original PDF, or states the missing crop and RDKit failure explicitly', async () => {
     const onOpenPdf = vi.fn()
     api.smilesToRdkitSvg.mockResolvedValue('<svg><title>ethanol</title></svg>')
 
@@ -59,9 +59,12 @@ describe('ReviewEvidenceComparison', () => {
       'src',
       expect.stringContaining('data:image/svg+xml;charset=utf-8,'),
     )
-  })
 
-  it('states missing source crop and RDKit rendering failure explicitly', async () => {
+    cleanup()
+
+    // Missing crop, missing source document and a failing RDKit render all have
+    // to be stated instead of silently rendering nothing.
+    api.smilesToRdkitSvg.mockReset()
     api.smilesToRdkitSvg.mockRejectedValue(new Error('render unavailable'))
 
     renderComparison(

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 
 vi.mock('@/api/query/hooks', () => ({
   useDocumentEvidence: vi.fn(),
@@ -60,7 +60,7 @@ describe('PageEvidencePane', () => {
     Element.prototype.scrollIntoView = vi.fn()
   })
 
-  it('renders every row of a paragraph as one block', () => {
+  it('groups paragraph rows into one block and renders continuation, indentation and selection state', () => {
     mockEvidence([
       evidence({
         evidence_id: 'ev-opening',
@@ -82,64 +82,6 @@ describe('PageEvidencePane', () => {
         paragraph_number: '0004',
         paragraph_start: true,
       }),
-    ])
-
-    const { container } = renderPane()
-
-    const blocks = container.querySelectorAll('.pdf-evidence-item')
-    expect(blocks).toHaveLength(2)
-    expect(blocks[0].querySelector('p')).toHaveTextContent(
-      '[0003] MRGX2 is Gq-coupled … (D. Fujisawa et al., J Allergy Clin Immunol …).',
-    )
-    expect(blocks[1].querySelector('p')).toHaveTextContent(
-      '[0004] MRGX2 is potentially involved …',
-    )
-  })
-
-  it('marks the tail of a paragraph that started on an earlier page', () => {
-    mockEvidence([
-      evidence({
-        evidence_id: 'ev-continuation',
-        raw_text: 'Fujisawa et al., J Allergy Clin Immunol …).',
-        paragraph_id: 'p-0003',
-        paragraph_number: '0003',
-        paragraph_start: false,
-      }),
-    ])
-
-    const { container } = renderPane()
-
-    const block = container.querySelector('.pdf-evidence-item')
-    expect(block).toHaveTextContent('pdf.evidenceContinued')
-    expect(screen.getByText('[0003]')).toBeInTheDocument()
-  })
-
-  it('highlights the paragraph containing the selected evidence row', () => {
-    mockEvidence([
-      evidence({
-        evidence_id: 'ev-opening',
-        raw_text: '[0003] MRGX2 is Gq-coupled … (D.',
-        paragraph_id: 'p-0003',
-        paragraph_number: '0003',
-        paragraph_start: true,
-      }),
-      evidence({
-        evidence_id: 'ev-continuation',
-        raw_text: 'Fujisawa et al., J Allergy Clin Immunol …).',
-        paragraph_id: 'p-0003',
-        paragraph_number: '0003',
-      }),
-    ])
-
-    const { container } = renderPane('ev-continuation')
-
-    const blocks = container.querySelectorAll('.pdf-evidence-item')
-    expect(blocks).toHaveLength(1)
-    expect(blocks[0]).toHaveClass('is-selected')
-  })
-
-  it('indents the deeper lines of a paragraph', () => {
-    mockEvidence([
       evidence({
         evidence_id: 'ev-head',
         raw_text: '[0006] One aspect provides:',
@@ -161,10 +103,50 @@ describe('PageEvidencePane', () => {
 
     const { container } = renderPane()
 
-    const paragraphs = container.querySelectorAll<HTMLElement>('.pdf-evidence-item p')
-    expect(paragraphs).toHaveLength(2)
-    expect(paragraphs[0].style.paddingLeft).toBe('')
-    expect(paragraphs[1].style.paddingLeft).toBe('1.25em')
-    expect(paragraphs[1]).toHaveTextContent('(a) C1-4 alkyl which is substituted')
+    // Every row of one paragraph collapses into a single block.
+    const blocks = container.querySelectorAll('.pdf-evidence-item')
+    expect(blocks).toHaveLength(3)
+    expect(blocks[0].querySelector('p')).toHaveTextContent(
+      '[0003] MRGX2 is Gq-coupled … (D. Fujisawa et al., J Allergy Clin Immunol …).',
+    )
+    expect(blocks[1].querySelector('p')).toHaveTextContent(
+      '[0004] MRGX2 is potentially involved …',
+    )
+
+    // Deeper lines of a paragraph render as separate, indented lines.
+    const lines = blocks[2].querySelectorAll<HTMLElement>('p')
+    expect(lines).toHaveLength(2)
+    expect(lines[0].style.paddingLeft).toBe('')
+    expect(lines[1].style.paddingLeft).toBe('1.25em')
+    expect(lines[1]).toHaveTextContent('(a) C1-4 alkyl which is substituted')
+
+    cleanup()
+
+    // A paragraph whose first rendered row continues an earlier page is
+    // marked as continued, and the block holding the selected evidence row is
+    // highlighted.
+    mockEvidence([
+      evidence({
+        evidence_id: 'ev-opening',
+        raw_text: '[0003] MRGX2 is Gq-coupled … (D.',
+        paragraph_id: 'p-0003',
+        paragraph_number: '0003',
+        paragraph_start: false,
+      }),
+      evidence({
+        evidence_id: 'ev-continuation',
+        raw_text: 'Fujisawa et al., J Allergy Clin Immunol …).',
+        paragraph_id: 'p-0003',
+        paragraph_number: '0003',
+      }),
+    ])
+
+    const selected = renderPane('ev-continuation')
+
+    const selectedBlocks = selected.container.querySelectorAll('.pdf-evidence-item')
+    expect(selectedBlocks).toHaveLength(1)
+    expect(selectedBlocks[0]).toHaveClass('is-selected')
+    expect(selectedBlocks[0]).toHaveTextContent('pdf.evidenceContinued')
+    expect(screen.getByText('[0003]')).toBeInTheDocument()
   })
 })

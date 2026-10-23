@@ -1,3 +1,6 @@
+// MoleculeDisplay renders structures from the local RDKit endpoint only and
+// degrades to the source crop (with a correction warning) when the local
+// renderer fails.
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -44,18 +47,19 @@ describe('MoleculeDisplay', () => {
     return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
   }
 
-  it('renders the local RDKit image without requesting a public image', async () => {
-    renderDisplay(<MoleculeDisplay smiles="CCO" />)
+  it('renders the local RDKit image and falls back to the source crop when local rendering fails', async () => {
+    const rendered = renderDisplay(<MoleculeDisplay smiles="CCO" />)
 
     await waitFor(() => {
       expect(renderLocalStructure).toHaveBeenCalledWith('CCO', 240, 240)
     })
     await waitFor(() => {
-      expect(screen.getByRole('img', { name: 'CCO' }).getAttribute('src')).toContain('data:image/svg+xml')
+      expect(screen.getByRole('img', { name: 'CCO' }).getAttribute('src')).toContain(
+        'data:image/svg+xml',
+      )
     })
-  })
+    rendered.unmount()
 
-  it('uses the source crop with a correction warning when local rendering fails', async () => {
     renderLocalStructure.mockRejectedValueOnce(new Error('RDKit unavailable'))
     renderDisplay(<MoleculeDisplay smiles="CCO" sourceImageUrl="/source-crop.png" />)
 

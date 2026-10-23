@@ -1,10 +1,10 @@
 import { Suspense, lazy, useMemo, useRef, useEffect, useState } from 'react'
 import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
-import { I18nextProvider } from 'react-i18next'
+import { I18nextProvider, useTranslation } from 'react-i18next'
 import i18n from './i18n'
 import AnimatedPage from './components/animations/AnimatedPage'
-import { ErrorState, ToastProvider } from './components/ui'
+import { Button, ErrorState, Tabs, ToastProvider } from './components/ui'
 import { LibraryBootstrap } from './components/app/LibraryBootstrap'
 import { AppShell } from './components/app/AppShell'
 import { AppProvider, useAppContext } from './context/AppContext'
@@ -18,6 +18,8 @@ import { clearViewerSnapshot } from './components/project/pdf/usePdfViewer'
 import type { Tab } from './context/AppContext'
 import Workspace from './components/workspace/Workspace'
 import Docs from './components/Docs'
+import ResearchShelf from './components/research/ResearchShelf'
+import { XIcon } from './components/icons'
 
 const MoleculeLibrary = lazy(() => import('./components/MoleculeLibrary'))
 const Knowledge = lazy(() => import('./components/Knowledge'))
@@ -59,7 +61,9 @@ function AppShellOrBootstrap() {
     openTabs,
     activeTabId,
     closeTab,
+    setActiveTabId,
   } = useAppContext()
+  const { t } = useTranslation()
   const location = useLocation()
   const navigate = useNavigate()
   // Memoize so the string reference is stable when ``location.pathname``
@@ -72,6 +76,7 @@ function AppShellOrBootstrap() {
   const [libraryStatusChecked, setLibraryStatusChecked] = useState(false)
   const [libraryStatusError, setLibraryStatusError] = useState<Error | null>(null)
   const [libraryStatusRetry, setLibraryStatusRetry] = useState(0)
+  const [viewExpanded, setViewExpanded] = useState(false)
 
   useIngestNotifications(libraryRoot)
 
@@ -159,17 +164,34 @@ function AppShellOrBootstrap() {
     return <LibraryBootstrap />
   }
 
+  if (location.pathname === '/') return <Navigate to="/agent" replace />
+  const hasView = activeTabId !== null || currentPage !== 'agent'
+  const utility = currentPage === 'settings' || currentPage === 'docs'
+  const closeView = () => { setViewExpanded(false); setActiveTabId(null); void navigate('/agent') }
+
   return (
     <AppShell currentPage={currentPage}>
-      {activeTabId === null ? (
-        <AppRoutes />
-      ) : (
-        <TabContent
-          activeTabId={activeTabId}
-          openTabs={openTabs}
-          closeTab={closeTab}
-        />
-      )}
+      <div className={`research-layout${hasView ? ' research-layout--with-view' : ''}${hasView && viewExpanded ? ' research-layout--expanded' : ''}${utility ? ' research-layout--utility' : ''}`}>
+        <div className="research-layout__chat">
+          <Suspense fallback={<RouteFallback />}><AgentChat key={libraryRoot} /></Suspense>
+        </div>
+        {hasView ? (
+          <section className="research-view" aria-label={t('research.resultWorkspace')}>
+            <header className="research-view__header">
+              <Tabs id="research-view-tabs" size="sm" variant="underline"
+                items={[{ key: 'overview', label: t(currentPage === 'agent' ? 'research.materials' : `nav.${currentPage}`) },
+                  ...openTabs.map(tab => ({ key: tab.id, label: tab.title }))]}
+                activeKey={activeTabId ?? 'overview'} onChange={key => setActiveTabId(key === 'overview' ? null : key)} />
+              {!utility && <Button variant="ghost" size="sm" ariaPressed={viewExpanded} onClick={() => setViewExpanded(value => !value)}>{t(viewExpanded ? 'research.showConversation' : 'research.expandResult')}</Button>}
+              <Button variant="ghost" size="sm" icon={<XIcon size={14} />} onClick={closeView}>{t('research.returnChat')}</Button>
+            </header>
+            <div className="research-view__content" role="tabpanel" id={`research-view-tabs-${activeTabId ?? 'overview'}-panel`}
+              aria-labelledby={`research-view-tabs-${activeTabId ?? 'overview'}-tab`}>
+              {activeTabId === null ? <AppRoutes /> : <TabContent activeTabId={activeTabId} openTabs={openTabs} closeTab={closeTab} />}
+            </div>
+          </section>
+        ) : <ResearchShelf />}
+      </div>
     </AppShell>
   )
 }
@@ -178,7 +200,7 @@ function pageFromPath(pathname: string): string {
   const page = pathname.split('/').filter(Boolean)[0]
   if (page === 'analysis') return 'molecules'
   if (page === 'notes') return 'knowledge'
-  return page || 'workspace'
+  return page || 'agent'
 }
 
 /** Switch on active tab type: pdf / markdown / document viewer. */
@@ -204,6 +226,8 @@ function TabContent({
           initialPage={activeTab.initialPage}
           initialBbox={activeTab.initialBbox}
           initialEvidenceId={activeTab.initialEvidenceId}
+          initialSidePaneTab={activeTab.initialSidePaneTab}
+          sidePaneRequestId={activeTab.sidePaneRequestId}
           onClose={() => {
             clearViewerSnapshot(`${activeTab.id}:${activeTab.doc.doc_id}`)
             closeTab(activeTab.id)
@@ -248,7 +272,7 @@ function AppRoutes() {
   return (
     <AnimatePresence initial={false}>
       <Routes location={location} key={routeKey}>
-        <Route path="/" element={<Navigate to="/workspace" replace />} />
+        <Route path="/" element={<Navigate to="/agent" replace />} />
         <Route
           path="/workspace"
           element={
@@ -314,14 +338,7 @@ function AppRoutes() {
             </Suspense>
           }
         />
-        <Route
-          path="/agent"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><AgentChat /></AnimatedPage>
-            </Suspense>
-          }
-        />
+        <Route path="/agent" element={<ResearchShelf />} />
         <Route
           path="/docking"
           element={

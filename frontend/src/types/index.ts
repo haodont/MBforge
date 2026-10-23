@@ -28,6 +28,8 @@ export interface DocumentEntry {
   moldet_pages?: number[]
 }
 
+export type PdfSidePaneTab = 'evidence' | 'molecules' | 'analysis'
+
 export interface SearchResult {
   id: string
   text: string

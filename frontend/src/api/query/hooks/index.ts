@@ -98,3 +98,4 @@ export {
   useMoleculeSearchBySmiles,
   useAddMolecule,
 } from './useMolecules'
+export { useResearchSessions, useResearchSession, useCreateResearchSession, useLoadResearchSession, useImportResearchHistory, useDeleteResearchSession } from './useResearch'

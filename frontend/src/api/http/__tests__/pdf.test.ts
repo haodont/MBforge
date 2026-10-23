@@ -1,3 +1,10 @@
+/**
+ * pdf.ts — `getDocumentOverlay` (covered function at top).
+ *
+ * Single-item file kept for one contract: the route body must use the
+ * backend's snake_case keys while the wrapper exposes camelCase params.
+ */
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../_utils', () => ({
@@ -15,7 +22,7 @@ describe('pdf API — document overlay', () => {
     vi.clearAllMocks()
   })
 
-  it('posts path and doc_id to /api/v1/pdf/document-overlay', async () => {
+  it('maps camelCase params onto the snake_case overlay payload', async () => {
     mockHttpPost.mockResolvedValue({
       success: true,
       path: '/p.pdf',
@@ -25,17 +32,11 @@ describe('pdf API — document overlay', () => {
       count: 0,
       source: 'empty',
     })
-    const result = await getDocumentOverlay({
-      libraryRoot: '/lib',
-      docId: 'doc-1',
-      path: '/p.pdf',
-    })
+    await getDocumentOverlay({ libraryRoot: '/lib', docId: 'doc-1', path: '/p.pdf' })
     expect(httpPost).toHaveBeenCalledWith('/api/v1/pdf/document-overlay', {
       library_root: '/lib',
       doc_id: 'doc-1',
       path: '/p.pdf',
     })
-    expect(result.blocks).toEqual([])
-    expect(result.pages).toEqual({})
   })
 })
