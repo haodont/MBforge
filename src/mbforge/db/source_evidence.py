@@ -221,6 +221,35 @@ def list_source_evidence(
     return [_row_to_evidence(row) for row in rows]
 
 
+def search_source_evidence(
+    library_root: str | Path,
+    query: str,
+    *,
+    doc_id: str = "",
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict[str, object]]:
+    """Literal keyword search in SQL evidence; snippets are bounded at the database."""
+    terms = query.lower().split()
+    clauses = ["instr(lower(e.raw_text), ?) > 0" for _ in terms]
+    params: list[object] = [*terms]
+    if doc_id:
+        clauses.append("e.doc_id = ?")
+        params.append(doc_id)
+    db = DatabaseManager.get(str(library_root))
+    with db.mol_conn() as conn:
+        rows = conn.execute(
+            "SELECT e.evidence_id, e.doc_id, e.page, e.kind, d.title, d.file_name, "
+            "substr(e.raw_text, max(1, instr(lower(e.raw_text), ?) - 200), 2000) AS snippet, "
+            "length(e.raw_text) > 2000 AS truncated FROM source_evidence e "
+            "JOIN documents d ON d.doc_id = e.doc_id WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY e.doc_id, e.page, e.bbox_y1 DESC, e.evidence_id LIMIT ? OFFSET ?",
+            [terms[0], *params, limit, offset],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def source_evidence_at(
     library_root: str | Path,
     doc_id: str,
@@ -279,5 +308,6 @@ __all__ = [
     "molecule_metadata",
     "persist_source_evidence",
     "source_evidence_at",
+    "search_source_evidence",
     "update_molecule_raw_text",
 ]

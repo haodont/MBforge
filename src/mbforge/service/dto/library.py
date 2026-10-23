@@ -38,6 +38,20 @@ class LibraryMoleculeEvidenceUpdateRequest(BaseModel):
     smiles: str = ""
 
 
+#: Bounded like every other evidence-id batch in the app; a viewer that needs more
+#: pages through the document instead.
+MAX_EVIDENCE_RESOLVE_IDS = 50
+
+
+class LibraryEvidenceResolveRequest(BaseModel):
+    """Resolve many evidence ids in one call (the viewer's per-compound passages)."""
+
+    library_root: str | None = None
+    evidence_ids: list[str] = Field(
+        default_factory=list, max_length=MAX_EVIDENCE_RESOLVE_IDS
+    )
+
+
 class LibraryConfigureRequest(BaseModel):
     root: str = ""
 

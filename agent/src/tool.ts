@@ -1,5 +1,5 @@
-import { Type } from '@mariozechner/pi-ai'
-import { defineTool } from '@mariozechner/pi-coding-agent'
+import { Type } from '@earendil-works/pi-ai'
+import { defineTool } from '@earendil-works/pi-coding-agent'
 
 export interface MoleculeSearchResult {
   [key: string]: unknown
@@ -20,15 +20,24 @@ const backendBaseUrl = (): string => {
 /** POST a tool request to the backend and parse the JSON reply. HTTP-level
  *  failures throw; a business failure (``success:false``) is returned as data so
  *  the model can read the reason and correct itself. */
-async function postTool<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${backendBaseUrl()}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  })
+export async function postTool<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${backendBaseUrl()}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (error) {
+    // A callback that never reaches the backend used to fail in silence: the model
+    // simply retried until its budget ran out, with nothing in any log to say why.
+    console.error(`[mbforge] ${path} unreachable at ${backendBaseUrl()}:`, error)
+    throw error
+  }
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 400)
+    console.error(`[mbforge] ${path} failed (${response.status}): ${detail}`)
     throw new Error(`MBForge tool ${path} failed (${response.status}): ${detail}`)
   }
   return (await response.json()) as T
@@ -96,6 +105,22 @@ export const libraryStatsTool = defineTool({
       signal,
     )
     return toolResult('library_stats', payload.stats ?? {}, { stats: payload.stats })
+  },
+})
+
+export const searchLibraryParameters = Type.Object({
+  query: Type.String({ minLength: 1, maxLength: 400, description: '1-10 literal keywords; all must occur in the same evidence row, case-insensitive.' }),
+  doc_id: Type.Optional(Type.String({ maxLength: 128 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000 })),
+}, { additionalProperties: false })
+
+export const searchLibraryTool = defineTool({
+  name: 'search_library', label: 'Search library text',
+  description: 'Search extracted SQL source text across documents, optionally within one doc_id. Returns bounded snippets with document, page, evidence ID and pagination. Empty results do not prove absence.',
+  parameters: searchLibraryParameters,
+  async execute(_id, params, signal) {
+    return toolResult('search_library', await postTool('/api/v1/agent/tools/search-library', params, signal), {})
   },
 })
 

@@ -15,7 +15,9 @@ loop in :mod:`mbforge.server.ingest.worker`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -28,6 +30,7 @@ from mbforge.foundation.queue_contract import INGEST_TERMINAL_STATUSES
 from mbforge.service.ports import get_runtime
 
 logger = get_logger("mbforge.service.use_cases.ingest")
+_enqueue_lock = threading.Lock()
 
 #: Default stage subset for import/re-ingest: the "into the library" boundary.
 #: Patent analysis is triggered on demand (per document or in batch) with
@@ -87,6 +90,7 @@ async def enqueue(
     *,
     stages: Sequence[str] | None = None,
     force: bool = False,
+    request_key: str | None = None,
 ) -> str:
     """Enqueue a registered document for pipeline processing.
 
@@ -106,6 +110,10 @@ async def enqueue(
 
     Returns the run id (new, or the reused in-flight one).
 
+    A research ``request_key`` binds a session/message to this run in SQL.
+    Repeated keys return that same run; Patent requests can attach to an active
+    import DAG and wait for its preparation stages without cancelling them.
+
     Raises:
         ValidationError: if *doc_id* or *library_root* is empty, or a stage
             name is not registered.
@@ -116,6 +124,15 @@ async def enqueue(
         raise ValidationError("doc_id is required")
     if not library_root:
         raise ValidationError("library_root is required")
+    if request_key is not None and (
+        force
+        or len(request_key) > 257
+        or len(request_key.split(":")) != 2
+        or any(not part for part in request_key.split(":"))
+    ):
+        raise ValidationError(
+            "Research enqueues require a session:request key and cannot force-cancel another run"
+        )
 
     selected = tuple(stages) if stages is not None else EXTRACT_STAGES
     if not selected:
@@ -144,30 +161,54 @@ async def enqueue(
             detail=f"doc_id={doc_id}",
         )
 
-    active = await asyncio.to_thread(_queue().active_run_id, library_root, doc_id)
-    if active is not None:
-        if not force:
-            logger.info("Reusing in-flight run %s for doc %s", active, doc_id)
-            return active
-        logger.info("Force enqueue cancels in-flight run %s for doc %s", active, doc_id)
-        await asyncio.to_thread(_queue().cancel_doc, library_root, doc_id)
-
     from mbforge.service.pipeline.run.ids import mint_run_id
 
     def _register() -> str:
-        # Two enqueues in the same wall-clock second must not share a run ID:
-        # the second would then reuse the first's queue nodes and finalize
-        # guard. Feed the queue's existing run IDs into the minter.
-        existing = set(_queue().run_ids_for_doc(library_root, doc_id))
-        run_id = mint_run_id(library_root, doc_id, extra_used=existing)
-        _queue().insert_dag(
-            library_root,
-            file_path=file_path,
-            doc_id=doc_id,
-            run_id=run_id,
-            stages=selected,
-        )
-        return run_id
+        # Registration is short; serialize API enqueues before checking active
+        # runs so two callers cannot create competing document writers.
+        with _enqueue_lock:
+            if request_key:
+                associated_run = _queue().requested_run_id(
+                    library_root, doc_id, request_key
+                )
+                if associated_run:
+                    return associated_run
+            requested_run = (
+                "research_"
+                + hashlib.sha256(f"{doc_id}:{request_key}".encode()).hexdigest()[:24]
+                if request_key is not None
+                else None
+            )
+            active = _queue().active_run_id(library_root, doc_id)
+            if active is not None:
+                if not force:
+                    if request_key is None or "patent" not in selected:
+                        return active
+                    if _queue().append_patent_to_active(
+                        library_root,
+                        doc_id=doc_id,
+                        run_id=active,
+                        file_path=file_path,
+                        request_key=request_key,
+                    ):
+                        return active
+                    # Preparation finished while we were registering; start a
+                    # distinct requested run rather than reviving that run.
+                else:
+                    _queue().cancel_doc(library_root, doc_id)
+            existing = set(_queue().run_ids_for_doc(library_root, doc_id))
+            run_id = requested_run or mint_run_id(
+                library_root, doc_id, extra_used=existing
+            )
+            _queue().insert_dag(
+                library_root,
+                file_path=file_path,
+                doc_id=doc_id,
+                run_id=run_id,
+                stages=selected,
+                **({"request_key": request_key} if request_key else {}),
+            )
+            return run_id
 
     run_id = await asyncio.to_thread(_register)
     ensure_worker(library_root)

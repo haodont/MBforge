@@ -7,6 +7,7 @@ Each stage reads from and writes to this context.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,8 @@ class PipelineContext:
         library_root: Library data directory (per-project root)
         doc_id: Document identifier
         task_id: Optional queue task ID for event and cancellation tracking
+        progress: Stage-facing progress hook installed by the runner
+            (``phase``, ``data``); None when the caller wants no progress
         staging_dir: Staging dir for images/crops evidence
             (``storage/{doc_id}/.staging/``); None writes directly
             to the canonical evidence dirs
@@ -47,6 +50,14 @@ class PipelineContext:
     library_root: Path
     doc_id: str
     task_id: str | None = None
+
+    # ---- Stage-facing progress (installed by the runner) ----
+    # Long stages (the LLM-led Patent analysis) report phase/turn/tool lines
+    # here; the runner routes them into the event sink, so a stage never
+    # imports the sink or the database.
+    progress: Callable[[str, dict[str, Any]], None] | None = field(
+        default=None, repr=False
+    )
 
     # ---- Run-scoped artifact staging (PIPE-13) ----
     # ``run_id`` identifies this single pipeline run; ``staging_dir`` is

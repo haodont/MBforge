@@ -30,8 +30,18 @@ GLOBAL_APP_DIR = (
 )
 GLOBAL_SETTINGS_PATH = GLOBAL_APP_DIR / "settings.json"
 
+#: Repository / source root (``src``'s parent), for the Node agent build under
+#: ``agent/``. Meaningful in a source checkout only: an installed wheel lives in
+#: site-packages, where ``agent/`` does not exist.
+SOURCE_ROOT = _SOURCE_ROOT
+
 # 后端 sidecar 端口 — __main__ 启动参数 fallback
 DEFAULT_SIDECAR_PORT = 18792
+
+# Node Pi agent sidecar (``agent/``) — owns every provider call, including the
+# Patent-analysis runtime. Mirrors the defaults the frontend/vite setup uses.
+DEFAULT_AGENT_HOST = "127.0.0.1"
+DEFAULT_AGENT_PORT = 18800
 
 # HF 镜像 endpoint — ensure_hf_mirror() 在 HF_ENDPOINT 未设置时使用
 DEFAULT_HF_ENDPOINT = "https://hf-mirror.com"

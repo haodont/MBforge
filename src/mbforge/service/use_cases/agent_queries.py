@@ -1,7 +1,7 @@
 """Read-side queries backing the assistant's library tools.
 
 These are the structured, safe queries the agent sidecar exposes as tools
-(``library_stats``, ``query_documents``, ``query_activities``,
+(``library_stats``, ``search_library``, ``query_documents``, ``query_activities``,
 ``query_evidence``) plus the guarded read-only SQL escape hatch
 (``library_sql``). They read the library database through the repository /
 database ports, so no tool reaches the concrete SQLite adapter directly.
@@ -19,6 +19,27 @@ from mbforge.service.use_cases.documents.source_evidence import find_text, list_
 
 #: Long free text (evidence, context) is truncated before crossing the tool boundary.
 MAX_TEXT_CHARS = 2000
+
+
+def search_library(
+    library_root: str, *, query: str, doc_id: str = "", limit: int = 20, offset: int = 0
+) -> dict[str, Any]:
+    """Search all extracted source text with literal, AND-combined keywords."""
+    query = query.strip()
+    if not query or len(query) > 400 or len(query.split()) > 10:
+        raise ValidationError("Use 1-10 keywords, at most 400 characters")
+    if not 1 <= limit <= 50 or not 0 <= offset <= 10000:
+        raise ValidationError("Invalid search pagination")
+    rows = get_repositories(library_root).evidence.search(
+        query, doc_id=doc_id, limit=limit + 1, offset=offset
+    )
+    return {
+        "results": rows[:limit],
+        "has_more": len(rows) > limit,
+        "next_offset": offset + limit if len(rows) > limit else None,
+        "scope": "extracted_source_evidence",
+        "query": query,
+    }
 
 
 def library_stats(library_root: str) -> dict[str, Any]:
@@ -104,11 +125,16 @@ def query_evidence(
         entries = list_evidence(library_root, doc_id, page=page, kind=kind or None)
     results: list[dict[str, Any]] = []
     for entry in entries:
+        if page is not None and entry.page != page:
+            continue
+        if kind and entry.kind != kind:
+            continue
         item = entry.to_dict()
         item["category"] = category_of(entry.kind)
         raw = item.get("raw_text")
         if isinstance(raw, str) and len(raw) > MAX_TEXT_CHARS:
             item["raw_text"] = raw[:MAX_TEXT_CHARS] + "…"
+        item["truncated"] = isinstance(raw, str) and len(raw) > MAX_TEXT_CHARS
         results.append(item)
         if len(results) >= limit:
             break
@@ -132,4 +158,5 @@ __all__ = [
     "query_documents",
     "query_evidence",
     "run_library_sql",
+    "search_library",
 ]

@@ -14,15 +14,11 @@ without rerunning it.
 from __future__ import annotations
 
 import contextlib
-import json
-import os
 import shutil
 from pathlib import Path
-from typing import Any
 
 from mbforge.foundation.layout import LibraryLayout
 from mbforge.foundation.logger import get_logger
-from mbforge.service.pipeline.patent.artifact import PatentFactsArtifact
 
 logger = get_logger("mbforge.service.pipeline.artifacts.staging")
 
@@ -134,36 +130,3 @@ def cleanup_staging(
     # Remove the now-empty ``.staging`` parent when this was the last run.
     with contextlib.suppress(OSError):
         verified.parent.rmdir()
-
-
-# --- run publication (file-first) --------------------------------------------
-
-
-def _atomic_write_json(path: Path, payload: Any) -> None:
-    """Write JSON via temp file + ``os.replace`` (crash-atomic per file)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
-    os.replace(tmp, path)
-
-
-def publish_run(
-    library_root: str | Path,
-    doc_id: str,
-    run_id: str,
-    *,
-    patent_facts: PatentFactsArtifact | None = None,
-    stage: str | None = None,
-) -> Path:
-    """Publish the current Patent facts artifact at the document root."""
-    if patent_facts is None or (stage is not None and stage != "patent"):
-        raise ValueError("publish_run requires patent_facts for the patent stage")
-    artifact_path = LibraryLayout(library_root).patent_facts_json(doc_id)
-    _atomic_write_json(artifact_path, patent_facts.model_dump())
-    logger.info(
-        "Published patent facts for %s (run %s): %s", doc_id, run_id, artifact_path
-    )
-    return artifact_path

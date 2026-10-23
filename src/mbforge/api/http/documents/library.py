@@ -24,16 +24,19 @@ from mbforge.foundation.config import update_settings
 from mbforge.foundation.errors import (
     FileAccessError,
     MBForgeError,
+    NotFoundError,
     ValidationError,
 )
 from mbforge.foundation.logger import get_logger
 from mbforge.service.dto.library import (
+    MAX_EVIDENCE_RESOLVE_IDS,
     LibraryConfigureRequest,
     LibraryConfigureResponse,
     LibraryDeleteDocumentsRequest,
     LibraryDeleteDocumentsResponse,
     LibraryDocumentsResponse,
     LibraryEvidenceItem,
+    LibraryEvidenceResolveRequest,
     LibraryImportResponse,
     LibraryListDocumentsRequest,
     LibraryMoleculeEvidenceUpdateRequest,
@@ -279,6 +282,48 @@ async def library_get_document_evidence(
         )
         for entry in annotated
     ]
+
+
+@router.get(
+    "/documents/{doc_id}/evidence/{evidence_id}", response_model=LibraryEvidenceItem
+)
+async def library_resolve_document_evidence(
+    doc_id: str, evidence_id: str, library_root: str | None = None
+) -> LibraryEvidenceItem:
+    root = str(resolve_library_root(library_root))
+    validate_doc_id(doc_id)
+    evidence = await asyncio.to_thread(source_evidence.resolve, root, evidence_id)
+    if evidence is None or evidence.doc_id != doc_id:
+        raise NotFoundError("Source evidence is unavailable in this document")
+    return LibraryEvidenceItem(
+        **evidence.to_dict(), category=category_of(evidence.kind)
+    )
+
+
+@router.post(
+    "/documents/{doc_id}/evidence/resolve", response_model=list[LibraryEvidenceItem]
+)
+async def library_resolve_document_evidence_batch(
+    doc_id: str, body: LibraryEvidenceResolveRequest
+) -> list[LibraryEvidenceItem]:
+    """Resolve bounded evidence ids at once, so a viewer never issues N requests.
+
+    Ids outside the document (or unknown ones) are skipped rather than failing the
+    batch: the caller asked for what it has, and a stale id must not blank the view.
+    """
+    root = str(resolve_library_root(body.library_root))
+    validate_doc_id(doc_id)
+    items: list[LibraryEvidenceItem] = []
+    for evidence_id in body.evidence_ids[:MAX_EVIDENCE_RESOLVE_IDS]:
+        evidence = await asyncio.to_thread(source_evidence.resolve, root, evidence_id)
+        if evidence is None or evidence.doc_id != doc_id:
+            continue
+        items.append(
+            LibraryEvidenceItem(
+                **evidence.to_dict(), category=category_of(evidence.kind)
+            )
+        )
+    return items
 
 
 @router.post(

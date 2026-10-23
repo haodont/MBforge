@@ -19,7 +19,6 @@ from mbforge.service.pipeline.artifacts.hydration import (
 from mbforge.service.pipeline.artifacts.staging import (
     cleanup_staging,
     promote_staging,
-    publish_run,
     staging_dir,
 )
 
@@ -36,7 +35,6 @@ __all__ = [
     "observation_payload",
     "page_frames_from_pdf",
     "promote_staging",
-    "publish_run",
     "register_evidence_kinds",
     "staging_dir",
     "summarize_molecules",

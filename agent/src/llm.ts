@@ -100,13 +100,17 @@ export function settingsPath(): string {
   return join(homedir(), 'MBForge', 'settings.json')
 }
 
-export async function loadPersistedLlmConfig(): Promise<Record<string, unknown>> {
+export async function loadPersistedSettings(): Promise<Record<string, unknown>> {
   try {
     const parsed = JSON.parse(await readFile(settingsPath(), 'utf8')) as unknown
-    return asRecord(asRecord(parsed).llm)
+    return asRecord(parsed)
   } catch {
     return {}
   }
+}
+
+export async function loadPersistedLlmConfig(): Promise<Record<string, unknown>> {
+  return asRecord((await loadPersistedSettings()).llm)
 }
 
 /** Classify a provider; unknown names fail fast instead of silently posting to

@@ -33,7 +33,11 @@ def read_pdf_page_count(doc: Document) -> int:
         with pymupdf.open(str(source)) as pdf:
             doc._page_count = pdf.page_count
     except Exception as exc:  # noqa: BLE001 — see docstring
-        logger.warning("Failed to read page count for %s: %s", doc.doc_id, exc)
+        # ``str(exc)``, not the exception object: a handler that retains the
+        # LogRecord (pytest's log capture, third-party handlers) would keep the
+        # failed open's traceback alive and pin the PDF handle on Windows,
+        # making a subsequent document delete fail with a sharing violation.
+        logger.warning("Failed to read page count for %s: %s", doc.doc_id, str(exc))
         return doc.page_count
     return doc._page_count
 

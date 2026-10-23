@@ -9,6 +9,7 @@ worker/DAO; this sink never writes it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -95,6 +96,24 @@ class PipelineEventSink:
         elif stage != "extract":
             logger.info("[%s] %s", event, message)
         self._record(event, message, stage=stage, data=data or None)
+
+    def progress(self, stage: str) -> Callable[[str, dict[str, Any]], None]:
+        """Return a stage-facing progress callback routed through this sink.
+
+        Long stages (the LLM-led Patent analysis) report phase/turn/tool lines
+        without importing the sink or the database: ``phase`` lands in the
+        event data and the message stays readable in the queue log.
+        """
+
+        def _emit(phase: str, data: dict[str, Any] | None = None) -> None:
+            payload = dict(data or {})
+            # The event payload may carry its own phase; the callback argument
+            # stays authoritative so the emit call never sees a duplicate key.
+            payload.pop("phase", None)
+            message = str(payload.pop("message", phase))
+            self.emit("info", message, stage=stage, phase=phase, **payload)
+
+        return _emit
 
     def emit_stage_result(self, result: StageResult) -> None:
         """Emit a pipeline event from a ``StageResult``."""

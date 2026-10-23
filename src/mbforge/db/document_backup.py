@@ -26,6 +26,8 @@ _DOC_TABLES = (
     "source_evidence",
     "review_items",
     "activities",
+    "measurements",
+    "measurement_attribution",
 )
 
 

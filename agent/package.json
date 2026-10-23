@@ -9,11 +9,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test \"dist/*.test.js\"",
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "0.73.1",
-    "@mariozechner/pi-ai": "0.73.1",
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@tavily/pi-extension": "0.1.2",
     "typebox": "^1.1.24"
   },
   "devDependencies": {

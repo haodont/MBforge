@@ -27,6 +27,7 @@ def insert_dag(
     doc_id: str,
     run_id: str,
     stages: Sequence[str] | None = None,
+    request_key: str | None = None,
 ) -> None:
     """Register the stage DAG for one document run.
 
@@ -92,6 +93,11 @@ def insert_dag(
                     "(doc_id, run_id, stage, depends_on) VALUES (?, ?, ?, ?)",
                     (doc_id, run_id, stage, prereq),
                 )
+        if request_key:
+            conn.execute(
+                "INSERT OR IGNORE INTO research_task_requests(request_key, doc_id, run_id, session_id) VALUES (?, ?, ?, ?)",
+                (request_key, doc_id, run_id, request_key.split(":", 1)[0]),
+            )
 
 
 def set_node_status(
@@ -222,10 +228,79 @@ def claim_finalize(library_root: str, *, doc_id: str, run_id: str) -> bool:
     with db.kb_conn() as conn:
         cursor = conn.execute(
             "UPDATE ingest_runs SET finalized = 1 "
-            "WHERE doc_id = ? AND run_id = ? AND finalized = 0",
-            (doc_id, run_id),
+            "WHERE doc_id = ? AND run_id = ? AND finalized = 0 "
+            "AND EXISTS (SELECT 1 FROM ingest_queue WHERE doc_id = ? AND run_id = ?) "
+            "AND NOT EXISTS (SELECT 1 FROM ingest_queue WHERE doc_id = ? AND run_id = ? AND status != 'done')",
+            (doc_id, run_id, doc_id, run_id, doc_id, run_id),
         )
         return cursor.rowcount == 1
+
+
+def requested_run_id(library_root: str, doc_id: str, request_key: str) -> str | None:
+    """Research request association survives terminal queue-node cleanup."""
+    with DatabaseManager.get(library_root).kb_conn() as conn:
+        row = conn.execute(
+            "SELECT run_id FROM research_task_requests WHERE doc_id = ? AND request_key = ?",
+            (doc_id, request_key),
+        ).fetchone()
+        return row["run_id"] if row else None
+
+
+def append_patent_to_active(
+    library_root: str, *, doc_id: str, run_id: str, file_path: str, request_key: str
+) -> bool:
+    """Atomically attach analysis to an import's existing preparation DAG."""
+    from mbforge.service.ports import get_pipeline_runtime
+
+    dependencies = get_pipeline_runtime().stage_dependencies()
+    with DatabaseManager.get(library_root).kb_conn() as conn:
+        # Acquire the writer lock before inspecting statuses: completion and
+        # analysis attachment must not race into a prematurely finalized run.
+        conn.execute(
+            "UPDATE ingest_runs SET finalized = finalized WHERE doc_id = ? AND run_id = ?",
+            (doc_id, run_id),
+        )
+        rows = conn.execute(
+            "SELECT stage, status FROM ingest_queue WHERE doc_id = ? AND run_id = ?",
+            (doc_id, run_id),
+        ).fetchall()
+        if not any(
+            row["status"] in ("pending", "processing", "blocked") for row in rows
+        ):
+            return False
+        existing = {row["stage"] for row in rows}
+        selected = existing | {"patent"}
+        if "extract" in existing:
+            selected.add("markdown")
+        for stage in ("markdown", "patent"):
+            if stage not in selected or stage in existing:
+                continue
+            prereqs = [name for name in dependencies.get(stage, ()) if name in selected]
+            conn.execute(
+                "INSERT OR IGNORE INTO ingest_queue (id, file_path, doc_id, stage, run_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+                (
+                    short_id(),
+                    file_path,
+                    doc_id,
+                    stage,
+                    run_id,
+                    "blocked" if prereqs else "pending",
+                ),
+            )
+            for prerequisite in prereqs:
+                conn.execute(
+                    "INSERT OR IGNORE INTO ingest_stage_deps(doc_id, run_id, stage, depends_on) VALUES (?, ?, ?, ?)",
+                    (doc_id, run_id, stage, prerequisite),
+                )
+        conn.execute(
+            "UPDATE ingest_runs SET finalized = 0 WHERE doc_id = ? AND run_id = ?",
+            (doc_id, run_id),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO research_task_requests(request_key, doc_id, run_id, session_id) VALUES (?, ?, ?, ?)",
+            (request_key, doc_id, run_id, request_key.split(":", 1)[0]),
+        )
+        return True
 
 
 def stages_in_run(library_root: str, *, doc_id: str, run_id: str) -> list[str]:

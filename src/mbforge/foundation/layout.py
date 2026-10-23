@@ -205,6 +205,23 @@ class LibraryLayout:
         """Create ``notes/`` if missing and return the path."""
         return self._ensure_dir(self.notes_dir)
 
+    @property
+    def research_sessions_dir(self) -> Path:
+        """Private Pi conversation files, independent from document runs."""
+        return self._root / "research" / "sessions"
+
+    def research_session_file(self, session_id: str) -> Path:
+        path = self._safe_child(
+            self.research_sessions_dir, f"{session_id}.jsonl", label="research session"
+        )
+        try:
+            path.relative_to(self._root)
+        except ValueError as exc:
+            raise PathTraversalError(
+                "Research session path escapes the library"
+            ) from exc
+        return path
+
     # -- Docking paths -------------------------------------------------
 
     @property

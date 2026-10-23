@@ -1,18 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 
-import {
-  AuthStorage,
-  createAgentSession,
-  createExtensionRuntime,
-  ModelRegistry,
-  type ResourceLoader,
-  SessionManager,
-  SettingsManager,
-  type AgentSession,
-} from '@mariozechner/pi-coding-agent'
-import type { Api, Model } from '@mariozechner/pi-ai'
+import type { AgentSession } from '@earendil-works/pi-coding-agent'
 
+import { commonHeaders, readBody, sendJson, startSse, writeSse } from './http.js'
 import {
   asRecord,
   fetchProviderModels,
@@ -26,6 +17,15 @@ import {
   type AgentLlmConfig,
   type LlmProbeResult,
 } from './llm.js'
+import { createSessionForSpec, type SessionSpec } from './session.js'
+import { handleResearchChat, handleResearchStatus } from './research.js'
+import { researchPrompt } from './prompts.js'
+import { createWebTools, loadWebConfig } from './web.js'
+import { loadSkillTool, researchSkills } from './skills.js'
+import {
+  handlePatentAnalysis,
+  handlePatentAnalysisCancel,
+} from './patent-analysis.js'
 import {
   getDockingJobTool,
   librarySqlTool,
@@ -37,16 +37,19 @@ import {
   queryDocumentsTool,
   queryEvidenceTool,
   runDockingTool,
+  searchLibraryTool,
 } from './tool.js'
 
-/** The custom tools exposed to the agent, and the allow-list passed to the
- *  session. Kept together so the two never drift. */
+/** The chat custom tools, and the allow-list passed to the session. Kept
+ *  together so the two never drift. */
 const AGENT_TOOL_NAMES = [
   'molecule_search',
   'library_stats',
   'query_documents',
   'query_activities',
   'query_evidence',
+  'search_library',
+  'load_skill',
   'library_sql',
   'list_receptors',
   'list_docking_jobs',
@@ -60,12 +63,33 @@ const AGENT_CUSTOM_TOOLS = [
   queryDocumentsTool,
   queryActivitiesTool,
   queryEvidenceTool,
+  searchLibraryTool,
+  loadSkillTool,
   librarySqlTool,
   listReceptorsTool,
   listDockingJobsTool,
   getDockingJobTool,
   runDockingTool,
 ]
+
+const CHAT_SYSTEM_PROMPT =
+  'You are the MBForge molecular-science assistant. Use molecule_search for ' +
+  'molecule lookups, and the library tools (library_stats, query_documents, ' +
+  'query_activities, query_evidence) for structured library facts; use ' +
+  'library_sql (read-only SELECT) only for questions the structured tools do ' +
+  'not cover. For molecular docking, use list_receptors to find a receptor, ' +
+  'then run_docking (only when the user explicitly asks) and poll ' +
+  'get_docking_job for the ranked poses. ' +
+  'Separate source-backed facts from hypotheses, cite returned molecule ' +
+  'identifiers when relevant, and never claim that a search result is a ' +
+  'validated design recommendation.'
+
+/** The chat run's prompt and tool surface (the Patent run has its own). */
+const CHAT_SPEC: SessionSpec = {
+  systemPrompt: CHAT_SYSTEM_PROMPT,
+  toolNames: AGENT_TOOL_NAMES,
+  customTools: AGENT_CUSTOM_TOOLS,
+}
 
 interface ChatRequest {
   message: string
@@ -78,112 +102,26 @@ interface SessionEntry {
   signature: string
   session: AgentSession
   tail: Promise<void>
+  resetWeb: (message: string) => void
 }
 
 const sessions = new Map<string, SessionEntry>()
 const maxSessions = 32
 
-function createConfiguredModel(config: AgentLlmConfig): {
-  authStorage: AuthStorage
-  modelRegistry: ModelRegistry
-  model: Model<Api>
-} {
-  const authStorage = AuthStorage.inMemory()
-  const modelRegistry = ModelRegistry.inMemory(authStorage)
-  const api: Api = config.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions'
-  const providerName = 'mbforge-' + config.provider
-
-  modelRegistry.registerProvider(providerName, {
-    name: config.provider,
-    api,
-    baseUrl: config.baseUrl,
-    apiKey: config.apiKey,
-    authHeader: api === 'openai-completions',
-    models: [
-      {
-        id: config.model,
-        name: config.model,
-        api,
-        reasoning: false,
-        input: ['text'],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 131072,
-        maxTokens: config.maxTokens,
-        compat: api === 'openai-completions'
-          ? {
-              supportsStore: false,
-              supportsDeveloperRole: false,
-              supportsReasoningEffort: false,
-              supportsUsageInStreaming: false,
-              maxTokensField: 'max_tokens',
-            }
-          : undefined,
-      },
-    ],
-  })
-
-  const model = modelRegistry.find(providerName, config.model)
-  if (!model) throw new Error('Could not register the configured LLM model')
-  return { authStorage, modelRegistry, model }
-}
-
-async function createSession(config: AgentLlmConfig): Promise<AgentSession> {
-  const { authStorage, modelRegistry, model } = createConfiguredModel(config)
-  const settingsManager = SettingsManager.inMemory({
-    compaction: { enabled: false },
-    retry: { enabled: false, provider: { timeoutMs: config.requestTimeoutMs, maxRetries: 0 } },
-    defaultThinkingLevel: 'off',
-  })
-  const resourceLoader: ResourceLoader = {
-    getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
-    getSkills: () => ({ skills: [], diagnostics: [] }),
-    getPrompts: () => ({ prompts: [], diagnostics: [] }),
-    getThemes: () => ({ themes: [], diagnostics: [] }),
-    getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () =>
-      'You are the MBForge molecular-science assistant. Use molecule_search for ' +
-      'molecule lookups, and the library tools (library_stats, query_documents, ' +
-      'query_activities, query_evidence) for structured library facts; use ' +
-      'library_sql (read-only SELECT) only for questions the structured tools do ' +
-      'not cover. For molecular docking, use list_receptors to find a receptor, ' +
-      'then run_docking (only when the user explicitly asks) and poll ' +
-      'get_docking_job for the ranked poses. ' +
-      'Separate source-backed facts from hypotheses, cite returned molecule ' +
-      'identifiers when relevant, and never claim that a search result is a ' +
-      'validated design recommendation.',
-    getAppendSystemPrompt: () => [],
-    extendResources: () => {},
-    reload: async () => {},
-  }
-
-  const { session } = await createAgentSession({
-    model,
-    thinkingLevel: 'off',
-    authStorage,
-    modelRegistry,
-    settingsManager,
-    resourceLoader,
-    sessionManager: SessionManager.inMemory(),
-    tools: [...AGENT_TOOL_NAMES],
-    customTools: AGENT_CUSTOM_TOOLS,
-  })
-  const registered = new Set(session.getAllTools().map((tool) => tool.name))
-  const missing = AGENT_TOOL_NAMES.filter((name) => !registered.has(name))
-  if (missing.length > 0) {
-    session.dispose()
-    throw new Error('MBForge agent tools were not registered: ' + missing.join(', '))
-  }
-  return session
-}
-
 async function getSession(sessionId: string, config: AgentLlmConfig): Promise<SessionEntry> {
-  const signature = JSON.stringify(config)
+  const webConfig = await loadWebConfig()
+  const signature = JSON.stringify({ config, webConfig })
   const existing = sessions.get(sessionId)
   if (existing && existing.signature === signature) return existing
   existing?.session.dispose()
 
-  const session = await createSession(config)
-  const entry: SessionEntry = { config, signature, session, tail: Promise.resolve() }
+  const web = await createWebTools(webConfig)
+  const session = await createSessionForSpec(config, {
+    ...CHAT_SPEC, systemPrompt: researchPrompt(web.toolNames.length > 0) + '\n' + CHAT_SYSTEM_PROMPT,
+    toolNames: [...AGENT_TOOL_NAMES, ...web.toolNames], extensions: web.extensions,
+    skills: researchSkills,
+  })
+  const entry: SessionEntry = { config, signature, session, tail: Promise.resolve(), resetWeb: web.reset }
   sessions.set(sessionId, entry)
   while (sessions.size > maxSessions) {
     const oldest = sessions.keys().next().value
@@ -193,51 +131,6 @@ async function getSession(sessionId: string, config: AgentLlmConfig): Promise<Se
     sessions.delete(oldest)
   }
   return entry
-}
-
-function corsOrigin(request: IncomingMessage): string {
-  const origin = request.headers.origin
-  if (!origin) return '*'
-  const frontendPort = process.env.MBFORGE_FRONTEND_PORT ?? '5173'
-  const backendPort = process.env.MBFORGE_BACKEND_PORT ?? '18792'
-  const allowed = new Set([
-    'http://127.0.0.1:' + frontendPort,
-    'http://localhost:' + frontendPort,
-    'http://127.0.0.1:' + backendPort,
-    'http://localhost:' + backendPort,
-  ])
-  return allowed.has(origin) ? origin : 'null'
-}
-
-function commonHeaders(request: IncomingMessage): Record<string, string> {
-  return {
-    'access-control-allow-origin': corsOrigin(request),
-    'access-control-allow-headers': 'content-type',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
-    vary: 'origin',
-  }
-}
-
-function sendJson(request: IncomingMessage, response: ServerResponse, status: number, body: unknown): void {
-  response.writeHead(status, { ...commonHeaders(request), 'content-type': 'application/json; charset=utf-8' })
-  response.end(JSON.stringify(body))
-}
-
-function writeSse(response: ServerResponse, event: string, body: unknown): void {
-  if (response.writableEnded) return
-  response.write('event: ' + event + '\ndata: ' + JSON.stringify(body) + '\n\n')
-}
-
-async function readBody(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
-  let length = 0
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    length += buffer.length
-    if (length > 512 * 1024) throw new Error('request body is too large')
-    chunks.push(buffer)
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
 async function handleChat(request: IncomingMessage, response: ServerResponse, body: unknown): Promise<void> {
@@ -256,14 +149,10 @@ async function handleChat(request: IncomingMessage, response: ServerResponse, bo
   )
   const entry = await getSession(sessionId, config)
 
-  response.writeHead(200, {
-    ...commonHeaders(request),
-    'content-type': 'text/event-stream; charset=utf-8',
-    'cache-control': 'no-cache, no-transform',
-    connection: 'keep-alive',
-  })
+  startSse(request, response)
 
   const run = entry.tail.then(async () => {
+    entry.resetWeb(message)
     let text = ''
     let closed = false
     const onClose = () => {
@@ -286,11 +175,11 @@ async function handleChat(request: IncomingMessage, response: ServerResponse, bo
     try {
       await entry.session.prompt(message, { expandPromptTemplates: false, source: 'rpc' })
       const errorMessage = entry.session.agent.state.errorMessage
-      if (errorMessage) writeSse(response, 'error', { message: errorMessage })
+      if (errorMessage) writeSse(response, 'error', { message: sanitizeError(errorMessage, config.apiKey) })
       else writeSse(response, 'done', { session_id: sessionId, text })
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      writeSse(response, 'error', { message: detail })
+      writeSse(response, 'error', { message: sanitizeError(detail, config.apiKey) })
     } finally {
       unsubscribe()
       response.removeListener('close', onClose)
@@ -364,7 +253,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
   try {
     if (request.url === '/v1/chat') await handleChat(request, response, body)
-    else if (request.url === '/v1/models') await handleModels(request, response, body)
+    else if (request.url === '/v1/research-chat') await handleResearchChat(request, response, body)
+    else if (request.url === '/v1/research-status') handleResearchStatus(request, response, body)
+    else if (request.url === '/v1/patent-analysis') {
+      await handlePatentAnalysis(request, response, body)
+    } else if (request.url === '/v1/patent-analysis/cancel') {
+      await handlePatentAnalysisCancel(request, response, body)
+    } else if (request.url === '/v1/models') await handleModels(request, response, body)
     else if (request.url === '/v1/probe') await handleProbe(request, response, body)
     else sendJson(request, response, 404, { error: 'not found' })
   } catch (error) {

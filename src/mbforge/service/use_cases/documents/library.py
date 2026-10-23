@@ -183,11 +183,15 @@ class LibraryStore:
             if storage_subdir.exists():
                 shutil.rmtree(storage_subdir, ignore_errors=True)
 
-        from mbforge.service.ports import get_database
+        from mbforge.service.ports import get_database, get_repositories
 
         db = get_database(str(self._root))
+        repositories = get_repositories(self._root)
         for doc_id in ids:
             db.delete_document_molecule_data(doc_id)
+            # The committed analysis snapshot goes with the document; a review
+            # queue clear, by contrast, keeps its human decisions.
+            repositories.patent_analysis.delete_document_state(doc_id)
         get_repositories(self._root).documents.delete_many(ids)
         logger.info("Documents deleted: %s", ids)
         return len(ids)
@@ -263,6 +267,9 @@ class LibraryStore:
                     )
 
         self.update_document_status(doc_id, "pending")
+        # Discard the committed facts with the rest of this run's outputs, but
+        # keep the human decisions so a re-run can still reuse them.
+        get_repositories(self._root).patent_analysis.clear_payload(doc_id)
         logger.info("Pipeline data cleared: %s (backup=%s)", doc_id, backup_path)
 
     def update_document_status(self, doc_id: str, status: str) -> None:
@@ -348,11 +355,13 @@ def read_document_report(root: str, doc_id: str) -> bytes:
 
 
 def read_patent_facts(root: str, doc_id: str) -> bytes:
-    """Read the Patent-stage facts artifact for a document."""
-    p = LibraryLayout(root).patent_facts_json(doc_id)
-    if not p.is_file():
+    """Read committed facts and observed projection status through the shared use case."""
+    from mbforge.service.use_cases.documents.patent_facts import load_patent_facts
+
+    artifact = load_patent_facts(root, doc_id)
+    if artifact is None:
         raise NotFoundError(f"patent_facts.json not found for {doc_id}")
-    return p.read_bytes()
+    return artifact.model_dump_json().encode("utf-8")
 
 
 def read_page_text(root: str, doc_id: str, page: int) -> str:

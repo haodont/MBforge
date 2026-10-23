@@ -9,8 +9,9 @@ Thin facade over ``pipeline/run/*`` collaborators:
 
 Stage flow: Extract → Markdown → Patent. The queue admits exactly one
 node at a time per document, so the runner never forks threads. The current
-pipeline ends after Patent; downstream linking and persistence remain separate
-work and are not invoked here.
+pipeline ends after Patent, which performs document-local associations and
+persists activity-backed molecules itself; there is no separate global
+linking/persistence stage.
 
 Public symbols (``run_pipeline``, ``cancel_task``, ``is_task_cancelled``,
 ``release_task``, ``PipelineResult``, ``STAGES``, ``_effective_stages``) are
@@ -141,6 +142,9 @@ def run_pipeline(
         stage=stage,
     )
     sink = PipelineEventSink(on_progress, task_id, root, doc_id, run_id=run_id)
+    # Stages report progress through the sink without importing it; the queue
+    # log and SSE stream stay the single observability exit.
+    run.ctx.progress = sink.progress(stage)
 
     try:
         # Per-invocation effective stage list from the composition root.

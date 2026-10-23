@@ -11,6 +11,7 @@ Tools:
     query-documents   list / filter documents
     query-activities  a document's Patent-stage activity measurements
     query-evidence    a document's source-evidence rows
+    search-library    cross-document extracted text search
     library-sql       guarded read-only SELECT escape hatch
 """
 
@@ -33,6 +34,7 @@ from mbforge.service.use_cases.agent_queries import (
     query_documents,
     query_evidence,
     run_library_sql,
+    search_library,
 )
 from mbforge.service.use_cases.docking import jobs as docking_jobs
 from mbforge.service.use_cases.docking import receptors as docking_receptors
@@ -103,6 +105,21 @@ class AgentResultsResponse(BaseModel):
     success: bool = True
     tool: str
     results: list[dict] = Field(default_factory=list)
+
+
+class AgentSearchLibraryRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    query: str = Field(min_length=1, max_length=400)
+    doc_id: str = Field("", max_length=128)
+    limit: int = Field(20, ge=1, le=50)
+    offset: int = Field(0, ge=0, le=10000)
+
+
+@router.post("/tools/search-library")
+async def agent_search_library(body: AgentSearchLibraryRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        search_library, str(resolve_library_root(None)), **body.model_dump()
+    )
 
 
 @router.post("/tools/query-documents", response_model=AgentResultsResponse)
