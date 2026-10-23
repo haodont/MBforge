@@ -29,6 +29,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from mbforge.foundation.inference.ocr.normalise import normalise_ocr_text
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
@@ -164,7 +165,6 @@ def read_text_in_boxes(
         return {}
 
     try:
-        import numpy as _np
         from rapidocr.utils.process_img import map_boxes_to_original
     except Exception as exc:  # noqa: BLE001 — rapidocr internals moved
         logger.warning("page text OCR internals unavailable (%s)", exc)
@@ -184,7 +184,21 @@ def read_text_in_boxes(
             line_boxes = map_boxes_to_original(
                 detection.boxes, operations, page_h, page_w
             )
-            recognized = engine.recognize_txt(crops)
+            # Recognize only lines whose centre falls inside a layout text
+            # region. Every other detected line (structure diagrams, figure
+            # labels, reagent text — the source project measured ~38% of a
+            # page's lines there) is discarded below anyway, so recognizing it
+            # first is pure GPU waste. Detection still runs once on the whole
+            # page, which the module docstring records as the fast path.
+            keep = [
+                index
+                for index, line_box in enumerate(line_boxes)
+                if _region_for_box(boxes, line_box) is not None
+            ]
+            if not keep:
+                return {}
+            recognized = engine.recognize_txt([crops[index] for index in keep])
+            line_boxes = [line_boxes[index] for index in keep]
     except Exception as exc:  # noqa: BLE001 — enrichment: degrade to empty
         logger.warning("page text OCR failed (%s)", exc)
         return {}
@@ -197,13 +211,11 @@ def read_text_in_boxes(
     for line_box, text in zip(line_boxes, texts, strict=False):
         if not text:
             continue
-        box = _np.asarray(line_box, dtype=float)
-        if box.size == 0:
-            continue
-        center_x = (float(box[:, 0].min()) + float(box[:, 0].max())) / 2
-        center_y = (float(box[:, 1].min()) + float(box[:, 1].max())) / 2
-        region_id = _region_for_point(boxes, center_x, center_y)
+        region_id = _region_for_box(boxes, line_box)
         if region_id is None:
+            continue
+        box = np.asarray(line_box, dtype=float)
+        if box.size == 0:
             continue
         # Raster order within the region (top-to-bottom, then left-to-right).
         per_region.setdefault(region_id, []).append(
@@ -211,7 +223,9 @@ def read_text_in_boxes(
         )
 
     return {
-        region_id: join_lines([text for _, _, text in sorted(lines)])
+        region_id: normalise_ocr_text(
+            join_lines([text for _, _, text in sorted(lines)])
+        )
         for region_id, lines in per_region.items()
     }
 
@@ -225,6 +239,24 @@ def _region_for_point(
         if x0 <= x <= x1 and y0 <= y <= y1:
             return region_id
     return None
+
+
+def _region_for_box(
+    boxes: Sequence[tuple[str, Sequence[float]]],
+    line_box: Sequence[Sequence[float]],
+) -> str | None:
+    """Region containing the centre of a detected line box, or ``None``.
+
+    The centre rule is the single definition of "this line belongs to that
+    region"; the pre-recognition filter and the final assembly both use it, so
+    they can never disagree.
+    """
+    box = np.asarray(line_box, dtype=float)
+    if box.size == 0:
+        return None
+    center_x = (float(box[:, 0].min()) + float(box[:, 0].max())) / 2
+    center_y = (float(box[:, 1].min()) + float(box[:, 1].max())) / 2
+    return _region_for_point(boxes, center_x, center_y)
 
 
 __all__ = [
