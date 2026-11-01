@@ -158,31 +158,38 @@ def _confirm_complete_to_molecules(repository: ReviewRepository, row: Any) -> st
     return mol_id
 
 
-def _confirm_scaffold_to_markush_scaffolds(
-    repository: ReviewRepository, row: Any
-) -> str:
-    """Write the destination ``markush_scaffolds`` row."""
-    scaffold_id = short_id()
-    repository.insert_scaffold_from_candidate(
-        scaffold_id=scaffold_id,
-        doc_id=row["doc_id"],
-        formula_label=row["normalized_label"] or row["raw_label"] or "",
-        smiles=row["smiles"] or "",
-        esmiles=row["esmiles"] or "",
-        page=row["page"],
-        bbox_x0=row["bbox_x0"],
-        bbox_y0=row["bbox_y0"],
-        bbox_x1=row["bbox_x1"],
-        bbox_y1=row["bbox_y1"],
-        crop_relpath=row["crop_relpath"],
-        confidence=row["composite_confidence"],
-        properties_json=json.dumps(
+def _candidate_columns(row: Any, *, id_key: str, id_value: str) -> dict[str, Any]:
+    """Build the column map shared by the scaffold/fragment destination rows."""
+    return {
+        id_key: id_value,
+        "doc_id": row["doc_id"],
+        "smiles": row["smiles"] or "",
+        "esmiles": row["esmiles"] or "",
+        "page": row["page"],
+        "bbox_x0": row["bbox_x0"],
+        "bbox_y0": row["bbox_y0"],
+        "bbox_x1": row["bbox_x1"],
+        "bbox_y1": row["bbox_y1"],
+        "crop_relpath": row["crop_relpath"],
+        "confidence": row["composite_confidence"],
+        "properties_json": json.dumps(
             {
                 "review_candidate_id": row["candidate_id"],
                 "label_kind": row["label_kind"],
             },
             ensure_ascii=False,
         ),
+    }
+
+
+def _confirm_scaffold_to_markush_scaffolds(
+    repository: ReviewRepository, row: Any
+) -> str:
+    """Write the destination ``markush_scaffolds`` row."""
+    scaffold_id = short_id()
+    repository.insert_scaffold_from_candidate(
+        **_candidate_columns(row, id_key="scaffold_id", id_value=scaffold_id),
+        formula_label=row["normalized_label"] or row["raw_label"] or "",
     )
     # Echo the new scaffold_id back to the candidate's properties so the
     # review UI can drive the SiteEditor without an extra round
@@ -205,25 +212,8 @@ def _confirm_fragment_to_markush_fragments(
     """Write the destination ``markush_fragments`` row."""
     fragment_id = short_id()
     repository.insert_fragment_from_candidate(
-        fragment_id=fragment_id,
-        doc_id=row["doc_id"],
+        **_candidate_columns(row, id_key="fragment_id", id_value=fragment_id),
         label=row["normalized_label"] or row["raw_label"] or "",
-        smiles=row["smiles"] or "",
-        esmiles=row["esmiles"] or "",
-        page=row["page"],
-        bbox_x0=row["bbox_x0"],
-        bbox_y0=row["bbox_y0"],
-        bbox_x1=row["bbox_x1"],
-        bbox_y1=row["bbox_y1"],
-        crop_relpath=row["crop_relpath"],
-        confidence=row["composite_confidence"],
-        properties_json=json.dumps(
-            {
-                "review_candidate_id": row["candidate_id"],
-                "label_kind": row["label_kind"],
-            },
-            ensure_ascii=False,
-        ),
     )
     repository.copy_evidence(row, "fragment", fragment_id, row["doc_id"])
     return fragment_id

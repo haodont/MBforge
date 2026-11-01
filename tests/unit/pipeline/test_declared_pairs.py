@@ -8,13 +8,13 @@ systematic name *and* the designation the activity table uses —
 not have to be recovered from a label detected beside a drawing.
 
 Measured on CN120329282A: 23 examples declare both, 14 of those numbers also carry
-activity, and the join produces 11 pairs — all 11 confirmed against the product
-mass spectrum the example itself prints.
+activity, and the join produces 11 pairs — all 11 consistent with the product
+mass printed in the example, without independent identity verification.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from mbforge.service.pipeline.patent.declared_pairs import (
     extract_declared_examples,
@@ -83,12 +83,25 @@ def test_a_reading_joins_to_the_structure_the_document_declares() -> None:
             "original_value": 60.7,
             "original_unit": "nM",
         },
+        {
+            "measurement_id": "m-example-2",
+            "provenance": {"reference_key": "2", "reference_type": "example"},
+        },
+        {
+            "measurement_id": "m-example-99",
+            "provenance": {"reference_key": "99", "reference_type": "example"},
+        },
     ]
-    structures = {"1": "CCO"}
+    # Example 2 prepares compound 1. Same-number compound 2 is a different
+    # identity; example 99 has no declaration even though compound 99 exists.
+    examples.append(replace(examples[0], example="2"))
+    structures = {"1": "CCO", "2": "CC", "99": "CCC"}
 
     pairs = pair_structure_activity(examples, readings, structures)
 
-    assert len(pairs) == 1
+    assert len(pairs) == 2
+    assert [pair.smiles for pair in pairs] == ["CCO", "CCO"]
+    assert [pair.measurement_id for pair in pairs] == ["m-1", "m-example-2"]
     assert pairs[0].declared_key == "1"
     assert pairs[0].value == 60.7
     assert pairs[0].unit == "nM"
@@ -113,7 +126,7 @@ def test_a_reading_without_a_declared_structure_is_left_unpaired() -> None:
 
 
 def test_a_pair_that_reproduces_the_printed_mass_is_marked_verified() -> None:
-    """The product mass independently confirms the structure.
+    """The printed mass checks consistency, not structure identity.
 
     Ethanol's [M+H]+ is 47.05: a printed 544.2 is not it, so the pair is reported
     unverified rather than silently presented as confirmed chemistry.

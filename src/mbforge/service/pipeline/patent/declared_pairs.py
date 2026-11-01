@@ -11,11 +11,9 @@ drawing; the document declares it. Measured on CN120329282A: 23 examples declare
 both, 14 of those numbers also carry activity, and together they cover 17 of the
 document's 19 printed readings.
 
-This module builds that join and, more importantly, *verifies* it. The example
-also prints the product's mass spectrum, so a candidate structure can be checked
-against the printed ``[M+H]+`` before it is paired with a reading. Measured on the
-eight structures the pipeline recognised for that document: 8 of 8 match within
-0.35 Da once the section's product mass (not an intermediate's) is used.
+The example's printed mass can be compared with the candidate's calculated
+``[M+H]+`` as a consistency check. Mass agreement cannot establish structure
+identity or distinguish isomers and must never supply a missing designation.
 
 What this does NOT do: invent a structure. When the document declares a name but
 draws no structure, the pair is reported as a gap. That is the honest outcome — a
@@ -25,7 +23,7 @@ wrong structure paired with a real measurement is worse than a missing pair.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from mbforge.foundation.logger import get_logger
@@ -37,9 +35,7 @@ _EXAMPLE_HEADING = re.compile(
     r"实施例\s*(?P<example>\d+)\s*[:：]\s*(?P<body>[^\n]{10,400})"
 )
 #: ``Example 1. 3-(2,4-Difluorophenoxy)-7-(...)-1,6-naphthyridine`` — the US form.
-#: A period separates the number from the name; some filings use a colon instead,
-#: and a few print the number alone with the name on the next line (handled by
-#: :func:`extract_declared_examples` when the body is empty).
+#: The name must be in the same evidence row, after a period or colon.
 _EXAMPLE_HEADING_EN = re.compile(
     r"\bExample\s*(?P<example>\d+)\s*(?:[.:：]|\s-\s)\s*(?P<body>[^\n]{10,400})"
 )
@@ -72,7 +68,7 @@ _MS_VALUE = re.compile(
 )
 #: Monoisotopic proton mass; ``[M+H]+`` is the neutral mass plus this.
 _PROTON = 1.00728
-#: A printed mass within this of the calculated one is the same ion.
+#: Tolerance for mass consistency; agreement does not establish identity.
 _MASS_TOLERANCE_DA = 0.6
 
 
@@ -109,8 +105,7 @@ def extract_declared_examples(
 ) -> list[DeclaredExample]:
     """Return every example whose heading declares both a name and a designation.
 
-    The heading is the only place a patent states that a name and a designation
-    are the same compound, which is exactly the fact the join needs.
+    This reader handles headings; declarations in running prose are read elsewhere.
     """
     sections: list[dict] = []
     for row in evidence:
@@ -269,12 +264,25 @@ def pair_structure_activity(
     When the example prints a product mass, the pair carries whether the
     structure reproduces it. A mismatch does not suppress the pair — the reading
     and the designation are still the document's own statement — but the flag
-    lets a reviewer see which pairs the chemistry independently confirms.
+    reports mass consistency for review, not independent identity verification.
     """
     by_key = {example.declared_key: example for example in examples}
+    keys_by_example: dict[str, set[str]] = {}
+    for example in examples:
+        keys_by_example.setdefault(example.example, set()).add(example.declared_key)
     pairs: list[StructureActivityPair] = []
     for reading in readings:
         key = _reading_designation(reading)
+        provenance = reading.get("provenance")
+        if (
+            isinstance(provenance, Mapping)
+            and provenance.get("reference_type") == "example"
+        ):
+            # Example 2 can prepare compound 1; equal digits do not prove identity.
+            declared_keys = keys_by_example.get(key, set())
+            if len(declared_keys) != 1:
+                continue
+            key = next(iter(declared_keys))
         smiles = structures_by_label.get(key)
         if not key or not smiles:
             continue
@@ -305,82 +313,9 @@ def pair_structure_activity(
     return pairs
 
 
-def recover_by_product_mass(
-    examples: Sequence[DeclaredExample],
-    known_keys: Collection[str],
-    structures: Sequence[str],
-) -> list[StructureActivityPair]:
-    """Recover a structure for an example whose drawing lost its label.
-
-    A scanned patent frequently draws the compound and prints its number, but the
-    OCR that reads the number off the crop misses it — the drawing is still in the
-    library, unnamed. The example states the product's mass, and a structure whose
-    ``[M+H]+`` reproduces that mass to within :data:`_MASS_TOLERANCE_DA` is the
-    compound the example describes.
-
-    Only a *unique* connectivity match is accepted. Several isomers can share a
-    mass, and picking one of them would fabricate an identity; measured on
-    CN120329282A, 9 examples had unnamed candidates and 3 collapsed to a single
-    connectivity. The rest stay gaps.
-
-    A pair recovered this way is marked ``verified_by_mass`` because the mass is
-    the evidence that found it.
-    """
-    keys = {str(key) for key in known_keys}
-    pending = [e for e in examples if e.declared_key not in keys and e.product_mz]
-    if not pending:
-        return []
-
-    from rdkit import Chem, RDLogger
-    from rdkit.Chem import Descriptors
-
-    RDLogger.DisableLog("rdApp.*")
-    parsed: list[tuple[str, float, str]] = []
-    for smiles in structures:
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            continue
-        parsed.append(
-            (
-                smiles,
-                Descriptors.ExactMolWt(mol) + _PROTON,
-                Chem.MolToSmiles(mol, isomericSmiles=False),
-            )
-        )
-
-    recovered: list[StructureActivityPair] = []
-    for example in pending:
-        target = example.product_mz
-        if target is None:
-            continue
-        flat: dict[str, str] = {}
-        for smiles, mass, naive in parsed:
-            if abs(mass - target) <= _MASS_TOLERANCE_DA:
-                flat.setdefault(naive, smiles)
-        if len(flat) != 1:
-            continue
-        smiles = next(iter(flat.values()))
-        recovered.append(
-            StructureActivityPair(
-                declared_key=example.declared_key,
-                measurement_id="",
-                mol_id="",
-                smiles=smiles,
-                metric=None,
-                value=None,
-                unit="",
-                verified_by_mass=True,
-                printed_mz=target,
-                calculated_mz=target,
-            )
-        )
-    return recovered
-
-
 __all__ = [
     "DeclaredExample",
     "StructureActivityPair",
     "extract_declared_examples",
     "pair_structure_activity",
-    "recover_by_product_mass",
 ]

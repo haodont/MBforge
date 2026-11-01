@@ -225,8 +225,9 @@ def _fill_tables(regions: list[dict[str, Any]], image: np.ndarray) -> dict[str, 
 
     Each table crop goes through the local table recognizer once. The raw
     HTML is kept on ``region["html"]`` and the Markdown pipe table on
-    ``region["text"]``, so it flows into ``page_text`` / ``SourceEvidence``
-    unchanged. Recognition is best-effort enrichment: a missing model or a
+    ``region["text"]``. If conversion fails, text retains the raw HTML for
+    ``SourceEvidence`` and review rather than guessing column alignment.
+    Recognition is best-effort enrichment: a missing model or a
     failed inference leaves the region empty and never breaks the page.
     """
     table_regions = [r for r in regions if str(r.get("type")) == TABLE]
@@ -236,6 +237,7 @@ def _fill_tables(regions: list[dict[str, Any]], image: np.ndarray) -> dict[str, 
     from mbforge.service.ports import get_runtime
 
     filled = 0
+    unconverted = 0
     for region in table_regions:
         try:
             crop = _crop_region(image, region["bbox_px"])
@@ -246,13 +248,23 @@ def _fill_tables(regions: list[dict[str, Any]], image: np.ndarray) -> dict[str, 
         html = (html or "").strip()
         if not html:
             continue
+        region["html"] = html
         markdown = html_table_to_markdown(html)
         if not markdown:
+            region["text"] = html
+            unconverted += 1
+            logger.warning(
+                "Layout table conversion failed at bbox %s; raw HTML retained",
+                region["bbox_px"],
+            )
             continue
-        region["html"] = html
         region["text"] = markdown
         filled += 1
-    return {"table_regions": len(table_regions), "tables_filled": filled}
+    return {
+        "table_regions": len(table_regions),
+        "tables_filled": filled,
+        "tables_unconverted": unconverted,
+    }
 
 
 def parse_pdf_layout(

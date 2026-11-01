@@ -43,10 +43,10 @@ function queueProgress(task: IngestTask | undefined): number | null {
 export function useWorkspaceQueueStatus(libraryRoot: string): UseWorkspaceQueueStatusResult {
   const { data: queueTasks = [] } = useIngestQueue(libraryRoot)
 
-  // Documents under processing are deliberately absent from the listing, so
-  // the queue is what tells the user their import is being worked on. The queue
-  // holds one row per stage per run, so count distinct documents (a retry can
-  // leave more than one row of a run active at once).
+  // Pending and in-flight documents are already listed by the workspace, so
+  // the queue overlay supplies their live stage. The queue holds one row per
+  // stage per run, so count distinct documents (a retry can leave more than
+  // one row of a run active at once).
   const processingCount = useMemo(() => {
     const docIds = new Set<string>()
     for (const task of queueTasks) {

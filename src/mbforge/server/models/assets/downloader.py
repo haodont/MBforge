@@ -110,6 +110,50 @@ def _filter_files(paths: list[str], info: ResourceInfo) -> list[str]:
     return list(paths)
 
 
+def _stream_file(
+    url: str,
+    path: str,
+    dest: Path,
+    emit: Callable[[dict], None],
+    index: int,
+    total: int,
+    *,
+    source: str,
+    params: dict | None = None,
+    timeout: int,
+) -> bool:
+    """Stream one remote file into *dest*. Returns success."""
+    try:
+        resp = _get(url, params=params, stream=True, timeout=timeout)
+        resp.raise_for_status()
+        target = _ensure_within(dest, dest / path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        size = int(resp.headers.get("Content-Length", 0) or 0)
+        got = 0
+        with target.open("wb") as fh:
+            for chunk in resp.iter_content(_CHUNK):
+                fh.write(chunk)
+                got += len(chunk)
+                if size > 0:
+                    emit(
+                        {
+                            "status": "downloading",
+                            "file": path,
+                            "file_progress": int(got * 100 / size),
+                            "file_index": index,
+                            "total_files": total,
+                        }
+                    )
+        return True
+    except ValueError as exc:
+        emit({"status": "failed", "error": str(exc)})
+        return False
+    except Exception as exc:  # noqa: BLE001 — one bad file must not abort the rest
+        logger.warning("%s download of %s failed: %s", source, path, exc)
+        emit({"status": "failed", "error": f"下载 {path} 失败: {exc}"})
+        return False
+
+
 def _ms_list_files(info: ResourceInfo, timeout: int = 30) -> list[str]:
     """List a ModelScope repo's blob paths.
 
@@ -143,40 +187,17 @@ def _ms_download_file(
     total: int,
 ) -> bool:
     """Stream one ModelScope file into *dest*. Returns success."""
-    try:
-        resp = _get(
-            f"{MS_BASE}/{info.ms_repo}/repo",
-            params={"Revision": "master", "FilePath": path},
-            stream=True,
-            timeout=600,
-        )
-        resp.raise_for_status()
-        target = _ensure_within(dest, dest / path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        size = int(resp.headers.get("Content-Length", 0) or 0)
-        got = 0
-        with target.open("wb") as fh:
-            for chunk in resp.iter_content(_CHUNK):
-                fh.write(chunk)
-                got += len(chunk)
-                if size > 0:
-                    emit(
-                        {
-                            "status": "downloading",
-                            "file": path,
-                            "file_progress": int(got * 100 / size),
-                            "file_index": index,
-                            "total_files": total,
-                        }
-                    )
-        return True
-    except ValueError as exc:
-        emit({"status": "failed", "error": str(exc)})
-        return False
-    except Exception as exc:  # noqa: BLE001 — one bad file must not abort the rest
-        logger.warning("ModelScope download of %s failed: %s", path, exc)
-        emit({"status": "failed", "error": f"下载 {path} 失败: {exc}"})
-        return False
+    return _stream_file(
+        f"{MS_BASE}/{info.ms_repo}/repo",
+        path,
+        dest,
+        emit,
+        index,
+        total,
+        source="ModelScope",
+        params={"Revision": "master", "FilePath": path},
+        timeout=600,
+    )
 
 
 def _modelscope_direct_http(
@@ -380,35 +401,16 @@ def _hf_download_file(
     total: int,
 ) -> bool:
     """Stream one HuggingFace file into *dest*, following CDN redirects."""
-    try:
-        resp = _get(_hf_resolve_url(info, path), stream=True, timeout=900)
-        resp.raise_for_status()
-        target = _ensure_within(dest, dest / path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        size = int(resp.headers.get("Content-Length", 0) or 0)
-        got = 0
-        with target.open("wb") as fh:
-            for chunk in resp.iter_content(_CHUNK):
-                fh.write(chunk)
-                got += len(chunk)
-                if size > 0:
-                    emit(
-                        {
-                            "status": "downloading",
-                            "file": path,
-                            "file_progress": int(got * 100 / size),
-                            "file_index": index,
-                            "total_files": total,
-                        }
-                    )
-        return True
-    except ValueError as exc:
-        emit({"status": "failed", "error": str(exc)})
-        return False
-    except Exception as exc:  # noqa: BLE001 — one bad file must not abort the rest
-        logger.warning("HuggingFace download of %s failed: %s", path, exc)
-        emit({"status": "failed", "error": f"下载 {path} 失败: {exc}"})
-        return False
+    return _stream_file(
+        _hf_resolve_url(info, path),
+        path,
+        dest,
+        emit,
+        index,
+        total,
+        source="HuggingFace",
+        timeout=900,
+    )
 
 
 def _hf_list_files(info: ResourceInfo, timeout: int = 30) -> list[str]:

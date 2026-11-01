@@ -2,8 +2,8 @@
 
 Writes one append-only record per reviewer action into the shared
 ``markush_decisions`` table using the shared review-decision contract,
-plus the ``insert_review_item`` write primitive consumed by the pipeline
-persist stage and the review queue service. The state machine itself
+plus the ``insert_review_item`` write primitive consumed by the document
+persistence path and the review queue service. The state machine itself
 lives in :mod:`mbforge.domain.review`.
 """
 

@@ -36,9 +36,8 @@ the workspace listing is gated on it:
 
 `POST /api/v1/library/import` registers the document and enqueues its run in
 the same request (unless `ingest.auto_enqueue_on_import` is false), returning
-the `run_id`. The workspace therefore hides a document between import and the
-end of processing, and the queue page is the place to watch progress, read
-logs, and retry.
+the `run_id`. The document is listed as soon as it is imported, and the queue
+page is the place to watch progress, read logs, and retry.
 
 The worker writes the status — not the per-stage event sink, whose `complete`
 event fires once per stage and would mark a document ready early:

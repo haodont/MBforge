@@ -12,6 +12,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from mbforge.db.sqlite.rows import fetch_one
 from mbforge.domain.enumeration import (
     MarkushEnumerationError,
     ResolvedFragment,
@@ -19,12 +20,6 @@ from mbforge.domain.enumeration import (
     SiteSelection,
 )
 from mbforge.foundation.ids import short_id
-
-
-def _one(conn: sqlite3.Connection, sql: str, params: Any) -> dict[str, Any] | None:
-    row = conn.execute(sql, params).fetchone()
-    return dict(row) if row is not None else None
-
 
 # ---------------------------------------------------------------------------
 # Selection authorization (read-only)
@@ -235,7 +230,7 @@ def record_enumeration_run(
 def get_generated_candidate(
     conn: sqlite3.Connection, generated_id: str
 ) -> dict[str, Any] | None:
-    return _one(
+    return fetch_one(
         conn,
         """
         SELECT generated_id, run_id, scaffold_id, combination_key,

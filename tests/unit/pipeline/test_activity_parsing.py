@@ -18,6 +18,10 @@ from mbforge.service.pipeline.activity.parsing import (
     _is_activity_table,
     _parse_simple_activity_table,
 )
+from mbforge.service.pipeline.activity.parsing.tables import (
+    _simple_activity_table_is_complete,
+)
+from mbforge.service.pipeline.layout.table_html import html_table_to_markdown
 
 # Producer labels are registered where they are minted; declare the ones this
 # module mints so the file is order-independent.
@@ -111,7 +115,62 @@ def test_parse_simple_activity_table_records_cells_and_forwards_default_target()
     assert _parse_simple_activity_table("just some text", table_idx=0, page_num=1) == []
 
 
+def test_nd_cells_are_missing_not_measurements() -> None:
+    """``ND`` is no data: it is counted as handled and publishes no record."""
+    table = (
+        "| Example | Activity | Activity |\n"
+        "|---|---|---|\n"
+        "| 1 | +++ | ++ |\n"
+        "| 2 | +++ | ND |"
+    )
+    records = _parse_simple_activity_table(table, table_idx=0, page_num=42)
+
+    assert [record.row_label for record in records] == ["1", "1", "2"]
+    assert all("ND" not in record.value_text for record in records)
+    assert _simple_activity_table_is_complete(table, records)
+
+
+def test_example_prefix_overrides_a_compound_header() -> None:
+    """``实施例 29`` under a ``化合物编号`` header is still an example label."""
+    table = (
+        "| 化合物编号 | IC50 (nM) | 化合物编号 | IC50 (nM) |\n"
+        "|---|---|---|---|\n"
+        "| 化合物1 | 10 | 实施例 29 | 29 |"
+    )
+    records = _parse_simple_activity_table(table, table_idx=0, page_num=94)
+
+    assert [record.reference_type for record in records] == ["compound", "example"]
+    assert [record.reference_key for record in records] == ["1", "29"]
+
+
 # --- extract_activity_measurements_from_evidence: readings and gaps ---
+
+
+def test_printed_positive_control_keeps_its_reading_and_explicit_endpoint() -> None:
+    """CN120943813A p95 must retain the control without inventing its identity."""
+    text = (
+        "| 化合物编号 | MRGPRX2 拮抗剂活性IC50(nM) |\n"
+        "| --- | --- |\n"
+        "| 化合物7-P1 | <0.001 |\n"
+        "| 化合物15 | 0.19 |\n"
+        "| 化合物5 | 0.03 |\n"
+        "| 化合物26 | 0.041 |\n"
+        "| 阳参化合物 | 0.2 |"
+    )
+    readings, issues = extract_activity_measurements_from_evidence(
+        [_evidence(text, kind="tab")], DOC
+    )
+    assert len(readings) == 5
+    assert {m["metric"] for m in readings} == {"IC50"}
+    assert {m["provenance"]["column_target"] for m in readings} == {"MRGPRX2"}
+    assert readings[0]["value"]["raw_text"] == "<0.001"
+    assert readings[0]["value"]["operator"] == "<"
+    control = readings[-1]
+    assert control["provenance"]["reference_raw"] == "阳参化合物"
+    assert control["provenance"]["reference_type"] == "unresolved"
+    assert control["provenance"]["reference_key"] is None
+    assert control["mol_id"] is None and control["linking_status"] == "pending"
+    assert [issue["code"] for issue in issues] == ["compound_reference_unresolved"]
 
 
 def test_prose_measurement_needs_a_compound_reference_to_be_kept() -> None:
@@ -154,6 +213,13 @@ def test_prose_measurement_needs_a_compound_reference_to_be_kept() -> None:
 
 # (case, table) — a table whose activity cell cannot be read as published.
 _COMPLEX_ACTIVITY_TABLES: list[tuple[str, str]] = [
+    (
+        "CN121270515A lost rowspan shifts receptor headers into designation column",
+        "| 化合物编号 | IC50(nM) | IC50(nM) | IC50(nM) | IC50(nM) |\n"
+        "|---|---|---|---|---|\n"
+        "| MRGPRX1 | MRGPRX2 | MRGPRX3 | MRGPRX4 | |\n"
+        "| 实施例1 | + | ++++ | + | + |",
+    ),
     (
         "unreadable cell",
         "| Compound | IC50 (nM) |\n|---|---|\n| 1 | 10 |\n| 2 | unreadable |",
@@ -343,7 +409,7 @@ _CN_SELECTIVITY_TABLE = "\n".join(
     [
         "| 化合物编号 | IC50(nM) |  |  |  |",
         "| --- | --- | --- | --- | --- |",
-        "| MRGPRX1 | MRGPRX2 | MRGPRX3 | MRGPRX4 |  |",
+        "|  | MRGPRX1 | MRGPRX2 | MRGPRX3 | MRGPRX4 |",
         "| 4（化合WO2022067094物1） | ++ | +++ | ++ | ++ |",
         "| 实施例1 | 十 | ++++ | 十 | 十 |",
         "| 实施例2 | 十 | ++++ | 十 | 十 |",
@@ -353,7 +419,7 @@ _CN_SELECTIVITY_TABLE = "\n".join(
 
 def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
     """Spanning metric headers with a target row, repeated (designation, value)
-    pairs — printed labels and merged label cells alike — and a metric qualified by
+    pairs with printed labels, and a metric qualified by
     its substrate inside the header each yield one record per printed value; a
     structure fragment or an assay-only header yields none.
     """
@@ -362,6 +428,12 @@ def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
     measurements, issues = extract_activity_measurements_from_evidence([block], DOC)
 
     assert len(measurements) == 12
+    assert [item["provenance"]["column_target"] for item in measurements[:4]] == [
+        "MRGPRX1",
+        "MRGPRX2",
+        "MRGPRX3",
+        "MRGPRX4",
+    ]
     assert {item["metric"] for item in measurements} == {"IC50"}
     assert [item["value"]["qualitative_value"] for item in measurements] == [
         "++",
@@ -412,6 +484,53 @@ def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
         20.0,
     ]
 
+    # OXR, US20260027089A1 p60: the spanning title precedes the real header.
+    titled = html_table_to_markdown(
+        '<table><tr><td colspan="3">Results for Select Compounds</td></tr>'
+        "<tr><td>Compound</td><td>Structure (image)</td>"
+        "<td>Human MrgprX2 Antagonist pIC50</td></tr>"
+        "<tr><td>E001</td><td></td><td>6.4</td></tr>"
+        "<tr><td>E002</td><td></td><td>5.1</td></tr>"
+        "<tr><td>E003</td><td></td><td>7.4</td></tr></table>"
+    )
+    assert titled is not None
+    titled_readings, titled_issues = extract_activity_measurements_from_evidence(
+        [_evidence(titled, kind="tab")], DOC
+    )
+    assert titled_issues == []
+    assert [m["value"]["original_value"] for m in titled_readings] == [6.4, 5.1, 7.4]
+    assert [m["metric"] for m in titled_readings] == ["pIC50"] * 3
+    assert [m["provenance"]["reference_key"] for m in titled_readings] == [
+        "E001",
+        "E002",
+        "E003",
+    ]
+
+    # Actual SLANet shapes: explicit row/column spans must keep the target in
+    # its own logical column. Existing Markdown fixtures have already lost spans.
+    for html, targets in (
+        (
+            '<table><tr><td rowspan="2">实施例编号</td><td>MRGPRX2 抑制</td>'
+            '<td rowspan="2">实施例编号</td><td>MRGPRX2 抑制</td></tr>'
+            "<tr><td>活性</td><td>活性</td></tr>"
+            "<tr><td>5</td><td>++++</td><td>6</td><td>++++</td></tr></table>",
+            ["MRGPRX2", "MRGPRX2"],
+        ),
+        (
+            '<table><tr><td rowspan="2">化合物编号</td><td colspan="2">IC50(nM)</td>'
+            "</tr><tr><td>MRGPRX1</td><td>MRGPRX2</td></tr>"
+            "<tr><td>1</td><td>12</td><td>34</td></tr></table>",
+            ["MRGPRX1", "MRGPRX2"],
+        ),
+    ):
+        markdown = html_table_to_markdown(html)
+        assert markdown is not None
+        span_readings, span_issues = extract_activity_measurements_from_evidence(
+            [_evidence(markdown, kind="tab")], DOC
+        )
+        assert span_issues == []
+        assert [m["provenance"].get("column_target") for m in span_readings] == targets
+
     # CN120329282A p113: the metric lives inside a target-qualified header, and the
     # two columns differ only by their substrate. Both facts were refused whole
     # before — no metric token was recognized at all.
@@ -451,8 +570,8 @@ def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
         "46",
     ]
 
-    # CN121270515A p20: the label cell of the second pair is the merged cell, so the
-    # designation printed to its left owns the value beside it.
+    # CN121270515A p20 prints 6 in the blank OCR cell. Never assign it to 5:
+    # without image/span evidence the whole table needs review.
     merged = _evidence(
         "| 实施例编号 | MRGPRX2 抑制 | 实施例编号 | MRGPRX2 抑制 |\n"
         "| --- | --- | --- | --- |\n"
@@ -464,11 +583,8 @@ def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
         [merged], DOC
     )
 
-    assert merged_issues == []
-    assert [item["provenance"]["reference_key"] for item in merged_measurements] == [
-        "5",
-        "5",
-    ]
+    assert merged_measurements == []
+    assert [issue["code"] for issue in merged_issues] == ["complex_activity_table"]
 
     # The rejected neighbours. A structure fragment is not a designation, so the
     # value beside it stays unread and the table is reported instead of guessed.
@@ -482,8 +598,8 @@ def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
     assert noise_measurements == []
     assert [issue["code"] for issue in noise_issues] == ["complex_activity_table"]
 
-    # A header that names only assays states no metric, so nothing is invented —
-    # and the table does not even reach the model as a gap.
+    # Assay-only headers state no metric: ask the model to read context rather
+    # than inventing IC50 or silently omitting the table from its worklist.
     assays = _evidence(
         "| Example | MRGPRX2 FLIPR | MRGPRX2 IP1 HTRF |\n| --- | --- | --- |\n"
         "| 1 | 8.2 | 7.9 |",
@@ -493,7 +609,7 @@ def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
         [assays], DOC
     )
     assert assay_measurements == []
-    assert assay_issues == []
+    assert [issue["code"] for issue in assay_issues] == ["complex_activity_table"]
 
 
 def test_document_legend_resolves_letter_bins_outside_the_table() -> None:

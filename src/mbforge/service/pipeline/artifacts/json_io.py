@@ -14,17 +14,21 @@ from mbforge.foundation.logger import get_logger
 logger = get_logger("mbforge.service.pipeline.artifacts.json_io")
 
 
-def read_json_object(path: Path) -> dict[str, Any] | None:
+def read_json_object(path: Path, *, label: str = "artifact") -> dict[str, Any] | None:
+    """Read one JSON object, returning ``None`` when missing or invalid."""
     if not path.is_file():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Ignoring unreadable artifact %s: %s", path, exc)
+        logger.warning("Ignoring unreadable %s %s: %s", label, path, exc)
         return None
     if not isinstance(data, dict):
         logger.warning(
-            "Ignoring artifact %s: expected object, got %s", path, type(data).__name__
+            "Ignoring %s %s: expected object, got %s",
+            label,
+            path,
+            type(data).__name__,
         )
         return None
     return data

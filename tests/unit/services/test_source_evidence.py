@@ -77,6 +77,39 @@ def test_source_evidence_queries_resolve_text_and_bbox_intersection(
         at(tmp_path, "doc-query", 1, None)  # type: ignore[arg-type]
 
 
+def test_source_evidence_loads_in_persisted_reading_order(tmp_path: Path) -> None:
+    """A two-column page reads left column then right, not top-to-bottom by y."""
+    left = SourceEvidence.create(
+        doc_id="doc-order",
+        page=1,
+        bbox=(10.0, 10.0, 20.0, 20.0),
+        raw_text="left",
+        reading_order=0,
+    )
+    right = SourceEvidence.create(
+        doc_id="doc-order",
+        page=1,
+        bbox=(40.0, 50.0, 50.0, 60.0),
+        raw_text="right",
+        reading_order=1,
+    )
+    top = SourceEvidence.create(
+        doc_id="doc-order",
+        page=1,
+        bbox=(10.0, 50.0, 20.0, 60.0),
+        raw_text="top",
+        reading_order=2,
+    )
+
+    persist_source_evidence(tmp_path, [top, right, left])
+
+    assert [item.raw_text for item in list_evidence(tmp_path, "doc-order")] == [
+        "left",
+        "right",
+        "top",
+    ]
+
+
 def test_source_evidence_persistence_is_idempotent_refreshable_and_drop_safe(
     tmp_path: Path,
 ) -> None:

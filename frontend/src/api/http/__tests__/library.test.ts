@@ -1,13 +1,13 @@
 /**
- * library.ts — `cropImageUrl` / `importDocument` (covered functions at top).
+ * library.ts — `cropImageUrl` / `importDocument` / `exportStructureActivity`.
  *
- * Protects two non-trivial contracts: the URL builder that must survive
+ * Protects the URL builder that must survive
  * Windows paths / non-ASCII rel_paths without breaking the query string, and
- * the multipart import path (no Content-Type override, server errors surfaced).
+ * the multipart import path, and binary dataset downloads with server errors surfaced.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cropImageUrl, importDocument } from '../library'
+import { cropImageUrl, exportStructureActivity, importDocument } from '../library'
 
 describe('cropImageUrl', () => {
   it('encodes Windows library roots and non-ASCII rel_paths into one query string', () => {
@@ -22,6 +22,53 @@ describe('cropImageUrl', () => {
     expect(cropImageUrl('doc1', '图 1.png', 'C:\\lib')).toContain('rel_path=%E5%9B%BE+1.png')
     // The backend namespace prefix is preserved when an API base is configured.
     expect(cropImageUrl('doc1', 'crop.png', 'C:\\lib').startsWith('/api/v1/library/documents/')).toBe(true)
+  })
+})
+
+describe('exportStructureActivity', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('downloads the selected-document archive unchanged and surfaces stale-snapshot errors without downloading', async () => {
+    vi.useFakeTimers()
+    const archive = new Uint8Array([0x50, 0x4b, 3, 4, 0, 255])
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(archive, {
+      headers: { 'Content-Type': 'application/zip' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectURL = vi.fn<(blob: Blob) => string>().mockReturnValue('blob:archive')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = revokeObjectURL
+    })
+    const downloaded: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloaded.push(this.download)
+    })
+
+    await exportStructureActivity(['doc-a', 'doc-b'], 'C:\\library')
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/activities/export')
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      doc_ids: ['doc-a', 'doc-b'], library_root: 'C:\\library',
+    })
+    const delivered = createObjectURL.mock.calls[0]
+    expect(new Uint8Array(await delivered[0].arrayBuffer())).toEqual(archive)
+    expect(downloaded).toEqual(['structure-activity.zip'])
+    expect(document.querySelector('a[download]')).toBeNull()
+    await vi.runAllTimersAsync()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:archive')
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: 'Evidence changed; rerun patent analysis', error_code: 'conflict',
+    }), { status: 409 }))
+    await expect(exportStructureActivity(['doc-a'], 'C:\\library'))
+      .rejects.toThrow('Evidence changed; rerun patent analysis')
+    expect(downloaded).toHaveLength(1)
   })
 })
 

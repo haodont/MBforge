@@ -13,8 +13,8 @@ Decision application (``apply_decision``) and the role-transition
 writes live in :mod:`mbforge.service.use_cases.markush.review`; the shared state
 machine in :mod:`mbforge.domain.review`.
 
-All writes target the caller-owned connection so the persist stage's
-existing transaction is reused; no implicit commits.
+All writes target the caller-owned connection so the caller's transaction is
+reused; no implicit commits.
 """
 
 from __future__ import annotations

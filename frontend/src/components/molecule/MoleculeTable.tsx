@@ -10,6 +10,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import Button from '@/components/ui/Button'
 import Badge, { type BadgeTone } from '@/components/ui/Badge'
 import { useOptionalAppContext } from '@/context/AppContext'
+import { documentEntry } from '@/utils/documentEntry'
 import './MoleculeTable.css'
 
 interface MoleculeTableProps {
@@ -61,19 +62,10 @@ export default function MoleculeTable({
     const evidence = mol.evidence?.[0]
     const docId = evidence?.doc_id || mol.source_doc
     if (!docId) return
-    const sourcePath = `storage/${docId}/source.pdf`
     appContext?.openTab({
       type: 'document',
       title: docId,
-      doc: {
-        doc_id: docId,
-        path: sourcePath,
-        source_path: sourcePath,
-        doc_type: 'pdf',
-        title: docId,
-        added_at: new Date().toISOString(),
-        hash: '',
-      },
+      doc: documentEntry(docId),
       libraryRoot,
       initialPage: evidence?.page ?? undefined,
       initialBbox: evidence?.bbox

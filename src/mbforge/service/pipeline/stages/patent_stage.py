@@ -1621,6 +1621,11 @@ class PatentStage:
                     evidence_pages=pages,
                     scope_evidence_ids=_answer_scope(answer, gaps),
                     scope_fact_ids=_answer_fact_scope(answer, gaps),
+                    scope_work_evidence_ids=(
+                        gap_by_id[answer.gap_id].rule_context.get("work_evidence_ids")
+                        if answer.gap_id in gap_by_id
+                        else None
+                    ),
                 )
                 for answer in answers
             ]
@@ -1701,7 +1706,7 @@ class PatentStage:
             if section.page_start is None or section.page_end is None:
                 raise ValueError("section page range is unavailable")
             source_ids = section.title_evidence_ids
-            declared_here = 0
+            title_declared = 0
 
             for entry_dict in extract_entries_from_title(
                 section.title,
@@ -1714,7 +1719,7 @@ class PatentStage:
                     continue
                 seen_entry_ids.add(entry_dict["entry_id"])
                 all_entries.append(entry_dict)
-                declared_here += 1
+                title_declared += 1
 
             for entry_dict in extract_entries_from_body(
                 [
@@ -1730,9 +1735,9 @@ class PatentStage:
                     continue
                 seen_entry_ids.add(entry_dict["entry_id"])
                 all_entries.append(entry_dict)
-                declared_here += 1
 
-            if declared_here == 0:
+            # Body designations may name starting materials or intermediates.
+            if title_declared == 0:
                 identity = _example_identity_entry(section, ctx.doc_id)
                 if identity is not None and identity["entry_id"] not in seen_entry_ids:
                     seen_entry_ids.add(identity["entry_id"])
@@ -1811,7 +1816,7 @@ class PatentStage:
         # heading; joining through that declaration is what turns a reading into
         # (structure, value) without guessing at a detected label.
         structure_activity = _declared_structure_activity(
-            source_evidence, measurements, candidates, ctx.doc_id, ctx.library_root
+            source_evidence, measurements, ctx.doc_id, ctx.library_root
         )
 
         return ExtractionOutcome(
@@ -1848,7 +1853,6 @@ def _candidate_designations(candidate: Any) -> set[str]:
 def _declared_structure_activity(
     evidence: Sequence[SourceEvidence],
     measurements: Sequence[dict],
-    candidates: Sequence[Any],
     doc_id: str,
     library_root: str,
 ) -> list[dict]:
@@ -1858,8 +1862,8 @@ def _declared_structure_activity(
     absent: the document named the compound but drew nothing, and reporting a
     pair there would mean inventing a structure.
 
-    The structures are read from the library's ``molecules`` table, not from
-    *candidates*: the candidates this stage receives are the raw recognition
+    The structures are read from the library's ``molecules`` table: the
+    candidates this stage receives are the raw recognition
     results (Markush scaffolds included, labelled ``I-A``/``II-A``), while the
     concrete compound the pipeline stored — ``name='8'`` with a plain SMILES — is
     the one an example heading's designation points at.
@@ -1867,7 +1871,6 @@ def _declared_structure_activity(
     from mbforge.service.pipeline.patent.declared_pairs import (
         extract_declared_examples,
         pair_structure_activity,
-        recover_by_product_mass,
     )
 
     structures = _stored_structures_by_designation(library_root, doc_id)
@@ -1879,13 +1882,6 @@ def _declared_structure_activity(
         if structures
         else []
     )
-    # A drawing whose label OCR missed is still in the library, unnamed. The
-    # example's printed product mass identifies it when exactly one structure
-    # reproduces that mass.
-    unnamed = _stored_unnamed_structures(library_root, doc_id)
-    if unnamed:
-        paired_keys = {pair.declared_key for pair in pairs}
-        pairs.extend(recover_by_product_mass(examples, paired_keys, unnamed))
     return [
         {
             "declared_key": pair.declared_key,
@@ -1900,24 +1896,6 @@ def _declared_structure_activity(
         }
         for pair in pairs
     ]
-
-
-def _stored_unnamed_structures(library_root: str, doc_id: str) -> list[str]:
-    """Concrete structures of this document that carry no printed designation.
-
-    These are the drawings whose crop-label OCR missed. They are the reserve a
-    product mass can identify.
-    """
-    from mbforge.service.ports import get_repositories
-
-    rows = get_repositories(library_root).molecules.designated_structures(doc_id)
-    out: list[str] = []
-    for row in rows:
-        name = str(row.get("name") or "").strip()
-        smiles = str(row.get("canonical_smiles") or "").strip()
-        if not name and smiles and "*" not in smiles:
-            out.append(smiles)
-    return out
 
 
 def _stored_structures_by_designation(library_root: str, doc_id: str) -> dict[str, str]:

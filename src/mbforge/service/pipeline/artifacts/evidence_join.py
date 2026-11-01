@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -198,6 +199,7 @@ def _region_evidence(
         bbox=_bbox_in_frame(region.get("bbox") or (), frame),
         raw_text=text,
         kind=kind,
+        reading_order=int(region.get("reading_order", 0) or 0),
     )
 
 
@@ -359,6 +361,7 @@ def mint_evidence(
             bbox=winner.bbox,
             raw_text=winner.raw_text or loser.raw_text,
             kind=winner.kind,
+            reading_order=winner.reading_order,
         )
 
     for page in extracted.pages:
@@ -395,7 +398,17 @@ def mint_evidence(
 
     evidence = _join_evidence_dedupe(list(by_id.values()))
     evidence.sort(key=lambda item: _evidence_sort_key(item, order_hint))
-    return evidence
+    # Persist the order that was just computed. A page's rows carry a
+    # zero-based position so the SQL loader can reproduce a two-column reading
+    # order without the layout regions; the geometric keys stay as the legacy
+    # tie-breakers for rows written before this column existed.
+    ordered: list[SourceEvidence] = []
+    positions: dict[int, int] = {}
+    for item in evidence:
+        position = positions.get(item.page, 0)
+        ordered.append(replace(item, reading_order=position))
+        positions[item.page] = position + 1
+    return ordered
 
 
 def load_document_evidence(

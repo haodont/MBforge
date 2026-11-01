@@ -2,11 +2,19 @@
 
 Use these living references when code and older notes disagree:
 
+- [Structure–activity export contract and audit (2026-10-30)](qa/structure-activity-export-20261030.md)
+- [Evidence-scoped Patent harness and real-provider audit (2026-10-30)](qa/patent-harness-20261030.md)
+- [OCR/OXR bottleneck experiments and activity-reference design (2026-10-29)](qa/patent-ocr-bottleneck-20261029.md)
+
 - [Architecture](wiki/architecture.md)
 - [Pipeline contract](wiki/pipeline.md)
 - [Activity ↔ molecule association](wiki/activity-association.md)
 - [Patent analysis adoption rules](wiki/patent-adoption-rules.md)
 - [Patent extraction forms (real-corpus catalog)](wiki/patent-extraction-forms.md)
+- [Patent taxonomy and extraction matrix](wiki/patent-taxonomy.md)
+- [Patent layout rules (13-document survey)](wiki/patent-layout-rules.md)
+- [Relation-pair contract (ADR 0001)](adr/0001-relation-pair-contract.md)
+- [Gold standard for relation pairs](plan-gold-standard.md)
 - [Research workbench frontend acceptance](qa/research-workbench-20261013.md)
 - [HTTP API](api/README.md)
 - [Development workflow](wiki/workflow.md)

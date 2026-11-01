@@ -274,6 +274,27 @@
             "value": {
               "$ref": "#/$defs/DraftValue"
             },
+            "source_quote": {
+              "default": "",
+              "description": "Verbatim row or sentence containing this designation and reading; required for table work with an evidence packet. Context/legend alone is not a reading.",
+              "maxLength": 4000,
+              "title": "Source Quote",
+              "type": "string"
+            },
+            "source_column": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Zero-based value column in the supplied Markdown work table (label columns count too); required for packet-backed pipe tables. raw_text must copy that cell exactly.",
+              "title": "Source Column"
+            },
             "compound_label_raw": {
               "default": "",
               "maxLength": 200,
@@ -444,12 +465,12 @@
                 }
               ],
               "default": null,
-              "description": "Printed number without the operator; qualitative only.",
+              "description": "Printed number without the operator; null for qualitative readings.",
               "title": "Value"
             },
             "unit": {
               "default": "",
-              "description": "Unit as printed; canonicalization stays in Python.",
+              "description": "Unit as printed; empty for dimensionless pIC50/pEC50/pKi/pKd-style metrics (do not mark unit missing). Other numeric readings without a unit must declare unit in missing_fields. Canonicalization stays in Python.",
               "maxLength": 64,
               "title": "Unit",
               "type": "string"

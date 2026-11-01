@@ -1,4 +1,4 @@
-"""Layout region detection pipeline (independent of the cloud OCR layout).
+"""Local layout region detection pipeline (page-layout producer).
 
 Modules:
 

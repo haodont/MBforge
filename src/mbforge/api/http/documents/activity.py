@@ -3,16 +3,37 @@ from __future__ import annotations
 import anyio
 from fastapi import APIRouter, Query
 from fastapi import Path as ApiPath
+from fastapi.responses import Response
 
 from mbforge.api.http._path_utils import resolve_library_root, validate_doc_id
 from mbforge.contracts.measurement import MeasurementDatasetStats
-from mbforge.service.dto.activity import ActivityRecordResponse
+from mbforge.service.dto.activity import ActivityExportRequest, ActivityRecordResponse
+from mbforge.service.use_cases.documents.activity_export import (
+    export_structure_activity,
+)
 from mbforge.service.use_cases.documents.activity_queries import (
     dataset_stats,
     list_activity_records,
 )
 
 router = APIRouter()
+
+
+@router.post("/export")
+async def export_activities(body: ActivityExportRequest) -> Response:
+    root = resolve_library_root(body.library_root)
+    for doc_id in body.doc_ids:
+        validate_doc_id(doc_id)
+    archive = await anyio.to_thread.run_sync(
+        export_structure_activity, root, body.doc_ids
+    )
+    return Response(
+        archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="structure-activity.zip"'
+        },
+    )
 
 
 @router.get(

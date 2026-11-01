@@ -2,7 +2,12 @@
  * 响应式布局工具组件。
  */
 import type { ReactNode, CSSProperties } from 'react'
-import { useIsMobile, useIsTablet, useIsDesktop } from '../../styles/responsive'
+import {
+  useIsDesktop,
+  useIsMobile,
+  useIsTablet,
+  useResponsiveColumns,
+} from '../../styles/responsive'
 
 // ============================================================================
 // ResponsiveLayout - 自适应布局容器
@@ -130,14 +135,7 @@ export function ResponsiveGrid({
   style,
   className,
 }: ResponsiveGridProps) {
-  const isMobile = useIsMobile()
-  const isTablet = useIsTablet()
-
-  const columns = isMobile
-    ? mobileColumns
-    : isTablet
-    ? tabletColumns
-    : desktopColumns
+  const columns = useResponsiveColumns(mobileColumns, tabletColumns, desktopColumns)
 
   return (
     <div

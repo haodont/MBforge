@@ -11,11 +11,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-
-def _one(conn: sqlite3.Connection, sql: str, params: Any) -> dict[str, Any] | None:
-    row = conn.execute(sql, params).fetchone()
-    return dict(row) if row is not None else None
-
+from mbforge.db.sqlite.rows import fetch_one
 
 # ---------------------------------------------------------------------------
 # Sites
@@ -26,7 +22,7 @@ def scaffold_site_context(
     conn: sqlite3.Connection, scaffold_id: str
 ) -> dict[str, Any] | None:
     """Return the ``smiles``/``status`` of a scaffold, or ``None``."""
-    return _one(
+    return fetch_one(
         conn,
         "SELECT smiles, status FROM markush_scaffolds WHERE scaffold_id = ?",
         (scaffold_id,),
@@ -64,7 +60,7 @@ def insert_site(
 
 
 def get_site_row(conn: sqlite3.Connection, site_id: str) -> dict[str, Any] | None:
-    return _one(conn, "SELECT * FROM markush_sites WHERE site_id = ?", (site_id,))
+    return fetch_one(conn, "SELECT * FROM markush_sites WHERE site_id = ?", (site_id,))
 
 
 def list_site_rows(conn: sqlite3.Connection, scaffold_id: str) -> list[dict[str, Any]]:
@@ -124,7 +120,7 @@ def update_site_row(
 
 
 def site_status(conn: sqlite3.Connection, site_id: str) -> dict[str, Any] | None:
-    return _one(
+    return fetch_one(
         conn,
         "SELECT site_id, status FROM markush_sites WHERE site_id = ?",
         (site_id,),
@@ -134,7 +130,7 @@ def site_status(conn: sqlite3.Connection, site_id: str) -> dict[str, Any] | None
 def fragment_status(
     conn: sqlite3.Connection, fragment_id: str
 ) -> dict[str, Any] | None:
-    return _one(
+    return fetch_one(
         conn,
         "SELECT status FROM markush_fragments WHERE fragment_id = ?",
         (fragment_id,),
@@ -178,7 +174,9 @@ def insert_option(
 
 
 def get_option_row(conn: sqlite3.Connection, option_id: str) -> dict[str, Any] | None:
-    return _one(conn, "SELECT * FROM markush_options WHERE option_id = ?", (option_id,))
+    return fetch_one(
+        conn, "SELECT * FROM markush_options WHERE option_id = ?", (option_id,)
+    )
 
 
 def list_option_rows(conn: sqlite3.Connection, site_id: str) -> list[dict[str, Any]]:
@@ -225,7 +223,7 @@ def list_mount_rows(
 def find_mount_row(
     conn: sqlite3.Connection, site_id: str, fragment_id: str
 ) -> dict[str, Any] | None:
-    return _one(
+    return fetch_one(
         conn,
         "SELECT * FROM markush_mounts WHERE site_id = ? AND fragment_id = ?",
         (site_id, fragment_id),
@@ -233,7 +231,9 @@ def find_mount_row(
 
 
 def get_mount_row(conn: sqlite3.Connection, mount_id: str) -> dict[str, Any] | None:
-    return _one(conn, "SELECT * FROM markush_mounts WHERE mount_id = ?", (mount_id,))
+    return fetch_one(
+        conn, "SELECT * FROM markush_mounts WHERE mount_id = ?", (mount_id,)
+    )
 
 
 def insert_mount(

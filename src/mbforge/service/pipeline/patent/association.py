@@ -17,6 +17,7 @@ from mbforge.domain.patent import (
 from mbforge.service.pipeline.patent.sections import (
     ParsedSection as DocumentSection,
 )
+from mbforge.service.pipeline.persist.molecules import filter_persistable_candidates
 
 if TYPE_CHECKING:
     from mbforge.service.pipeline.activity.normalization import ReferenceLabel
@@ -421,14 +422,22 @@ def associate_facts(
         )
         # Splitting one heading into several blocks yields several sections for
         # the same example; they declare the same compound, so the identity is
-        # decided by distinct designations, not by section count. A compound the
-        # section prints beats the section's own example identity.
+        # decided by distinct designations, not by section count. Only a title
+        # declaration can replace the example identity; body mentions may be reagents.
         compound_entries = [
-            entry for entry in example_entries if not _is_example_identity(entry)
+            entry
+            for entry in example_entries
+            if not _is_example_identity(entry)
+            and (section := sections_by_id.get(entry.get("section_id"))) is not None
+            and set(_string_ids(entry.get("evidence_ids")))
+            & set(section.title_evidence_ids)
         ]
         declared = [
             group[0]
-            for group in _group_by_label(compound_entries or example_entries).values()
+            for group in _group_by_label(
+                compound_entries
+                or [entry for entry in example_entries if _is_example_identity(entry)]
+            ).values()
         ]
         if len(declared) == 1:
             measurement["compound_entry_id"] = declared[0]["entry_id"]
@@ -441,8 +450,8 @@ def associate_facts(
                 fact_id,
             )
         elif reference.key and reference.reference_type == "example":
-            # No section carries that number, but the passage does print the
-            # designation, so it is declared here rather than reported as missing.
+            # No title-backed product identity exists; retain the printed example
+            # designation without borrowing a body compound or an equal number.
             measurement["compound_entry_id"] = _declare_entry(
                 entries,
                 entries_by_label,
@@ -526,7 +535,7 @@ def associate_facts(
         measurement["linking_status"] = "failed" if relation_issue else "linked"
 
     candidate_matches: dict[str, list[tuple[Any, set[str], list[str]]]] = {}
-    for candidate in candidates:
+    for candidate in filter_persistable_candidates("", list(candidates), warn=False):
         keys = _candidate_label_keys(candidate)
         evidence_ids = _candidate_evidence_ids(candidate, valid_evidence_ids)
         if not keys:
@@ -578,18 +587,6 @@ def associate_facts(
             )
             continue
         candidate, _, candidate_evidence_ids = matches[0]
-        properties = getattr(candidate, "properties", {})
-        if candidate.status == "rejected" or (
-            isinstance(properties, dict) and properties.get("markush") is True
-        ):
-            _append_issue(
-                issues,
-                "molecule_candidate_rejected",
-                f"Detection candidate for {label_key} is rejected or Markush",
-                candidate_evidence_ids,
-                fact_entry_id,
-            )
-            continue
         if not candidate_evidence_ids:
             _append_issue(
                 issues,

@@ -19,12 +19,14 @@ from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
-from mbforge.contracts.patent import PatentGapAnswer
+from mbforge.contracts.patent import PatentGap, PatentGapAnswer
 from mbforge.contracts.patent_runtime import PatentTaskScope
 from mbforge.domain.evidence import SourceEvidence
 from mbforge.domain.evidence_kind import category_of
 from mbforge.foundation.errors import ValidationError
 from mbforge.foundation.logger import get_logger
+from mbforge.service.pipeline.activity.normalization import find_activity_metrics
+from mbforge.service.pipeline.activity.parsing.tables import table_cell_matches
 from mbforge.service.pipeline.artifacts.hydration import load_detections
 from mbforge.service.pipeline.persist.molecules import filter_persistable_candidates
 from mbforge.service.ports.patent_analysis import get_patent_task_registry
@@ -95,9 +97,7 @@ def get_gap(credential: str, *, gap_id: str = "") -> dict[str, Any]:
     and the verbatim excerpt an answer is judged against. Enumeration belongs
     to Python, so the session never rebuilds this list by reading the document.
 
-    The attempt's identity travels with the gap: the answer contract requires
-    those fields, so withholding them would leave the model unable to produce a
-    conforming object at all.
+    The attempt's identity travels with the gap for the host to bind submissions.
     """
     scope = _scope(credential)  # authorization: unknown credentials are rejected
     registry = get_patent_task_registry()
@@ -164,6 +164,11 @@ def request_excerpt(
     )
     if refusal:
         return _failure(refusal)
+    if gap.rule_context.get("evidence"):
+        gap.rule_context["evidence"] = [
+            *gap.rule_context["evidence"],
+            *({**item, "role": "context"} for item in items),
+        ]
     registry.record_evidence_reads(credential, items)
     return {
         "success": True,
@@ -176,9 +181,9 @@ def request_excerpt(
 def submit_gap_answer(credential: str, answer: dict[str, Any]) -> dict[str, Any]:
     """Validate one gap answer against its gap and stage it.
 
-    Tier-1 checks only: contract shape, bound document/attempt/evidence set, and
-    that every cited evidence id lies inside the gap's own excerpt (plus its one
-    follow-up). Field support and adoption stay with the merge.
+    Check shape, bound identity and evidence membership. Packet-backed tables
+    also require literal row/cell/metric support; semantic attribution and
+    adoption still need the merge and review.
     """
     scope = _scope(credential)
     registry = get_patent_task_registry()
@@ -238,7 +243,7 @@ def submit_gap_answer(credential: str, answer: dict[str, Any]) -> dict[str, Any]
         def normalize(value: str) -> str:
             key = designation_key(value) or _LABEL_PREFIX_RE.sub("", value)
             if example_rows and not key.startswith("@example:"):
-                key = designation_key(f"Example {key}")
+                key = designation_key(f"Example {key}") or key
             return key.strip(_LABEL_TRIM).casefold()
 
         allowed_labels = {normalize(label) for label in row_labels}
@@ -262,6 +267,12 @@ def submit_gap_answer(credential: str, answer: dict[str, Any]) -> dict[str, Any]
             "answer cites evidence outside the bound document",
             foreign_evidence_ids=foreign[:10],
             foreign_count=len(foreign),
+        )
+    support_errors = _table_support_errors(parsed, gap)
+    if support_errors:
+        return _failure(
+            "table readings must quote a supplied data row, not a context definition",
+            errors=support_errors,
         )
     # The model reads the number; the label-to-structure link is deterministic
     # and belongs here. A live run was handed ``77 -> mol_id`` and still
@@ -304,6 +315,82 @@ def submit_gap_answer(credential: str, answer: dict[str, Any]) -> dict[str, Any]
         "structures_attached": attached,
         "next_gap_id": pending.gap_id if pending is not None else None,
     }
+
+
+def _table_support_errors(answer: PatentGapAnswer, gap: PatentGap) -> list[str]:
+    """Check literal cell ownership; assay semantics still need review."""
+    packet = gap.rule_context.get("evidence") or []
+    if gap.gap_kind != "table" or not packet:
+        return []
+    work = {
+        row["evidence_id"]: row["raw_text"]
+        for row in packet
+        if row.get("role") == "work"
+    }
+    visible = {row["evidence_id"]: row["raw_text"] for row in packet}
+
+    def compact(text: str) -> str:
+        return re.sub(r"\s+", "", text)
+
+    errors: list[str] = []
+    for item in answer.items:
+        quote = compact(item.source_quote)
+        sources = [work[eid] for eid in item.evidence_ids if eid in work]
+        label = compact(item.row_label_raw or item.compound_label_raw)
+        value_text = compact(item.value.raw_text)
+        if value_text.upper() in {"ND", "NA", "NT"}:
+            errors.append(f"{item.local_key}: a no-data marker is not a reading")
+        if (
+            not quote
+            or not any(quote in compact(text) for text in sources)
+            or (label and label not in quote)
+            or value_text not in quote
+        ):
+            errors.append(
+                f"{item.local_key}: source_quote must contain the printed row label and value and occur in cited work evidence"
+            )
+        pipe_sources = [text for text in sources if text.lstrip().startswith("|")]
+        if pipe_sources and (
+            item.source_column is None
+            or not any(
+                table_cell_matches(
+                    text,
+                    item.source_quote,
+                    row_label=item.row_label_raw or item.compound_label_raw,
+                    raw_value=item.value.raw_text,
+                    column=item.source_column,
+                )
+                for text in pipe_sources
+            )
+        ):
+            errors.append(
+                f"{item.local_key}: source_column must select the exact value cell paired with this printed label; quote one complete data row and never borrow a sibling pair's value"
+            )
+        if item.value.value is not None:
+            number = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", item.value.raw_text)
+            if number is None or float(number[0]) != item.value.value:
+                errors.append(
+                    f"{item.local_key}: value.value must equal the number in value.raw_text"
+                )
+            printed_operator = re.match(
+                r"\s*(<=|>=|<|>|≤|≥|~|≈|=)", item.value.raw_text
+            )
+            aliases = {"≤": "<=", "≥": ">=", "≈": "~"}
+            source_operator = printed_operator[1] if printed_operator else "="
+            if aliases.get(source_operator, source_operator) != aliases.get(
+                item.value.operator, item.value.operator
+            ):
+                errors.append(
+                    f"{item.local_key}: operator must preserve the printed comparison"
+                )
+        cited_text = "\n".join(visible.get(eid, "") for eid in item.evidence_ids)
+        if not set(find_activity_metrics(item.metric)) & set(
+            find_activity_metrics(cited_text)
+        ):
+            errors.append(
+                f"{item.local_key}: metric must be explicitly stated in cited work or context evidence; request the missing definition or leave unanswerable"
+            )
+    return errors
 
 
 #: Compound prefixes may be removed; example identities keep their own namespace.
@@ -357,7 +444,11 @@ def _attach_gap_structures(
         if gap.rule_context.get(
             "row_label_type"
         ) == "example" and not label_key.startswith("@example:"):
-            label_key = designation_key(f"Example {label_key}").casefold()
+            label_key = (
+                designation_key(f"Example {label_key}") or label_key
+            ).casefold()
+        if gap.rule_context.get("row_label_type") == "example":
+            item = item.model_copy(update={"compound_label_key": label_key})
         references = by_label.get(label_key, set())
         if item.molecule_ref and (
             (
@@ -372,8 +463,6 @@ def _attach_gap_structures(
             item = item.model_copy(update={"molecule_ref": next(iter(references))})
             attached += 1
         items.append(item)
-    if not attached:
-        return answer, 0, conflicts
     return answer.model_copy(update={"items": items}), attached, conflicts
 
 

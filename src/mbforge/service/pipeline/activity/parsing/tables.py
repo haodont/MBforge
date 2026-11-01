@@ -45,6 +45,9 @@ _QUALITATIVE_CELL_RE = re.compile(
     r"^(?:\+{1,4}|[十]{1,4}|active|inactive|weak|moderate|strong|nd|na|nt|[a-d])$",
     re.IGNORECASE,
 )
+#: A published "no data" marker. It is a missing value, not an inactivity grade
+#: and not a zero; the cell is counted as handled but produces no measurement.
+_MISSING_VALUE_RE = re.compile(r"^(?:ND|NA|NT)$", re.IGNORECASE)
 # A data row starts with a compound designation. Chemical fragments OCR'd out of
 # a structure column (``H3C``, ``N.``), prose, and qualitative symbols are not
 # designations, so a value beside them stays unattributed instead of being
@@ -60,6 +63,7 @@ _STANDALONE_VALUE_RE = re.compile(
 _LABEL_HEADER_RE = re.compile(
     r"(?:compound|example|molecule|no\b|编号|实施例|化合物|code)", re.IGNORECASE
 )
+_ASSAY_HEADER_RE = re.compile(r"\b(?:FLIPR|HTRF|IP1|assay)\b|arrestin", re.IGNORECASE)
 #: Data rows one refused-table task carries. Two rows per task turned a single
 #: document's refused tables into 192 separate gaps — a model turn each — while an
 #: answer may return 200 items. Eight rows stay well inside the contract's
@@ -102,12 +106,11 @@ class _TableLayout:
 
 
 def _is_activity_table(table_md: str) -> bool:
-    """Return whether a structurally valid table contains activity signals.
+    """Return whether a Markdown table contains activity signals.
 
     A table is eligible when its first rows contain an activity header or any
-    value with a recognized activity unit. Ambiguous tables are skipped before
-    an LLM request; this keeps the full pipeline from spending remote budget
-    on synthesis, characterization, or unrelated property tables.
+    value with a recognized activity unit. Layout validation happens separately;
+    an ambiguous activity table remains eligible for an evidence-scoped LLM gap.
     """
     rows = [row for row in table_md.split("\n") if row.strip()]
     if len(rows) < 2 or not any(_TABLE_SEPARATOR_RE.match(row) for row in rows[1:3]):
@@ -155,7 +158,15 @@ def looks_like_activity_table(raw_text: str) -> bool:
     head = _normalize_table_markup("\n".join(rows[:5]))
     if _NON_ACTIVITY_TABLE_RE.search(head):
         return False
-    return bool(_ACTIVITY_HEADER_RE.search(head) or _GATE_VALUE_RE.search(raw_text))
+    return bool(
+        _ACTIVITY_HEADER_RE.search(head)
+        or _GATE_VALUE_RE.search(raw_text)
+        or (
+            _LABEL_HEADER_RE.search(head)
+            and _ASSAY_HEADER_RE.search(head)
+            and _NUMERIC_RE.search(raw_text)
+        )
+    )
 
 
 def _normalize_table_markup(text: str) -> str:
@@ -232,9 +243,48 @@ def activity_table_excerpts(table_md: str) -> list[tuple[str, list[str]]]:
     ] or [(table_md, [])]
 
 
+def table_cell_matches(
+    table_md: str,
+    source_quote: str,
+    *,
+    row_label: str,
+    raw_value: str,
+    column: int,
+) -> bool:
+    """Ground a draft in one cell and its own printed designation column."""
+
+    def compact(text: str) -> str:
+        return re.sub(r"\s+", "", text)
+
+    lines = [line for line in table_md.splitlines() if line.strip()]
+    quoted = [line for line in lines if compact(line) == compact(source_quote)]
+    if len(quoted) != 1:
+        return False
+    cells = _split_pipe_row(quoted[0])
+    header_rows = [_split_pipe_row(line) for line in lines[:5]]
+    header = next(
+        (
+            row
+            for row in header_rows
+            if any(_LABEL_HEADER_RE.search(cell) for cell in row)
+        ),
+        header_rows[0],
+    )
+    label_columns = [
+        i for i, cell in enumerate(header) if _LABEL_HEADER_RE.search(cell)
+    ] or [0]
+    label_column = max((i for i in label_columns if i < column), default=-1)
+    return (
+        0 <= label_column < column < len(cells)
+        and _is_row_label(cells[label_column])
+        and compact(cells[label_column]) == compact(row_label)
+        and compact(cells[column]) == compact(raw_value)
+    )
+
+
 def _clean_target(text: str) -> str | None:
     """Return a header cell's assay target with metric/unit noise removed."""
-    target = METRIC_TOKEN_RE.sub(" ", text, count=1)
+    target = METRIC_TOKEN_RE.sub(" ", text.replace("拮抗剂", " "))
     target = _HEADER_UNIT_RE.sub(" ", target)
     target = re.sub(r"[()\[\]{}$,:;]", " ", target)
     target = re.sub(
@@ -245,7 +295,7 @@ def _clean_target(text: str) -> str | None:
     cleaned = " ".join(target.split())
     # ``抑制% (300 nM)`` leaves the concentration behind, and a bare number states a
     # condition rather than an assay target.
-    if not cleaned or cleaned.isdigit():
+    if not cleaned or cleaned.isdigit() or cleaned in {"活性", "结果", "数值"}:
         return None
     return cleaned
 
@@ -260,11 +310,20 @@ def _activity_header_columns(
         metrics = find_activity_metrics(cell)
         if not metrics:
             continue
+        # A named endpoint beats surrounding words like "antagonist activity".
+        metric = next(
+            (
+                name
+                for name in metrics
+                if re.fullmatch(r"p?(?:(?:IC|EC|ED|GI|AC|CC)\d+|K[di])", name)
+            ),
+            metrics[0],
+        )
         unit_match = _HEADER_UNIT_RE.search(cell)
         columns.append(
             (
                 column,
-                metrics[0],
+                metric,
                 unit_match.group(0) if unit_match else "",
                 _clean_target(cell),
             )
@@ -297,9 +356,32 @@ def _read_table_layout(table_md: str) -> _TableLayout | None:
 
     head_rows = rows[:separator_index]
     rest = rows[separator_index + 1 :]
+    # A repeated spanning title is not the column header; require an explicit
+    # designation and metric in the next row before promoting it.
+    if (
+        rest
+        and len(set(head_rows[-1])) == 1
+        and _is_header_band_row(rest[0])
+        and any(_LABEL_HEADER_RE.search(cell) for cell in rest[0])
+        and _activity_header_columns(rest[0])
+    ):
+        head_rows = [rest[0]]
+        rest = rest[1:]
     band = 0
     while band < len(rest) and band < 2 and _is_header_band_row(rest[band]):
         band += 1
+
+    designation_columns = [
+        i for i, cell in enumerate(head_rows[-1]) if _LABEL_HEADER_RE.search(cell)
+    ]
+    # A target under the designation header signals lost spans, not a new column.
+    if any(
+        row[i].strip() and not _LABEL_HEADER_RE.search(row[i])
+        for row in rest[:band]
+        for i in designation_columns
+        if i < len(row)
+    ):
+        return None
 
     metrics = {
         column: (metric, unit, target)
@@ -316,7 +398,7 @@ def _read_table_layout(table_md: str) -> _TableLayout | None:
         metric, unit, header_target = metrics.get(index, (None, "", None))
         sub = sub_text[index] if index < len(sub_text) else ""
         text = " ".join(part for part in (head_rows[-1][index], sub) if part).strip()
-        target = sub or header_target
+        target = _clean_target(sub) or header_target
         columns.append(
             _HeaderColumn(
                 index=index,
@@ -356,6 +438,9 @@ def _is_row_label(value: str) -> bool:
         return False
     if _QUALITATIVE_CELL_RE.fullmatch(stripped):
         return False
+    # CN120943813A p95 prints a measured positive control without a numeric label.
+    if stripped == "阳参化合物":
+        return True
     from mbforge.domain.patent import designation_key
 
     # The pipeline's own designation space first, so one designation is never read
@@ -377,32 +462,11 @@ def _normalize_bin_symbol(value: str) -> str:
 def _cell_has_activity_value(cell: str) -> bool:
     """Return whether a table cell carries a quantitative/qualitative value."""
     stripped = _normalize_table_markup(cell).strip()
+    if _MISSING_VALUE_RE.fullmatch(stripped):
+        return False
     return bool(
         _NUMERIC_RE.search(stripped) or _QUALITATIVE_CELL_RE.fullmatch(stripped)
     )
-
-
-def _pair_owner(row: Sequence[str], label_column: int, value_column: int) -> str:
-    """The designation a value cell belongs to, following a merged label cell.
-
-    A repeated (label, value) header prints the designation once and leaves the
-    sibling pair's label cell blank (``| 5 | ++++ | | ++++ |``), so a blank label
-    cell means "the owner printed to its left". The walk skips the *value* cells of
-    the pairs in between and stops at anything that is neither a designation nor an
-    activity value (a structure fragment OCR'd out of a structure column): that row
-    owns no designation, and a value beside it stays unread. A value is never
-    carried this way — only a label, which is what the span declares.
-    """
-    for index in range(min(label_column, len(row) - 1), -1, -1):
-        cell = row[index].strip()
-        if not cell:
-            continue
-        if _is_row_label(cell):
-            return cell
-        if _cell_has_activity_value(cell):
-            continue
-        return ""
-    return ""
 
 
 def _parse_simple_activity_table(
@@ -443,8 +507,9 @@ def _parse_simple_activity_table(
             value_text = _normalize_bin_symbol(row[value_column])
             if not _cell_has_activity_value(value_text):
                 continue
-            label = _pair_owner(row, label_column, value_column)
-            if not label:
+            # A blank Markdown cell cannot prove a span; OCR may have lost a label.
+            label = row[label_column].strip() if label_column < len(row) else ""
+            if not _is_row_label(label):
                 continue
             column = metrics[value_column]
             target = column.target or default_target
@@ -505,6 +570,9 @@ def _simple_activity_table_is_complete(
     expected = 0
     for row in layout.data_rows:
         for _label_column, value_column in layout.pairs:
-            if value_column < len(row) and row[value_column].strip():
+            if value_column >= len(row):
+                continue
+            cell = _normalize_table_markup(row[value_column]).strip()
+            if cell and not _MISSING_VALUE_RE.fullmatch(cell):
                 expected += 1
     return expected > 0 and expected == len(records)

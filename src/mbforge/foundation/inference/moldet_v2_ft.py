@@ -61,15 +61,6 @@ def to_api_dict(result: MoleculeResult) -> dict[str, Any]:
 _ultralytics: Any | None = None
 
 
-def default_model_dir() -> Path:
-    """Return the shared model cache directory (unified constant)."""
-    from mbforge.foundation.paths import get_model_cache_dir
-
-    cache_dir = Path(get_model_cache_dir())
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir
-
-
 def _has_ultralytics() -> bool:
     global _ultralytics
     if _ultralytics is None:
@@ -141,7 +132,9 @@ class MolDetv2Detector:
             return resolved
 
         # Fallback: default model directory (matches the catalog local_name)
-        return default_model_dir() / "MolDetv2" / self.DEFAULT_SUBPATH
+        from mbforge.foundation.paths import get_model_cache_path
+
+        return get_model_cache_path() / "MolDetv2" / self.DEFAULT_SUBPATH
 
     def _load_model(self) -> None:
         """Load the YOLO model (missing weights mark the detector unavailable)."""

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { FilterIcon } from '../icons'
 import Input from '../ui/Input'
-import Select from '../ui/Select'
+import Select, { type SelectOption } from '../ui/Select'
 import type {
   MoleculeFilters as MoleculeFiltersType,
 } from '@/hooks/useMoleculeLibrary'
@@ -12,6 +12,33 @@ interface MoleculeFiltersProps {
   sourceTypeOptions: string[]
   sourceDocOptions: string[]
   disabled?: boolean
+}
+
+/** One enumeration filter: every select shares the same layout props. */
+function FilterSelect({
+  value,
+  onChange,
+  ariaLabel,
+  options,
+  disabled,
+}: {
+  value: string
+  onChange: (value: string) => void
+  ariaLabel: string
+  options: SelectOption[]
+  disabled: boolean
+}) {
+  return (
+    <Select
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      className="molecule-filters__select"
+      showPlaceholder={false}
+      ariaLabel={ariaLabel}
+      options={options}
+    />
+  )
 }
 
 export default function MoleculeFilters({
@@ -30,12 +57,10 @@ export default function MoleculeFilters({
     <div className="molecule-filters">
       <div className="molecule-filters__controls">
         <FilterIcon size={14} />
-        <Select
+        <FilterSelect
           value={filters.status}
           onChange={(value) => handleStatusChange(value as MoleculeFiltersType['status'])}
           disabled={disabled}
-          className="molecule-filters__select"
-          showPlaceholder={false}
           ariaLabel={t('mol.statusFilter')}
           options={[
             { value: 'all', label: t('mol.status.all') },
@@ -46,12 +71,10 @@ export default function MoleculeFilters({
           ]}
         />
 
-        <Select
+        <FilterSelect
           value={filters.sourceType}
           onChange={(value) => onFiltersChange((prev) => ({ ...prev, sourceType: value }))}
           disabled={disabled}
-          className="molecule-filters__select"
-          showPlaceholder={false}
           ariaLabel={t('mol.sourceType.label')}
           options={[
             { value: 'all', label: t('mol.sourceType.all') },
@@ -59,12 +82,10 @@ export default function MoleculeFilters({
           ]}
         />
 
-        <Select
+        <FilterSelect
           value={filters.sourceDoc}
           onChange={(value) => onFiltersChange((prev) => ({ ...prev, sourceDoc: value }))}
           disabled={disabled}
-          className="molecule-filters__select"
-          showPlaceholder={false}
           ariaLabel={t('mol.sourceDoc.label')}
           options={[
             { value: 'all', label: t('mol.sourceDoc.all') },
@@ -72,7 +93,7 @@ export default function MoleculeFilters({
           ]}
         />
 
-        <Select
+        <FilterSelect
           value={filters.activityPresence}
           onChange={(value) =>
             onFiltersChange((prev) => ({
@@ -81,8 +102,6 @@ export default function MoleculeFilters({
             }))
           }
           disabled={disabled}
-          className="molecule-filters__select"
-          showPlaceholder={false}
           ariaLabel={t('mol.activityFilter.label')}
           options={[
             { value: 'all', label: t('mol.activityFilter.all') },

@@ -52,3 +52,16 @@ export const PROVIDER_META: Record<string, { label: string; defaultUrl: string; 
   // VLM
   qwen_vl: { label: 'Qwen-VL (local)', defaultUrl: '', needsKey: false },
 }
+
+export type Translate = (key: string, options?: Record<string, unknown>) => string
+
+/** Provider dropdown options for one model map, localized with a fallback label. */
+export const providerOptions = (map: ModelMap, t: Translate) =>
+  Object.keys(map).map(k => ({
+    value: k,
+    label: t(`providers.${k}`, { defaultValue: (PROVIDER_META[k] ?? { label: k }).label }),
+  }))
+
+/** Provider metadata, falling back to the provider key when unknown. */
+export const getProviderMeta = (key: string) =>
+  PROVIDER_META[key] ?? { label: key, defaultUrl: '', needsKey: false }

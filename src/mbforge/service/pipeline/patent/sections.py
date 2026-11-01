@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -125,9 +126,24 @@ class ParsedSection:
     heading_line: str
 
 
+_DIGIT_GAP_RE = re.compile(r"(?<=\d)\s+(?=\d)")
+
+
+def _normalize_heading_text(line: str) -> str:
+    """Normalize a heading's spelling without touching the stored print.
+
+    Japanese filings print ``実施例 1 0 3`` and ``実施例２および3``; the native
+    text layer and OCR both insert spaces between digits and emit full-width
+    digits. Collapsing only digit-separating spaces and applying NFKC lets the
+    heading regex see the token a reader sees, while ``ParsedSection.heading_line``
+    keeps the verbatim print for the anchor.
+    """
+    return _DIGIT_GAP_RE.sub("", unicodedata.normalize("NFKC", line))
+
+
 def match_section_heading(line: str) -> re.Match[str] | None:
     """Return a valid section-heading match, excluding body false positives."""
-    match = _HEADING_RE.match(line)
+    match = _HEADING_RE.match(_normalize_heading_text(line))
     if match is None:
         return None
     kind = match.group("kind").casefold()
@@ -233,8 +249,8 @@ def parse_source_evidence_sections(
 
     Args:
         evidence: SourceEvidence rows already in deterministic reading order
-            (page ASC, bbox_y1 DESC, bbox_x0 ASC, bbox_y0 ASC, bbox_x1 ASC,
-            evidence_id ASC).
+            (page ASC, ``reading_order``, then bbox_y1 DESC, bbox_x0 ASC,
+            bbox_y0 ASC, bbox_x1 ASC, evidence_id ASC).
         doc_id: must match every row.
 
     Returns:

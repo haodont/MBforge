@@ -175,6 +175,11 @@ export async function httpPost<T>(path: string, body: Record<string, unknown> = 
   return httpFetch<T>(path, { method: 'POST', body: JSON.stringify(body) })
 }
 
+export async function httpPostBlob(path: string, body: Record<string, unknown>): Promise<Blob> {
+  const resp = await httpRequest(path, { method: 'POST', body: JSON.stringify(body) })
+  return resp.blob()
+}
+
 export async function httpGet<T>(path: string): Promise<T> {
   return httpFetch<T>(path, { method: 'GET' })
 }

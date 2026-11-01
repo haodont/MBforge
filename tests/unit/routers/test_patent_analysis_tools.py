@@ -184,6 +184,122 @@ def _reading_item(
     return item
 
 
+def test_table_answer_requires_quoted_work_and_consistent_number(
+    app_client: TestClient, tmp_library: Path
+) -> None:
+    """Citing a real legend ID must not authorize invented or unsupported readings."""
+    gap = _seed_gap(tmp_library)
+    work_id = gap.evidence_ids[0]
+    context_id = _seed_evidence(
+        tmp_library, DOC, 21, (0.0, 20.0, 10.0, 30.0), '"+" means IC50 > 1000 nM'
+    )
+    gap.evidence_ids.append(context_id)
+    gap.rule_context["row_label_type"] = "example"
+    gap.rule_context["evidence"] = [
+        {"evidence_id": work_id, "role": "work", "raw_text": gap.excerpt},
+        {
+            "evidence_id": context_id,
+            "role": "context",
+            "raw_text": '"+" means IC50 > 1000 nM',
+        },
+    ]
+    _register(tmp_library, gaps=[gap])
+    answer = _gap_answer(gap)
+    item = answer["items"][0]
+    item["value"] = {"raw_text": "十", "qualitative": "+"}
+
+    def submit() -> dict[str, Any]:
+        return app_client.post(
+            f"{TOOLS}/submit-gap-answer", json={"credential": CRED, "answer": answer}
+        ).json()
+
+    assert submit()["success"] is False
+    item["source_quote"] = "| 实施例1 | 十 |"
+    item["source_column"] = 1
+    item["value"]["value"] = 999
+    assert submit()["success"] is False
+    item["value"].pop("value")
+    item["evidence_ids"] = [context_id]
+    assert submit()["success"] is False
+    item["evidence_ids"] = [work_id, context_id]
+    item["metric"] = "pIC50"
+    assert submit()["success"] is False
+    item["metric"] = "IC50"
+    assert submit()["success"] is True
+    staged = get_patent_task_registry().gap_answers(CRED)
+    assert staged[0].items[0].source_quote == "| 实施例1 | 十 |"
+    assert not staged[0].items[0].molecule_ref
+    assert staged[0].items[0].compound_label_key == "@example:1"
+
+
+def test_table_answer_keeps_each_value_in_its_printed_label_pair(
+    app_client: TestClient, tmp_library: Path
+) -> None:
+    """A whole-row quote must not transfer a sibling column's value to a label."""
+    from mbforge.service.pipeline.patent.llm_gaps import build_gaps
+
+    text = (
+        "| 化合物编号 | IC50(nM) | 化合物编号 | IC50(nM) |\n"
+        "| --- | --- | --- | --- |\n"
+        "| 化合物1 | 10 | 化合物2 | 20 |\n"
+        "| 化合物3 | 30 |  | 40 |"
+    )
+    eid = _seed_evidence(tmp_library, DOC, 21, (0.0, 0.0, 10.0, 10.0), text, "tab")
+    gap = build_gaps(
+        issues=[{"code": "complex_activity_table", "evidence_ids": [eid]}],
+        evidence=[
+            SourceEvidence(
+                doc_id=DOC,
+                page=21,
+                bbox=(0, 0, 10, 10),
+                evidence_id=eid,
+                raw_text=text,
+                kind="tab",
+            )
+        ],
+    )[0][0]
+    _register(tmp_library, gaps=[gap])
+    answer = _gap_answer(gap)
+    item = answer["items"][0]
+    item.update(
+        row_label_raw="化合物1",
+        compound_label_key="1",
+        source_quote="| 化合物1 | 10 | 化合物2 | 20 |",
+    )
+    item["value"] = {"raw_text": "20", "value": 20, "unit": "nM"}
+
+    def submit() -> dict[str, Any]:
+        return app_client.post(
+            f"{TOOLS}/submit-gap-answer", json={"credential": CRED, "answer": answer}
+        ).json()
+
+    assert submit()["success"] is False
+    item["source_column"] = 3
+    assert submit()["success"] is False
+    item["source_column"] = 1
+    assert submit()["success"] is False
+    item["value"] = {"raw_text": "10", "value": 10, "unit": "nM"}
+    item["row_label_raw"] = "1"
+    assert (
+        submit()["success"] is False
+    )  # A substring of 化合物1 is not the printed cell.
+    item["row_label_raw"] = "化合物3"
+    item["source_quote"] = "| 化合物3 | 30 |  | 40 |"
+    item["value"] = {"raw_text": "40", "value": 40, "unit": "nM"}
+    item["source_column"] = 3
+    assert (
+        submit()["success"] is False
+    )  # The missing sibling label cannot borrow 化合物3.
+    item.update(
+        row_label_raw="化合物1",
+        source_quote="| 化合物1 | 10 | 化合物2 | 20 |",
+        source_column=1,
+    )
+    item["value"] = {"raw_text": "10", "value": 10, "unit": "nM"}
+    assert submit()["success"] is True
+    assert get_patent_task_registry().gap_answers(CRED)[0].items[0].source_column == 1
+
+
 def test_tools_require_a_registered_credential_and_never_invent_structures(
     app_client: TestClient, tmp_library: Path
 ) -> None:
@@ -428,6 +544,24 @@ def test_row_label_attachment_is_deterministic_over_the_gaps_structures(
     ).json()
     assert example["success"] is True
     assert example["structures_attached"] == 1
+
+    # A publication designation under an example header must not normalize to
+    # the same empty key as every unrecognized label.
+    example_gap.rule_context["row_labels"].append("WO2022067094")
+    _register(tmp_library, gaps=[example_gap])
+    external = _gap_answer(example_gap)
+    external["items"][0]["row_label_raw"] = "unknown-control"
+    rejected = app_client.post(
+        f"{TOOLS}/submit-gap-answer", json={"credential": CRED, "answer": external}
+    ).json()
+    assert rejected["success"] is False
+    external["items"][0]["row_label_raw"] = "WO2022067094"
+    accepted = app_client.post(
+        f"{TOOLS}/submit-gap-answer", json={"credential": CRED, "answer": external}
+    ).json()
+    assert accepted["success"] is True
+    item = get_patent_task_registry().gap_answers(CRED)[0].items[0]
+    assert item.compound_label_key == "wo2022067094" and not item.molecule_ref
 
 
 def test_gap_answer_validation_refuses_outside_evidence_kind_and_unknown_refs(

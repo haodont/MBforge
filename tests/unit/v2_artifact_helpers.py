@@ -33,29 +33,36 @@ def _synthesize_regions(extracted: ExtractedDocument) -> None:
     for page in extracted.pages:
         if page.regions:
             continue
-        regions: list[dict[str, Any]] = []
+        textual: list[dict[str, Any]] = []
+        images: list[dict[str, Any]] = []
         for order, span in enumerate(page.text_spans):
-            regions.append(
-                {
-                    "region_id": f"r{order}",
-                    "kind": _BLOCK_KIND.get(span.block_type, "text"),
-                    "type": _BLOCK_REGION_TYPE.get(span.block_type, "text"),
-                    "bbox": list(span.bbox),
-                    "reading_order": order,
-                    "text": span.text,
-                }
-            )
+            region = {
+                "region_id": f"r{order}",
+                "kind": _BLOCK_KIND.get(span.block_type, "text"),
+                "type": _BLOCK_REGION_TYPE.get(span.block_type, "text"),
+                "bbox": list(span.bbox),
+                "reading_order": order,
+                "text": span.text,
+            }
+            # An image span and a figure bbox are both pictures; the legacy
+            # views do not carry a column-aware order, so read them top-to-bottom
+            # and keep the textual spans in their own order.
+            (images if span.block_type == 1 else textual).append(region)
         for offset, bbox in enumerate(page.figure_bboxes):
-            regions.append(
+            images.append(
                 {
                     "region_id": f"f{offset}",
                     "kind": "figcx",
                     "type": "image",
                     "bbox": list(bbox),
-                    "reading_order": len(page.text_spans) + offset,
+                    "reading_order": 0,
                     "text": "",
                 }
             )
+        images.sort(key=lambda item: (-item["bbox"][3], item["bbox"][0]))
+        regions = textual + images
+        for order, region in enumerate(regions):
+            region["reading_order"] = order
         page.regions = regions
 
 

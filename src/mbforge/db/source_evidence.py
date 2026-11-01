@@ -42,6 +42,7 @@ _PROBE_FIELDS = (
     "bbox_y1",
     "raw_text",
     "kind",
+    "reading_order",
 )
 
 
@@ -116,10 +117,11 @@ def persist_source_evidence(
                 y1,
                 item.raw_text,
                 item.kind,
+                item.reading_order,
             )
             existing = active_conn.execute(
                 "SELECT doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, "
-                "raw_text, kind FROM source_evidence "
+                "raw_text, kind, reading_order FROM source_evidence "
                 "WHERE evidence_id = ?",
                 (item.evidence_id,),
             ).fetchone()
@@ -144,7 +146,8 @@ def persist_source_evidence(
             active_conn.execute(
                 "INSERT INTO source_evidence "
                 "(evidence_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, "
-                "raw_text, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "raw_text, kind, reading_order) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 values,
             )
             count += 1
@@ -159,7 +162,8 @@ def persist_source_evidence(
 
 
 _COLUMNS = (
-    "evidence_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, raw_text, kind"
+    "evidence_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, raw_text, "
+    "kind, reading_order"
 )
 
 
@@ -179,6 +183,7 @@ def _row_to_evidence(row: sqlite3.Row) -> SourceEvidence:
             ],
             "raw_text": row["raw_text"],
             "kind": row["kind"],
+            "reading_order": row["reading_order"],
         }
     )
 
@@ -215,7 +220,8 @@ def list_source_evidence(
     with db.mol_conn() as conn:
         rows = conn.execute(
             f"SELECT {_COLUMNS} FROM source_evidence WHERE {' AND '.join(clauses)} "
-            "ORDER BY page, bbox_y1 DESC, bbox_x0, bbox_y0, bbox_x1, evidence_id",
+            "ORDER BY page, reading_order, bbox_y1 DESC, bbox_x0, bbox_y0, "
+            "bbox_x1, evidence_id",
             params,
         ).fetchall()
     return [_row_to_evidence(row) for row in rows]

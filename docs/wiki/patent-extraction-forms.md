@@ -70,21 +70,25 @@ section prepares — a bare number never borrows another section's compound.
 | Header split over two rows | metric row `\| 化合物编号 \| IC50(nM) \| \| \| \|` + target row `\| MRGPRX1 \| MRGPRX2 \| MRGPRX3 \| MRGPRX4 \|` (CN121270515A) | handled |
 | Repeated (label, value) column pairs | `\| 实施例编号 \| MRGPRX2 抑制 \| 实施例编号 \| MRGPRX2 抑制 \|`, row `\| 1 \| ++++ \| 2 \| ++++ \|` (CN121270515A p20) | handled (the metric word is read out of the header cell, and the header's own space decides whether a row label is `实施例N` or `化合物N`) |
 | Metric qualified by its target inside one header cell | `\| \| CYP3A4(咪达唑仑)抑制率(%) \| CYP3A4(睾酮)抑制率(%) \|`, rows `\| 化合物77 \| 26.3 \| 31.7 \|` (CN120329282A p113) | handled (metric `抑制率`, unit `%`, and the substrate kept as `provenance.column_target`) |
-| Merged label cell across sibling pairs | `\| 5 \| ++++ \| \| ++++ \|` (CN121270515A p20) | handled (a blank label cell means the designation printed to its left owns both values) |
+| OCR-dropped label across sibling pairs | `\| 5 \| ++++ \| \| ++++ \|` (CN121270515A p20; image prints `6`) | refused (a blank Markdown cell does not prove a span or an owner) |
 | Qualitative bins | `++++`, `+++`, `++`, `+` (CN), `A/B/C` bins (KR/WO) | handled (ordinal rank + scheme) |
 | OCR plus-sign substitution | `十` where the table means `+` (CN121270515A) | handled (normalized to `+`) |
-| Bin legend outside the table | `注：“+”：IC50>1μM`, `“++”100nM<IC₅0<1μM`, `“++++"1nM<IC50<20nM` (CN121270515A) | handled (document-level legend) |
+| Bin legend outside the table | `注：“+”：IC50>1μM`, `“++”100nM<IC₅0<1μM`, `“++++"1nM<IC50<20nM` (CN121270515A) | rule extraction collects document legends; LLM packets cite bounded nearby context as candidate scope, never a document-wide default |
 | Bin scale with letter labels | `A: IC50 < 500 nM, B: 500 nM ≤ IC50 < 1 uM, C: 1 uM ≤ IC50 < 3 uM` (WO2025163462A1, KR20250121245A) | refused by design (scale definition, not a measurement) |
-| Log-scale single value | `E020 \| 6.9` under `MrgprX2 Antagonist pIC50` (US20260027089A1) | open (table refused: labels and values sit on different rows) |
+| Log-scale single value | `E020 \| 6.9` under `MrgprX2 Antagonist pIC50` (US20260027089A1) | rules refuse the damaged table; v4.2 LLM recovers only the quoted E020 cell in the selected p63 chunk (one reading, not whole-page recall) |
 | Prose value with a named compound | `Compound 21 showed an IC50 of < 0.1 μM.` | handled |
 | Prose value without a compound | `本实验测得 IC50 小于 100 nM。` | refused by design (`activity_reference_missing`) |
 | Percent inhibition / fold / range values | `%`, `fold`, `< 0.1 μM` forms | handled by value normalization |
-| Structure column OCR noise | `\| N. HN S \| 6.4 \|`, `\| H3C \| 6.6 \|` (US20260027089A1, WO2025223036A1) | refused by design (structure fragment is not a designation; table skipped whole) |
+| Structure column OCR noise | `\| N. HN S \| 6.4 \|`, `\| H3C \| 6.6 \|` (US20260027089A1, WO2025223036A1) | refused by design; v4.2 also refuses the selected US p60 chunk rather than attach 6.4 to a separately printed E003 |
+| Printed positive control | `阳参化合物 \| 0.2` under `MRGPRX2 拮抗剂活性IC50(nM)` (CN120943813A p95) | all five table readings retained; explicit IC50 wins over generic activity wording; control stays unresolved, pending and unlinked |
 | Unparsed metric tokens | `ICs0`, `IC₅0` (subscript OCR), `ρIC50` (JP), `Λ:` for `A:` | open (`activity_value_unparsed`; 45 occurrences in JP2023544789A) |
 
 Fail-closed contract: a table is published only when **every** non-empty value
 cell becomes a record attributed to a compound designation. Otherwise the whole
-table is reported as `complex_activity_table` and no fact is written.
+table is reported as `complex_activity_table` and no deterministic measurement
+is written. Opt-in LLM table gaps may instead propose individually grounded
+cells for review; pipe-table drafts must preserve the full row, exact printed
+label/value cells and zero-based value column. This is not a completeness claim.
 
 ## 4. Assay sections and attribution
 
@@ -106,7 +110,7 @@ measurements with no assay section of a recognized form.
 |---|---|---|
 | Markdown pipe table from layout | `\| 化合物编号 \| IC50(nM) \| …` | handled |
 | HTML-rendered table | `<table>…</table>` normalized to markdown | handled |
-| Merged cell (blank label, carried value) | `\| 5 \| ++++ \| \| ++++ \|` (CN121270515A p20) | refused by design (unattributable cell blocks the table) |
+| Missing label with a printed value | `\| 5 \| ++++ \| \| ++++ \|` (CN121270515A p20) | refused by design (unattributable cell blocks the table; inspect the image) |
 | Synthesis table | `The following compounds were synthesized using a similar method…`, `LCMS Method` (US20260027089A1) | refused by design (not an activity table) |
 | Characterization / NMR table | `\| No \| 7至 \| 号B2 \| 0日 \|`, `H NMR (400 MHz CDCl) δ …` (KR20250121245A, JP) | refused by design |
 | Materials table | `\| 试剂和耗材 \| 来源 \| 批号 \|` (CN121270515A) | refused by design |
@@ -145,7 +149,7 @@ measurements with no assay section of a recognized form.
 6. **Forms must be named** — a rule is added only with a corpus example and a test that pins the rejected neighbour (prose that looks like a heading, protocol sentence, mass reading).
 7. **The header states the key space** — a label column headed `实施例编号` prints example numbers, so its bare cells are `@example:N`, never compound `N`.
 8. **A printed designation declares itself** — a row or sentence that prints a designation declares it for the document (review pending) even when no section does; the rules never leave a reading without an owner.
-9. **A merged label cell is a span** — where a repeated (label, value) header leaves a label blank, the designation printed to the left owns the value beside it. A *value* is never carried that way, and the walk stops at a cell that is neither label nor value (structure noise).
+9. **Blank is not a span** — a missing label in Markdown may be OCR loss. Never inherit a neighbouring designation without explicit source span evidence; CN121270515A p20 prints `6`, not a second reading for `5`.
 
 ## 9. Where each form is handled
 
@@ -176,8 +180,10 @@ all 13 documents): 31 activity tables, **6 parsed** (3 before), **52 measurement
 4. Machine-translated documents: heading labels were dropped in translation.
 5. Plural/list references (`Examples 4, 25, 28 and 30`) could split into one
    measurement per listed compound.
-6. Three value cells whose row prints no designation at all (CN120943813A's
-   disjunction `化合物 4-P2 or 4-P4` and its control row, WO2025002360A1's `79`).
+6. Ambiguous designation forms, including CN120943813A's disjunction
+   `化合物 4-P2 or 4-P4` and WO2025002360A1's `79`. The printed
+   `阳参化合物` control is now recognized; see the dated harness audit rather
+   than treating the historical corpus counts above as a current rerun.
 
 ## 11. Name, spectra and synthesis-route forms (measured over all 13 documents)
 

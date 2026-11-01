@@ -79,6 +79,17 @@ export function useIsDesktop(): boolean {
   return useMediaQuery(`(min-width: ${BREAKPOINTS.lg}px)`)
 }
 
+/** Pick the grid column count for the active breakpoint. */
+export function useResponsiveColumns(
+  mobile: number,
+  tablet: number,
+  desktop: number,
+): number {
+  const isMobile = useIsMobile()
+  const isTablet = useIsTablet()
+  return isMobile ? mobile : isTablet ? tablet : desktop
+}
+
 // ============================================================================
 // 实用工具
 // ============================================================================

@@ -373,6 +373,22 @@ def reset_request_path(token: contextvars.Token) -> None:
     _request_path_var.reset(token)
 
 
+def _record_fields(record: logging.LogRecord) -> dict[str, Any]:
+    """Return the fields shared by the JSON and diagnostic representations."""
+    return {
+        "level": logging.getLevelName(record.levelno),
+        "logger": record.name,
+        "message": record.getMessage(),
+        "error_code": getattr(record, "mbforge_error_code", None),
+        "status_code": getattr(record, "mbforge_status_code", None),
+        "severity": getattr(record, "mbforge_severity", None),
+        "category": getattr(record, "mbforge_category", None),
+        "context": getattr(record, "mbforge_context", None),
+        "request_path": _request_path_var.get(),
+        **_current_trace(),
+    }
+
+
 class JsonFormatter(logging.Formatter):
     """单行 JSON 格式 — 适合 Loki/ELK/grep 聚合.
 
@@ -396,21 +412,12 @@ class JsonFormatter(logging.Formatter):
         )
         payload: dict[str, Any] = {
             "ts": ts,
-            "level": logging.getLevelName(record.levelno),
-            "logger": record.name,
+            **_record_fields(record),
             "pid": record.process,
             "tid": record.threadName,
-            "message": record.getMessage(),
             "exception": self.formatException(record.exc_info)
             if record.exc_info
             else None,
-            "error_code": getattr(record, "mbforge_error_code", None),
-            "status_code": getattr(record, "mbforge_status_code", None),
-            "severity": getattr(record, "mbforge_severity", None),
-            "category": getattr(record, "mbforge_category", None),
-            "context": getattr(record, "mbforge_context", None),
-            "request_path": _request_path_var.get(),
-            **_current_trace(),
         }
         return json.dumps(payload, ensure_ascii=False, default=str)
 
@@ -420,22 +427,13 @@ def _record_to_diagnostic(record: logging.LogRecord) -> dict[str, Any]:
     ts = datetime.fromtimestamp(record.created, tz=UTC).isoformat()
     return {
         "ts": ts,
-        "level": logging.getLevelName(record.levelno),
-        "logger": record.name,
-        "message": record.getMessage(),
+        **_record_fields(record),
         "exception": record.__dict__.get("mbforge_exception_text")
         or (
             "".join(traceback.format_exception(*record.exc_info))
             if record.exc_info
             else None
         ),
-        "error_code": getattr(record, "mbforge_error_code", None),
-        "status_code": getattr(record, "mbforge_status_code", None),
-        "severity": getattr(record, "mbforge_severity", None),
-        "category": getattr(record, "mbforge_category", None),
-        "context": getattr(record, "mbforge_context", None),
-        "request_path": _request_path_var.get(),
-        **_current_trace(),
     }
 
 

@@ -156,48 +156,53 @@ _DUMMY_REASONS = {
 }
 
 
-def _context_values(molecule: Molecule) -> list[str]:
-    """Collect bounded, human-readable context used for role classification."""
+def _collect_values(
+    molecule: Molecule, keys: tuple[str, ...], *, limit: int
+) -> list[str]:
+    """Collect bounded string values from the molecule name and properties."""
     values: list[str] = []
     if molecule.name:
         values.append(molecule.name)
     properties = molecule.properties
-    for key in (
-        "context_texts",
-        "detection_names",
-        "role_contexts",
-        "mixture_or_isomer_note",
-        "stereochemistry_status",
-    ):
+    for key in keys:
         value = properties.get(key)
         if isinstance(value, str):
             values.append(value)
         elif isinstance(value, Iterable) and not isinstance(value, (bytes, dict)):
             values.extend(item for item in value if isinstance(item, str))
+    return [value[:limit] for value in values if value.strip()]
+
+
+def _context_values(molecule: Molecule) -> list[str]:
+    """Collect bounded, human-readable context used for role classification."""
     # Keep classification bounded even when a document contributes many
     # detections.  Presence of a marker is what matters, not full text volume.
-    return [value[:1000] for value in values if value.strip()]
+    return _collect_values(
+        molecule,
+        (
+            "context_texts",
+            "detection_names",
+            "role_contexts",
+            "mixture_or_isomer_note",
+            "stereochemistry_status",
+        ),
+        limit=1000,
+    )
 
 
 def _label_values(molecule: Molecule) -> list[str]:
     """Collect candidate labels without scanning broad prose contexts."""
-    values: list[str] = []
-    if molecule.name:
-        values.append(molecule.name)
-    properties = molecule.properties
-    for key in (
-        "normalized_label",
-        "raw_coref_label",
-        "label",
-        "formula_label",
-        "detection_names",
-    ):
-        value = properties.get(key)
-        if isinstance(value, str):
-            values.append(value)
-        elif isinstance(value, Iterable) and not isinstance(value, (bytes, dict)):
-            values.extend(item for item in value if isinstance(item, str))
-    return [value[:200] for value in values if value.strip()]
+    return _collect_values(
+        molecule,
+        (
+            "normalized_label",
+            "raw_coref_label",
+            "label",
+            "formula_label",
+            "detection_names",
+        ),
+        limit=200,
+    )
 
 
 def _markush_context_signals(values: Iterable[str]) -> list[str]:

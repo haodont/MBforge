@@ -66,21 +66,22 @@ export default function Workspace() {
     return <DocumentStatusBadge status={status} progress={progress} />
   }
 
+  const documentItemProps = (doc: DocumentInfo) => ({
+    doc,
+    deletePending: mutations.deletePending,
+    patentPending: mutations.patentPending,
+    onOpen: handleOpenDocument,
+    onDelete: mutations.requestDelete,
+    onPatentAnalyze: (document: DocumentInfo) => void mutations.handlePatentAnalysis([document]),
+    selected: selection.selectedDocumentIds.has(doc.doc_id),
+    onToggleSelect: selection.handleToggleSelect,
+    statusBadge,
+  })
+
   const renderGrid = () => (
     <div className="doc-grid">
       {documents.map(doc => (
-        <DocumentCard
-          key={doc.doc_id}
-          doc={doc}
-          deletePending={mutations.deletePending}
-          patentPending={mutations.patentPending}
-          onOpen={handleOpenDocument}
-          onDelete={mutations.requestDelete}
-          onPatentAnalyze={(document) => void mutations.handlePatentAnalysis([document])}
-          selected={selection.selectedDocumentIds.has(doc.doc_id)}
-          onToggleSelect={selection.handleToggleSelect}
-          statusBadge={statusBadge}
-        />
+        <DocumentCard key={doc.doc_id} {...documentItemProps(doc)} />
       ))}
     </div>
   )
@@ -96,18 +97,7 @@ export default function Workspace() {
         <span className="doc-list__col--menu" aria-hidden="true" />
       </div>
       {documents.map(doc => (
-        <DocumentRow
-          key={doc.doc_id}
-          doc={doc}
-          deletePending={mutations.deletePending}
-          patentPending={mutations.patentPending}
-          onOpen={handleOpenDocument}
-          onDelete={mutations.requestDelete}
-          onPatentAnalyze={(document) => void mutations.handlePatentAnalysis([document])}
-          selected={selection.selectedDocumentIds.has(doc.doc_id)}
-          onToggleSelect={selection.handleToggleSelect}
-          statusBadge={statusBadge}
-        />
+        <DocumentRow key={doc.doc_id} {...documentItemProps(doc)} />
       ))}
     </div>
   )

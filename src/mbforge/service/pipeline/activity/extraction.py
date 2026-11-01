@@ -360,6 +360,7 @@ def _measurement_from_record(
         value=MeasurementValue(
             raw_text=raw_text,
             operator=record.operator,
+            operator_original=record.operator_original or "=",
             original_value=_decimal(record.value_original),
             original_unit=record.unit,
             canonical_value=_decimal(
@@ -563,6 +564,7 @@ def _parse_text_run(
             value=MeasurementValue(
                 raw_text=raw_value,
                 operator=normalized.operator,
+                operator_original=normalized.operator_original,
                 original_value=_decimal(normalized.value_original),
                 original_unit=normalized.unit_original,
                 canonical_value=_decimal(normalized.value_canonical),

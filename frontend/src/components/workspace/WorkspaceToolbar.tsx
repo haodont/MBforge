@@ -2,8 +2,9 @@
 
 import { useTranslation } from 'react-i18next'
 import Button from '@/components/ui/Button'
-import { FlaskIcon, GridIcon, PlusIcon, QueueIcon, TableIcon, TrashIcon } from '@/components/icons'
+import { DownloadIcon, FlaskIcon, GridIcon, PlusIcon, QueueIcon, TableIcon, TrashIcon } from '@/components/icons'
 import type { DocumentInfo } from '@/api/http/library'
+import { useActivityExport } from './useActivityExport'
 
 export type ViewMode = 'grid' | 'list'
 
@@ -44,6 +45,7 @@ export default function WorkspaceToolbar({
   importBusy,
 }: WorkspaceToolbarProps) {
   const { t } = useTranslation()
+  const { exportPending, handleExport } = useActivityExport(libraryRoot)
   const totalPages = documents.reduce((total, doc) => total + Math.max(0, doc.page_count), 0)
 
   return (
@@ -88,6 +90,19 @@ export default function WorkspaceToolbar({
                 {patentPending
                   ? t('workspace.patentAnalyzingSelected')
                   : t('workspace.patentAnalysisSelected', { count: selectedDocuments.length })}
+              </Button>
+            )}
+            {selectedDocuments.length > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<DownloadIcon size={16} />}
+                onClick={() => void handleExport(selectedDocuments.map(doc => doc.doc_id))}
+                disabled={exportPending || deletePending || patentPending || !libraryRoot}
+              >
+                {exportPending
+                  ? t('workspace.activityExportPending')
+                  : t('workspace.activityExportSelected', { count: selectedDocuments.length })}
               </Button>
             )}
             {selectedDocuments.length > 0 && (

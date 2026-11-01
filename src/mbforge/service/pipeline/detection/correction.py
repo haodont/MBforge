@@ -120,6 +120,14 @@ def _context_values(molecule: Molecule) -> list[str]:
     return [value[:2000] for value in values if value.strip()]
 
 
+def _parse_smiles(smiles: str) -> Any | None:
+    """Parse *smiles* with RDKit, returning ``None`` when it is invalid."""
+    try:
+        return Chem.MolFromSmiles(smiles)
+    except Exception:
+        return None
+
+
 def correct_rgroup_misread(molecule: Molecule) -> bool:
     """Flag molecules whose context suggests R-groups but SMILES is closed.
 
@@ -143,10 +151,7 @@ def correct_rgroup_misread(molecule: Molecule) -> bool:
 
     # Check if SMILES already contains dummy atoms (expected for Markush)
     smiles = molecule.canonical_smiles
-    try:
-        mol = Chem.MolFromSmiles(smiles)
-    except Exception:
-        mol = None
+    mol = _parse_smiles(smiles)
     if mol is None:
         return False
 
@@ -193,10 +198,7 @@ def verify_element_consistency(molecule: Molecule) -> bool:
         return False
 
     smiles = molecule.canonical_smiles
-    try:
-        mol = Chem.MolFromSmiles(smiles)
-    except Exception:
-        mol = None
+    mol = _parse_smiles(smiles)
     if mol is None:
         return False
 
@@ -237,10 +239,7 @@ def check_markush_consistency(molecule: Molecule) -> bool:
 
     label_kind = molecule.properties.get("label_kind")
     smiles = molecule.canonical_smiles
-    try:
-        mol = Chem.MolFromSmiles(smiles)
-    except Exception:
-        mol = None
+    mol = _parse_smiles(smiles)
     if mol is None:
         return False
 
@@ -284,10 +283,7 @@ def verify_name_substructure(molecule: Molecule) -> bool:
         return False
 
     smiles = molecule.canonical_smiles
-    try:
-        mol = Chem.MolFromSmiles(smiles)
-    except Exception:
-        mol = None
+    mol = _parse_smiles(smiles)
     if mol is None:
         return False
 

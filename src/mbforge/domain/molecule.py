@@ -65,6 +65,81 @@ class JsonRecordMixin:
         return cls.from_dict(dict(row))
 
 
+class MarkushRecordMixin(JsonRecordMixin):
+    """Shared derived operations and column mapping for Markush records."""
+
+    doc_id: str
+    smiles: str
+    esmiles: str
+    page: int | None
+    bbox_x0: float | None
+    bbox_y0: float | None
+    bbox_x1: float | None
+    bbox_y1: float | None
+    crop_relpath: str | None
+    confidence: float | None
+    status: str
+    properties: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+    @property
+    def attachment_count(self) -> int:
+        """Number of explicit attachment sites (``*`` atoms) in the SMILES."""
+        return self.smiles.count("*") if self.smiles else 0
+
+    def _common_dict_fields(self) -> dict[str, Any]:
+        """Fields shared by the scaffold and fragment serializations."""
+        return {
+            "doc_id": self.doc_id,
+            "smiles": self.smiles,
+            "esmiles": self.esmiles,
+            "page": self.page,
+            "bbox_x0": self.bbox_x0,
+            "bbox_y0": self.bbox_y0,
+            "bbox_x1": self.bbox_x1,
+            "bbox_y1": self.bbox_y1,
+            "crop_relpath": self.crop_relpath,
+            "confidence": self.confidence,
+            "status": self.status,
+            "properties": self.properties,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def _common_from_dict(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Fields shared by the scaffold and fragment constructors."""
+        return {
+            "doc_id": data.get("doc_id", ""),
+            "smiles": data.get("smiles", ""),
+            "esmiles": data.get("esmiles", ""),
+            "page": data.get("page"),
+            "bbox_x0": data.get("bbox_x0"),
+            "bbox_y0": data.get("bbox_y0"),
+            "bbox_x1": data.get("bbox_x1"),
+            "bbox_y1": data.get("bbox_y1"),
+            "crop_relpath": data.get("crop_relpath"),
+            "confidence": data.get("confidence"),
+            "status": data.get("status", "pending"),
+            "properties": cls._json_col(data, "properties", {}),
+            "created_at": data.get("created_at", ""),
+            "updated_at": data.get("updated_at", ""),
+        }
+
+
+def _smiles_parses(smiles: str) -> bool:
+    """Return True when *smiles* is non-empty and parseable by RDKit."""
+    from rdkit import Chem
+
+    if not smiles or not smiles.strip():
+        return False
+    try:
+        return Chem.MolFromSmiles(smiles.strip()) is not None
+    except Exception:
+        return False
+
+
 @dataclass
 class Molecule(JsonRecordMixin):
     """A molecule as a typed value object.
@@ -264,7 +339,7 @@ class Molecule(JsonRecordMixin):
 
 
 @dataclass
-class MarkushScaffold(JsonRecordMixin):
+class MarkushScaffold(MarkushRecordMixin):
     """A Markush scaffold as a typed value object.
 
     Fields mirror the ``markush_scaffolds`` SQLite table. A scaffold is
@@ -307,21 +382,9 @@ class MarkushScaffold(JsonRecordMixin):
 
     # ── Derived chemical operations ─────────────────────────────
 
-    @property
-    def attachment_count(self) -> int:
-        """Number of explicit attachment sites (``*`` atoms) in the SMILES."""
-        return self.smiles.count("*") if self.smiles else 0
-
     def is_valid(self) -> bool:
         """Return True if the SMILES is parseable by RDKit."""
-        from rdkit import Chem
-
-        if not self.smiles or not self.smiles.strip():
-            return False
-        try:
-            return Chem.MolFromSmiles(self.smiles.strip()) is not None
-        except Exception:
-            return False
+        return _smiles_parses(self.smiles)
 
     # ── Serialization ───────────────────────────────────────────
 
@@ -329,21 +392,8 @@ class MarkushScaffold(JsonRecordMixin):
         """Return the record as a plain dict suitable for JSON serialization."""
         return {
             "scaffold_id": self.scaffold_id,
-            "doc_id": self.doc_id,
-            "smiles": self.smiles,
-            "esmiles": self.esmiles,
             "formula_label": self.formula_label,
-            "page": self.page,
-            "bbox_x0": self.bbox_x0,
-            "bbox_y0": self.bbox_y0,
-            "bbox_x1": self.bbox_x1,
-            "bbox_y1": self.bbox_y1,
-            "crop_relpath": self.crop_relpath,
-            "confidence": self.confidence,
-            "status": self.status,
-            "properties": self.properties,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
+            **self._common_dict_fields(),
         }
 
     @classmethod
@@ -357,26 +407,13 @@ class MarkushScaffold(JsonRecordMixin):
 
         return cls(
             scaffold_id=data.get("scaffold_id", ""),
-            doc_id=data.get("doc_id", ""),
-            smiles=data.get("smiles", ""),
-            esmiles=data.get("esmiles", ""),
             formula_label=data.get("formula_label", ""),
-            page=data.get("page"),
-            bbox_x0=data.get("bbox_x0"),
-            bbox_y0=data.get("bbox_y0"),
-            bbox_x1=data.get("bbox_x1"),
-            bbox_y1=data.get("bbox_y1"),
-            crop_relpath=data.get("crop_relpath"),
-            confidence=data.get("confidence"),
-            status=data.get("status", "pending"),
-            properties=cls._json_col(data, "properties", {}),
-            created_at=data.get("created_at", ""),
-            updated_at=data.get("updated_at", ""),
+            **cls._common_from_dict(data),
         )
 
 
 @dataclass
-class MarkushFragment(JsonRecordMixin):
+class MarkushFragment(MarkushRecordMixin):
     """A Markush fragment as a typed value object.
 
     Fields mirror the ``markush_fragments`` SQLite table. A fragment is
@@ -420,21 +457,9 @@ class MarkushFragment(JsonRecordMixin):
 
     # ── Derived chemical operations ─────────────────────────────
 
-    @property
-    def attachment_count(self) -> int:
-        """Number of attachment points (``*`` atoms) in the SMILES."""
-        return self.smiles.count("*") if self.smiles else 0
-
     def is_valid(self) -> bool:
         """Return True if the SMILES is parseable by RDKit."""
-        from rdkit import Chem
-
-        if not self.smiles or not self.smiles.strip():
-            return False
-        try:
-            return Chem.MolFromSmiles(self.smiles.strip()) is not None
-        except Exception:
-            return False
+        return _smiles_parses(self.smiles)
 
     # ── Serialization ───────────────────────────────────────────
 
@@ -442,22 +467,9 @@ class MarkushFragment(JsonRecordMixin):
         """Return the record as a plain dict suitable for JSON serialization."""
         return {
             "fragment_id": self.fragment_id,
-            "doc_id": self.doc_id,
             "scaffold_id": self.scaffold_id,
-            "smiles": self.smiles,
-            "esmiles": self.esmiles,
             "label": self.label,
-            "page": self.page,
-            "bbox_x0": self.bbox_x0,
-            "bbox_y0": self.bbox_y0,
-            "bbox_x1": self.bbox_x1,
-            "bbox_y1": self.bbox_y1,
-            "crop_relpath": self.crop_relpath,
-            "confidence": self.confidence,
-            "status": self.status,
-            "properties": self.properties,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
+            **self._common_dict_fields(),
         }
 
     @classmethod
@@ -471,22 +483,9 @@ class MarkushFragment(JsonRecordMixin):
 
         return cls(
             fragment_id=data.get("fragment_id", ""),
-            doc_id=data.get("doc_id", ""),
             scaffold_id=data.get("scaffold_id"),
-            smiles=data.get("smiles", ""),
-            esmiles=data.get("esmiles", ""),
             label=data.get("label", ""),
-            page=data.get("page"),
-            bbox_x0=data.get("bbox_x0"),
-            bbox_y0=data.get("bbox_y0"),
-            bbox_x1=data.get("bbox_x1"),
-            bbox_y1=data.get("bbox_y1"),
-            crop_relpath=data.get("crop_relpath"),
-            confidence=data.get("confidence"),
-            status=data.get("status", "pending"),
-            properties=cls._json_col(data, "properties", {}),
-            created_at=data.get("created_at", ""),
-            updated_at=data.get("updated_at", ""),
+            **cls._common_from_dict(data),
         )
 
 

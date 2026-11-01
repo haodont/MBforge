@@ -3,7 +3,7 @@ import MoleculeDetailPanel from './MoleculeDetailPanel'
 import { showToast } from '@/hooks/useToast'
 import { useAppContext } from '@/context/AppContext'
 import type { EvidenceItem, MoleculeRecord } from '@/types'
-import type { DocumentEntry } from '@/types'
+import { documentEntry } from '@/utils/documentEntry'
 
 interface MoleculeDetailDrawerProps {
   molecule: MoleculeRecord | null
@@ -32,22 +32,10 @@ export default function MoleculeDetailDrawer({
       showToast('未指定 library_root', 'error')
       return
     }
-    // Build a minimal DocumentEntry so openTab accepts it. The PDF viewer
-    // resolves the canonical source artifact from the library root.
-    const sourcePath = `storage/${docId}/source.pdf`
-    const stub: DocumentEntry = {
-      doc_id: docId,
-      path: sourcePath,
-      source_path: sourcePath,
-      doc_type: 'pdf',
-      title: docId,
-      added_at: new Date().toISOString(),
-      hash: '',
-    }
     openTab({
       type: 'document',
       title: docId,
-      doc: stub,
+      doc: documentEntry(docId),
       libraryRoot,
       initialPage: page ?? undefined,
       initialBbox: bbox

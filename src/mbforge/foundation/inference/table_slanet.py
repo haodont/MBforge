@@ -282,8 +282,9 @@ def _cell_texts(image: np.ndarray, cell_boxes: list[np.ndarray]) -> dict[int, st
         x0, y0, x1, y1 = (float(v) for v in box)
         if x1 <= x0 or y1 <= y0:
             continue
-        x0, y0 = max(0.0, x0), max(0.0, y0)
-        x1, y1 = min(float(width), x1), min(float(height), y1)
+        # shortcut: 2 px covers measured 144-DPI cell/OCR jitter; recalibrate if DPI changes.
+        x0, y0 = max(0.0, x0 - 2), max(0.0, y0 - 2)
+        x1, y1 = min(float(width), x1 + 2), min(float(height), y1 + 2)
         if x1 <= x0 or y1 <= y0:
             continue
         key = f"slanet-cell-{i}"

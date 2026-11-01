@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.db.sqlite.rows import row_to_dict
 
 _COLUMNS = "doc_id, file_name, title, page_count, status, created_at"
 
@@ -75,7 +76,7 @@ def get(library_root: str | Path, doc_id: str) -> dict[str, Any] | None:
         row = kb.execute(
             f"SELECT {_COLUMNS} FROM documents WHERE doc_id = ?", (doc_id,)
         ).fetchone()
-    return dict(row) if row is not None else None
+    return row_to_dict(row)
 
 
 def find_by_filename(library_root: str | Path, file_name: str) -> dict[str, Any] | None:
@@ -85,7 +86,7 @@ def find_by_filename(library_root: str | Path, file_name: str) -> dict[str, Any]
         row = kb.execute(
             f"SELECT {_COLUMNS} FROM documents WHERE file_name = ?", (file_name,)
         ).fetchone()
-    return dict(row) if row is not None else None
+    return row_to_dict(row)
 
 
 def list_rows(

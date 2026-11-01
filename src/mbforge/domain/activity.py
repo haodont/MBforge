@@ -9,6 +9,8 @@ The Patent stage emits these document-local measurements before downstream linki
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -19,6 +21,14 @@ from mbforge.foundation.ids import stable_id
 LINK_PENDING = "pending"
 LINK_LINKED = "linked"
 LINK_FAILED = "failed"
+
+
+def is_log_potency_metric(metric: str) -> bool:
+    """Whether a metric is a dimensionless pIC/pEC/pKi/pKd-style endpoint."""
+    compact = "".join(unicodedata.normalize("NFKC", metric).split())
+    return bool(
+        re.fullmatch(r"p(?:IC|EC|ED|GI|AC|CC)\d+|pK[di]", compact, re.IGNORECASE)
+    )
 
 
 def assay_method_id(doc_id: str, section_id: str) -> str:
@@ -72,11 +82,13 @@ class MeasurementValue:
     qualitative_rank: int | None = None
     qualitative_scheme: str = ""
     qualitative_label: str = ""
+    operator_original: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "raw_text": self.raw_text,
             "operator": self.operator,
+            "operator_original": self.operator_original,
             "original_value": (
                 float(self.original_value) if self.original_value is not None else None
             ),
@@ -98,6 +110,7 @@ class MeasurementValue:
         return cls(
             raw_text=data.get("raw_text", ""),
             operator=data.get("operator", ""),
+            operator_original=data.get("operator_original", ""),
             original_value=_to_decimal(data.get("original_value")),
             original_unit=data.get("original_unit", ""),
             canonical_value=_to_decimal(data.get("canonical_value")),

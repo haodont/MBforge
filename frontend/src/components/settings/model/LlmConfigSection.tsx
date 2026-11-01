@@ -10,8 +10,8 @@ import ApiKeyInput from '../ApiKeyInput'
 import { ModelSelector } from '../ModelComponents'
 import {
   LLM_MODELS,
-  PROVIDER_META,
-  type ModelMap,
+  getProviderMeta,
+  providerOptions,
   type ModelOption,
 } from '../modelConfigs'
 import type { SettingsState } from '../types'
@@ -22,15 +22,6 @@ interface Props {
   markDirty: (field: string) => void
   dirtyFields: Record<string, boolean>
 }
-
-const providerOptions = (map: ModelMap, t: (key: string, options?: Record<string, unknown>) => string) =>
-  Object.keys(map).map(k => ({
-    value: k,
-    label: t(`providers.${k}`, { defaultValue: (PROVIDER_META[k] ?? { label: k }).label }),
-  }))
-
-const getProviderMeta = (key: string) =>
-  PROVIDER_META[key] ?? { label: key, defaultUrl: '', needsKey: false }
 
 export default function LlmConfigSection({
   settings,

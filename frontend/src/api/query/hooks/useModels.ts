@@ -75,6 +75,25 @@ export interface DownloadModelVariables {
   onCancelReady?: (cancel: () => void) => void
 }
 
+/** Resolve once *start* reports a terminal download event or is cancelled. */
+function downloadWithProgress(
+  start: (report: (event: DownloadProgress) => void) => () => void,
+  onProgress?: (event: DownloadProgress) => void,
+  onCancelReady?: (cancel: () => void) => void,
+): Promise<void> {
+  // `Promise.withResolvers` needs ES2024; the project targets ES2020.
+  return new Promise<void>((resolve) => {
+    const cancel = start((event) => {
+      onProgress?.(event)
+      if (event.status === 'completed' || event.status === 'failed') resolve()
+    })
+    onCancelReady?.(() => {
+      cancel()
+      resolve()
+    })
+  })
+}
+
 /**
  * Download a single-file resource.
  *
@@ -87,16 +106,11 @@ export function useDownloadModel() {
 
   return useMutation({
     mutationFn: ({ resourceId, onProgress, onCancelReady }: DownloadModelVariables) =>
-      new Promise<void>((resolve) => {
-        const cancel = downloadModel(resourceId, (event) => {
-          onProgress?.(event)
-          if (event.status === 'completed' || event.status === 'failed') resolve()
-        })
-        onCancelReady?.(() => {
-          cancel()
-          resolve()
-        })
-      }),
+      downloadWithProgress(
+        (report) => downloadModel(resourceId, report),
+        onProgress,
+        onCancelReady,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.models.all })
     },
@@ -116,16 +130,11 @@ export function useDownloadModelSubfile() {
 
   return useMutation({
     mutationFn: ({ resourceId, subpath, onProgress, onCancelReady }: DownloadSubfileVariables) =>
-      new Promise<void>((resolve) => {
-        const cancel = downloadModelSubfile(resourceId, subpath, (event) => {
-          onProgress?.(event)
-          if (event.status === 'completed' || event.status === 'failed') resolve()
-        })
-        onCancelReady?.(() => {
-          cancel()
-          resolve()
-        })
-      }),
+      downloadWithProgress(
+        (report) => downloadModelSubfile(resourceId, subpath, report),
+        onProgress,
+        onCancelReady,
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.models.all })
     },

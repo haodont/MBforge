@@ -99,7 +99,7 @@ def _seed_evidence(tmp_path: Path, pages: list[FakePage]) -> list[SourceEvidence
 
 @pytest.fixture(autouse=True)
 def _activity_parser(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep Patent tests independent from Worker A's parallel module."""
+    """Control stage readings; the real parser has separate usage coverage."""
     monkeypatch.setattr(
         "mbforge.service.pipeline.activity.extraction.extract_activity_measurements_from_evidence",
         lambda _evidence, _doc_id: ([], []),
@@ -286,13 +286,17 @@ def test_an_example_reference_resolves_to_its_own_sections_compound() -> None:
     }
     named_measurement = _example_measurement("实施例2", "2")
     named_issues: list[dict] = []
+    intermediate = {
+        **_entry("entry-reagent-1", "化合物1", "sec-2"),
+        "evidence_ids": ["ev-body-reagent"],
+    }
     associate_facts(
         [named_section],
-        [named_entry],
+        [named_entry, intermediate],
         [],
         [named_measurement],
         [],
-        {"ev-sec-2", "ev-table"},
+        {"ev-sec-2", "ev-table", "ev-body-reagent"},
         named_issues,
     )
     assert named_measurement["compound_entry_id"] == "entry-example-2"
@@ -865,7 +869,22 @@ def test_patent_stage_publishes_entries_assays_and_structure_free_facts(
         properties={"ocr_labels": ["化合物20"]},
     )
     link_ctx = _make_ctx(link_root, [FakePage(1, f"{heading}\n{body}")])
-    link_ctx.candidates = [candidate]
+    link_ctx.candidates = [
+        candidate,
+        Molecule(
+            canonical_smiles="*N",
+            esmiles="*N",
+            name="20",
+            detections=candidate.detections,
+        ),
+        Molecule(
+            canonical_smiles="CCN",
+            esmiles="CCN",
+            name="20",
+            status="rejected",
+            detections=candidate.detections,
+        ),
+    ]
 
     link_result = PatentStage().execute(link_ctx)
 
@@ -962,6 +981,41 @@ def test_a_printed_name_fills_an_entry_that_has_none(tmp_path: Path) -> None:
     assert facts.synthesis_steps[0]["yield_raw"] == "收率41%"
     assert facts.synthesis_steps[0]["step_count"] == 1
     assert facts.stats["characterization_count"] == 1
+    assert any(entry["label_key"] == "@example:1" for entry in facts.entries)
+    assert any(entry["label_key"] == "1" for entry in facts.entries)
+
+
+def test_patent_stage_does_not_invent_activity_pairs_from_mass_alone(
+    tmp_path: Path,
+) -> None:
+    """A matching unnamed structure and MS line are not an activity reading.
+
+    Existing stage coverage has no stored unnamed structure with a matching mass.
+    This reproduces the recovery branch publishing an empty-measurement pair.
+    """
+    pages = [
+        FakePage(
+            1,
+            "实施例1：2-羟基乙烷(化合物1)的制备\nLC-MS,M/Z(ESI):47.05[M+H]+",
+        )
+    ]
+    _seed_evidence(tmp_path, pages)
+    with DatabaseManager.get(str(tmp_path)).mol_conn() as conn:
+        conn.execute(
+            "INSERT INTO molecules (mol_id, smiles, canonical_smiles, source_doc) "
+            "VALUES (?, ?, ?, ?)",
+            ("unlabelled", "CCO", "CCO", "doc1"),
+        )
+        conn.commit()
+
+    PatentStage().execute(_make_ctx(tmp_path, pages))
+    facts = load_patent_facts(tmp_path, "doc1")
+
+    assert facts is not None
+    assert len(facts.characterizations) == 1
+    assert facts.characterizations[0]["technique"] == "ms"
+    assert facts.measurements == []
+    assert facts.structure_activity == []
 
 
 def test_patent_stage_requires_parsed_documents(tmp_path: Path) -> None:

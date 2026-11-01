@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { OcrBlock } from '@/api/http/pdf'
+import OverlayLayer from '@/components/ui/OverlayLayer'
 import { pdfToCss } from '@/utils/pdf'
 
 interface Props {
@@ -78,18 +79,7 @@ const OcrOverlay = memo(function OcrOverlay({
   if (boxes.length === 0) return null
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: '50%',
-        width: renderWidth,
-        height: renderHeight,
-        transform: 'translateX(-50%)',
-        pointerEvents: 'none',
-        zIndex: 2,
-      }}
-    >
+    <OverlayLayer renderWidth={renderWidth} renderHeight={renderHeight}>
       {boxes.map((box) => {
         const isSelected = selectedIndex === box.index
         const isHovered = hoveredIdx === box.index
@@ -151,7 +141,7 @@ const OcrOverlay = memo(function OcrOverlay({
           </div>
         )
       })}
-    </div>
+    </OverlayLayer>
   )
 })
 

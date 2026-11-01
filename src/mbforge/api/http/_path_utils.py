@@ -58,12 +58,12 @@ def resolve_pdf_path(
     *,
     must_exist: bool = True,
 ) -> Path:
-    """Resolve ``(library_root, doc_id)`` to the canonical PDF path.
+    """Resolve ``(library_root, doc_id)`` to the stored PDF.
 
-    Primary resolution uses ``LibraryLayout.source_pdf(doc_id)``. If that
-    file does not exist, we fall back to the filename recorded in the
-    ``LibraryStore`` so endpoints work for documents imported before the
-    canonical ``source.pdf`` layout was enforced.
+    Imports store the PDF under its original ``file_name``. The legacy
+    ``LibraryLayout.source_pdf`` path is tried first only for documents
+    created before that layout; otherwise the filename recorded in the
+    ``LibraryStore`` is used.
 
     Raises:
         InvalidPathError: If ``library_root`` or ``doc_id`` is unsafe.

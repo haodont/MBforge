@@ -44,6 +44,7 @@ from mbforge.service.pipeline.activity.normalization import (
     NormalizedActivity,
     normalize_activity_measurement,
     normalize_reference_label,
+    normalize_stored_measurement,
 )
 
 REASON_LLM_ONLY = "llm_only"
@@ -74,6 +75,7 @@ def merge_submission(
     evidence_pages: Mapping[str, int] | None = None,
     scope_evidence_ids: Collection[str] | None = None,
     scope_fact_ids: Collection[str] | None = None,
+    scope_work_evidence_ids: Collection[str] | None = None,
 ) -> MergeResult:
     """Align and merge one validated submission against the rule draft.
 
@@ -131,7 +133,20 @@ def merge_submission(
         states_assay = bool(measurement.assay_local_key) or any(
             (measurement.target, measurement.system, measurement.endpoint)
         )
-        key = _llm_slot(doc_id, measurement, draft_assays, with_assay=states_assay)
+        work_anchor = _anchor(
+            [
+                eid
+                for eid in measurement.evidence_ids
+                if scope_work_evidence_ids and eid in scope_work_evidence_ids
+            ]
+        )
+        key = _llm_slot(
+            doc_id,
+            measurement,
+            draft_assays,
+            with_assay=states_assay,
+            anchor_evidence_id=work_anchor,
+        )
         peers = slots.get(key, []) if states_assay else loose.get(key, [])
         if (
             not states_assay
@@ -283,10 +298,11 @@ def _llm_slot(
     draft_assays: Mapping[str, Any],
     *,
     with_assay: bool = True,
+    anchor_evidence_id: str | None = None,
 ) -> str:
     # The draft contract requires at least one evidence reference, so the anchor
     # is always available for a validated submission.
-    anchor = _anchor(measurement.evidence_ids) or ""
+    anchor = anchor_evidence_id or _anchor(measurement.evidence_ids) or ""
     assay_key = ""
     if with_assay:
         assay_key = _assay_signature(
@@ -298,7 +314,11 @@ def _llm_slot(
     return measurement_slot_id(
         doc_id,
         anchor_evidence_id=anchor,
-        compound_key=_text(reference.key or measurement.compound_label_key),
+        compound_key=_text(
+            measurement.compound_label_key
+            if measurement.compound_label_key.startswith("@example:")
+            else reference.key or measurement.compound_label_key
+        ),
         assay_key=assay_key,
         metric=_text(measurement.metric),
         # Rule measurements carry no conditions today, so a submission that
@@ -313,16 +333,7 @@ def _llm_slot(
 
 def _rule_reading(measurement: Mapping[str, Any]) -> NormalizedActivity:
     value = measurement.get("value") or {}
-    number = value.get("original_value")
-    if number is None:
-        number = value.get("qualitative_value") or value.get("raw_text") or ""
-    return normalize_activity_measurement(
-        measurement.get("metric"),
-        number,
-        value.get("original_unit", ""),
-        value.get("operator", "=") or "=",
-        value_text=value.get("raw_text", ""),
-    )
+    return normalize_stored_measurement(measurement.get("metric"), value)
 
 
 def _llm_reading(measurement: Any) -> NormalizedActivity:
@@ -343,13 +354,17 @@ def _llm_reading(measurement: Any) -> NormalizedActivity:
 
 def _reading_fields(reading: NormalizedActivity) -> dict[str, Any]:
     """The compared fields; the raw text is display-only and never signed."""
-    return {
+    fields = {
         "metric": reading.metric,
         "operator": reading.operator,
         "value_canonical": reading.value_canonical,
         "unit_canonical": reading.unit_canonical,
         "qualitative": reading.qualitative_label,
     }
+    if reading.value_canonical is None and reading.value_original is not None:
+        fields["value_unconverted"] = reading.value_original
+        fields["unit_unconverted"] = reading.unit_original
+    return fields
 
 
 def _display_fields(source: Any, fields: Mapping[str, Any]) -> dict[str, Any]:

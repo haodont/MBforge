@@ -20,6 +20,7 @@ from mbforge.contracts.measurement import (
     MeasurementRecord,
 )
 from mbforge.foundation.ids import stable_id
+from mbforge.service.pipeline.activity.normalization import normalize_stored_measurement
 
 #: Link statuses the domain uses (``mbforge.domain.activity``). ``linked`` there
 #: means "this pass resolved its relation issues" — it does NOT mean a structure
@@ -59,8 +60,8 @@ def _assay_index(assay_methods: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 def _assay_scope(method: Mapping[str, Any] | None) -> dict[str, str | None]:
     """Read the target/assay columns a measurement row carries.
 
-    The assay section owns target, system and assay type; a reading inherits
-    them so a dataset query can filter by target without joining another table.
+    The assay section supplies defaults; a table column can state its own target.
+    Dataset queries use these copied fields without joining another table.
     """
     if method is None:
         return {
@@ -119,6 +120,7 @@ def measurement_records(
             measurement.get("compound_entry_id") or measurement.get("entry_id")
         )
         metric = _optional_text(measurement.get("metric"))
+        normalized = normalize_stored_measurement(metric, value)
         records.append(
             MeasurementRecord(
                 measurement_id=measurement_id,
@@ -133,10 +135,10 @@ def measurement_records(
                 or "quantitative",
                 original_value=_float(value.get("original_value")),
                 original_unit=_text(value.get("original_unit")),
-                canonical_value=_float(value.get("canonical_value")),
-                canonical_unit=_text(value.get("canonical_unit")),
-                operator=_text(value.get("operator")),
-                scale=_text(value.get("scale") or "linear") or "linear",
+                canonical_value=normalized.value_canonical,
+                canonical_unit=normalized.unit_canonical or "",
+                operator=normalized.operator,
+                scale=normalized.scale,
                 value_text=_optional_text(value.get("raw_text")),
                 qualitative_raw=_text(value.get("qualitative_value")),
                 qualitative_rank=(
@@ -146,7 +148,8 @@ def measurement_records(
                 ),
                 qualitative_scheme=_text(value.get("qualitative_scheme")),
                 qualitative_label=_text(value.get("qualitative_label")),
-                target=scope["target"],
+                target=_optional_text(provenance.get("column_target"))
+                or scope["target"],
                 species=scope["species"],
                 assay_type=scope["assay_type"],
                 assay_description=scope["assay_description"],
@@ -176,7 +179,10 @@ def measurement_records(
                 reference_key=_text(provenance.get("reference_key")),
                 reference_type=_text(provenance.get("reference_type")),
                 evidence_ids=evidence_ids,
-                provenance=dict(provenance),
+                provenance={
+                    **provenance,
+                    "operator_original": normalized.operator_original,
+                },
                 evidence_grade="measured",
                 review_status="pending",
                 linking_status=linking,
@@ -195,18 +201,19 @@ def _owner_of(
 
     A reading the model bound carries ``mol_id``; a reading whose designation
     resolved to a structure carries it on the cited entry. Both name the same
-    molecule, so both are accepted.
+    molecule when they agree; conflicting references stay unattributed.
     """
     direct = _optional_text(measurement.get("mol_id"))
-    if direct:
-        return direct
     entry_id = _optional_text(measurement.get("compound_entry_id"))
     if not entry_id:
-        return None
+        return direct
     entry = entries_by_id.get(entry_id)
     if entry is None:
+        return direct
+    indirect = _optional_text(entry.get("entity_id"))
+    if direct and indirect and direct != indirect:
         return None
-    return _optional_text(entry.get("entity_id"))
+    return direct or indirect
 
 
 def unattributed_reason(

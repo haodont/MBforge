@@ -45,6 +45,12 @@ _HEADING_CASES = [
     ("Example A. MRGPRX2 FLIPR Calcium Mobilization Assay", "A"),
     # JP filings label examples 実施例; the label names the same fact.
     ("実施例1", "1"),
+    # The native text layer splits a number into digits and uses full-width
+    # digits; the stored print stays verbatim, the token is normalized.
+    ("実施例 1 0 3", "103"),
+    ("実施例1 04", "104"),
+    # A range names more than one example, so it is not one section.
+    ("実施例２および3", None),
     ("Examples of 6,6-fused heteroaryl groups include quinolinyl", None),
 ]
 

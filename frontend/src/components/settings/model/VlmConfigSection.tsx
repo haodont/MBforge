@@ -9,9 +9,9 @@ import SettingSection, { SettingGroup, SettingItem } from '@/components/ui/Setti
 import { ProviderField } from '../SettingRow'
 import { ModelSelector } from '../ModelComponents'
 import {
-  PROVIDER_META,
   VLM_MODELS,
-  type ModelMap,
+  getProviderMeta,
+  providerOptions,
 } from '../modelConfigs'
 import type { SettingsState } from '../types'
 
@@ -21,15 +21,6 @@ interface Props {
   markDirty: (field: string) => void
   dirtyFields: Record<string, boolean>
 }
-
-const providerOptions = (map: ModelMap, t: (key: string, options?: Record<string, unknown>) => string) =>
-  Object.keys(map).map(k => ({
-    value: k,
-    label: t(`providers.${k}`, { defaultValue: (PROVIDER_META[k] ?? { label: k }).label }),
-  }))
-
-const getProviderMeta = (key: string) =>
-  PROVIDER_META[key] ?? { label: key, defaultUrl: '', needsKey: false }
 
 export default function VlmConfigSection({
   settings,

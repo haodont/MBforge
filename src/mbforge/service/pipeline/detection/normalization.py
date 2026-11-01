@@ -274,6 +274,29 @@ def normalize_molecules(
     by_canonical: dict[tuple[str, ...], Molecule] = {}
     by_invalid: dict[tuple[str, ...], Molecule] = {}
 
+    def _reject(
+        result: ExtractionResult, identity_key: tuple[str, ...], reason: str
+    ) -> None:
+        """Record *result* as rejected, merging with an existing identity."""
+        raw_value, markush_value, original_esmiles, _groups = _structure_fields(result)
+        stored_esmiles = original_esmiles if markush_value else raw_value
+        existing = by_invalid.get(identity_key)
+        if existing is not None:
+            _merge_detection(existing, result)
+            return
+        properties: dict[str, Any] = {}
+        _append_detection_metadata(properties, result)
+        by_invalid[identity_key] = Molecule(
+            canonical_smiles=raw_value,
+            esmiles=stored_esmiles,
+            name=result.name,
+            sources=["image"],
+            detections=[_detection_from_result(result)],
+            status="rejected",
+            reject_reason=reason,
+            properties=properties,
+        )
+
     # Pre-filter only for clearly unusable fragments. We do NOT reject SMILES
     # containing ``*`` here — ``*`` is a valid Markush wildcard atom (used by
     # patent R-group definitions) and is exactly what MolParser emits for
@@ -296,21 +319,7 @@ def normalize_molecules(
         )
         if _is_unusable_fragment(raw):
             logger.debug("Rejected low-quality SMILES: %s", raw)
-            if identity in by_invalid:
-                _merge_detection(by_invalid[identity], r)
-            else:
-                properties: dict[str, Any] = {}
-                _append_detection_metadata(properties, r)
-                by_invalid[identity] = Molecule(
-                    canonical_smiles=raw,
-                    esmiles=stored_esmiles,
-                    name=r.name,
-                    sources=["image"],
-                    detections=[_detection_from_result(r)],
-                    status="rejected",
-                    reject_reason="low_quality_smiles",
-                    properties=properties,
-                )
+            _reject(r, identity, "low_quality_smiles")
             continue
 
         try:
@@ -321,21 +330,7 @@ def normalize_molecules(
 
         if mol is None:
             logger.debug("Rejected invalid SMILES: %s", raw)
-            if identity in by_invalid:
-                _merge_detection(by_invalid[identity], r)
-            else:
-                properties: dict[str, Any] = {}
-                _append_detection_metadata(properties, r)
-                by_invalid[identity] = Molecule(
-                    canonical_smiles=raw,
-                    esmiles=stored_esmiles,
-                    name=r.name,
-                    sources=["image"],
-                    detections=[_detection_from_result(r)],
-                    status="rejected",
-                    reject_reason="invalid_smiles",
-                    properties=properties,
-                )
+            _reject(r, identity, "invalid_smiles")
             continue
 
         # Element whitelist — RDKit accepts some rare elements that have
@@ -358,42 +353,14 @@ def normalize_molecules(
                 invalid_atoms,
                 raw,
             )
-            if identity in by_invalid:
-                _merge_detection(by_invalid[identity], r)
-            else:
-                properties = {}
-                _append_detection_metadata(properties, r)
-                by_invalid[identity] = Molecule(
-                    canonical_smiles=raw,
-                    esmiles=stored_esmiles,
-                    name=r.name,
-                    sources=["image"],
-                    detections=[_detection_from_result(r)],
-                    status="rejected",
-                    reject_reason="invalid_element",
-                    properties=properties,
-                )
+            _reject(r, identity, "invalid_element")
             continue
 
         try:
             canonical = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
         except Exception as exc:
             logger.debug("RDKit canonicalization error for %r: %s", raw, exc)
-            if identity in by_invalid:
-                _merge_detection(by_invalid[identity], r)
-            else:
-                properties = {}
-                _append_detection_metadata(properties, r)
-                by_invalid[identity] = Molecule(
-                    canonical_smiles=raw,
-                    esmiles=stored_esmiles,
-                    name=r.name,
-                    sources=["image"],
-                    detections=[_detection_from_result(r)],
-                    status="rejected",
-                    reject_reason="canonicalization_failed",
-                    properties=properties,
-                )
+            _reject(r, identity, "canonicalization_failed")
             continue
 
         identity = _identity_key(

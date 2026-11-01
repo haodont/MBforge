@@ -26,6 +26,7 @@ import threading
 import numpy as np
 from PIL import Image
 
+from mbforge.foundation.inference.ocr.geometry import tight_box
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
@@ -219,12 +220,6 @@ def filter_label_texts(reads: list[tuple[str, float]]) -> list[str]:
     return labels
 
 
-def _tight_box(points) -> tuple[int, int, int, int]:
-    xs = [int(p[0]) for p in points]
-    ys = [int(p[1]) for p in points]
-    return (min(xs), min(ys), max(xs), max(ys))
-
-
 def _isolation_flags(boxes: list[tuple[int, int, int, int]]) -> list[bool]:
     """Flag reads that stand alone on their text line.
 
@@ -331,7 +326,7 @@ def _label_reads_from_result(
     output shapes — labels are enrichment only.
     """
     raw = _raw_reads(result)
-    flags = _isolation_flags([_tight_box(points) for points, _, _ in raw])
+    flags = _isolation_flags([tight_box(points) for points, _, _ in raw])
     reads: list[tuple[str, float, tuple[int, int, int, int], bool]] = []
     for (points, text, conf), isolated in zip(raw, flags, strict=True):
         if not _is_label(text, float(conf)):
@@ -339,7 +334,7 @@ def _label_reads_from_result(
         value = text.strip()
         if any(value == seen for seen, _, _, _ in reads):
             continue
-        reads.append((value, float(conf), _tight_box(points), isolated))
+        reads.append((value, float(conf), tight_box(points), isolated))
     return reads
 
 

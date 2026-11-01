@@ -69,6 +69,10 @@ class SourceEvidence:
     evidence_id: str = ""
     raw_text: str = ""
     kind: str = "text"
+    #: Zero-based position inside the page's reading order. ``0`` is both the
+    #: first row and the legacy default; a loader falls back to geometry when
+    #: every row of a page carries the default.
+    reading_order: int = 0
 
     def __post_init__(self) -> None:
         if not self.doc_id:
@@ -81,6 +85,12 @@ class SourceEvidence:
             raise ValueError("page must be a positive 1-based integer")
         if not self.kind:
             raise ValueError("kind must not be empty")
+        if (
+            not isinstance(self.reading_order, int)
+            or isinstance(self.reading_order, bool)
+            or self.reading_order < 0
+        ):
+            raise ValueError("reading_order must be a non-negative integer")
         normalised = _normalise_bbox(self.bbox)
         if normalised != self.bbox:
             object.__setattr__(self, "bbox", normalised)
@@ -103,6 +113,7 @@ class SourceEvidence:
             "bbox": list(self.bbox),
             "raw_text": self.raw_text,
             "kind": self.kind,
+            "reading_order": self.reading_order,
         }
 
     @classmethod
@@ -114,6 +125,7 @@ class SourceEvidence:
         bbox: tuple[float, float, float, float] | list[float],
         raw_text: str = "",
         kind: str = "text",
+        reading_order: int = 0,
     ) -> SourceEvidence:
         normalised = _normalise_bbox(bbox)
         return cls(
@@ -122,6 +134,7 @@ class SourceEvidence:
             bbox=normalised,
             raw_text=raw_text,
             kind=kind,
+            reading_order=reading_order,
             evidence_id=_location_id(
                 doc_id,
                 page,
@@ -142,6 +155,7 @@ class SourceEvidence:
             evidence_id=data.get("evidence_id", ""),
             raw_text=data.get("raw_text", ""),
             kind=data.get("kind", "text"),
+            reading_order=int(data.get("reading_order", 0) or 0),
         )
 
 

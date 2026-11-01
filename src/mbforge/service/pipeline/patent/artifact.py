@@ -87,8 +87,8 @@ class PatentFactsArtifact(BaseModel):
     the join does not depend on label detection succeeding.
 
     ``verified_by_mass`` records whether the example's printed product mass
-    reproduces the structure: measured on CN120329282A, 11 pairs, all 11 confirmed
-    within 0.35 Da."""
+    agrees with calculated [M+H]+ within tolerance. It is a consistency flag,
+    not proof of structure identity; mass alone never creates a pair."""
     issues: list[dict[str, Any]] = Field(default_factory=list)
     """Review issues: code/message/severity/evidence_ids/related_fact_id."""
     analysis_status: AnalysisStatus = "disabled"

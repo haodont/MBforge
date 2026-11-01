@@ -146,6 +146,7 @@ def _from_draft(
         "value": {
             "raw_text": value.get("raw_text", ""),
             "operator": value.get("operator", "") or "=",
+            "operator_original": value.get("operator", "") or "=",
             "original_value": value.get("value"),
             "original_unit": value.get("unit", ""),
             "canonical_value": None,

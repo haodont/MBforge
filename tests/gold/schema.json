@@ -1,0 +1,399 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mbforge.local/schemas/gold-relation-pair.schema.json",
+  "title": "MBForge gold relation pair",
+  "description": "One human-annotated relation pair. The page image is the source of truth; bboxes are PDF points with a bottom-left origin.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "gold_id",
+    "schema_version",
+    "doc",
+    "page_annotation",
+    "anchor",
+    "relation_type",
+    "gold_status",
+    "evidence_ids",
+    "geometry_complete",
+    "annotation"
+  ],
+  "properties": {
+    "gold_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Anchored to document + page + slot + relation + ordinal; never to an InChIKey."
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "doc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "doc_id",
+        "file_name",
+        "jurisdiction",
+        "kind",
+        "language",
+        "rendering",
+        "chemistry_pattern",
+        "table_form"
+      ],
+      "properties": {
+        "doc_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "file_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "jurisdiction": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 4
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Publication kind code: A, A1, A2, B1, B2, U, Y, ..."
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 8
+        },
+        "translation": {
+          "enum": ["none", "machine", "human"]
+        },
+        "rendering": {
+          "enum": ["scanned", "native", "hybrid", "ocr_layer", "tiff", "xml", "docx", "paper"]
+        },
+        "chemistry_pattern": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "example_per_compound",
+              "markush_genus",
+              "table_only_sar",
+              "reaction_scheme",
+              "prophetic",
+              "formulation",
+              "salt_polymorph",
+              "biotech_sequence",
+              "polymer",
+              "no_chemistry"
+            ]
+          }
+        },
+        "table_form": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "none",
+              "unknown",
+              "simple",
+              "split_header",
+              "repeated_pairs",
+              "merged_cells",
+              "target_in_header",
+              "rotated",
+              "structure_column",
+              "cross_page",
+              "legend"
+            ]
+          }
+        }
+      }
+    },
+    "page_annotation": {
+      "enum": ["exhaustive", "targeted"],
+      "description": "exhaustive: every pair on the page was checked, so unmatched commits are false positives. targeted: only the listed pairs were checked."
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "key_space", "label_raw", "label_key", "page", "bbox", "evidence_id"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "section_heading",
+            "table_row_label",
+            "table_cell",
+            "caption",
+            "prose",
+            "scheme_node",
+            "claim_text",
+            "title",
+            "abstract"
+          ]
+        },
+        "key_space": {
+          "enum": ["example", "compound", "claim", "internal_code", "table_row", "scheme_node", "none"]
+        },
+        "label_raw": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Verbatim printed/OCR string; never normalized."
+        },
+        "label_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Normalized matching key, e.g. '@example:7' or '77-A'."
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ocr_issue": {
+          "type": "string",
+          "description": "Recorded OCR error, broken wrap or glyph substitution; never silently corrected."
+        }
+      }
+    },
+    "subject": {
+      "$ref": "#/$defs/chemical"
+    },
+    "object": {
+      "$ref": "#/$defs/chemical"
+    },
+    "relation_type": {
+      "enum": [
+        "exemplified_by",
+        "designated_as",
+        "reported_as",
+        "member_of_genus",
+        "claim_scope",
+        "prepared_from",
+        "salt_of",
+        "solvate_of",
+        "stereoisomer_of",
+        "tautomer_of",
+        "formulated_as"
+      ]
+    },
+    "example_status": {
+      "enum": ["exemplified", "prophetic", "unknown"]
+    },
+    "gold_status": {
+      "enum": ["present", "absent", "insufficient_evidence"]
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "sources"],
+      "properties": {
+        "status": {
+          "enum": ["insufficient_evidence", "uncorroborated", "corroborated", "contradicted"]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/corroboration"
+          }
+        }
+      }
+    },
+    "evidence_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "geometry_complete": {
+      "type": "boolean"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "annotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["annotator", "version", "created"],
+      "properties": {
+        "annotator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adjudicator": {
+          "type": ["string", "null"]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created": {
+          "type": "string",
+          "format": "date"
+        },
+        "supersedes": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "bbox": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "number"
+      },
+      "description": "PDF points, bottom-left origin: [x0, y0, x1, y1], with x0 <= x1 and y0 <= y1."
+    },
+    "chemical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["molecule", "scaffold"]
+        },
+        "smiles": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inchikey": {
+          "type": "string",
+          "minLength": 27,
+          "maxLength": 27
+        },
+        "esmiles": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scaffold_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_level": {
+          "enum": ["exact_stereo", "exact_isotopes", "connectivity", "parent_after_desalting", "tautomer_collapsed"],
+          "description": "exact_isotopes compares RDKit canonical isomeric SMILES including [2H]/[13C]; full standard InChIKeys distinguish isotopologues, but the connectivity block alone does not."
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "definition_raw"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "definition_raw": {
+                "type": "string",
+                "minLength": 1
+              },
+              "definition_key": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"kind": {"const": "molecule"}},
+            "required": ["kind"]
+          },
+          "then": {
+            "anyOf": [{"required": ["smiles"]}, {"required": ["inchikey"]}]
+          }
+        },
+        {
+          "if": {
+            "properties": {"kind": {"const": "scaffold"}},
+            "required": ["kind"]
+          },
+          "then": {
+            "anyOf": [{"required": ["esmiles"]}, {"required": ["scaffold_id"]}]
+          }
+        }
+      ]
+    },
+    "corroboration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "result"],
+      "properties": {
+        "source": {
+          "enum": [
+            "ms_mass",
+            "label_sequence",
+            "geometry_complete",
+            "table_complete",
+            "name_match",
+            "human_confirm",
+            "cross_renderer",
+            "reaction_balance"
+          ]
+        },
+        "result": {
+          "enum": ["pass", "fail", "not_run"]
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"gold_status": {"const": "present"}},
+        "required": ["gold_status"]
+      },
+      "then": {
+        "allOf": [
+          {
+            "anyOf": [{"required": ["subject"]}, {"required": ["object"]}]
+          },
+          {
+            "properties": {
+              "geometry_complete": {"const": true},
+              "evidence_ids": {"minItems": 1}
+            },
+            "required": ["verification"]
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {"gold_status": {"const": "absent"}},
+        "required": ["gold_status"]
+      },
+      "then": {
+        "properties": {
+          "page_annotation": {"const": "exhaustive"}
+        }
+      }
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 """Hiro-Layout table recognition contract (``_fill_tables``).
 
 ``parse_page_image`` is the public boundary: table regions must carry
-HTML/Markdown content when the SLANet-1M recognizer works, stay empty when it
-does not, and never break the page (best-effort enrichment). Recognition is
+HTML/Markdown content when the SLANet-1M recognizer works, retain unsupported
+HTML for review, stay empty on inference failure, and never break the page.
+Recognition is
 unconditional — there is no switch that turns it off.
 """
 
@@ -80,3 +81,18 @@ def test_parse_page_image_keeps_table_empty_without_usable_html(monkeypatch) -> 
         assert "html" not in region
         assert not region.get("text")
         assert page.stats["tables_filled"] == 0
+
+
+def test_parse_page_image_retains_conflicting_spans_for_review(monkeypatch) -> None:
+    """A rejected grid must keep its raw evidence without fabricating columns."""
+    html = (
+        '<table><tr><td>B</td><td rowspan="2">A</td></tr>'
+        '<tr><td colspan="2">C</td><td>D</td></tr></table>'
+    )
+    page = _parse(_FakeRuntime(html=html), monkeypatch)
+
+    region = _table_region(page)
+    assert region["html"] == html
+    assert region["text"] == html
+    assert page.stats["tables_filled"] == 0
+    assert page.stats["tables_unconverted"] == 1

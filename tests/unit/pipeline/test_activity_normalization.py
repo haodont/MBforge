@@ -18,6 +18,7 @@ from mbforge.service.pipeline.activity.normalization import (
     normalize_activity_measurement,
     normalize_activity_metric,
     normalize_reference_label,
+    normalize_stored_measurement,
 )
 
 # (operator, expected comparable operator) — a log metric measures inversely.
@@ -70,23 +71,44 @@ def test_log_metric_converts_to_nm_and_inverts_the_operator() -> None:
     assert embedded.operator == ">="
     assert embedded.value_canonical == 10_000.0
 
+    # Re-reading a stored canonical inequality must not invert it a second time.
+    for original in (None, ">"):
+        stored = normalize_stored_measurement(
+            "pIC50",
+            {
+                "original_value": 7.0,
+                "original_unit": "",
+                "canonical_value": 100.0,
+                "operator": "<",
+                "operator_original": original,
+            },
+        )
+        assert stored.operator_original == ">"
+        assert stored.operator == "<"
+        assert stored.value_canonical == 100.0
 
-def test_linear_units_convert_directly_and_unknown_ones_fall_back_to_nm() -> None:
+
+def test_linear_units_convert_without_inventing_concentration_units() -> None:
     """Original unit/value survive; percent and fold keep their own branch."""
     converted = normalize_activity_measurement("IC50", 1.5, "μM", "=")
 
     assert converted.value_original == 1.5
     assert converted.value_canonical == 1500.0
     assert converted.unit_original == "μM"
-    assert converted.unit_canonical == "μM"
+    assert converted.unit_canonical == "nM"
 
     for unit in ["cells/mL", "ng/mL"]:
         fallback = normalize_activity_measurement("IC50", 2.5, unit, "=")
 
         assert fallback.unit_original == unit, unit
-        assert fallback.unit_canonical == "nM", unit
+        assert fallback.unit_canonical == unit, unit
         assert fallback.value_canonical == 2.5, unit
         assert fallback.scale == "linear", unit
+
+    missing = normalize_activity_measurement("IC50", 2.5)
+    assert missing.value_original == 2.5
+    assert missing.value_canonical is None
+    assert not missing.unit_canonical
 
     unicode_linear = normalize_activity_measurement("IC50", "≥ 100", "nM")
 
@@ -142,6 +164,14 @@ def test_qualitative_values_need_a_legend_to_be_ranked() -> None:
     assert resolved.qualitative_scheme == "legend"
     assert resolved.qualitative_label == "strong"
     assert resolved.qualitative_rank == 3
+
+    # ``ND`` means no data. It is not an inactivity grade and must not become
+    # rank 0 (which would publish a missing cell as a measurement).
+    missing = normalize_activity_measurement("activity", "ND", "")
+
+    assert missing.qualitative_raw == "ND"
+    assert missing.qualitative_rank is None
+    assert missing.measurement_kind == "qualitative"
 
 
 def test_metric_and_reference_labels_share_one_normalized_key() -> None:

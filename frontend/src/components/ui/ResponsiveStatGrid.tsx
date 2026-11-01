@@ -6,7 +6,7 @@
  * - 桌面（≥ 1024px）：4 列
  */
 import type { ReactNode, CSSProperties } from 'react'
-import { useIsMobile, useIsTablet } from '../../styles/responsive'
+import { useResponsiveColumns } from '../../styles/responsive'
 
 export interface ResponsiveStatGridProps {
   children: ReactNode
@@ -30,14 +30,7 @@ export default function ResponsiveStatGrid({
   style,
   className,
 }: ResponsiveStatGridProps) {
-  const isMobile = useIsMobile()
-  const isTablet = useIsTablet()
-
-  const columns = isMobile
-    ? mobileColumns
-    : isTablet
-    ? tabletColumns
-    : desktopColumns
+  const columns = useResponsiveColumns(mobileColumns, tabletColumns, desktopColumns)
 
   return (
     <div

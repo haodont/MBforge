@@ -294,6 +294,29 @@ def test_recorded_readings_bind_to_the_gap_and_batches_stay_distinct() -> None:
         == []
     )
 
+    # A method-only answer must also retain a recorded dimensionless reading.
+    logarithmic = _recorded_items(
+        answer,
+        gap,
+        [
+            {
+                **recorded[0],
+                "metric": "pIC50",
+                "value": {
+                    "raw_text": "6.9",
+                    "operator": "=",
+                    "original_value": 6.9,
+                    "original_unit": "",
+                },
+            }
+        ],
+    )
+    preserved = _answer_submission(answer, scope, logarithmic).measurements[0]
+    assert preserved.metric == "pIC50"
+    assert preserved.value.value == 6.9
+    assert preserved.value.unit == ""
+    assert preserved.value.missing_fields == []
+
     first = MergeResult(
         measurements=[],
         candidates=[{"review_item_id": "item-1", "reason": "llm_only"}],

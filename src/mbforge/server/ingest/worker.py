@@ -369,8 +369,8 @@ def _run_pipeline_sync(
         logger.info("Pipeline cancelled for %s: %s", file_path, exc)
         queue_dao.set_node_status(library_root, task_id, "cancelled", str(exc))
         # A cancelled run produced no results, so the document goes back to
-        # ``pending`` and stays hidden from the workspace listing until a run
-        # reaches an outcome. The queue page still offers a retry.
+        # ``pending`` (listed as "待处理" again). The queue page still offers
+        # a retry.
         _set_document_status(library_root, doc_id, "pending")
         return
     except Exception as exc:  # noqa: BLE001
@@ -414,9 +414,9 @@ def _run_pipeline_sync(
 def _set_document_status(library_root: str, doc_id: str, status: str) -> None:
     """Record a document's processing outcome for the workspace listing.
 
-    The workspace shows documents that reached a resting status
-    (``extracted``/``ready``/``error``), so each terminal queue transition
-    writes the registry row here. Failures are logged rather than raised — the
+    The workspace lists every visible status (``pending``, ``extracted``,
+    ``ready``, ``error``), so each terminal queue transition writes the
+    registry row here. Failures are logged rather than raised — the
     queue node's own status remains the authoritative record of the run.
     """
     if not doc_id:

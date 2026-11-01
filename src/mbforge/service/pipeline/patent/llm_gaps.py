@@ -20,6 +20,7 @@ from mbforge.domain.evidence import SourceEvidence
 from mbforge.domain.evidence_kind import category_of
 from mbforge.domain.molecule import Molecule
 from mbforge.domain.patent import designation_key
+from mbforge.service.pipeline.activity.normalization import find_activity_metrics
 from mbforge.service.pipeline.activity.parsing.tables import activity_table_excerpts
 from mbforge.service.pipeline.persist.molecules import filter_persistable_candidates
 
@@ -73,18 +74,16 @@ MAX_EXCERPT_CHARS = _MAX_TEXT
 
 #: A qualitative bin is meaningless without the bound it stands for
 #: (``"++++" 1nM<IC50<20nM``, ``注 "+"：IC50>1μM``). Those definition lines are
-#: collected once per document and appended to any gap whose text uses a bin.
+#: selected as nearby, citable context, never a document-wide assay default.
 _LEGEND_LINE_RE = re.compile(
     r"(?:注|Note)?\s*[“\"'(\[]?\s*(?:\+{1,4}|[十]{1,4})\s*[”\"')\]]?\s*[:：]?\s*"
     r".{0,40}?(?:IC|EC)\s*_?\s*\d+",
     re.IGNORECASE,
 )
-_QUALITATIVE_TOKEN_RE = re.compile(r"\+{2,4}|[十]{2,4}")
 #: How a row prints an owned designation: ``化合物77``, ``实施例1``, ``Compound 7``.
 _DESIGNATION_MARKER = (
     r"(?:化合物|实施例|实例|化合物号|第|Compound|Example|Ex\.?|No\.?)\s*"
 )
-MAX_LEGEND_LINES = 8
 MAX_GAP_STRUCTURES = 20
 #: Passages one grouped gap may carry. A document prints hundreds of spectra, names
 #: and routes; the page is the unit one answer can cover, and the contract's own
@@ -135,12 +134,10 @@ def build_gaps(
 
     ``structures`` are the document's recognized molecules. A gap whose excerpt
     prints labels those structures own carries them, so the answer can be tied to
-    a concrete structure without another round trip; and a gap whose text uses a
-    qualitative bin carries the document's bin definitions, because a symbol
-    without its bound is not a reading.
+    a concrete structure without another round trip. Nearby method/legend
+    passages carry their own IDs as candidate context, never global defaults.
     """
     by_id = {row.evidence_id: row for row in evidence if row.evidence_id}
-    legend = _legend_lines(evidence)
     catalogue = _structure_catalogue(structures or [], entries)
     entries_by_id = {str(entry.get("entry_id") or ""): entry for entry in entries}
 
@@ -247,7 +244,7 @@ def build_gaps(
                     rows=rows,
                     seen_ids=seen_ids,
                     excerpt_char_budget=excerpt_char_budget,
-                    legend=legend,
+                    context_rows=_context_rows(rows, evidence),
                     catalogue=catalogue,
                     excerpt=excerpt,
                     row_labels=row_labels,
@@ -261,19 +258,36 @@ def build_gaps(
     return built, skipped
 
 
-def _legend_lines(evidence: Sequence[SourceEvidence]) -> list[str]:
-    """The document's qualitative-bin definition lines, in order, deduplicated."""
-    lines: list[str] = []
-    for row in evidence:
-        for line in (row.raw_text or "").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped in lines:
-                continue
-            if _LEGEND_LINE_RE.search(stripped):
-                lines.append(stripped)
-                if len(lines) >= MAX_LEGEND_LINES:
-                    return lines
-    return lines
+def _context_rows(
+    rows: Sequence[SourceEvidence], evidence: Sequence[SourceEvidence]
+) -> list[SourceEvidence]:
+    """Nearby assay/legend passages are candidates for scope, not global defaults."""
+    pages = {row.page for row in rows}
+    owned = {row.evidence_id for row in rows}
+    positions = {row.evidence_id: index for index, row in enumerate(evidence)}
+    anchor = positions.get(rows[0].evidence_id, 0)
+    candidates = [
+        row
+        for row in evidence
+        if row.evidence_id not in owned
+        and row.doc_id == rows[0].doc_id
+        and category_of(row.kind) == "text"
+        and row.raw_text.strip()
+        and min(abs(row.page - page) for page in pages) <= 1
+        and (
+            find_activity_metrics(row.raw_text)
+            or _LEGEND_LINE_RE.search(row.raw_text)
+            or re.search(r"\b(?:assay|FLIPR|HTRF)\b|测定|试验", row.raw_text, re.I)
+        )
+    ]
+    candidates.sort(
+        key=lambda row: (
+            min(abs(row.page - page) for page in pages),
+            abs(positions[row.evidence_id] - anchor),
+        )
+    )
+    # shortcut: adjacent pages only; use request_excerpt for a distant definition.
+    return candidates[:6]
 
 
 def _normalise(text: str) -> str:
@@ -442,7 +456,7 @@ def _gap(
     rows: list[SourceEvidence],
     seen_ids: dict[str, int],
     excerpt_char_budget: int,
-    legend: Sequence[str],
+    context_rows: Sequence[SourceEvidence],
     catalogue: Sequence[Mapping[str, Any]],
     excerpt: str | None = None,
     row_labels: Sequence[str] = (),
@@ -455,16 +469,47 @@ def _gap(
     if excerpt is None:
         excerpt = "\n\n".join(row.raw_text for row in rows if row.raw_text)
 
-    # A bin without its bound is not a reading: when this gap's text uses one,
-    # the document's own definitions travel with the excerpt.
-    if legend and _QUALITATIVE_TOKEN_RE.search(excerpt):
-        excerpt += "\n\nBin definitions stated in this document:\n" + "\n".join(legend)
     if excerpt_char_budget > 0 and len(excerpt) > excerpt_char_budget:
         excerpt = excerpt[:excerpt_char_budget] + TRUNCATION_MARK
     if len(excerpt) > MAX_EXCERPT_CHARS:
         excerpt = excerpt[: MAX_EXCERPT_CHARS - len(TRUNCATION_MARK)] + TRUNCATION_MARK
 
     context: dict[str, Any] = {}
+    # IDs accompany the visible text, so context can be cited without a tool turn.
+    context["evidence"] = []
+    work_budget = min(max(0, excerpt_char_budget), MAX_EXCERPT_CHARS)
+    for row in rows:
+        if work_budget <= 0:
+            break
+        full_text = excerpt if len(rows) == 1 else row.raw_text
+        text = full_text[:work_budget]
+        context["evidence"].append(
+            {
+                "evidence_id": row.evidence_id,
+                "page": row.page,
+                "role": "work",
+                "raw_text": text,
+                "truncated": len(text) < len(full_text) or TRUNCATION_MARK in text,
+            }
+        )
+        work_budget -= len(text)
+    context["work_evidence_ids"] = list(evidence_ids)
+    context_budget = max(0, min(excerpt_char_budget, MAX_EXCERPT_CHARS))
+    for row in context_rows:
+        if context_budget <= 0:
+            break
+        text = row.raw_text[:context_budget]
+        context["evidence"].append(
+            {
+                "evidence_id": row.evidence_id,
+                "page": row.page,
+                "role": "context",
+                "raw_text": text,
+                "truncated": len(text) < len(row.raw_text),
+            }
+        )
+        evidence_ids.append(row.evidence_id)
+        context_budget -= len(text)
     messages = [str(issue.get("message", ""))[:400]]
     if messages[0]:
         context["rule_reason"] = messages[0]
@@ -484,7 +529,7 @@ def _gap(
     # Structures whose printed label appears here: the answer can name one of
     # them, so the reading lands on a concrete structure instead of a string.
     # Legends contain thresholds, not additional compound designations.
-    structure_text = excerpt.split("\n\nBin definitions stated in this document:")[0]
+    structure_text = excerpt
     if row_labels:
         structure_text = " | ".join(row_labels)
         context["row_labels"] = list(row_labels)

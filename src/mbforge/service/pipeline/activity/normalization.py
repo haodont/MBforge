@@ -1,6 +1,6 @@
 """Deterministic normalization helpers for extracted bioactivity values.
 
-The LLM is responsible for locating a measurement in a table.  This module
+Extractors locate a measurement in the source evidence. This module
 keeps the representation of that measurement deterministic: logarithmic
 potency values are converted to a comparable concentration, qualitative
 symbols retain their source meaning, and compound labels are normalized only
@@ -15,10 +15,8 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from mbforge.domain.activity import is_log_potency_metric
 from mbforge.domain.patent import compound_label_key
-from mbforge.foundation.logger import get_logger
-
-logger = get_logger(__name__)
 
 _NUMBER_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
 _OPERATOR_RE = re.compile(r"^\s*(<=|>=|<|>|=|~|≤|≥|≈)?\s*")
@@ -113,11 +111,6 @@ def find_activity_metrics(text: str) -> list[str]:
     ]
 
 
-def is_log_potency_metric(metric: str) -> bool:
-    """Return whether ``metric`` is a pIC/pEC/pKi/pKd-style log metric."""
-    return bool(re.fullmatch(r"p(?:IC|EC|ED|GI|AC|CC)\d+|pK[di]", metric))
-
-
 def _normalize_unit(value: object) -> str:
     unit = unicodedata.normalize("NFKC", str(value or "")).strip()
     compact = unit.lower().replace("μ", "u")
@@ -192,7 +185,9 @@ def extract_qualitative_legend(text: str) -> dict[str, str]:
 
 def _qualitative_rank(label: str) -> int | None:
     lowered = label.lower()
-    if lowered in {"inactive", "none", "negative", "na", "nd", "nt"}:
+    # ``ND``/``NA``/``NT`` mean "no data", not an inactivity grade. Ranking
+    # them as 0 published a missing cell as a measurement.
+    if lowered in {"inactive", "none", "negative"}:
         return 0
     if lowered in {"weak", "low", "poor"}:
         return 1
@@ -246,7 +241,7 @@ def normalize_activity_measurement(
     value_text: object | None = None,
     legend: Mapping[str, str] | None = None,
 ) -> NormalizedActivity:
-    """Normalize one LLM item without guessing missing structural data."""
+    """Normalize one extracted reading without inventing missing units."""
     canonical_metric = normalize_activity_metric(metric)
     original_unit = str(unit or "").strip()
     canonical_unit = _normalize_unit(original_unit)
@@ -339,27 +334,26 @@ def normalize_activity_measurement(
             qualitative_label=None,
         )
 
-    unit_for_conversion = canonical_unit or "nM"
     conversion = {
         "nM": 1.0,
         "μM": 1000.0,
         "mM": 1_000_000.0,
         "pM": 0.001,
         "M": 1_000_000_000.0,
-    }.get(unit_for_conversion)
-    if conversion is None:
-        logger.warning(
-            "Unknown unit %r; falling back to nM; %s",
-            original_unit,
-            source_text,
-        )
-        conversion = 1.0
+    }.get(canonical_unit)
+    if conversion is not None:
         canonical_unit = "nM"
     return NormalizedActivity(
         metric=canonical_metric,
         measurement_kind="quantitative",
         value_original=numeric,
-        value_canonical=numeric * conversion,
+        value_canonical=(
+            numeric * conversion
+            if conversion is not None
+            else numeric
+            if canonical_unit
+            else None
+        ),
         unit_original=original_unit,
         unit_canonical=canonical_unit,
         operator_original=operator_original,
@@ -370,6 +364,31 @@ def normalize_activity_measurement(
         qualitative_rank=None,
         qualitative_scheme=None,
         qualitative_label=None,
+    )
+
+
+def normalize_stored_measurement(
+    metric: object, value: Mapping[str, object]
+) -> NormalizedActivity:
+    """Normalize original fields once, including older canonical comparators."""
+    operator = value.get("operator_original")
+    if not operator:
+        operator = value.get("operator") or "="
+        # Older rule snapshots kept only the comparator on the converted value.
+        if (
+            is_log_potency_metric(str(metric or ""))
+            and value.get("canonical_value") is not None
+        ):
+            operator = _invert_operator(str(operator))
+    number = value.get("original_value")
+    if number is None:
+        number = value.get("qualitative_value") or value.get("raw_text") or ""
+    return normalize_activity_measurement(
+        metric,
+        number,
+        value.get("original_unit", ""),
+        operator,
+        value_text=value.get("raw_text", ""),
     )
 
 

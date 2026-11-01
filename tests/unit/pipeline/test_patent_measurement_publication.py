@@ -1,5 +1,8 @@
 """Patent readings reach SQL without a structure, and none are collapsed.
 
+Functions under test: ``publish_document_facts``, ``measurement_records``,
+and ``measurement_attributions``.
+
 The regression this file guards: the publication path used to keep only readings
 that resolved to a structure and then only the **first** reading per molecule, so
 a document's other assays, targets and doses never reached the database.
@@ -55,6 +58,7 @@ def _measurement(
             "reference_raw": entry_id or "",
             "reference_key": entry_id or "",
             "reference_type": "compound",
+            "column_target": target,
         },
         "page_num": page,
         "table_idx": 0,
@@ -87,7 +91,14 @@ def test_two_readings_of_one_structure_are_both_stored(tmp_library: Path) -> Non
         ],
         measurements=[
             _measurement("m-ic50", entry_id="entry-1", metric="IC50", value=12.0),
-            _measurement("m-ki", entry_id="entry-1", metric="Ki", value=3.5, row_idx=2),
+            _measurement(
+                "m-ki",
+                entry_id="entry-1",
+                metric="Ki",
+                value=3.5,
+                target="MRGPRX1",
+                row_idx=2,
+            ),
         ],
     )
 
@@ -106,8 +117,8 @@ def test_two_readings_of_one_structure_are_both_stored(tmp_library: Path) -> Non
     assert [row["measurement_id"] for row in rows] == ["m-ic50", "m-ki"]
     assert [row["metric"] for row in rows] == ["IC50", "Ki"]
     assert [row["original_value"] for row in rows] == [12.0, 3.5]
-    # The assay section owns target/species, so a dataset filter needs no join.
-    assert {row["target"] for row in rows} == {"EGFR"}
+    # A selectivity column's explicit target overrides the shared assay target.
+    assert [row["target"] for row in rows] == ["EGFR", "MRGPRX1"]
     assert {row["species"] for row in rows} == {"human"}
 
 

@@ -19,7 +19,10 @@ from mbforge.contracts.patent import PATENT_FACT_REVIEW_KIND, PatentConflict
 from mbforge.foundation.ids import stable_id
 from mbforge.foundation.layout import LibraryLayout
 from mbforge.foundation.logger import get_logger
-from mbforge.service.pipeline.artifacts.json_io import write_json_atomic
+from mbforge.service.pipeline.artifacts.json_io import (
+    read_json_object,
+    write_json_atomic,
+)
 from mbforge.service.pipeline.patent.artifact import PatentFactsArtifact
 from mbforge.service.pipeline.patent.decisions import apply_decisions
 from mbforge.service.ports import get_repositories
@@ -407,24 +410,6 @@ def _measurement_has_activity(measurement: dict[str, Any]) -> bool:
 # ── read side ─────────────────────────────────────────────────────────
 
 
-def _load_json_file(path: Path, label: str) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Ignoring unreadable %s: %s (%s)", path, label, exc)
-        return None
-    if not isinstance(data, dict):
-        logger.warning(
-            "Ignoring artifact %s: expected object, got %s",
-            path,
-            type(data).__name__,
-        )
-        return None
-    return data
-
-
 def load_patent_facts(
     library_root: str | Path, doc_id: str
 ) -> PatentFactsArtifact | None:
@@ -450,8 +435,8 @@ def load_patent_facts(
         status = _repair_projection(root, doc_id, artifact)
         return artifact.model_copy(update={"projection_status": status})
 
-    data = _load_json_file(
-        LibraryLayout(root).patent_facts_json(doc_id), "patent facts"
+    data = read_json_object(
+        LibraryLayout(root).patent_facts_json(doc_id), label="patent facts"
     )
     if data is None:
         return None
@@ -471,7 +456,7 @@ def _repair_projection(
     path = LibraryLayout(library_root).patent_facts_json(doc_id)
     payload = artifact.model_dump(exclude={"projection_status"})
     try:
-        existing = _load_json_file(path, "patent facts projection")
+        existing = read_json_object(path, label="patent facts projection")
         if existing == payload:
             return "current"
         write_json_atomic(path, payload)

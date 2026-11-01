@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react'
 import type { ExtractionResult, DetectionBox } from '@/types'
+import OverlayLayer from '@/components/ui/OverlayLayer'
 import { pdfToCss } from '@/utils/pdf'
 
 interface Props {
@@ -80,18 +81,7 @@ const MoleculeOverlay = memo(function MoleculeOverlay({
   if (boxes.length === 0) return null
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: '50%',
-        width: renderWidth,
-        height: renderHeight,
-        transform: 'translateX(-50%)',
-        pointerEvents: 'none',
-        zIndex: 2,
-      }}
-    >
+    <OverlayLayer renderWidth={renderWidth} renderHeight={renderHeight}>
       {boxes.map((box, i) => {
         const isSelected = selectedIndex === i
         const isHovered = hoveredIdx === i
@@ -181,7 +171,7 @@ const MoleculeOverlay = memo(function MoleculeOverlay({
           </div>
         )
       })}
-    </div>
+    </OverlayLayer>
   )
 })
 

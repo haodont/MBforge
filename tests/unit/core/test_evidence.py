@@ -55,3 +55,25 @@ def test_source_evidence_create_derives_position_id_and_validates_input() -> Non
             bbox=(10.0, 0.0, 1.0, 1.0),
             raw_text="text",
         )
+
+
+def test_source_evidence_reading_order_round_trips_and_rejects_negative() -> None:
+    """The persisted order is part of the row, not a loader-only hint."""
+    ordered = SourceEvidence.create(
+        doc_id="doc",
+        page=1,
+        bbox=(1.0, 2.0, 3.0, 4.0),
+        raw_text="second in column two",
+        reading_order=7,
+    )
+
+    assert ordered.reading_order == 7
+    assert SourceEvidence.from_dict(ordered.to_dict()).reading_order == 7
+
+    with pytest.raises(ValueError, match="reading_order"):
+        SourceEvidence.create(
+            doc_id="doc",
+            page=1,
+            bbox=(1.0, 2.0, 3.0, 4.0),
+            reading_order=-1,
+        )

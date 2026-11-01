@@ -68,6 +68,13 @@ def get_model_cache_dir() -> str:
     return str(GLOBAL_APP_DIR / "models")
 
 
+def get_model_cache_path() -> Path:
+    """Return the model cache directory as a ``Path``, creating it if needed."""
+    path = Path(get_model_cache_dir())
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def is_within_global_app_dir(path: str | Path) -> bool:
     """Return True if ``path`` is the global app dir or inside it.
 

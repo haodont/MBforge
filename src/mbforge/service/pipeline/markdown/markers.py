@@ -1,7 +1,7 @@
 """Shared regex markers for the markdown pipeline stage.
 
 Page markers, E-SMILES code blocks, headings, and Markush context signals
-used across markdown-stage modules and the persist stage.
+used across the Markdown stage and the Patent facts parser.
 """
 
 from __future__ import annotations

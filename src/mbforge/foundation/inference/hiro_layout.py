@@ -91,15 +91,6 @@ class LayoutBox:
     score: float
 
 
-def default_model_dir() -> Path:
-    """Return the shared model cache directory (unified constant)."""
-    from mbforge.foundation.paths import get_model_cache_dir
-
-    cache_dir = Path(get_model_cache_dir())
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir
-
-
 def _has_onnxruntime() -> bool:
     try:
         import onnxruntime  # noqa: F401
@@ -188,7 +179,9 @@ class HiroLayoutDetector:
             return resolved
 
         # Fallback: default model directory (matches the catalog local_name).
-        return default_model_dir() / "Hiro-Layout" / DEFAULT_ONNX_SUBPATH
+        from mbforge.foundation.paths import get_model_cache_path
+
+        return get_model_cache_path() / "Hiro-Layout" / DEFAULT_ONNX_SUBPATH
 
     def _load_model(
         self, *, providers: list[str] | None, num_threads: int | None

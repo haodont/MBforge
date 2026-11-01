@@ -1,10 +1,10 @@
 /**
  * Offline boundary tests for the Patent-analysis runtime.
  * Functions: parsePatentRequest, createBudgetGuard, createPatentTools,
- * registerAttempt/cancelAttempt/activeAttemptIds, patentSystemPrompt.
+ * registerAttempt/cancelAttempt/activeAttemptIds, handlePatentAnalysis.
  *
  * They protect what the Python side depends on and never touch a provider, the
- * network or the backend: the request gate, the budget arithmetic (unknown usage
+ * external network or a real backend: the request gate, the budget arithmetic (unknown usage
  * stays unknown), the cancel registry, and the fact that the task credential is
  * captured by the tools rather than exposed as a parameter the model can set.
  */
@@ -26,7 +26,6 @@ import {
   createPatentTools,
   handlePatentAnalysis,
   parsePatentRequest,
-  patentSystemPrompt,
   registerAttempt,
   unregisterAttempt,
   type PatentBudget,
@@ -264,19 +263,7 @@ test('the runtime registers one in-flight attempt, never exposes the credential,
   }
 })
 
-test('the system prompt carries the exported gap contract and a worked example', () => {
-  const prompt = patentSystemPrompt()
-  assert.match(prompt, /Answer contract/)
-  // Read from agent/schemas/patent-gap.v2.json: a missing or stale export must
-  // fail here rather than silently shrinking the contract.
-  assert.ok(prompt.includes('"gap_kind"'))
-  assert.ok(prompt.includes('"unanswerable_reason"'))
-  // The schema alone was not enough for the model to submit anything at all.
-  assert.match(prompt, /Example answer/)
-  assert.ok(prompt.includes('"status": "answered"'))
-})
-
-test('a stalled gap expires while the next isolated session submits with host-bound identity', async () => {
+test('a stalled gap expires and the next session repairs a rejected answer with host-bound identity', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'mbforge-patent-'))
   const previousSettings = process.env.MBFORGE_SETTINGS_PATH
   const previousBackend = process.env.MBFORGE_BACKEND_URL
@@ -292,8 +279,8 @@ test('a stalled gap expires while the next isolated session submits with host-bo
         return
       }
       const args = JSON.stringify({ answer: {
-        gap_id: 'wrong-gap', doc_id: 'wrong-document', status: 'unanswerable',
-        unanswerable_reason: 'no_attribution',
+        status: 'unanswerable',
+        unanswerable_reason: requests.length === 2 ? 'invalid-reason' : 'no_attribution',
       } })
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       for (const [delta, finish] of [
@@ -335,8 +322,15 @@ test('a stalled gap expires while the next isolated session submits with host-bo
     assert.match(text, /gap time budget exceeded/)
     assert.match(text, /"complete":false/)
     assert.match(text, /"status":"succeeded"/)
-    assert.equal(requests.length, 2, 'submission ends its session without another model turn')
+    assert.equal(requests.length, 3, 'the invalid answer is repaired once, then submission ends the session')
+    const toolFailure = text.split('\n').filter(line => line.startsWith('data: '))
+      .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>)
+      .find(event => event.kind === 'tool' && event.ok === false)
+    assert.ok(toolFailure, 'SDK validation failures must be observable as tool failures')
+    assert.match(String(toolFailure.error), /unanswerable_reason/)
     assert.ok(requests.every(r => !r.tools.some(t => t.function.name === 'get_gap')))
+    assert.ok(requests.every(r => !r.tools.some(t => t.function.name === 'list_molecules')),
+      'table extraction must not spend its budget searching the structure catalogue')
     assert.ok(!JSON.stringify(requests[1].messages).includes('FIRST_GAP_ONLY'))
     assert.equal(submitted?.gap_id, 'g-2')
     assert.equal(submitted?.doc_id, 'doc-1')

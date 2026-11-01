@@ -1,15 +1,16 @@
-/** Per-document action menu — enqueue / patent analysis / delete. */
+/** Per-document actions: enqueue, analyze, export and delete. */
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppContext } from '@/context/AppContext'
 import { useEnqueueTask } from '@/api/query/hooks'
 import { showToast } from '@/hooks/useToast'
-import { FlaskIcon, FolderIcon, TrashIcon } from '@/components/icons'
+import { DownloadIcon, FlaskIcon, FolderIcon, TrashIcon } from '@/components/icons'
 import Menu, { type MenuItem } from '@/components/ui/Menu'
 import IconButton from '@/components/ui/IconButton'
 import type { DocumentInfo } from '@/api/http/library'
 import { getUserFacingError } from '@/utils/errors'
+import { useActivityExport } from './useActivityExport'
 
 export interface DocumentActionMenuProps {
   doc: DocumentInfo
@@ -28,6 +29,7 @@ export default function DocumentActionMenu({
 }: DocumentActionMenuProps) {
   const { t } = useTranslation()
   const { libraryRoot } = useAppContext()
+  const { exportPending, handleExport } = useActivityExport(libraryRoot)
   const enqueueMutation = useEnqueueTask()
   const [enqueuePending, setEnqueuePending] = useState(false)
 
@@ -59,6 +61,13 @@ export default function DocumentActionMenu({
       icon: <FlaskIcon size={16} />,
       disabled: patentPending,
       onClick: () => onPatentAnalyze(doc),
+    },
+    {
+      key: 'activity-export',
+      label: exportPending ? t('workspace.activityExportPending') : t('doc.activityExport'),
+      icon: <DownloadIcon size={16} />,
+      disabled: exportPending || deletePending || patentPending || !libraryRoot,
+      onClick: () => handleExport([doc.doc_id]),
     },
     { type: 'separator', key: 'sep-delete' },
     {

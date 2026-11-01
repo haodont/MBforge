@@ -1,7 +1,9 @@
 """Contract tests for the shared HTML-table → Markdown conversion.
 
+Functions under test: ``html_table_to_markdown``.
+
 The converter is the single normalization point for table-recognition output
-(PaddleOCR cloud and SLANet-1M); the activity parser consumes its result, so
+(local SLANet-1M); the activity parser consumes its result, so
 the conversion shape is a public cross-module contract.
 """
 
@@ -23,7 +25,13 @@ _TABLE_CASES = [
 ]
 
 # No usable rows: the converter must yield None rather than raise.
-_EMPTY_CASES = ["", "<table>broken", "<table></table>"]
+_EMPTY_CASES = [
+    "",
+    "<table>broken",
+    "<table></table>",
+    '<table><tr><td colspan="invalid">x</td></tr></table>',
+    '<table><tr><td rowspan="1000000000">x</td></tr></table>',
+]
 
 
 def test_html_table_to_markdown_converts_pads_and_rejects_empty() -> None:

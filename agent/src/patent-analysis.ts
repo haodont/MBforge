@@ -28,7 +28,7 @@ import { createSessionForSpec, type SessionSpec } from './session.js'
 import { postTool } from './tool.js'
 
 /** Bumped whenever the patent prompt changes, so results stay attributable. */
-export const PATENT_PROMPT_VERSION = 'patent-gap-v3'
+export const PATENT_PROMPT_VERSION = 'patent-gap-v4.4'
 export const PATENT_PROTOCOL_VERSION = '2'
 
 const TOOLS = {
@@ -138,8 +138,22 @@ const FORM_BLOCKS: Record<string, string> = {
     'A line that defines a scale (A: IC50 < 500 nM, 注："+":IC50>1μM) is a',
     'definition, never a reading: it is not an item.',
     'When the gap lists rule_context.structures, name the structure each row',
-    'belongs to with molecule_ref (its mol_id) — an unattributed reading is',
-    'dropped rather than published.',
+    'belongs to with molecule_ref only when the mapping is explicit. Keep the',
+    'printed designation and leave molecule_ref empty when unresolved.',
+    'This task extracts readings; list_molecules is unavailable. Use only the',
+    'supplied structure mapping and submit readings even without a structure.',
+    'The evidence packet distinguishes work (data rows) from context (methods,',
+    'captions and legends). Read context to determine the metric/unit and assay',
+    'scope; proximity alone does not establish scope. Each item must include',
+    'source_quote copied as one complete data row and cite that work evidence.',
+    'For pipe tables also supply source_column: the zero-based value column,',
+    'counting designation and structure columns. Copy value.raw_text from that',
+    'exact cell; row_label_raw must copy its own designation cell. Never borrow',
+    'a value from a sibling (designation, value) pair or invent a missing label.',
+    'Keep explicitly printed control labels such as 阳参化合物 and leave their',
+    'structure unresolved unless the supplied mapping proves it.',
+    'Also cite the context evidence used for metric/unit/bins. Keep all assay',
+    'columns separate; skip ND/NA/NT. Return every supported cell in this chunk.',
   ].join('\n'),
   prose_measurement: [
     'This gap is prose that names a metric without a value the rules could read.',
@@ -359,8 +373,8 @@ export function createPatentTools(credential: string, hooks: PatentToolHooks) {
    *
    * They travel with the gap precisely so no lookup is needed; a session that
    * looks them up again pays for the same answer twice and (measured on
-   * CN120329282A) still submitted an empty molecule_ref. A lookup stays available
-   * for a label the gap lists nothing for — see ``MAX_MOLECULE_LOOKUPS``.
+   * CN120329282A) still submitted an empty molecule_ref. Non-table gaps retain
+   * bounded lookups; table readings do not depend on a resolved structure.
    */
   let currentStructures = hooks.gap ? readStructures({ ...hooks.gap }) : []
 
@@ -549,10 +563,7 @@ export function createPatentTools(credential: string, hooks: PatentToolHooks) {
       'If a submission is rejected, fix the reported reasons and submit again.',
     ],
     parameters: Type.Object({
-      answer: Type.Record(Type.String(), Type.Unknown(), {
-        description:
-          'The gap answer, exactly as defined by the gap-answer contract in your system prompt.',
-      }),
+      answer: Type.Unsafe<Record<string, unknown>>(gapAnswerSchema(Boolean(hooks.gap && hooks.identity))),
     }),
     async execute(_toolCallId, params, signal) {
       if (hooks.isActive && !hooks.isActive()) throw new Error('gap session has ended')
@@ -581,81 +592,39 @@ export function createPatentTools(credential: string, hooks: PatentToolHooks) {
   })
 
   return [getGap, requestExcerpt, listMolecules, submitGapAnswer]
+    .filter(tool => hooks.gap?.gap_kind !== 'table' || tool.name !== 'list_molecules')
 }
 
 /** The gap-answer contract, read from the exported bundle (no second copy here). */
-function gapContractText(): string {
-  try {
-    const url = new URL('../schemas/patent-gap.v2.json', import.meta.url)
-    const bundle = JSON.parse(readFileSync(url, 'utf8')) as {
-      models?: Record<string, Record<string, unknown>>
-    }
-    const answer = bundle.models?.PatentGapAnswer
-    if (!answer) return ''
-    return compactSchema(answer, 'PatentGapAnswer')
-  } catch (error) {
-    console.warn('patent gap schema unavailable:', String(error))
-    return ''
+function gapAnswerSchema(bindIdentity = true): Record<string, unknown> {
+  const url = new URL('../schemas/patent-gap.v2.json', import.meta.url)
+  const bundle = JSON.parse(readFileSync(url, 'utf8')) as {
+    models?: Record<string, Record<string, unknown>>
   }
-}
-
-/**
- * Render a JSON Schema as a compact field table.
- *
- * The raw schema is ~8.2k characters of descriptions and ``$defs``, re-sent on
- * every turn and worth more than the answer it describes. The model needs field
- * names, types and which are required; that is all this prints.
- */
-function compactSchema(schema: Record<string, unknown>, name: string): string {
-  const defs = (schema.$defs ?? {}) as Record<string, Record<string, unknown>>
-  const lines: string[] = []
-
-  const resolve = (node: Record<string, unknown>): Record<string, unknown> => {
-    const ref = typeof node.$ref === 'string' ? node.$ref : ''
-    const key = ref.split('/').pop() ?? ''
-    return key && defs[key] ? defs[key] : node
-  }
-
-  const walk = (node: Record<string, unknown>, indent: string, depth: number): void => {
-    const resolved = resolve(node)
-    const properties = (resolved.properties ?? {}) as Record<
-      string,
-      Record<string, unknown>
-    >
-    const required = new Set((resolved.required as string[]) ?? [])
-    for (const [key, child] of Object.entries(properties)) {
-      lines.push(
-        `${indent}${key}: ${fieldType(child)}${required.has(key) ? '' : ' (optional)'}`,
-      )
-      if (depth >= 1) continue
-      const inner = child.items ?? resolve(child)
-      const innerProps = (resolve(inner as Record<string, unknown>).properties ??
-        {}) as Record<string, unknown>
-      if (Object.keys(innerProps).length > 0) {
-        walk(inner as Record<string, unknown>, `${indent}  `, depth + 1)
-      }
+  const answer = bundle.models?.PatentGapAnswer
+  if (!answer) throw new Error('patent gap schema unavailable')
+  const defs = asRecord(answer.$defs)
+  const expand = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(expand)
+    if (value === null || typeof value !== 'object') return value
+    const node = asRecord(value)
+    if (typeof node.$ref === 'string') {
+      const key = node.$ref.split('/').pop() ?? ''
+      if (!defs[key]) throw new Error(`missing patent schema definition: ${key}`)
+      return expand(defs[key])
     }
+    return Object.fromEntries(Object.entries(node)
+      .filter(([key]) => key !== '$defs')
+      .map(([key, item]) => [key, expand(item)]))
   }
-
-  function fieldType(node: Record<string, unknown>): string {
-    const variants = (node.anyOf ?? node.oneOf) as Record<string, unknown>[] | undefined
-    if (Array.isArray(variants)) {
-      const parts = variants
-        .map((variant) => fieldType(variant))
-        .filter((part) => part !== 'null')
-      return parts.length > 0 ? `${[...new Set(parts)].join('|')}|null` : 'null'
-    }
-    if (Array.isArray(node.enum)) return `one of ${(node.enum as unknown[]).join(', ')}`
-    if (node.const !== undefined) return JSON.stringify(node.const)
-    if (node.type === 'array') {
-      return `array<${fieldType((node.items ?? {}) as Record<string, unknown>)}>`
-    }
-    if (node.$ref) return String(node.$ref).split('/').pop() ?? 'object'
-    return typeof node.type === 'string' ? node.type : 'object'
-  }
-
-  walk(schema, '', 0)
-  return `${name} fields (${lines.length}):\n${lines.join('\n')}`
+  // Identity is assigned by the host, never asked of the model.
+  const schema = asRecord(expand(answer))
+  if (!bindIdentity) return schema
+  const properties = { ...asRecord(schema.properties) }
+  const bound = ['doc_id', 'attempt_id', 'evidence_signature', 'gap_id', 'gap_kind']
+  for (const key of bound) delete properties[key]
+  return { ...schema, properties,
+    required: (schema.required as string[]).filter(key => !bound.includes(key)) }
 }
 
 /**
@@ -669,17 +638,14 @@ function compactSchema(schema: Record<string, unknown>, name: string): string {
  */
 const EXAMPLE_ANSWER = JSON.stringify(
   {
-    gap_id: '<the gap_id you were given>',
-    gap_kind: 'table',
-    doc_id: '<doc_id from get_gap>',
-    attempt_id: '<attempt_id from get_gap>',
-    evidence_signature: '<evidence_signature from get_gap>',
     status: 'answered',
     items: [
       {
         local_key: 'item-1',
         metric: 'IC50',
         value: { raw_text: '++', qualitative: '++' },
+        source_quote: '| 实施例1 | ++ |',
+        source_column: 1,
         compound_label_raw: '实施例1',
         row_label_raw: '实施例1',
         compound_label_key: '1',
@@ -702,17 +668,14 @@ const EXAMPLE_ANSWER = JSON.stringify(
  */
 const EXAMPLE_NUMERIC_ANSWER = JSON.stringify(
   {
-    gap_id: '<the gap_id you were given>',
-    gap_kind: 'table',
-    doc_id: '<doc_id from get_gap>',
-    attempt_id: '<attempt_id from get_gap>',
-    evidence_signature: '<evidence_signature from get_gap>',
     status: 'answered',
     items: [
       {
         local_key: 'item-1',
         metric: 'CYP3A4抑制率',
         value: { raw_text: '26.3', operator: '=', value: 26.3, unit: '%' },
+        source_quote: '| 化合物77 | 26.3 |',
+        source_column: 1,
         compound_label_raw: '化合物77',
         row_label_raw: '化合物77',
         compound_label_key: '77',
@@ -730,11 +693,6 @@ const EXAMPLE_NUMERIC_ANSWER = JSON.stringify(
 
 const EXAMPLE_UNANSWERABLE = JSON.stringify(
   {
-    gap_id: '<the gap_id you were given>',
-    gap_kind: 'prose_measurement',
-    doc_id: '<doc_id from get_gap>',
-    attempt_id: '<attempt_id from get_gap>',
-    evidence_signature: '<evidence_signature from get_gap>',
     status: 'unanswerable',
     unanswerable_reason: 'glyph_damaged',
     evidence_ids: [],
@@ -752,11 +710,6 @@ const EXAMPLE_UNANSWERABLE = JSON.stringify(
  */
 const EXAMPLE_LINK_ANSWER = JSON.stringify(
   {
-    gap_id: '<the gap_id you were given>',
-    gap_kind: 'prose_measurement',
-    doc_id: '<doc_id from get_gap>',
-    attempt_id: '<attempt_id from get_gap>',
-    evidence_signature: '<evidence_signature from get_gap>',
     status: 'answered',
     links: [
       {
@@ -821,8 +774,7 @@ export function patentSystemPrompt(gap?: PatentGapInput): string {
     'id, the library and the evidence set are bound by the caller; you cannot ' +
     'change them, and no tool call takes a path or a document id.\n' +
     hardRules() +
-    '\nAnswer contract (JSON Schema):\n' +
-    gapContractText() +
+    '\nThe submit_gap_answer tool parameters define the answer contract.\n' +
     '\nThe host supplies the gap and injects the document/attempt identity.\n' +
     'Example answer for a qualitative table row, as the answer argument of ' +
     'submit_gap_answer:\n' +
@@ -1033,7 +985,13 @@ export async function handlePatentAnalysis(
             guard.noteToolCall()
             writeSse(response, 'tool', { kind: 'tool', tool: event.toolName, ok: null })
           } else if (event.type === 'tool_execution_end') {
-            writeSse(response, 'tool', { kind: 'tool', tool: event.toolName, ok: !event.isError })
+            const content = asRecord(event.result).content
+            const detail = event.isError && Array.isArray(content)
+              ? content.map(part => asRecord(part).text).filter(text => typeof text === 'string').join('\n') : ''
+            const error = detail
+              ? sanitizeError(detail.split(run.credential).join('***'), config.apiKey) : null
+            writeSse(response, 'tool', { kind: 'tool', tool: event.toolName,
+              ok: !event.isError, error, message: error ?? '' })
           }
           const limit = guard.exceeded()
           if (limit) { void abort('budget', limit); endGap(limit) }
