@@ -245,9 +245,7 @@ class LibraryStore:
             resolver.patent_facts_json(doc_id),
         ]
         dirs = [
-            resolver.pages_dir(doc_id),
             resolver.crops_dir(doc_id),
-            resolver.storage_dir(doc_id) / "artifacts",
             resolver.storage_dir(doc_id) / ".staging",
         ]
         for path in paths:
@@ -364,22 +362,8 @@ def read_patent_facts(root: str, doc_id: str) -> bytes:
     return artifact.model_dump_json().encode("utf-8")
 
 
-def read_page_text(root: str, doc_id: str, page: int) -> str:
-    """Return the per-page OCR text for a single page (1-based).
-
-    Routed through ``load_page_json`` so page artifacts have a single
-    reader; missing or unparseable pages raise ``NotFoundError``.
-    """
-    from mbforge.service.pipeline.extract.ocr_artifacts import load_page_json
-
-    data = load_page_json(doc_id, root, page)
-    if data is None:
-        raise NotFoundError(f"page {page} text not found for {doc_id}")
-    return data.get("text", "")
-
-
 def resolve_document_pdf(root: str, doc_id: str) -> str:
-    """Resolve the canonical PDF path with a legacy-layout fallback."""
+    """Resolve the registered PDF, with a legacy ``source.pdf`` fallback."""
     store = LibraryStore.get(root)
     pdf_path = store.resolve_file(doc_id)
     if pdf_path is None:

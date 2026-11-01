@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import importlib
 
-from mbforge.foundation import docking as docking_engine
 from mbforge.foundation.inference import hiro_layout, moldet_v2_ft
 from mbforge.foundation.inference.ocr import crop_labels as ocr_crop_labels
 from mbforge.foundation.inference.ocr import label_reader as ocr_label_reader
@@ -18,7 +17,6 @@ from mbforge.server import (
     process,
     resource_manager,
 )
-from mbforge.server.docking import worker as docking_worker
 from mbforge.server.ingest import queue as ingest_queue
 from mbforge.server.ingest import worker as ingest_worker
 from mbforge.service.ports.runtime import RuntimeProvider
@@ -63,8 +61,6 @@ def create_runtime_provider() -> RuntimeProvider:
         process=process,
         ingest_queue=ingest_queue,
         ingest_worker=ingest_worker,
-        docking_engine=docking_engine,
-        docking_worker=docking_worker,
     )
 
 

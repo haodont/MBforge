@@ -152,10 +152,6 @@ async def lifespan(app: FastAPI):
 
         worker.ensure_queue_worker(cfg.library_root)
 
-        from mbforge.server.docking import worker as docking_worker
-
-        docking_worker.ensure_docking_worker(cfg.library_root)
-
     prewarm_task: asyncio.Task[dict[str, str]] | None = None
     if os.environ.get("MBFORGE_PREWARM_MODELS") == "1":
         from mbforge.foundation.inference.prewarm import prewarm_models
@@ -374,7 +370,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
 
     # Register all routers
     from mbforge.api.http import agent, markush, patent_analysis, research, review
-    from mbforge.api.http.docking import docking as docking_router
     from mbforge.api.http.documents import (
         activity,
         documents,
@@ -391,7 +386,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
         moldet,
         molecule,
         molparser,
-        sar,
     )
     from mbforge.api.http.pipeline import detection_cache, pipeline
     from mbforge.api.http.system import (
@@ -427,7 +421,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.include_router(resource.router, prefix="/api/v1", tags=["resource"])
     app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
     app.include_router(pdf.router, prefix="/api/v1/pdf", tags=["pdf"])
-    app.include_router(sar.router, prefix="/api/v1/sar", tags=["sar"])
     app.include_router(markush.router, prefix="/api/v1/markush", tags=["markush"])
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
     app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent-tools"])
@@ -436,9 +429,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
         patent_analysis.router,
         prefix="/api/v1/patent-analysis",
         tags=["patent-analysis"],
-    )
-    app.include_router(
-        docking_router.router, prefix="/api/v1/docking", tags=["docking"]
     )
     app.include_router(
         diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"]

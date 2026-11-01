@@ -148,45 +148,6 @@ export interface DetectionBox {
   result?: ExtractionResult
 }
 
-// ---- SAR 分析 ----
-
-/** 单个分子实体（用于 SAR 表）*/
-export interface SARCompound {
-  id: string
-  esmiles: string
-  /** 化合物名称 / 编号 */
-  name: string
-  /** R-group 取代基位置（以原子索引为 key）*/
-  rGroups: Record<number, string>
-  /** 活性数据 */
-  activity?: number
-  /** 活性类型（IC50 / EC50 / Ki ...）*/
-  activityType?: string
-  /** 单位（nM / uM ...）*/
-  units?: string
-  /** 选择性数据 */
-  selectivity?: Record<string, number>
-  /** 备注 */
-  notes?: string
-}
-
-/** SAR 分析会话 */
-export interface SARSession {
-  id: string
-  /** 课题名称 */
-  name: string
-  /** 靶点 / 蛋白 */
-  target?: string
-  /** 化合物列表 */
-  compounds: SARCompound[]
-  /** 核心骨架 SMILES（用于 R-group 分析）*/
-  coreSmiles?: string
-  /** 关联的文献 */
-  sourceDocs?: string[]
-  /** 创建时间 */
-  createdAt: string
-}
-
 
 // ---- DocumentReport (EVT_DOC_RESULT payload) ----
 

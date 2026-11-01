@@ -19,8 +19,6 @@ from mbforge.contracts.measurement import (
 )
 from mbforge.contracts.research import ResearchSession, ResearchSessionSummary
 from mbforge.db import (
-    activity_store,
-    docking_store,
     document_backup,
     document_records,
     markush_enumeration_store,
@@ -55,7 +53,6 @@ _COUNTED_TABLES: tuple[str, ...] = (
     "documents",
     "source_evidence",
     "molecules",
-    "activities",
     "markush_review_candidates",
     "review_items",
 )
@@ -582,24 +579,6 @@ class SqliteReviewRepository:
 
 
 @dataclass
-class SqliteActivityRepository:
-    """Repository for activity review items.
-
-    Stored readings are read through ``SqliteMeasurementRepository``; this
-    repository only surfaces the pending review candidates.
-    """
-
-    library_root: Path
-
-    def list_activity_review_items(
-        self, doc_id: str, limit: int
-    ) -> list[dict[str, Any]]:
-        return activity_store.list_activity_review_items(
-            self.library_root, doc_id, limit
-        )
-
-
-@dataclass
 class SqliteMeasurementRepository:
     """Readings and attributions; a reading needs no structure to be stored."""
 
@@ -626,71 +605,6 @@ class SqliteMeasurementRepository:
 
     def document_label_numbers(self, doc_id: str) -> set[str]:
         return molecule_store.document_label_numbers(self.library_root, doc_id)
-
-
-@dataclass
-class SqliteDockingRepository:
-    """Repository for receptors, docking jobs and poses."""
-
-    library_root: Path
-
-    def insert_receptor(self, receptor: dict[str, Any]) -> None:
-        docking_store.insert_receptor(self.library_root, receptor)
-
-    def list_receptors(self) -> list[dict[str, Any]]:
-        return docking_store.list_receptors(self.library_root)
-
-    def get_receptor(self, receptor_id: str) -> dict[str, Any] | None:
-        return docking_store.get_receptor(self.library_root, receptor_id)
-
-    def delete_receptor(self, receptor_id: str) -> int:
-        return docking_store.delete_receptor(self.library_root, receptor_id)
-
-    def insert_job(self, job: dict[str, Any]) -> None:
-        docking_store.insert_job(self.library_root, job)
-
-    def get_job(self, job_id: str) -> dict[str, Any] | None:
-        return docking_store.get_job(self.library_root, job_id)
-
-    def list_jobs(
-        self, *, status: str | None = None, limit: int = 100
-    ) -> list[dict[str, Any]]:
-        return docking_store.list_jobs(self.library_root, status=status, limit=limit)
-
-    def claim_next_pending(self, worker: str) -> dict[str, Any] | None:
-        return docking_store.claim_next_pending(self.library_root, worker)
-
-    def set_job_status(
-        self,
-        job_id: str,
-        status: str,
-        *,
-        progress: float | None = None,
-        message: str | None = None,
-        error: str | None = None,
-        finished: bool = False,
-    ) -> None:
-        docking_store.set_job_status(
-            self.library_root,
-            job_id,
-            status,
-            progress=progress,
-            message=message,
-            error=error,
-            finished=finished,
-        )
-
-    def reset_running_jobs(self) -> int:
-        return docking_store.reset_running_jobs(self.library_root)
-
-    def insert_pose(self, pose: dict[str, Any]) -> None:
-        docking_store.insert_pose(self.library_root, pose)
-
-    def list_poses(self, job_id: str) -> list[dict[str, Any]]:
-        return docking_store.list_poses(self.library_root, job_id)
-
-    def get_pose(self, pose_id: str) -> dict[str, Any] | None:
-        return docking_store.get_pose(self.library_root, pose_id)
 
 
 @dataclass
@@ -797,16 +711,8 @@ class SqliteRepositories(LibraryRepositories):
         return SqliteMoleculeRepository(self.library_root)
 
     @property
-    def activities(self) -> SqliteActivityRepository:
-        return SqliteActivityRepository(self.library_root)
-
-    @property
     def measurements(self) -> SqliteMeasurementRepository:
         return SqliteMeasurementRepository(self.library_root)
-
-    @property
-    def docking(self) -> SqliteDockingRepository:
-        return SqliteDockingRepository(self.library_root)
 
     @property
     def markush(self) -> SqliteMarkushRepository:
@@ -844,7 +750,6 @@ def create_repositories(library_root: str | Path) -> SqliteRepositories:
 
 
 __all__ = [
-    "SqliteActivityRepository",
     "SqliteDatabaseRepository",
     "SqliteDocumentRepository",
     "SqliteEvidenceRepository",

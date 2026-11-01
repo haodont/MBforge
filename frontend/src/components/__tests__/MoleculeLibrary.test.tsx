@@ -113,11 +113,10 @@ describe('MoleculeLibrary', () => {
       refresh: vi.fn(),
     })
     vi.mocked(useMoleculeAnalysis).mockReturnValue({
-      activeTab: 'overview',
+      activeTab: 'analytics',
       setActiveTab: vi.fn(),
       selectedMolecules: [],
       analysisInput: [],
-      sarSession: null,
       hasSelection: true,
     })
   })

@@ -27,16 +27,12 @@ import {
   handlePatentAnalysisCancel,
 } from './patent-analysis.js'
 import {
-  getDockingJobTool,
   librarySqlTool,
   libraryStatsTool,
-  listDockingJobsTool,
-  listReceptorsTool,
   moleculeSearchTool,
   queryActivitiesTool,
   queryDocumentsTool,
   queryEvidenceTool,
-  runDockingTool,
   searchLibraryTool,
 } from './tool.js'
 
@@ -51,10 +47,6 @@ const AGENT_TOOL_NAMES = [
   'search_library',
   'load_skill',
   'library_sql',
-  'list_receptors',
-  'list_docking_jobs',
-  'get_docking_job',
-  'run_docking',
 ] as const
 
 const AGENT_CUSTOM_TOOLS = [
@@ -66,10 +58,6 @@ const AGENT_CUSTOM_TOOLS = [
   searchLibraryTool,
   loadSkillTool,
   librarySqlTool,
-  listReceptorsTool,
-  listDockingJobsTool,
-  getDockingJobTool,
-  runDockingTool,
 ]
 
 const CHAT_SYSTEM_PROMPT =
@@ -77,9 +65,7 @@ const CHAT_SYSTEM_PROMPT =
   'molecule lookups, and the library tools (library_stats, query_documents, ' +
   'query_activities, query_evidence) for structured library facts; use ' +
   'library_sql (read-only SELECT) only for questions the structured tools do ' +
-  'not cover. For molecular docking, use list_receptors to find a receptor, ' +
-  'then run_docking (only when the user explicitly asks) and poll ' +
-  'get_docking_job for the ranked poses. ' +
+  'not cover. ' +
   'Separate source-backed facts from hypotheses, cite returned molecule ' +
   'identifiers when relevant, and never claim that a search result is a ' +
   'validated design recommendation.'

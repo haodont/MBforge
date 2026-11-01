@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, useRef, useEffect, useState } from 'react'
+import { Suspense, lazy, useMemo, useRef, useEffect, useState, type ReactNode } from 'react'
 import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { I18nextProvider, useTranslation } from 'react-i18next'
@@ -27,7 +27,6 @@ const ProcessingQueue = lazy(() => import('./components/project/ProcessingQueue'
 const SettingsPage = lazy(() => import('./components/settings/SettingsPage'))
 const ReviewCenter = lazy(() => import('./components/review/ReviewCenter'))
 const AgentChat = lazy(() => import('./components/AgentChat'))
-const DockingPage = lazy(() => import('./components/docking/DockingPage'))
 
 /** Lightweight fallback shown while a route chunk is being fetched. */
 function RouteFallback() {
@@ -266,6 +265,11 @@ function TabContent({
 
 function AppRoutes() {
   const location = useLocation()
+  const page = (element: ReactNode) => (
+    <Suspense fallback={<RouteFallback />}>
+      <AnimatedPage>{element}</AnimatedPage>
+    </Suspense>
+  )
   // Keep the Docs route mounted while switching slugs so the article does not
   // replay the page-level enter/exit animation on every document selection.
   const routeKey = location.pathname.startsWith('/docs/') ? '/docs' : location.pathname
@@ -273,80 +277,16 @@ function AppRoutes() {
     <AnimatePresence initial={false}>
       <Routes location={location} key={routeKey}>
         <Route path="/" element={<Navigate to="/agent" replace />} />
-        <Route
-          path="/workspace"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><Workspace /></AnimatedPage>
-            </Suspense>
-          }
-        />
-        <Route
-          path="/molecules"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><MoleculeLibrary /></AnimatedPage>
-            </Suspense>
-          }
-        />
+        <Route path="/workspace" element={page(<Workspace />)} />
+        <Route path="/molecules" element={page(<MoleculeLibrary />)} />
         <Route path="/analysis" element={<Navigate to="/molecules" replace />} />
-        <Route
-          path="/settings"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><SettingsPage /></AnimatedPage>
-            </Suspense>
-          }
-        />
-        <Route
-          path="/queue"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><ProcessingQueue /></AnimatedPage>
-            </Suspense>
-          }
-        />
-        <Route
-          path="/notes"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><Knowledge /></AnimatedPage>
-            </Suspense>
-          }
-        />
-        <Route
-          path="/docs"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><Docs /></AnimatedPage>
-            </Suspense>
-          }
-        />
-        <Route
-          path="/docs/:slug"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><Docs /></AnimatedPage>
-            </Suspense>
-          }
-        />
-        <Route
-          path="/review"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><ReviewCenter /></AnimatedPage>
-            </Suspense>
-          }
-        />
+        <Route path="/settings" element={page(<SettingsPage />)} />
+        <Route path="/queue" element={page(<ProcessingQueue />)} />
+        <Route path="/notes" element={page(<Knowledge />)} />
+        <Route path="/docs" element={page(<Docs />)} />
+        <Route path="/docs/:slug" element={page(<Docs />)} />
+        <Route path="/review" element={page(<ReviewCenter />)} />
         <Route path="/agent" element={<ResearchShelf />} />
-        <Route
-          path="/docking"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <AnimatedPage><DockingPage /></AnimatedPage>
-            </Suspense>
-          }
-        />
       </Routes>
     </AnimatePresence>
   )

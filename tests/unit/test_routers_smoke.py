@@ -63,8 +63,6 @@ ROUTES: list[tuple[str, str, dict | None, tuple[int, ...]]] = [
     ("POST", "/api/v1/resource/cache-dir-info", {}, (200, 422)),
     # pdf document overlay
     ("POST", "/api/v1/pdf/document-overlay", {}, (200, 422)),
-    # sar
-    ("POST", "/api/v1/sar/build-matrix", {}, (200,)),
     # diagnostics
     ("GET", "/api/v1/diagnostics/stats", None, (200,)),
     # repository documentation pages

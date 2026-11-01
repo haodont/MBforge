@@ -6,10 +6,8 @@ The contracts moved to :mod:`mbforge.ports.repositories` (neutral layer) so
 """
 
 from mbforge.ports.repositories import (
-    ActivityRepository,
     ArtifactStore,
     DatabaseRepository,
-    DockingRepository,
     DocumentRepository,
     EvidenceRepository,
     LibraryRepositories,
@@ -23,11 +21,9 @@ from mbforge.ports.repositories import (
 )
 
 __all__ = [
-    "ActivityRepository",
     "ArtifactStore",
     "DatabaseRepository",
     "DocumentRepository",
-    "DockingRepository",
     "EvidenceRepository",
     "LibraryRepositories",
     "MarkushRepository",

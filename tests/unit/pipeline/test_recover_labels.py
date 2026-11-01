@@ -16,7 +16,6 @@ from unittest.mock import MagicMock
 # ``label_recovery`` imports ``markdown.markers``, so importing the module
 # before its ``markdown`` parent package would close a cycle; the package
 # re-exports the entry point, which keeps this test file order-independent.
-from mbforge.service.pipeline.activity.family_gate import derive_family_core
 from mbforge.service.pipeline.markdown import recover_labels_from_ms
 
 SCAFFOLD_1 = (
@@ -59,13 +58,13 @@ def _candidate(
 
 
 def _core() -> str:
-    scaffolds = [
-        _candidate(smiles, role="scaffold")
-        for smiles in (SCAFFOLD_1, SCAFFOLD_2, SCAFFOLD_3)
-    ]
-    core = derive_family_core(scaffolds)
-    assert core is not None
-    return core
+    # The core derived from the three scaffolds above; kept inline after the
+    # one-off derivation helper was removed from production.
+    return (
+        "[#6&R](-&@[#6&R])-&@[#6&R]-&@[#6&R](-&@[#6&R]-&@[#6&R]-&!@[#7&!R]-&!@[#6]1:&@[#6]:&@[#6]"
+        "(-&!@[#6&!R](-&!@[#9&!R])(-&!@[#9&!R])-&!@[#9&!R]):&@[#7]:&@[#6]2:&@[#6]:&@1:&@[#6]:&@[#6]:&@[#6]"
+        ":&@[#6]:&@2)-&!@[#7&!R]-&!@[#6&!R](=&!@[#8&!R])-&!@[#6]1:&@[#6]:&@[#7]:&@[#7]:&@[#6]:&@1"
+    )
 
 
 def _prep_paragraph(page: int, label: str, mz: float) -> str:

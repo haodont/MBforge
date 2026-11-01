@@ -32,14 +32,13 @@ def mint_run_id(
 ) -> str:
     """Mint a UTC ``YYYYMMDDHHMMSS`` run ID unique within *doc_id*.
 
-    Uniqueness is enforced against published run directories, active
-    staging-file run IDs, and *extra_used* (callers pass the run IDs already
-    present in the ingest queue, so two enqueues in the same wall-clock second
-    never share an ID); on collision the timestamp is advanced one second at a
-    time.
+    Uniqueness is enforced against active staging-file run IDs and
+    *extra_used* (callers pass the run IDs already present in the ingest
+    queue, so two enqueues in the same wall-clock second never share an ID);
+    on collision the timestamp is advanced one second at a time.
     """
     layout = LibraryLayout(library_root)
-    used = _existing_run_ids(layout.runs_dir(doc_id), layout.storage_dir(doc_id))
+    used = _existing_run_ids(layout.storage_dir(doc_id))
     used.update(extra_used)
     now = datetime.now(UTC)
     candidate = now.strftime(RUN_ID_FORMAT)
@@ -49,13 +48,9 @@ def mint_run_id(
     return candidate
 
 
-def _existing_run_ids(runs_dir: Path, storage_dir: Path) -> set[str]:
-    """Collect run IDs already present in published and staged artifacts."""
+def _existing_run_ids(storage_dir: Path) -> set[str]:
+    """Collect run IDs already present in staged artifacts."""
     used: set[str] = set()
-    if runs_dir.is_dir():
-        for child in runs_dir.iterdir():
-            if child.is_dir():
-                used.add(child.name)
     staging = storage_dir / ".staging"
     if staging.is_dir():
         for path in staging.glob("*.json"):

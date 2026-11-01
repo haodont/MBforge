@@ -68,7 +68,6 @@ export default function MoleculeLibrary() {
     activeTab,
     setActiveTab,
     analysisInput,
-    sarSession,
   } = useMoleculeAnalysis(molecules, selectedIds)
 
   const bulkUpdateStatus = useBulkUpdateMoleculeStatus()
@@ -337,7 +336,6 @@ export default function MoleculeLibrary() {
               <div className="molecule-library-analysis__content">
                 <MoleculeAnalysisPanel
                   analysisInput={analysisInput}
-                  sarSession={sarSession}
                   activeTab={activeTab}
                   onTabChange={(tab) => setActiveTab(tab)}
                   libraryRoot={libraryRoot}

@@ -1,7 +1,7 @@
 """LibraryLayout — single authority for all library paths.
 
 Resolves both **library-level** paths (``library.db``, ``storage/``, ``notes/``)
-and **document-level** artifact paths (``storage/{doc_id}/source.pdf``, etc.).
+and **document-level** artifact paths (``storage/{doc_id}/{file_name}``, etc.).
 All file reads / writes that touch a path under the library root go through
 this class so the storage layout is defined in one place and path traversal
 attacks are rejected at a single chokepoint.
@@ -19,10 +19,10 @@ Library-level:
 
 Document-level (under ``storage/{doc_id}/``):
 
-* ``source.pdf``                  — original imported PDF bytes
+* ``{file_name}``                 — imported PDF under its original name
+* ``source.pdf``                  — legacy PDF name (read-only fallback)
 * ``document.md``                 — canonical document Markdown
 * ``report.json``                 — pipeline report
-* ``pages/page_{n:04d}.json``     — per-page OCR result (text + metadata)
 * ``crops/{filename}``            — molecule crop images
 * ``images/{filename}``           — figures extracted by OCR
 
@@ -44,9 +44,6 @@ from mbforge.foundation.errors import (  # noqa: F401 — re-export
 
 # Safe doc_id: letters, digits, underscore, hyphen.
 _SAFE_DOC_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
-# run_id is generated as lowercase hex (uuid4.hex); accept the same charset
-# as doc_id so legacy/derived IDs remain usable.
-_SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
 
 class InvalidDocIdError(ValueError):
@@ -222,47 +219,6 @@ class LibraryLayout:
             ) from exc
         return path
 
-    # -- Docking paths -------------------------------------------------
-
-    @property
-    def docking_dir(self) -> Path:
-        """``{root}/docking/`` — receptor and job artifacts for docking."""
-        return self._root / "docking"
-
-    @property
-    def receptors_dir(self) -> Path:
-        """``{root}/docking/receptors/`` — one directory per receptor."""
-        return self.docking_dir / "receptors"
-
-    @property
-    def docking_jobs_dir(self) -> Path:
-        """``{root}/docking/jobs/`` — one directory per docking job."""
-        return self.docking_dir / "jobs"
-
-    def receptor_dir(self, receptor_id: str) -> Path:
-        """Return ``docking/receptors/{receptor_id}`` (validated id)."""
-        return self._validate_and_join("docking", "receptors", receptor_id)
-
-    def receptor_source(self, receptor_id: str, filename: str) -> Path:
-        """Return a source file under the receptor's directory (traversal-safe)."""
-        return self._safe_child(
-            self.receptor_dir(receptor_id), filename, label="receptor file"
-        )
-
-    def receptor_pdbqt(self, receptor_id: str) -> Path:
-        """Return the prepared ``receptor.pdbqt`` path for a receptor."""
-        return self.receptor_dir(receptor_id) / "receptor.pdbqt"
-
-    def docking_job_dir(self, job_id: str) -> Path:
-        """Return ``docking/jobs/{job_id}`` (validated id)."""
-        return self._validate_and_join("docking", "jobs", job_id)
-
-    def docking_pose_path(self, job_id: str, filename: str) -> Path:
-        """Return a pose file under the job's ``poses/`` dir (traversal-safe)."""
-        return self._safe_child(
-            self.docking_job_dir(job_id) / "poses", filename, label="pose file"
-        )
-
     def resolve_relative_path(self, relative_path: str | Path) -> Path:
         """Resolve a relative library path and enforce root containment."""
         candidate = Path(relative_path)
@@ -284,6 +240,7 @@ class LibraryLayout:
         return self._validate_and_join("storage", doc_id)
 
     def source_pdf(self, doc_id: str) -> Path:
+        """Return the legacy ``source.pdf`` path (read-only fallback)."""
         return self._doc_file(doc_id, "source.pdf")
 
     def document_md(self, doc_id: str) -> Path:
@@ -295,38 +252,8 @@ class LibraryLayout:
     def patent_facts_json(self, doc_id: str) -> Path:
         return self._doc_file(doc_id, "patent_facts.json")
 
-    def pages_dir(self, doc_id: str) -> Path:
-        return self._doc_file(doc_id, "pages")
-
-    def page_text(self, doc_id: str, page: int) -> Path:
-        if page < 1:
-            raise ValueError(f"page must be >= 1, got {page}")
-        return self.pages_dir(doc_id) / f"page_{int(page):04d}.json"
-
     def crops_dir(self, doc_id: str) -> Path:
         return self._doc_file(doc_id, "crops")
-
-    def artifacts_dir(self, doc_id: str) -> Path:
-        """Return ``storage/{doc_id}/artifacts/`` (per-stage state artifacts).
-
-        Canonical and readable; survives staging cleanup so a stage can
-        hydrate pipeline context across separate ``run_pipeline`` calls.
-        """
-        return self._doc_file(doc_id, "artifacts")
-
-    def runs_dir(self, doc_id: str) -> Path:
-        """Return ``storage/{doc_id}/runs/`` (published pipeline runs)."""
-        return self._doc_file(doc_id, "runs")
-
-    def run_dir(self, doc_id: str, run_id: str) -> Path:
-        """Return ``storage/{doc_id}/runs/{run_id}/`` for a published run."""
-        if not run_id or not _SAFE_RUN_ID_RE.match(run_id):
-            raise ValueError(f"invalid run_id: {run_id!r}")
-        return self.runs_dir(doc_id) / run_id
-
-    def run_current_json(self, doc_id: str) -> Path:
-        """Return ``storage/{doc_id}/runs/current.json`` (published-run pointer)."""
-        return self.runs_dir(doc_id) / "current.json"
 
     def crop(self, doc_id: str, relpath: str) -> Path:
         """Resolve a crop filename to a path under ``storage/{doc_id}/crops/``.

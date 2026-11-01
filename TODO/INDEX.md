@@ -2,6 +2,80 @@
 
 This directory records active architecture and implementation plans.
 
+## Structure–activity export (2026-10-30)
+
+[Export contract and real-corpus audit](../docs/qa/structure-activity-export-20261030.md).
+The workspace now downloads selected documents (or one document from its menu)
+as a ZIP containing matched readings, unresolved readings and exact SQL evidence.
+The export uses the committed Patent snapshot, refuses stale sources, preserves
+all assays and stereochemistry, and keeps review candidates separate from facts.
+Original and canonical units/comparators are separate; known concentrations
+convert coherently to nM, unknown units remain unchanged, and missing units are
+never guessed. Missing-unit numeric disagreements remain conflicts in the LLM
+merge. Rejected or identity-changed catalog structures cannot enter matched CSV.
+
+A deterministic replay for 13 development PDFs, after refreshing two damaged
+CN121270515A table regions with the current local producer, now produces
+**48 readings: 16 matched pending review and 32 unresolved**, with every reading
+retained exactly once. The earlier stored-extraction baseline was 41/14/27.
+Nonconcrete/rejected crops no longer block a unique concrete designation match;
+body references to starting materials no longer replace an example's product
+identity. Lost-rowspan headers are quarantined, not shifted by guesswork.
+The refreshed selectivity table has the correct MRGPRX1–4 columns. Independent
+source-image review found stereo errors in both CN121270515A final-product
+recognitions; these remain unresolved and are not added as correct pairs.
+These development counts are not precision/recall or scientific validation.
+Next: adjudicated structure–reading–assay–source tuples, evidence-backed product
+association, stereo review and missing assay context.
+
+## Current Patent harness (2026-10-30)
+
+[Harness implementation and real-provider audit](../docs/qa/patent-harness-20261030.md)
+records citable work/context packets, the exported schema as the actual Pi tool
+contract, exact printed label/value-cell checks (`source_quote` + zero-based
+`source_column`), stable work anchors and example namespaces. Four v4.2
+real-provider work-chunk trials returned 6, 22, 0 and 1 text-supported readings;
+the actual publisher preserved their column provenance as review candidates in
+isolated SQL backups, with no new LLM structure links. The zero-result trial
+correctly refused damaged OCR; these counts are not whole-page recall. The
+printed positive control in CN120943813A p95 now stays in the deterministic
+five-reading table, with IC50 preferred over generic activity wording.
+Historical provider failures are retained. These are development samples;
+LLM analysis remains opt-in pending held-out scientific evaluation. Cell
+ownership does not prove assay semantics. The v4.3 follow-up fixes the generic
+unit contract: dimensionless pIC50 no longer needs a missing-unit declaration,
+while concentration readings still do. Physical units on log endpoints are
+rejected; old drafts with a declared missing log unit remain readable.
+The v4.3 fresh trial exhausted its gap budget after a structure lookup; v4.4
+therefore exposes only excerpt/submit tools to bound table sessions. Separate
+association tasks retain structure queries. Unitless pIC50 has passed isolated
+tool validation and SQL publication replay. A v4.4 real-provider retest returned
+E020 pIC50 6.9 in one turn/submit call (9,178 tokens, 59.675 s), also passing SQL
+publication audit. This remains one work chunk; latency gains are not established.
+
+## Current extraction experiments (2026-10-29)
+
+[OCR/OXR bottleneck investigation](../docs/qa/patent-ocr-bottleneck-20261029.md)
+records a fresh 13-document rule baseline, direct LLM calls and isolated 4090
+server preparation. The baseline is 43 readings / 11 linked to structures, not
+the older 52-reading snapshot. A reproduced error assigned an OCR-dropped `6`
+to `5` in CN121270515A p20. Cross-column label inheritance is removed; the
+ambiguous table now goes to review, leaving 36 readings / 11 structure-linked.
+The old-SQL baseline is unchanged by later image fixes. On 8 freshly detected
+tables, a 2-pixel cell/text tolerance restores printed `6` without changing other
+cells; explicit HTML spans repair an observed MRGPRX1-4 target shift. Mass-only
+empty-reading pairs are removed and declared-example joins respect their
+namespace. A JP grouped-interval LLM experiment preserves clean-text lists and
+identifies a printed conflict for example 258; noisy OCR exhausted its budget.
+OXR has now completed 6 frozen-crop requests on the 4090: it restores all
+three US structure-table readings and clean JP intervals. The parser now accepts
+the structure table's explicit header beneath a spanning title (3 readings);
+the assay-only table still needs evidence-scoped metric context. Explicit column
+targets now survive SQL publication. An omp review exposed silent loss of malformed
+span output; raw HTML is now retained for review with a warning and failure count.
+The test service was stopped; no production backend switch
+has been made. See the report for the unresolved association/interval work.
+
 ## Current pipeline
 
 `Extract → Markdown → Patent` is the registered pipeline, but the stages are
@@ -32,7 +106,7 @@ improves. `measurements.evidence_grade` separates a printed figure (`measured`)
 from a model output; Phase A writes only `measured`, and compute paths must
 supply their own grade rather than reuse it.
 
-Measured on the real corpus (`.tmp/e2e` artifacts): **36 artifact readings → 36
+An earlier development replay (`.tmp/e2e` artifacts): **36 artifact readings → 36
 SQL rows, 0 dropped, 12 attributed**. Before this change the same data reached
 SQL as 8 `molecules.activity` scalars.
 
@@ -43,18 +117,9 @@ every reading it could not attribute to a structure (across 18 artifacts: 526
 entries, 144 carrying an `entity_id` = 27%, and **0 of 130 readings carrying a
 `mol_id`**) and then kept only `measurements_by_smiles[...][0]` — **the first
 reading per molecule**, discarding the document's other assays, targets and
-doses. The `activities` table (34 columns) had no production writer at all:
-`INSERT INTO activities` appeared only in tests, so `/api/v1/activities/...` and
-the agent's `query_activities` returned empty for every real document.
-
-Retired with it: `activity/matching.py::match_activities` (385 lines) and
-`make_family_core_guard`, neither called by production code.
-`activity/family_gate.py` keeps only `derive_family_core`, which
-`tests/unit/pipeline/test_recover_labels.py` does use.
-
-Still open: the `activity_match` review kind is declared in `domain/review.py`
-and `service/dto/review.py`, read by `db/activity_store.py`, and produced by
-nothing — it survives only as a read path for legacy rows.
+doses. The legacy `activities` table and the `activity_match` review kind were removed
+with `db/activity_store.py` and `activity/family_gate.py`; no read path or
+test-only producer remains. Readings live only in `measurements`.
 
 ## Model assets
 
@@ -82,19 +147,6 @@ resume automatically once the downloads land — enqueueing is never gated.
 `ppocrv6` is deliberately excluded: RapidOCR's weights ship with the
 `rapidocr` package rather than the catalog, and OCR has a degradation path, so
 gating on it would deadlock the queue.
-
-## Docking
-
-The docking worker (`server/docking/worker.py`) claims a `pending` job only when
-`service/use_cases/docking/engine_gate.py` reports the engine ready — the same
-gate-before-claim shape as the pipeline's model gate — so a missing engine or GPU
-leaves jobs `pending` instead of failing them. Jobs left `running` by a previous
-process are reset at worker startup. The engine
-(`foundation/docking/engine.py`, UniDock-Pro) needs CUDA *and* a C++/CUDA binary
-that no package index provides: it must be on PATH or named by
-`MBFORGE_UNIDOCK_BIN`, and without it docking degrades to
-`docking_unavailable` (503). The `docking` extra installs only the Python-side
-preparation (`meeko`, `gemmi`, `unidock-tools`).
 
 ## LLM ownership
 
@@ -167,6 +219,25 @@ can obtain a raw connection. `foundation/inference/assets.py` defines the
 `ResourceResolver` seam the composition root injects, so the inference backends
 never import `server`.
 
+## Recognition order and value rules (2026-10-23)
+
+- `source_evidence` now persists `reading_order` (zero-based inside the page);
+  `list_source_evidence` orders by it, so a two-column page is read column-major
+  in the Patent stage. Legacy rows keep `0` and fall back to the geometric order
+  until the document is re-extracted.
+- `match_section_heading` normalizes digit-separating spaces and full-width
+  digits before matching, so `実施例 1 0 3` and `実施例1 04` yield `103`/`104`
+  without rewriting the stored `heading_line`; the range `実施例２および3` is
+  normalized but still refused as one section.
+- `ND`/`NA`/`NT` are missing values: `_qualitative_rank` no longer assigns rank
+  `0`, and the table parser excludes them from the completeness count, so a row
+  with `ND` does not become an inactivity measurement.
+- Covered by `tests/unit/core/test_evidence.py`,
+  `tests/unit/services/test_source_evidence.py`,
+  `tests/unit/pipeline/test_sections_sql.py`,
+  `tests/unit/pipeline/test_activity_normalization.py` and
+  `tests/unit/pipeline/test_activity_parsing.py`.
+
 ## Known gaps
 
 - Patent facts now also carry the printed **chemistry names**, **spectra/elemental
@@ -229,13 +300,10 @@ never import `server`.
 - A gap's excerpt is capped at the contract's own limit (`MAX_EXCERPT_CHARS`): a live
   run of CN120329282A failed the whole Patent stage because the excerpt budget (8000)
   exceeded the contract's cap (4000) and one invalid gap took the stage down.
-- `storage/{doc_id}/pages/` has no writer in the active path: the removed Persist
-  stage produced it, while the page reader still consumes it. `report.json` is
-  written again by run finalization (`run/checkpoint.write_merged_report` →
-  `LibraryLayout.report_json`), matching the reader. `artifacts/` and `runs/`
-  have no writer either: `runs/` is only read, to keep new run ids from reusing
-  existing directory names (`service/pipeline/run/ids.py`), and `artifacts/` is
-  only deleted, by `LibraryStore.clear_pipeline_data`.
+- The unused `pages/`, `artifacts/` and `runs/` layout paths and their readers,
+  writers and id-collision scan were removed. `report.json` is written by run
+  finalization (`run/checkpoint.write_merged_report` →
+  `LibraryLayout.report_json`).
 - Extract now classifies recognized image structures and atomically queues
   Markush scaffolds, fragments, and uncertain candidates with their canonical
   source-evidence links. Prose-only Markush definitions still need a separate
@@ -243,11 +311,10 @@ never import `server`.
 - The molecule↔evidence association is now persisted in `evidence.evidence_id`
   (pointing at the canonical `source_evidence` row); the legacy
   `text_molecule_links` table was dropped.
-- An activity with no molecule is not representable in SQL: `activities.mol_id`
-  is `NOT NULL` and nothing in `src/` inserts, `activity_match` review items have
-  no producer, and `match_activities()` has no production caller. Such a
-  measurement survives only in `patent_facts.json` `measurements[]`. The full
-  cause list — including the silent entry-without-molecule case and the
+- A reading with no molecule is first-class: `measurements` stores it with no
+  structural requirement and `measurement_attribution` fills links in later.
+  The removed `activities.mol_id` `NOT NULL` table no longer blocks such rows.
+  The full cause list — including the silent entry-without-molecule case and the
   `name`-vs-`properties` label trap — with real text cases is in
   [docs/wiki/activity-association.md](../docs/wiki/activity-association.md).
 - Import starts processing in the same request and the workspace lists every
@@ -255,7 +322,7 @@ never import `server`.
   "待处理" while the queue reports the live stage. Auto-enqueue can be turned off
   (`ingest.auto_enqueue_on_import`); a failed enqueue leaves the document
   imported but unprocessed (`run_id` is `None`). Deleting a queue task clears
-  that run's outputs (Markdown/report/pages/crops/molecule data) and returns the
+  that run's outputs (Markdown/report/crops/molecule data) and returns the
   document to `pending`; only deleting the document card removes the source PDF.
 - The `agent/` sidecar now has a Node test runner for Patent boundaries and
   durable research-session restoration with a local simulated provider. Its
@@ -263,26 +330,15 @@ never import `server`.
   Those contracts used to live in
   `tests/unit/test_llm_probe.py` and `tests/unit/routers/test_settings.py`,
   which were deleted with the Python implementation they covered.
-- The frontend locale files carry roughly 340 keys no component references
-  (whole `sar.*`, `welcome.*`, `project.*`, `pdf.patentFacts*`,
-  `pdfToolbar.*` and `doc.*` groups among them). Only the removed-LLM cluster
-  has been pruned; the rest is untouched pending a deliberate cleanup.
-- The Markush workspace is unreachable: `frontend/src/components/markush/`
-  (MarkushWorkspace, MarkushReviewPage, MarkushQueue, SiteEditor,
-  EnumerationPanel) has no route in `App.tsx` and no sidebar entry, and
-  `nav.markush` is an unreferenced locale key. Markush review is reachable only
-  through the review center's `markush_link` items.
-- SAR is a fail-closed stub: `/api/v1/sar` `build-matrix` returns `success:false`
-  and `heatmap` an empty list, while `frontend/src/components/sar/` ships an
-  R-group matrix/cliffs UI.
-- Stale comments still describe behavior that no longer exists: the import path
-  claims documents stay hidden until their run reaches a terminal status
-  (`api/http/documents/library.py`, `server/ingest/worker.py`,
-  `frontend/src/components/workspace/useWorkspaceQueueStatus.ts`) although
-  `pending` is in `VISIBLE_DOCUMENT_STATUSES`; and `LibraryLayout`'s layout
-  docstring lists `source.pdf` as the stored PDF although imports keep the
-  original `file_name` (the accessor survives only as a legacy fallback in
-  `resolve_document_pdf`).
+- The frontend locale files were pruned to keys the components reference;
+  dynamic-key prefixes (`nav.*`, `mol.status.*`, `errors.*`, …) were preserved.
+- The unreachable Markush frontend workspace and its HTTP client were removed;
+  Markush structures are still classified during Extract, and review items of
+  kind `markush_link` remain in the review center.
+- SAR was removed: the fail-closed `/api/v1/sar` stub and
+  `frontend/src/components/sar/` are gone, and the molecule analysis panel now
+  exposes only analytics and relations. Reintroducing SAR requires the Phase C
+  preconditions in [the activity plan](../docs/plan-activity-extraction.md).
 - Deterministic activity extraction is proven on a 13-patent corpus (CN/US/WO/KR/
   JP/IL) but only 2 of those documents yield any measurement today: the others
   publish their activity as tables the parser refuses by design (split headers,
@@ -370,13 +426,36 @@ never import `server`.
   单调上升（0.7k→30 秒、1–2k→96 秒、3.7k→300–400 秒且不提交），所以**窄任务是承重设计**：
   放大任务不会让模型读得更多，只会让它推理到超时。要放宽必须先确定"单次预算 vs 页面规模"的可行
   边界。证据与两次运行的完整数据：`docs/qa/patent-live-association-20261016.md` §8。
-- Review items are re-pended on every publication: `_queue_review_items` calls
-  `set_review_item_status(item_id, kind, "pending")` for every remaining
-  candidate unconditionally, so a previously rejected item that is still a
-  candidate is resurrected to `pending` by any later re-run or decision publish.
+- ~~Review items are re-pended on every publication.~~ **No longer true:**
+  `review_audit.insert_review_item`'s `ON CONFLICT` clause updates the payload
+  but not `status`, and `set_review_item_status` is called only from the human
+  decision path (`service/use_cases/review_queue.py`). A rejected item that is
+  still a candidate keeps its status across re-runs.
+
+- **The relation-pair contract is accepted but not implemented.**
+  `page_geometry`, `label_anchor` and `relation_pair` exist only in
+  [ADR 0001](../docs/adr/0001-relation-pair-contract.md). The write path still
+  stores canonical SMILES in `CompoundEntry.entity_id`, reports
+  `structure_status="resolved"` without a verification axis, and drops a Markush
+  candidate after `molecule_candidate_rejected`. The
+  [gold standard](../docs/plan-gold-standard.md) has a development manifest
+  (`tests/gold/manifest.json`, 13 documents) and a validator. Unadjudicated
+  pilot annotations now cover five documents / 36 records
+  (`tests/gold/annotations/*.pilot.jsonl`); the first-document findings are in
+  [the pilot report](../docs/qa/gold-pilot-cn121270515a-20261023.md) and the
+  cross-document rules in
+  [patent layout rules](../docs/wiki/patent-layout-rules.md). There is no
+  held-out split and no pair-level metric yet.
 
 ## Active plans
 
+- [Relation-pair contract](../docs/adr/0001-relation-pair-contract.md) and
+  [gold standard](../docs/plan-gold-standard.md) — **ADR accepted, tables not
+  yet applied**. First implementation step is the `label_anchor` index in
+  Extract, then the pair write path. Pilot annotations now cover five documents
+  / 36 records in `tests/gold/annotations/`; the layout survey is
+  [patent layout rules](../docs/wiki/patent-layout-rules.md). Human adjudication
+  and the held-out split are pending.
 - [Activity data extraction and persistence](../docs/plan-activity-extraction.md) — **Phase A implemented**: readings are first-class SQL rows independent of structure attribution. Phase B (compute layer: Boltz-2, reproducible `compute_runs`, `evidence_grade` for predictions) and Phase C (SAR, synthesis suggestions) are recorded with their preconditions and are not scheduled.
 - [Patent analysis and an LLM-first research workspace](../docs/plan-patent-agent-harness.md) — frontend U0/U1/P4 and necessary SQL/session/task integration completed; [acceptance evidence](../docs/qa/research-workbench-20261013.md). P5 real-patent scientific evaluation remains pending; LLM analysis is opt-in.
 - [Source layout reorganization](../docs/plan-source-layout-reorganization.md)

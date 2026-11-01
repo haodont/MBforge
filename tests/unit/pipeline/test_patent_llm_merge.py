@@ -141,9 +141,18 @@ def test_a_refused_table_becomes_one_gap_with_its_rows_and_bins() -> None:
         evidence=with_bins,
     )
 
-    assert "Bin definitions stated in this document" in binned[0].excerpt
-    assert "注：“+”：IC50>1μM" in binned[0].excerpt
-    assert '"++++"1nM<IC50<20nM' in binned[0].excerpt
+    packet = binned[0].rule_context["evidence"]
+    context = {row["evidence_id"]: row for row in packet if row["role"] == "context"}
+    assert context["ev-legend"]["raw_text"] == "注：“+”：IC50>1μM"
+    assert context["ev-legend-2"]["raw_text"] == '"++++"1nM<IC50<20nM'
+    assert set(context) <= set(binned[0].evidence_ids)
+    assert binned[0].rule_context["work_evidence_ids"] == ["ev-tab-21"]
+    # A distant assay's scale is not a document-wide default.
+    distant, _ = build_gaps(
+        issues=[{"code": "complex_activity_table", "evidence_ids": ["ev-tab-21"]}],
+        evidence=with_bins + [_evidence("ev-other-assay", 50, '"++++" IC50>1000nM')],
+    )
+    assert "ev-other-assay" not in distant[0].evidence_ids
 
 
 def test_leftover_gap_work_is_counted_and_dangling_references_are_no_location() -> None:
@@ -465,7 +474,6 @@ def _submission(
             "evidence_signature": "sig-1",
             "assay_methods": assays or [],
             "measurements": list(measurements),
-            "associations": [],
             "coverage": {"pages_viewed": [1], "pages_uncovered": []},
         }
     )
@@ -478,6 +486,7 @@ def _merge(
     submission: PatentDraft,
     pages: dict[str, int] | None = None,
     scope_fact_ids: list[str] | None = None,
+    scope_work_evidence_ids: list[str] | None = None,
 ):
     return merge_submission(
         doc_id=DOC,
@@ -486,11 +495,23 @@ def _merge(
         submission=submission,
         evidence_pages=pages,
         scope_fact_ids=scope_fact_ids,
+        scope_work_evidence_ids=scope_work_evidence_ids,
     )
 
 
 def test_an_agreed_reading_changes_nothing_and_distinct_facts_stay_distinct() -> None:
     """An identical reading is agreed; a different assay or species is not merged."""
+    log_rule = _rule_measurement(metric="pIC50", value=7, unit="", operator="<")
+    log_rule["value"]["canonical_value"] = 100.0
+    log_rule["value"]["canonical_unit"] = "nM"
+    log = _merge(
+        rule_measurements=[log_rule],
+        submission=_submission(
+            _llm_measurement(metric="pIC50", value=7, unit="", operator=">")
+        ),
+    )
+    assert log.stats["agreed"] == 1
+    assert log.conflicts == []
     agreed = _merge(
         rule_measurements=[_rule_measurement()],
         rule_assay_methods=[_rule_assay()],
@@ -502,6 +523,25 @@ def test_an_agreed_reading_changes_nothing_and_distinct_facts_stay_distinct() ->
     assert agreed.conflicts == []
     assert agreed.candidates == []
     assert len(agreed.measurements) == 1
+
+    # Context citations must not move the reading's slot away from its data table.
+    supported = _merge(
+        rule_measurements=[_rule_measurement()],
+        rule_assay_methods=[_rule_assay()],
+        submission=_submission(_llm_measurement(evidence_ids=["ctx-0", "ev-1"])),
+        scope_work_evidence_ids=["ev-1"],
+    )
+    assert supported.stats["agreed"] == 1
+    assert supported.candidates == []
+    example = _merge(
+        rule_measurements=[_rule_measurement()],
+        rule_assay_methods=[_rule_assay()],
+        submission=_submission(
+            _llm_measurement(compound_raw="12", compound_key="@example:12")
+        ),
+    )
+    assert example.stats["agreed"] == 0
+    assert len(example.candidates) == 1
 
     distinct = _merge(
         rule_measurements=[
@@ -560,6 +600,15 @@ def test_an_agreed_reading_changes_nothing_and_distinct_facts_stay_distinct() ->
 def test_a_conflicting_reading_is_held_back_with_both_values() -> None:
     """A bounded reading is never conflated with an exact one, and a slot that
     holds two readings keeps both for the reviewer."""
+    missing_units = _merge(
+        rule_measurements=[_rule_measurement(value=1, unit="")],
+        submission=_submission(_llm_measurement(value=1000, unit="")),
+    )
+    assert missing_units.stats["conflict"] == 1
+    assert missing_units.measurements == []
+    assert [
+        c.fields["value_unconverted"] for c in missing_units.conflicts[0].candidates
+    ] == [1, 1000]
     bounded = _merge(
         rule_measurements=[
             _rule_measurement(operator="<", value=100.0, raw_text="IC50 < 100 nM")

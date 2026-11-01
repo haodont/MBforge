@@ -5,7 +5,7 @@ One file, one test per boundary:
 * the strict draft shape and its refusal rules (``PatentDraft``);
 * slot / candidate-set / evidence signatures that retire a decision when values
   or evidence change, and the conflict + decision + snapshot round trip;
-* the committed JSON schema bundle the Node sidecar consumes;
+* the committed gap JSON schema bundle the Node sidecar consumes;
 * the gap and gap-answer shapes pinned on strings read from the real corpus;
 * the runtime boundary: the wire request carries no library path, unknown token
   usage stays unknown, a credential binds exactly one immutable scope for the
@@ -16,7 +16,7 @@ One file, one test per boundary:
 
 Functions under test: ``mbforge.contracts.patent`` /
 ``mbforge.contracts.patent_runtime``, ``mbforge.domain.patent_analysis``,
-``mbforge.contracts.schema_export.build_bundle``,
+``mbforge.contracts.schema_export.build_gap_bundle``,
 ``mbforge.server.patent_analysis.InMemoryPatentTaskRegistry`` /
 ``SidecarPatentAnalysisRuntime``, ``mbforge.service.pipeline.run.events``.
 """
@@ -45,7 +45,7 @@ from mbforge.contracts.patent_runtime import (
     PatentAnalysisRequest,
     PatentTaskScope,
 )
-from mbforge.contracts.schema_export import build_bundle, default_output_path
+from mbforge.contracts.schema_export import build_gap_bundle, default_gap_output_path
 from mbforge.domain.patent_analysis import (
     candidate_set_signature,
     candidate_signature,
@@ -118,15 +118,6 @@ def _draft_payload(**overrides: Any) -> dict[str, Any]:
                 "evidence_ids": ["ev-cell"],
             },
         ],
-        "associations": [
-            {
-                "local_key": "association-1",
-                "measurement_local_key": "measurement-1",
-                "compound_label_key": "12",
-                "molecule_ref": "12",
-                "evidence_ids": ["ev-cell"],
-            }
-        ],
         "coverage": {"pages_viewed": [7], "pages_uncovered": [1, 2, 3, 4, 5, 6, 8]},
     }
     payload.update(overrides)
@@ -164,17 +155,7 @@ def test_draft_preserves_bounded_readings_and_refuses_misdescriptions() -> None:
     with pytest.raises(ValidationError):
         PatentDraft.model_validate(payload)
 
-    payload = _draft_payload()
-    payload["associations"][0]["measurement_local_key"] = "measurement-missing"
-    with pytest.raises(ValidationError):
-        PatentDraft.model_validate(payload)
-
-    payload = _draft_payload()
-    payload["associations"][0]["local_key"] = "measurement-1"
-    with pytest.raises(ValidationError):
-        PatentDraft.model_validate(payload)
-
-    # A bare numeric reading is only legal once it declares the unit is missing.
+    # A concentration without a unit must explicitly declare it missing.
     payload = _draft_payload()
     payload["measurements"][0]["value"] = {"raw_text": "8.3", "value": 8.3}
     with pytest.raises(ValidationError):
@@ -182,6 +163,20 @@ def test_draft_preserves_bounded_readings_and_refuses_misdescriptions() -> None:
 
     payload["measurements"][0]["value"]["missing_fields"] = ["unit"]
     assert PatentDraft.model_validate(payload).measurements[0].value.value == 8.3
+
+    # US20260027089A1 p63: pIC50 6.9 is dimensionless, not missing a unit.
+    payload = _draft_payload()
+    payload["measurements"][0].update(
+        metric="pIC50", value={"raw_text": "6.9", "value": 6.9}
+    )
+    logarithmic = PatentDraft.model_validate(payload).measurements[0].value
+    assert logarithmic.unit == ""
+    assert logarithmic.missing_fields == []
+    assert logarithmic.value == 6.9
+
+    payload["measurements"][0]["value"]["unit"] = "nM"
+    with pytest.raises(ValidationError, match="dimensionless"):
+        PatentDraft.model_validate(payload)
 
 
 # ── identity signatures ─────────────────────────────────────────────
@@ -321,12 +316,12 @@ def test_conflict_decision_and_snapshot_round_trip() -> None:
         )
 
 
-def test_committed_schema_bundle_matches_contracts() -> None:
-    """The Node-facing bundle must be regenerated with the contracts."""
-    path = default_output_path()
+def test_committed_gap_schema_bundle_matches_contracts() -> None:
+    """The Node-facing gap bundle must be regenerated with the contracts."""
+    path = default_gap_output_path()
     assert path.is_file(), f"missing exported schema: {path}"
     committed = json.loads(path.read_text(encoding="utf-8"))
-    assert committed == build_bundle()
+    assert committed == build_gap_bundle()
 
 
 # ── the gap-answer contract (corpus strings) ────────────────────────

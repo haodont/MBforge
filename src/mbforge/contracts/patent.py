@@ -19,6 +19,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mbforge.domain.activity import is_log_potency_metric
+
 #: Draft protocol version understood by this module.
 PROTOCOL_VERSION = "1"
 
@@ -71,8 +73,8 @@ PATENT_FACT_REVIEW_KIND = "patent_fact_review"
 VALUE_OPERATORS = ("", "=", "<", "<=", ">", ">=", "~")
 
 #: Fields a draft item may declare as missing; absence is recorded, never
-#: guessed. ``unit`` on a numeric reading must be declared when no unit was
-#: printed (e.g. a pIC50-style log value).
+#: guessed. A concentration without a printed unit declares ``unit`` missing;
+#: dimensionless logarithmic potency metrics do not.
 MISSING_FIELDS = (
     "value",
     "unit",
@@ -108,12 +110,16 @@ class DraftValue(BaseModel):
         ),
     )
     value: float | None = Field(
-        None, description="Printed number without the operator; qualitative only."
+        None,
+        allow_inf_nan=False,
+        description="Printed number without the operator; null for qualitative readings.",
     )
     unit: str = Field(
         "",
         max_length=64,
-        description="Unit as printed; canonicalization stays in Python.",
+        description="Unit as printed; empty for dimensionless pIC50/pEC50/pKi/pKd-style "
+        "metrics (do not mark unit missing). Other numeric readings without a unit "
+        "must declare unit in missing_fields. Canonicalization stays in Python.",
     )
     qualitative: str = Field(
         "", max_length=64, description="Qualitative label, e.g. '++' or 'inactive'."
@@ -135,14 +141,6 @@ class DraftValue(BaseModel):
         unknown = [name for name in self.missing_fields if name not in MISSING_FIELDS]
         if unknown:
             raise ValueError(f"unknown missing_fields entries: {unknown}")
-        if (
-            self.value is not None
-            and not self.unit
-            and "unit" not in self.missing_fields
-        ):
-            raise ValueError(
-                "a numeric reading without a unit must declare 'unit' in missing_fields"
-            )
         return self
 
 
@@ -188,6 +186,19 @@ class DraftMeasurement(BaseModel):
     local_key: str = Field(..., min_length=1, max_length=64)
     metric: str = Field(..., min_length=1, max_length=64)
     value: DraftValue
+    source_quote: str = Field(
+        "",
+        max_length=_MAX_TEXT,
+        description="Verbatim row or sentence containing this designation and reading; "
+        "required for table work with an evidence packet. Context/legend alone is not a reading.",
+    )
+    source_column: int | None = Field(
+        None,
+        ge=0,
+        strict=True,
+        description="Zero-based value column in the supplied Markdown work table (label columns count too); "
+        "required for packet-backed pipe tables. raw_text must copy that cell exactly.",
+    )
     compound_label_raw: str = Field("", max_length=200)
     row_label_raw: str = Field(
         "",
@@ -221,25 +232,23 @@ class DraftMeasurement(BaseModel):
     evidence_ids: list[str] = Field(..., min_length=1, max_length=_MAX_EVIDENCE_REFS)
     model_confidence: float | None = Field(None, ge=0, le=1)
 
-
-class DraftAssociation(BaseModel):
-    """A suggested link from one draft measurement to an existing structure."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    local_key: str = Field(..., min_length=1, max_length=64)
-    measurement_local_key: str = Field(..., min_length=1, max_length=64)
-    compound_label_key: str = Field("", max_length=64)
-    molecule_ref: str = Field(
-        "",
-        max_length=256,
-        description=(
-            "Existing candidate label key or mol_id. Free-form SMILES is "
-            "never accepted."
-        ),
-    )
-    evidence_ids: list[str] = Field(..., min_length=1, max_length=_MAX_EVIDENCE_REFS)
-    model_confidence: float | None = Field(None, ge=0, le=1)
+    @model_validator(mode="after")
+    def _unit_matches_metric(self) -> DraftMeasurement:
+        # Only the measurement knows whether an empty unit is missing or inapplicable.
+        if is_log_potency_metric(self.metric):
+            if self.value.unit.strip():
+                raise ValueError(
+                    "a logarithmic potency reading is dimensionless; unit must be empty"
+                )
+        elif (
+            self.value.value is not None
+            and not self.value.unit.strip()
+            and "unit" not in self.value.missing_fields
+        ):
+            raise ValueError(
+                "a numeric reading without a unit must declare 'unit' in missing_fields"
+            )
+        return self
 
 
 class DraftCoverage(BaseModel):
@@ -406,18 +415,15 @@ class PatentDraft(BaseModel):
     )
     assay_methods: list[DraftAssayMethod] = Field(default_factory=list, max_length=200)
     measurements: list[DraftMeasurement] = Field(default_factory=list, max_length=2000)
-    associations: list[DraftAssociation] = Field(default_factory=list, max_length=2000)
     coverage: DraftCoverage
 
     @model_validator(mode="after")
     def _local_references_resolve(self) -> PatentDraft:
         seen: set[str] = set()
         duplicates: set[str] = set()
-        for key in (
-            [item.local_key for item in self.assay_methods]
-            + [item.local_key for item in self.measurements]
-            + [item.local_key for item in self.associations]
-        ):
+        for key in [item.local_key for item in self.assay_methods] + [
+            item.local_key for item in self.measurements
+        ]:
             if key in seen:
                 duplicates.add(key)
             seen.add(key)
@@ -433,13 +439,6 @@ class PatentDraft(BaseModel):
                 raise ValueError(
                     f"measurement {measurement.local_key!r} references unknown "
                     f"assay method {measurement.assay_local_key!r}"
-                )
-        measurement_keys = {item.local_key for item in self.measurements}
-        for association in self.associations:
-            if association.measurement_local_key not in measurement_keys:
-                raise ValueError(
-                    f"association {association.local_key!r} references unknown "
-                    f"measurement {association.measurement_local_key!r}"
                 )
         return self
 
@@ -531,7 +530,6 @@ __all__ = [
     "ConflictCandidate",
     "DecisionChoice",
     "DraftAssayMethod",
-    "DraftAssociation",
     "DraftCoverage",
     "DraftMeasurement",
     "DraftValue",

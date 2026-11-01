@@ -1,6 +1,6 @@
 /* ==========================================================================
    Assistant Markdown typography — shared by every chat surface
-   (the /agent page and the docking agent rail). Global so a lazy route that
+   (the /agent page and its agent rail). Global so a lazy route that
    never loads AgentChat.css still renders markdown correctly.
    ========================================================================== */
 

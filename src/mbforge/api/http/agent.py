@@ -24,9 +24,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from mbforge.api.http._path_utils import resolve_library_root
-from mbforge.domain.docking import DockingBox, DockingLigand
 from mbforge.foundation.errors import ValidationError
-from mbforge.service.dto.docking import DockingBoxModel, DockingLigandModel
 from mbforge.service.use_cases.agent_queries import (
     library_schema,
     library_stats,
@@ -36,8 +34,6 @@ from mbforge.service.use_cases.agent_queries import (
     run_library_sql,
     search_library,
 )
-from mbforge.service.use_cases.docking import jobs as docking_jobs
-from mbforge.service.use_cases.docking import receptors as docking_receptors
 from mbforge.service.use_cases.molecule.queries import search_molecules
 
 router = APIRouter()
@@ -226,102 +222,3 @@ async def agent_library_sql(body: AgentLibrarySqlRequest) -> AgentLibrarySqlResp
     except ValidationError as exc:
         return AgentLibrarySqlResponse(success=False, error=exc.message)
     return AgentLibrarySqlResponse(**result)
-
-
-# ---------------------------------------------------------------------------
-# Docking (agent-driven docking interface)
-# ---------------------------------------------------------------------------
-class AgentDockingListResponse(BaseModel):
-    success: bool = True
-    tool: str
-    items: list[dict] = Field(default_factory=list)
-
-
-class AgentDockingJobResponse(BaseModel):
-    success: bool = True
-    tool: str
-    job: dict = Field(default_factory=dict)
-
-
-@router.post("/tools/docking-receptors", response_model=AgentDockingListResponse)
-async def agent_docking_receptors() -> AgentDockingListResponse:
-    """List the prepared receptors available to dock against."""
-
-    items = await asyncio.to_thread(
-        docking_receptors.list_receptors, str(resolve_library_root(None))
-    )
-    return AgentDockingListResponse(tool="list_receptors", items=items)
-
-
-class AgentDockingJobsRequest(BaseModel):
-    status: str = Field("", max_length=32)
-    limit: int = Field(20, ge=1, le=100)
-
-
-@router.post("/tools/docking-jobs", response_model=AgentDockingListResponse)
-async def agent_docking_jobs(
-    body: AgentDockingJobsRequest,
-) -> AgentDockingListResponse:
-    """List recent docking jobs (optionally filtered by status)."""
-
-    items = await asyncio.to_thread(
-        docking_jobs.list_jobs,
-        str(resolve_library_root(None)),
-        status=body.status or None,
-        limit=body.limit,
-    )
-    return AgentDockingListResponse(tool="list_docking_jobs", items=items)
-
-
-class AgentDockingJobRequest(BaseModel):
-    job_id: str = Field(..., min_length=1, max_length=128)
-
-
-@router.post("/tools/docking-job", response_model=AgentDockingJobResponse)
-async def agent_docking_job(body: AgentDockingJobRequest) -> AgentDockingJobResponse:
-    """Fetch one docking job with its ranked poses."""
-
-    job = await asyncio.to_thread(
-        docking_jobs.get_job, str(resolve_library_root(None)), body.job_id
-    )
-    return AgentDockingJobResponse(tool="get_docking_job", job=job)
-
-
-class AgentRunDockingRequest(BaseModel):
-    """Explicit docking request: the agent must name receptor, ligands and box."""
-
-    receptor_id: str = Field(..., min_length=1, max_length=128)
-    ligands: list[DockingLigandModel] = Field(..., min_length=1, max_length=200)
-    box: DockingBoxModel
-    params: dict[str, Any] = Field(default_factory=dict)
-
-
-@router.post("/tools/run-docking", response_model=AgentDockingJobResponse)
-async def agent_run_docking(body: AgentRunDockingRequest) -> AgentDockingJobResponse:
-    """Queue a docking job (returns a job_id to poll via get_docking_job)."""
-
-    root = str(resolve_library_root(None))
-    box = DockingBox(
-        center=tuple(float(v) for v in body.box.center),  # type: ignore[arg-type]
-        size=tuple(float(v) for v in body.box.size),  # type: ignore[arg-type]
-    )
-    ligands = [
-        DockingLigand(
-            label=item.label or item.mol_id or f"ligand-{index + 1}",
-            smiles=item.smiles,
-            mol_id=item.mol_id,
-        )
-        for index, item in enumerate(body.ligands)
-        if item.smiles.strip()
-    ]
-    if not ligands:
-        raise ValidationError("at least one ligand needs a SMILES")
-    job = await asyncio.to_thread(
-        docking_jobs.enqueue_job,
-        root,
-        receptor_id=body.receptor_id,
-        ligands=ligands,
-        box=box,
-        params=body.params,
-    )
-    return AgentDockingJobResponse(tool="run_docking", job=job)

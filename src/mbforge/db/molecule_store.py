@@ -16,6 +16,7 @@ from typing import Any
 from rdkit import Chem
 
 from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.db.sqlite.rows import row_to_dict
 from mbforge.domain.molecule import Molecule
 from mbforge.foundation.logger import get_logger
 
@@ -144,7 +145,7 @@ def get_row(library_root: str | Path, mol_id: str) -> dict[str, Any] | None:
         row = conn.execute(
             "SELECT * FROM molecules WHERE mol_id = ?", (mol_id,)
         ).fetchone()
-    return dict(row) if row is not None else None
+    return row_to_dict(row)
 
 
 def find_row(library_root: str | Path, canonical_smiles: str) -> dict[str, Any] | None:
@@ -155,7 +156,7 @@ def find_row(library_root: str | Path, canonical_smiles: str) -> dict[str, Any] 
             "SELECT * FROM molecules WHERE mol_id = ? OR canonical_smiles = ?",
             (canonical_smiles, canonical_smiles),
         ).fetchone()
-    return dict(row) if row is not None else None
+    return row_to_dict(row)
 
 
 def create(
@@ -430,11 +431,11 @@ def designated_structures(
 
     ``name`` is the number printed beside the drawing; an empty one means the
     crop-label OCR missed it, which is ordinary on a dense page. Those rows are
-    returned too: a drawing whose label was missed is still a recognised
-    structure, and a printed product mass can identify it later.
+    returned too: missing labels do not discard recognised structures, but mass
+    agreement alone cannot establish their designation.
 
-    A Markush scaffold is excluded — its ``name`` is a scheme label (``I-A``),
-    never a designation an activity table prints.
+    Callers must exclude Markush scaffolds before joining designations: a scheme
+    label such as ``I-A`` does not identify a concrete finished compound.
     """
     if not doc_id:
         return []
@@ -701,7 +702,6 @@ DOC_SCOPED_MOLECULE_TABLES: tuple[str, ...] = (
     "markush_review_candidates",
     "markush_evidence",
     "markush_scaffolds",
-    "activities",
 )
 # ``measurements`` / ``measurement_attribution`` are deliberately absent above:
 # they are cleared by ``measurement_store.delete_document_measurements`` so the

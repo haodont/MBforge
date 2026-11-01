@@ -56,7 +56,6 @@ export function useReviewDecide() {
       if (variables.items.some(item => item.kind === 'patent_fact_review')) {
         void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
         void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
-        void qc.invalidateQueries({ queryKey: queryKeys.sar.all })
       }
       for (const item of variables.items) {
         void qc.invalidateQueries({

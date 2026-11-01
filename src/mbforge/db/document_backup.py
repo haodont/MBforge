@@ -25,7 +25,6 @@ _DOC_TABLES = (
     "markush_evidence",
     "source_evidence",
     "review_items",
-    "activities",
     "measurements",
     "measurement_attribution",
 )

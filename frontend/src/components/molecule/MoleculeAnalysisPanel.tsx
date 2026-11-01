@@ -1,19 +1,13 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Tabs, TabPanel, EmptyState } from '../ui'
-import SessionOverview from '@/components/sar/SessionOverview'
-import OverviewTab from '@/components/sar/OverviewTab'
-import RGroupTab from '@/components/sar/RGroupTab'
-import CliffsTab from '@/components/sar/CliffsTab'
 import AnalyticsTab from '@/components/molecule/analysis/AnalyticsTab'
 import RelationsTab from '@/components/molecule/analysis/RelationsTab'
-import { moleculesToSession } from '@/components/sar/utils'
-import type { MoleculeRecord, SARSession } from '@/types'
+import type { MoleculeRecord } from '@/types'
 import type { AnalysisTab } from '@/hooks/useMoleculeAnalysis'
 
 export interface MoleculeAnalysisPanelProps {
   analysisInput: MoleculeRecord[]
-  sarSession: SARSession | null
   activeTab: AnalysisTab
   onTabChange: (tab: AnalysisTab) => void
   libraryRoot: string | null
@@ -24,7 +18,6 @@ const ANALYSIS_INPUT_LIMIT = 200
 
 export default function MoleculeAnalysisPanel({
   analysisInput,
-  sarSession: _sarSession,
   activeTab,
   onTabChange,
   libraryRoot,
@@ -37,19 +30,11 @@ export default function MoleculeAnalysisPanel({
     [analysisInput],
   )
 
-  const effectiveSession = useMemo(
-    () => (effectiveInput.length > 0 ? moleculesToSession(effectiveInput) : null),
-    [effectiveInput],
-  )
-
   if (analysisInput.length === 0) {
     return <EmptyState message={t('mol.selectOrImport')} />
   }
 
   const items = [
-    { key: 'overview', label: t('analysis.tab.overview') },
-    { key: 'rgroup', label: t('analysis.tab.rgroup') },
-    { key: 'cliffs', label: t('analysis.tab.cliffs') },
     { key: 'analytics', label: t('analysis.tab.analytics') },
     { key: 'relations', label: t('analysis.tab.relations') },
   ]
@@ -77,25 +62,6 @@ export default function MoleculeAnalysisPanel({
         activeKey={activeTab}
         onChange={(key) => onTabChange(key as AnalysisTab)}
       />
-
-      <TabPanel activeKey={activeTab} tabKey="overview">
-        {effectiveSession && (
-          <>
-            <SessionOverview session={effectiveSession} />
-            <OverviewTab session={effectiveSession} selectedCompoundId={null} onSelect={() => {}} />
-          </>
-        )}
-      </TabPanel>
-
-      <TabPanel activeKey={activeTab} tabKey="rgroup">
-        {effectiveSession && <RGroupTab session={effectiveSession} onSelectCompound={() => {}} />}
-      </TabPanel>
-
-      <TabPanel activeKey={activeTab} tabKey="cliffs">
-        {effectiveSession && libraryRoot && (
-          <CliffsTab session={effectiveSession} libraryRoot={libraryRoot} />
-        )}
-      </TabPanel>
 
       <TabPanel activeKey={activeTab} tabKey="analytics">
         <AnalyticsTab molecules={effectiveInput} libraryRoot={libraryRoot} onRefresh={onRefresh} />

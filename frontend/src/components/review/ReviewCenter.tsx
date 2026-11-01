@@ -20,7 +20,7 @@ import { getUserFacingError } from '@/utils/errors'
 import ReviewEvidenceComparison from './ReviewEvidenceComparison'
 import './ReviewCenter.css'
 
-const KINDS: Array<'all' | ReviewKind> = ['all', 'low_conf_molecule', 'review_required', 'unparsable_smiles', 'activity_match', 'missing_evidence', 'ambiguous_coref', 'markush_link', 'patent_fact_review', 'smiles_correction']
+const KINDS: Array<'all' | ReviewKind> = ['all', 'low_conf_molecule', 'review_required', 'unparsable_smiles', 'missing_evidence', 'ambiguous_coref', 'markush_link', 'patent_fact_review', 'smiles_correction']
 const PAGE_SIZE = 25
 
 function labelForKind(kind: string, t: (key: string) => string): string {

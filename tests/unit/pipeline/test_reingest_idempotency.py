@@ -32,8 +32,6 @@ def test_clear_pipeline_data_removes_prior_run_state(
     resolver.storage_dir(doc_id).mkdir(parents=True, exist_ok=True)
     resolver.document_md(doc_id).write_text("# old")
     (resolver.report_json(doc_id)).write_text("{}")
-    resolver.pages_dir(doc_id).mkdir(exist_ok=True)
-    (resolver.page_text(doc_id, 1)).write_text("old text")
 
     with db.mol_conn() as conn:
         conn.execute(
@@ -72,4 +70,3 @@ def test_clear_pipeline_data_removes_prior_run_state(
 
     assert not resolver.document_md(doc_id).exists()
     assert not resolver.report_json(doc_id).exists()
-    assert not resolver.pages_dir(doc_id).exists()

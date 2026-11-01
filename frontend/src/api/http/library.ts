@@ -1,6 +1,6 @@
 /** Library API — unified document library. */
 
-import { apiUrl, httpGet, httpGetText, httpPost, httpFetch, invokeWithError } from './_utils'
+import { apiUrl, httpGet, httpGetText, httpPost, httpPostBlob, httpFetch, invokeWithError } from './_utils'
 import { AppError, ErrorCode } from '@/utils/errors'
 
 // ── Types ───────────────────────────────────────────
@@ -319,6 +319,25 @@ export async function runPatentAnalysis(docIds: string[]): Promise<PatentAnalysi
   )
 }
 
+/** Download all readings and their source evidence for the selected documents. */
+export async function exportStructureActivity(docIds: string[], libraryRoot: string): Promise<void> {
+  const blob = await httpPostBlob('/api/v1/activities/export', {
+    doc_ids: docIds,
+    library_root: libraryRoot,
+  })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'structure-activity.zip'
+  document.body.appendChild(anchor)
+  try {
+    anchor.click()
+  } finally {
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+}
+
 export async function updateMoleculeEvidence(
   docId: string,
   evidenceId: string,
@@ -438,17 +457,4 @@ export async function resolveDocumentEvidenceBatch(
     artifactUrl(`/documents/${encodeURIComponent(docId)}/evidence/resolve`, libraryRoot),
     { evidence_ids: evidenceIds.slice(0, 50) },
   )
-}
-
-export async function fetchPageText(
-  docId: string,
-  page: number,
-  libraryRoot: string
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
-  try {
-    const text = await httpGetText(artifactUrl(`/documents/${encodeURIComponent(docId)}/pages/${page}`, libraryRoot))
-    return { ok: true, text }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
 }

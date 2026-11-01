@@ -77,13 +77,13 @@ def test_decide_routes_native_and_markush_entities_to_their_lifecycles(
     with db.mol_conn() as conn:
         repo.insert_review_item(
             item_id="activity-1",
-            kind="activity_match",
+            kind="smiles_correction",
             doc_id="doc-1",
             payload={"activity_id": "a1"},
         )
         result = decide(
             repo,
-            kind="activity_match",
+            kind="smiles_correction",
             item_id="activity-1",
             action="reject",
             reason="not enough context",
@@ -220,7 +220,7 @@ def test_clear_all_empties_the_queue_and_keeps_promoted_artifacts(tmp_path) -> N
         )
         repo.insert_review_item(
             item_id="resolved-1",
-            kind="activity_match",
+            kind="smiles_correction",
             doc_id="doc-1",
         )
         conn.execute(

@@ -185,59 +185,6 @@ class MoleculeRepository(Protocol):
     ) -> int: ...
 
 
-class DockingRepository(Protocol):
-    """Persistence boundary for receptors, docking jobs and poses."""
-
-    def insert_receptor(self, receptor: dict[str, Any]) -> None: ...
-
-    def list_receptors(self) -> list[dict[str, Any]]: ...
-
-    def get_receptor(self, receptor_id: str) -> dict[str, Any] | None: ...
-
-    def delete_receptor(self, receptor_id: str) -> int: ...
-
-    def insert_job(self, job: dict[str, Any]) -> None: ...
-
-    def get_job(self, job_id: str) -> dict[str, Any] | None: ...
-
-    def list_jobs(
-        self, *, status: str | None = None, limit: int = 100
-    ) -> list[dict[str, Any]]: ...
-
-    def claim_next_pending(self, worker: str) -> dict[str, Any] | None: ...
-
-    def set_job_status(
-        self,
-        job_id: str,
-        status: str,
-        *,
-        progress: float | None = None,
-        message: str | None = None,
-        error: str | None = None,
-        finished: bool = False,
-    ) -> None: ...
-
-    def reset_running_jobs(self) -> int: ...
-
-    def insert_pose(self, pose: dict[str, Any]) -> None: ...
-
-    def list_poses(self, job_id: str) -> list[dict[str, Any]]: ...
-
-    def get_pose(self, pose_id: str) -> dict[str, Any] | None: ...
-
-
-class ActivityRepository(Protocol):
-    """Persistence boundary for activity review items.
-
-    Stored readings live in :class:`MeasurementRepository`; this port only
-    covers the pending review candidates raised against them.
-    """
-
-    def list_activity_review_items(
-        self, doc_id: str, limit: int
-    ) -> list[dict[str, Any]]: ...
-
-
 class MeasurementRepository(Protocol):
     """Readings and their structure attributions.
 
@@ -503,13 +450,7 @@ class LibraryRepositories(Protocol):
     def molecules(self) -> MoleculeRepository: ...
 
     @property
-    def activities(self) -> ActivityRepository: ...
-
-    @property
     def measurements(self) -> MeasurementRepository: ...
-
-    @property
-    def docking(self) -> DockingRepository: ...
 
     @property
     def markush(self) -> MarkushRepository: ...
@@ -564,7 +505,6 @@ __all__ = [
     "DatabaseRepository",
     "ArtifactStore",
     "DocumentRepository",
-    "DockingRepository",
     "EvidenceRepository",
     "LibraryRepositories",
     "MarkushRepository",

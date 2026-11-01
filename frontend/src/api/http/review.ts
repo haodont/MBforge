@@ -8,7 +8,6 @@ export type ReviewKind =
   | 'low_conf_molecule'
   | 'review_required'
   | 'unparsable_smiles'
-  | 'activity_match'
   | 'missing_evidence'
   | 'ambiguous_coref'
   | 'markush_link'
@@ -31,7 +30,6 @@ export type ReviewPayload =
   | { kind: 'low_conf_molecule'; mol_id?: string; evidence?: unknown }
   | { kind: 'review_required'; reason?: string }
   | { kind: 'unparsable_smiles'; smiles?: string }
-  | { kind: 'activity_match'; activity?: unknown }
   | { kind: 'missing_evidence'; notes?: string }
   | { kind: 'ambiguous_coref'; mol_id?: string; ocr_labels?: string[]; coref_primary?: string }
   | { kind: 'markush_link'; markush?: unknown }

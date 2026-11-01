@@ -17,8 +17,6 @@ from pathlib import Path
 from typing import Any
 
 from mbforge.db.sqlite.schema import (
-    _ACTIVITIES_SCHEMA,
-    _DOCKING_SCHEMA,
     _KB_SCHEMA,
     _MEASUREMENTS_SCHEMA,
     _MOL_FTS,
@@ -81,7 +79,6 @@ class DatabaseManager:
             _MOL_SCHEMA
             + _SOURCE_EVIDENCE_SCHEMA
             + _REVIEW_V12_SCHEMA
-            + _ACTIVITIES_SCHEMA
             + _MEASUREMENTS_SCHEMA
             + _PATENT_ANALYSIS_SCHEMA
             + _RESEARCH_SCHEMA
@@ -139,11 +136,6 @@ class DatabaseManager:
 
         _chunked("molecule_images", "mol_id", actual_ids)
         _chunked("molecule_detections", "mol_id", actual_ids)
-        # ``activities`` has a CASCADE FK on ``mol_id`` but we
-        # also issue an explicit DELETE here so the cleanup is visible in
-        # this routine and works on connections that have
-        # ``PRAGMA foreign_keys`` off.
-        _chunked("activities", "mol_id", actual_ids)
         _chunked("molecules", "mol_id", actual_ids)
         # This FTS table uses molecules as external content. Rebuilding after
         # the base rows are gone is reliable across SQLite/FTS5 versions,
@@ -256,7 +248,6 @@ class DatabaseManager:
         conn.execute(
             "DELETE FROM markush_review_candidates WHERE doc_id = ?", (doc_id,)
         )
-        conn.execute("DELETE FROM activities WHERE doc_id = ?", (doc_id,))
         # Printed readings are document-scoped and have no molecule FK, so they
         # are cleared here explicitly: a deleted document must not leave
         # citable readings behind.
@@ -302,13 +293,11 @@ class DatabaseManager:
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA foreign_keys=ON")
+                # Index creation and large deletes need a temporary store; an
+                # unavailable OS temp directory otherwise fails with "unable to
+                # open database file" on this filesystem.
+                conn.execute("PRAGMA temp_store=MEMORY")
                 conn.executescript(_KB_SCHEMA)
-                # The activities table is defined in _ACTIVITIES_SCHEMA but not
-                # included in _KB_SCHEMA, so it is created explicitly here.
-                conn.executescript(_ACTIVITIES_SCHEMA)
-                # Docking tables (receptors / jobs / poses) are likewise created
-                # here rather than in _KB_SCHEMA.
-                conn.executescript(_DOCKING_SCHEMA)
                 # Collections were removed; drop the retired tables from any
                 # existing library database.
                 conn.executescript(
@@ -323,6 +312,7 @@ class DatabaseManager:
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("PRAGMA temp_store=MEMORY")
                 conn.executescript(DatabaseManager.molecule_schema())
                 self._migrate_molecule_schema(conn)
                 conn.commit()
@@ -366,10 +356,10 @@ class DatabaseManager:
 
         ``CREATE TABLE IF NOT EXISTS`` cannot add a column to an existing
         table, so a pre-existing library database needs the new
-        ``molecule_detections.evidence_id`` / ``context_text`` columns added
-        explicitly. The retired ``text_molecule_links`` and ``evidence`` tables
-        (the latter's role now lives on ``molecule_detections``) are dropped
-        outright.
+        ``molecule_detections.evidence_id`` / ``context_text`` and
+        ``source_evidence.reading_order`` columns added explicitly. The retired
+        ``text_molecule_links`` and ``evidence`` tables (the latter's role now
+        lives on ``molecule_detections``) are dropped outright.
         """
         detection_columns = {
             row[1]
@@ -386,6 +376,24 @@ class DatabaseManager:
             )
         if detection_columns and "context_text" not in detection_columns:
             conn.execute("ALTER TABLE molecule_detections ADD COLUMN context_text TEXT")
+        evidence_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(source_evidence)").fetchall()
+        }
+        if evidence_columns and "reading_order" not in evidence_columns:
+            conn.execute(
+                "ALTER TABLE source_evidence ADD COLUMN reading_order "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+            logger.info("Migrated source evidence: added reading_order")
+        if evidence_columns:
+            # The base schema cannot create this index before the column exists
+            # on an old table, so it is created here for both fresh and migrated
+            # databases.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_se_doc_page_order "
+                "ON source_evidence(doc_id, page, reading_order)"
+            )
         conn.execute("DROP TABLE IF EXISTS text_molecule_links")
         conn.execute("DROP TABLE IF EXISTS evidence")
 

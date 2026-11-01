@@ -366,10 +366,16 @@ CREATE TABLE IF NOT EXISTS source_evidence (
     bbox_y1 REAL NOT NULL,
     raw_text TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL,
+    -- Zero-based reading position inside the page. The producer writes the
+    -- layout's column-aware order here; 0 is the legacy default and falls
+    -- back to the geometric tie-breakers when every row of a page is 0.
+    reading_order INTEGER NOT NULL DEFAULT 0,
     CHECK (bbox_x0 >= 0 AND bbox_y0 >= 0 AND bbox_x0 <= bbox_x1 AND bbox_y0 <= bbox_y1)
 );
 CREATE INDEX IF NOT EXISTS idx_se_doc_page_kind
     ON source_evidence(doc_id, page, kind);
+-- idx_se_doc_page_order is created by _migrate_molecule_schema after it has
+-- ensured the reading_order column exists on a pre-existing database.
 CREATE INDEX IF NOT EXISTS idx_se_doc_bbox
     ON source_evidence(doc_id, bbox_x0, bbox_y0, bbox_x1, bbox_y1);
 """
@@ -413,59 +419,6 @@ CREATE INDEX IF NOT EXISTS idx_ri_status_kind ON review_items(status, kind);
 CREATE INDEX IF NOT EXISTS idx_ri_doc ON review_items(doc_id);
 """
 
-# Structured activity data: one row per (molecule, target, assay_description)
-# combination. This is the first-class store for SAR queries
-# (find compound best activity, rank by target, etc.); the `evidence` table
-# still records *where* the activity came from (row_idx/table_idx/page) but
-# does not store target/assay/value in queryable columns.
-_ACTIVITIES_SCHEMA = """
-CREATE TABLE IF NOT EXISTS activities (
-    activity_id TEXT PRIMARY KEY,
-    mol_id TEXT NOT NULL,
-    doc_id TEXT NOT NULL,
-    activity_type TEXT NOT NULL,         -- IC50 / pIC50 / Ki / qualitative
-    value REAL,                           -- comparable value; usually nM
-    value_original REAL,                  -- value in the original unit
-    unit_original TEXT,                   -- nM / μM / mM
-    operator TEXT DEFAULT '=',
-    measurement_kind TEXT DEFAULT 'quantitative',
-    metric TEXT,
-    value_canonical REAL,
-    unit_canonical TEXT,
-    operator_original TEXT,
-    scale TEXT DEFAULT 'linear',
-    value_text TEXT,
-    qualitative_raw TEXT,
-    qualitative_rank INTEGER,
-    qualitative_scheme TEXT,
-    qualitative_label TEXT,
-    reference_raw TEXT,
-    reference_key TEXT,
-    reference_type TEXT,
-    target TEXT,                          -- protein/enzyme name (e.g. STAT6)
-    assay_type TEXT,                      -- enzymatic / cellular / binding
-    assay_description TEXT,               -- human-readable assay name (e.g. hSTAT6 TR-FRET)
-    confidence REAL,
-    page_num INTEGER,
-    table_idx INTEGER,
-    row_idx INTEGER,
-    col_idx INTEGER,
-    row_label TEXT,
-    row_smiles TEXT,
-    raw_text TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (mol_id) REFERENCES molecules(mol_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_act_mol ON activities(mol_id);
-CREATE INDEX IF NOT EXISTS idx_act_doc ON activities(doc_id);
-CREATE INDEX IF NOT EXISTS idx_act_target ON activities(target);
-CREATE INDEX IF NOT EXISTS idx_act_assay ON activities(assay_description);
-CREATE INDEX IF NOT EXISTS idx_act_doc_target_assay
-    ON activities(doc_id, target, assay_description);
-CREATE INDEX IF NOT EXISTS idx_act_doc_row
-    ON activities(doc_id, table_idx, row_idx);
-"""
-
 # Patent activity readings as first-class rows.
 #
 # The split matters: a printed reading is complete, traceable data whether or
@@ -477,8 +430,8 @@ CREATE INDEX IF NOT EXISTS idx_act_doc_row
 # incrementally. ``entry_id`` (the printed designation) is likewise optional.
 #
 # ``evidence_grade`` separates a figure the document printed from one a model
-# produced. Phase A writes only ``measured``; later compute paths (docking,
-# structure prediction) must never reuse this column to claim a measurement.
+# produced. Phase A writes only ``measured``; later compute paths (structure
+# prediction) must never reuse this column to claim a measurement.
 #
 # ``measurements.measurement_id`` is the deterministic id the Patent stage
 # already mints (doc + page + metric + raw value + row label), so a re-run
@@ -596,55 +549,4 @@ _MOL_FTS = """
 CREATE VIRTUAL TABLE IF NOT EXISTS mol_search USING fts5(
     name, notes, smiles, content='molecules', content_rowid='rowid'
 );
-"""
-
-# Molecular docking: prepared receptors, jobs and resulting poses. A receptor
-# is a prepared protein (PDB uploaded, PDBQT derived); a job docks one or more
-# ligands against it; each pose holds one ranked result for a ligand.
-_DOCKING_SCHEMA = """
-CREATE TABLE IF NOT EXISTS receptors (
-    receptor_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    source_filename TEXT NOT NULL DEFAULT '',
-    pdbqt_path TEXT NOT NULL DEFAULT '',
-    file_hash TEXT NOT NULL DEFAULT '',
-    chain TEXT NOT NULL DEFAULT '',
-    meta TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS docking_jobs (
-    job_id TEXT PRIMARY KEY,
-    receptor_id TEXT NOT NULL,
-    engine TEXT NOT NULL DEFAULT 'unidockpro',
-    params TEXT NOT NULL DEFAULT '{}',
-    box TEXT NOT NULL DEFAULT '{}',
-    ligands TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL DEFAULT 'pending',
-    progress REAL NOT NULL DEFAULT 0,
-    message TEXT NOT NULL DEFAULT '',
-    error TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    started_at TEXT,
-    finished_at TEXT,
-    FOREIGN KEY (receptor_id) REFERENCES receptors(receptor_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_dock_jobs_status ON docking_jobs(status);
-CREATE INDEX IF NOT EXISTS idx_dock_jobs_receptor ON docking_jobs(receptor_id);
-
-CREATE TABLE IF NOT EXISTS docking_poses (
-    pose_id TEXT PRIMARY KEY,
-    job_id TEXT NOT NULL,
-    mol_id TEXT,
-    ligand_label TEXT NOT NULL DEFAULT '',
-    affinity REAL,
-    rmsd_lb REAL,
-    rmsd_ub REAL,
-    rank INTEGER NOT NULL DEFAULT 0,
-    pose_path TEXT NOT NULL DEFAULT '',
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (job_id) REFERENCES docking_jobs(job_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_dock_pose_job ON docking_poses(job_id);
-CREATE INDEX IF NOT EXISTS idx_dock_pose_mol ON docking_poses(mol_id);
 """

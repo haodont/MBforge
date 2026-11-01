@@ -53,7 +53,7 @@ class ReviewDecision:
     or molecule name); ``payload`` carries kind-specific context.
     """
 
-    item_kind: str  # ambiguous_coref | activity_match | ...
+    item_kind: str  # ambiguous_coref | smiles_correction | ...
     target_id: str
     action: str  # approved | rejected
     choice: str | None = None

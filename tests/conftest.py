@@ -229,7 +229,6 @@ def _clear_singleton_caches() -> None:
     yield
     from mbforge.db.sqlite.database import DatabaseManager
     from mbforge.foundation.config import load_global_config
-    from mbforge.foundation.docking import get_docking_engine
     from mbforge.service.use_cases.documents.library import LibraryStore
 
     DatabaseManager.get.cache_clear()
@@ -237,7 +236,6 @@ def _clear_singleton_caches() -> None:
     # ``load_global_config`` returns a mutable object; clearing its cache
     # after every test guarantees a copy mutated in place cannot survive.
     load_global_config.cache_clear()
-    get_docking_engine.cache_clear()
     # An analysis attempt registered by one test must not be resolvable by the
     # next: a fresh registry keeps credentials scope-local to their test.
     configure_patent_task_registry(create_patent_task_registry())

@@ -3,8 +3,7 @@
 状态：**Phase A 已实施（A1–A7 全部完成）**。Phase B/C 只记录边界，尚未开工。
 日期：2026-10-20。
 目标产品：面向不熟悉计算的使用者的分子科学验证软件。LLM 是其中主导模块，核心能力是
-从专利文献提出 **结构 ↔ 活性配对**，并在此之上发起计算（Boltz-2 结构预测、深度学习实验、
-分子对接），把**可复现、有来源**的结果汇报给药物化学家，最终支持 SAR 分析与下一步合成建议。
+从专利文献提出 **结构 ↔ 活性配对**，并在此之上发起计算（Boltz-2 结构预测、深度学习实验），把**可复现、有来源**的结果汇报给药物化学家，最终支持 SAR 分析与下一步合成建议。
 
 本文件只把 **Phase A：专利活性数据的提取与落库** 作为当前工作。Phase B/C 是目标形态的
 记录，不是承诺的排期。与 [Patent 分析与领域 Agent Harness 计划](plan-patent-agent-harness.md)
@@ -13,7 +12,7 @@
 ## 1. 为什么先做这一步
 
 产品的每一层都建立在"结构 ↔ 活性"这一对数据之上：SAR 需要同一母核的系列读数，
-对接/预测需要一个有结构的起点，报告需要有来源的事实。而当前这条链路是**通的但没接通**：
+结构预测需要一个有结构的起点，报告需要有来源的事实。而当前这条链路是**通的但没接通**：
 
 - 提取器产出读数，但读数只存在于 `patent_facts.json` 产物里；
 - SQL 的 `activities` 表有 34 个字段、有读接口、有 agent 工具，**没有任何生产代码写入**；
@@ -94,7 +93,7 @@
 
 `activities` 与 `molecules` 都没有任何字段区分"文献实测"与"模型预测"。
 `molecules.source_type` 表达的是来源渠道（manual/detected），不是证据等级。
-这一点在 Phase B 引入对接/Boltz-2 后会变成硬约束（见 §7）。
+这一点在 Phase B 引入 Boltz-2 后会变成硬约束（见 §7）。
 
 ## 3. 目标数据模型（Phase A）
 
@@ -682,10 +681,11 @@ A5 可与 A4 并行；A6 在 A5 之后；A7 依赖 A5。
 
 ### 不在 Phase A 范围
 
-- SAR 矩阵与热图（`api/http/sar.py` 仍是 fail-closed 空壳，保持空壳）；
+- SAR 矩阵与热图（原 `api/http/sar.py` fail-closed 空壳及其前端已于 2026-10-31 删除；
+  Phase C 落地前不恢复 API/UI）；
 - 页级"编号 → 结构"的 LLM 索引（这是把解析率提上去的手段，但它属于提取召回，
   建议在 A4 落地、读数能全量入库之后再动，否则无法度量收益）；
-- 任何计算编排（对接 / Boltz-2 / 训练）；
+- 任何计算编排（Boltz-2 / 训练）；
 - 数据集导出（SDF/CSV）。
 
 ## 5. 验证
@@ -717,15 +717,10 @@ A5 可与 A4 并行；A6 在 A5 之后；A7 依赖 A5。
 目标：让"预测"成为一等公民，且与"实测"物理隔离。
 
 1. `evidence_grade`：`measured` / `predicted` / `derived` / `suggested`，贯穿读数与计算产物；
-2. 统一 `compute_runs` 记账（对接 / Boltz-2 / 训练共用）：`model_id`、`model_version`、
+2. 统一 `compute_runs` 记账（Boltz-2 / 训练共用）：`model_id`、`model_version`、
    `weights_hash`、`params_hash`（含 seed）、`input_hash`、`started/finished_at`、`run_id`；
-3. Boltz-2 接入，含格式桥：当前受体导入**只接受 `.pdb`**
-   （`service/use_cases/docking/receptors.py`），而 Boltz-2 输出 mmCIF；
-   还需从预测复合物切出蛋白链、切出配体参考构象、推导对接盒；
-4. 对接已有基础（UniDock-Pro、`docking_jobs`/`docking_poses`），但 `docking_jobs` 只存
-   `params`（含 seed/exhaustiveness），不记录引擎版本，输入侧仅 `receptors.file_hash`
-   有哈希、配体侧没有，需要并入 `compute_runs`；
-5. 预算闸：非专业用户一次"全跑"可能是几十 GPU 小时，需要 compute budget（可复用
+3. Boltz-2 接入，含格式桥：输出 mmCIF，需要切出蛋白链与配体参考构象；
+4. 预算闸：非专业用户一次"全跑"可能是几十 GPU 小时，需要 compute budget（可复用
    `patent_analysis` 的 `createBudgetGuard` 形态）。
 
 ### Phase C — SAR 与建议
@@ -737,7 +732,7 @@ A5 可与 A4 并行；A6 在 A5 之后；A7 依赖 A5。
 - 系列完整性检查可判定（母核判定可复用 `domain/enumeration.py` 里基于 RDKit 骨架编辑的
   MCS / `ReplaceAtom` 能力）。
 
-满足后：SAR 矩阵（当前 `api/http/sar.py` 空壳）→ 只在通过检查时开放；
+满足后：SAR 矩阵（原 fail-closed 空壳已删除，需按本节前置条件重新实现）→ 只在通过检查时开放；
 **合成建议默认不做自动生成**，最多给"该位点已知类似物 + 文献出处"。
 理由：逆合成可行性、试剂可得性、实验室约束都不在文献里，模型生成的建议在药化语境下
 无法自证。

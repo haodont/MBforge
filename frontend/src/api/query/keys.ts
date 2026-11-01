@@ -77,14 +77,6 @@ export const queryKeys = {
       [...queryKeys.molecules.all, 'analogs', molId, minSimilarity] as const,
   },
 
-  markush: {
-    all: ['markush'] as const,
-    list: (libraryRoot: string, params: Record<string, unknown> = {}) =>
-      [...queryKeys.markush.all, 'list', libraryRoot, params] as const,
-    detail: (libraryRoot: string, candidateId: string) =>
-      [...queryKeys.markush.all, 'detail', libraryRoot, candidateId] as const,
-  },
-
   notes: {
     all: ['notes'] as const,
     list: (libraryRoot: string) =>
@@ -149,23 +141,4 @@ export const queryKeys = {
       [...queryKeys.review.all, 'history', libraryRoot, entityId] as const,
   },
 
-  docking: {
-    all: ['docking'] as const,
-    engine: () => [...queryKeys.docking.all, 'engine'] as const,
-    receptors: () => [...queryKeys.docking.all, 'receptors'] as const,
-    jobs: (status: string) => [...queryKeys.docking.all, 'jobs', status] as const,
-    job: (jobId: string) => [...queryKeys.docking.all, 'job', jobId] as const,
-  },
-
-  sar: {
-    all: ['sar'] as const,
-    cliffs: (libraryRoot: string, minSimilarity: number, minActivityRatio: number) =>
-      [...queryKeys.sar.all, 'cliffs', libraryRoot, minSimilarity, minActivityRatio] as const,
-    scaffoldProfile: (libraryRoot: string, scaffoldEsmiles: string) =>
-      [...queryKeys.sar.all, 'scaffold-profile', libraryRoot, scaffoldEsmiles] as const,
-    matrix: (compounds: readonly unknown[], coreSmiles: string) =>
-      [...queryKeys.sar.all, 'matrix', compounds, coreSmiles] as const,
-    heatmap: (matrix: unknown, lowerIsBetter: boolean) =>
-      [...queryKeys.sar.all, 'heatmap', matrix, lowerIsBetter] as const,
-  },
 } as const

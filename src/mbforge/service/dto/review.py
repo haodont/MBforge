@@ -15,7 +15,6 @@ ReviewKind = Literal[
     "low_conf_molecule",
     "review_required",
     "unparsable_smiles",
-    "activity_match",
     "missing_evidence",
     "ambiguous_coref",
     "markush_link",

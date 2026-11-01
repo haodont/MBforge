@@ -91,7 +91,6 @@ def _merge(*, llm_value: float) -> Any:
                     "evidence_ids": ["ev-1"],
                 }
             ],
-            "associations": [],
             "coverage": {"pages_viewed": [1], "pages_uncovered": []},
         }
     )

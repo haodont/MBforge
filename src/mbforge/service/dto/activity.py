@@ -5,12 +5,18 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ActivityExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    doc_ids: list[str] = Field(min_length=1)
+    library_root: str | None = None
+
+
 class ActivityRecordResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     activity_id: str | None = None
-    review_id: str | None = None
-    source: Literal["measurements", "activities", "review_items"]
+    source: Literal["measurements"]
     status: Literal["persisted", "pending", "confirmed", "rejected"]
     mol_id: str | None = None
     doc_id: str

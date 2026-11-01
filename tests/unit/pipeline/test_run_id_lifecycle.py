@@ -28,7 +28,7 @@ from mbforge.service.pipeline.run.ids import mint_run_id
 DOC = "doc-runid-lifecycle"
 
 
-def test_mint_run_id_is_second_grained_and_avoids_existing_run_dirs(
+def test_mint_run_id_is_second_grained_and_avoids_existing_staged_ids(
     tmp_path: Path,
 ) -> None:
     """Minting returns ``YYYYMMDDHHMMSS`` and skips IDs already in use."""
@@ -46,16 +46,17 @@ def test_mint_run_id_is_second_grained_and_avoids_existing_run_dirs(
         # Nothing occupied -> the base second is returned as-is.
         assert mint_run_id(tmp_path, DOC) == "20260909123456"
 
-        # An existing run directory at the base second forces an advance.
-        (layout.run_dir(DOC, "20260909123456")).mkdir(parents=True)
-        assert mint_run_id(tmp_path, DOC) == "20260909123457"
-        (layout.run_dir(DOC, "20260909123457")).mkdir(parents=True)
+        # A staged run ID at the base second forces an advance.
         staging = layout.storage_dir(DOC) / ".staging"
         staging.mkdir(parents=True)
         (staging / "_run.json").write_text(
-            '{"run_id": "20260909123458"}', encoding="utf-8"
+            '{"run_id": "20260909123456"}', encoding="utf-8"
         )
-        assert mint_run_id(tmp_path, DOC) == "20260909123459"
+        assert mint_run_id(tmp_path, DOC) == "20260909123457"
+        (staging / "_run2.json").write_text(
+            '{"run_id": "20260909123457"}', encoding="utf-8"
+        )
+        assert mint_run_id(tmp_path, DOC) == "20260909123458"
     finally:
         run_ids_module.datetime = real_datetime  # type: ignore[assignment]
 

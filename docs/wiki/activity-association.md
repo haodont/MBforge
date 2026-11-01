@@ -110,15 +110,14 @@ assay is unknown — or whose entry carries no structure at all — still report
 |---|---|---|
 | `patent_facts.json` `measurements[]` | **Yes** — this is the only place today | `patent/artifact.py:46-49` |
 | `molecules.activity` (SQLite) | No — needs a canonical-SMILES `mol_id` | `patent_stage.py:266-287` |
-| `activities` table | **No** — `mol_id TEXT NOT NULL`, and nothing in `src/` inserts | `db/sqlite/schema.py:422-424` |
-| `review_items` kind `activity_match` | Read by `db/activity_store.py`, but **no producer** | `activity_store.py:110-127` |
-| `match_activities()` label/SMILES/page matcher | **No production caller** | `activity/matching.py:170`; only `tests/unit/pipeline/test_family_core.py` imports it |
+| `measurements` (SQLite) | **Yes** — no structural requirement; a reading is stored whether or not a structure owns it | `db/sqlite/schema.py` measurements |
+| `measurement_attribution` | Optional `reading -> structure` links, zero or more per reading | `db/measurement_store.py` |
 | `ctx.activity_records` | Declared, never assigned | `run/context.py:71` |
 
-Read side: `db/activity_store.py` + `service/use_cases/documents/activity_queries.py`
-project both `activities` rows and `activity_match` review items, so the API can
-*display* an unassociated row — nothing writes one. The `activities` table is
-populated only by hand in tests (`tests/unit/routers/test_activity.py`).
+Read side: `service/use_cases/documents/activity_queries.py` projects
+`measurements` and their attributions, so the API displays an unassociated
+reading directly. The retired `activities` table, `activity_match` review kind
+and the unused `match_activities()` matcher no longer exist.
 
 ## 3. The causes
 
@@ -235,12 +234,11 @@ every other producer's issues are untouched.
 
 There is currently **no SQL surface for an unassociated activity**:
 
-- `activities.mol_id` is `TEXT NOT NULL` (`db/sqlite/schema.py:422-424`) and no
-  `src/` code inserts into `activities`.
-- `activity_match` review items have no producer.
-- `match_activities()` (row label → full SMILES → low-confidence same-page
-  fallback, with the family-core veto) is fully implemented and tested but has
-  **no production caller**; `ctx.activity_records` is never populated.
+- `measurements` stores a printed reading with no structural requirement;
+  `measurement_attribution` holds the optional `reading -> structure` links.
+- The retired `activities` table and `activity_match` review kind are gone.
+- The unused `match_activities()` matcher was removed; `ctx.activity_records` is
+  never populated.
 
 So "activity with no molecule" is representable only in
 `patent_facts.json`. The dead matcher and the `activities` table are the pieces
@@ -371,10 +369,8 @@ this page describes working end to end.
 - `tests/unit/pipeline/test_patent_stage_llm.py::test_an_association_reaches_the_persisted_activity`
   — the same chain through the stage: gap → association → declared entry → bound
   reading → `molecules.activity`, with the answered failure gone.
-- `tests/unit/pipeline/test_family_core.py` — exercises `match_activities` and the
-  family-core veto, which have no production caller.
-- `tests/unit/routers/test_activity.py`, `tests/unit/test_cascade_delete_activities.py`
-  — seed `activities` rows and `activity_match` review items by hand.
+- `tests/unit/routers/test_activity.py` — seeds `measurements` rows and their
+  attributions by hand.
 
 ## Related
 

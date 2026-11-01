@@ -32,9 +32,7 @@ from mbforge.service.ports import get_database, get_runtime
 
 logger = get_logger(__name__)
 
-_READINESS_RESOURCE_IDS = frozenset(
-    {"moldet", "molparser", "rdkit", "torch", "unidock_tools"}
-)
+_READINESS_RESOURCE_IDS = frozenset({"moldet", "molparser", "rdkit", "torch"})
 
 
 def _sanitize_error(exc: BaseException) -> str:

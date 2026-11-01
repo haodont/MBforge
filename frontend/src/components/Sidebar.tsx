@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { FlaskIcon, SettingsIcon, GlobeIcon, FileTextIcon, QueueIcon, CheckIcon, ChatIcon, TargetIcon, SparklesIcon } from './icons'
+import { FlaskIcon, SettingsIcon, GlobeIcon, FileTextIcon, QueueIcon, CheckIcon, ChatIcon, SparklesIcon } from './icons'
 import { Button } from '@/components/ui'
 import { useAppContext } from '@/context/AppContext'
 
@@ -9,7 +9,6 @@ const resources = [
   { id: 'molecules', path: '/molecules', icon: FlaskIcon },
   { id: 'queue', path: '/queue', icon: QueueIcon },
   { id: 'review', path: '/review', icon: CheckIcon },
-  { id: 'docking', path: '/docking', icon: TargetIcon },
   { id: 'knowledge', path: '/notes', icon: GlobeIcon },
 ]
 

@@ -154,8 +154,8 @@ async def _auto_enqueue(root: str, doc_id: str) -> str | None:
 
     Returns the new ``run_id``, or ``None`` when auto-enqueue is disabled or
     the enqueue itself failed. A failed enqueue must not fail the import: the
-    bytes are already stored and registered, so the document stays importable
-    (the workspace hides it until a run reaches a terminal status).
+    bytes are already stored and registered, so the document stays visible as
+    ``pending`` and can be queued later.
     """
     from mbforge.foundation import config as app_config
     from mbforge.service.use_cases.pipeline import ingest
@@ -365,18 +365,6 @@ async def library_get_crop(
         library_service.resolve_crop_path, root, doc_id, rel_path
     )
     return FileResponse(str(target_path), media_type="image/png")
-
-
-@router.get("/documents/{doc_id}/pages/{page}")
-async def library_get_page_text(
-    doc_id: str, page: int, library_root: str | None = None
-) -> PlainTextResponse:
-    """Return the per-page OCR text for a single page (1-based)."""
-    root = _resolve_library_root(
-        {"library_root": library_root} if library_root else None
-    )
-    text = await asyncio.to_thread(library_service.read_page_text, root, doc_id, page)
-    return PlainTextResponse(text)
 
 
 @router.post("/configure")
