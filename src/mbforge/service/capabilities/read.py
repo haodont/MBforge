@@ -148,11 +148,15 @@ async def resolve_document(
         documents = (
             [exact] if exact is not None else store.search_documents(request.query)
         )
-        return [document.to_dict() for document in documents[: request.limit]]
+        return [document.to_dict() for document in documents]
 
     rows = await asyncio.to_thread(_search)
+    truncated = len(rows) > request.limit
     return CapabilityResult(
-        data=ResolveDocumentOutput(matches=[DocumentMatch(**row) for row in rows])
+        data=ResolveDocumentOutput(
+            matches=[DocumentMatch(**row) for row in rows[: request.limit]]
+        ),
+        truncated=truncated,
     )
 
 
@@ -201,6 +205,10 @@ async def get_document_markdown(
 async def list_evidence(
     context: CapabilityContext, request: ListEvidenceInput
 ) -> CapabilityResult:
+    store = LibraryStore.get(context.library_root)
+    document = await asyncio.to_thread(store.load_document, request.doc_id)
+    if document is None:
+        raise NotFoundError("document not found", detail=request.doc_id)
     records = await asyncio.to_thread(
         source_evidence.list_evidence,
         context.library_root,
@@ -291,7 +299,8 @@ async def get_run(context: CapabilityContext, request: GetRunInput) -> Capabilit
             status=status or "unknown",
             nodes=[
                 RunNode(
-                    stage=str(row.get("stage", "")), status=str(row.get("status", ""))
+                    stage=str(row.get("stage") or ""),
+                    status=str(row.get("status") or ""),
                 )
                 for row in rows
             ],
