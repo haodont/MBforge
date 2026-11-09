@@ -1364,11 +1364,16 @@ git commit -m "test(capabilities): cover manifest and edit-mode guard"
 
 ---
 
-## Task 8: 现有 Node agent 接入
+## Task 8: CLI 优先接入 + 现有 Node agent
+
+CLI 是 v1 的 agent 呈现形式；`server.ts` 保留为前端兼容入口。两者共用同一套能力工具与模型配置，避免 CLI/HTTP 两套会话逻辑。
 
 **Files:**
 - Create: `agent/src/capabilities.ts`
+- Create: `agent/src/runtime.ts`
+- Create: `agent/src/cli.ts`
 - Modify: `agent/src/server.ts`
+- Modify: `agent/package.json`
 - Delete: `agent/src/tool.ts`
 
 - [ ] **Step 1: 写 `agent/src/capabilities.ts`**
@@ -1455,41 +1460,200 @@ export async function loadCapabilityTools(mode: AgentMode) {
 }
 ```
 
-- [ ] **Step 2: 修改 `agent/src/server.ts`**
+- [ ] **Step 2: 写 `agent/src/runtime.ts`**
 
-删除：
-
-```ts
-import { moleculeSearchTool } from './tool.js'
-```
-
-加入：
+把 `server.ts` 里的模型配置与会话创建原样迁出，并让 CLI/HTTP 共用：
 
 ```ts
+import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+import {
+  AuthStorage,
+  createAgentSession,
+  createExtensionRuntime,
+  ModelRegistry,
+  type AgentSession,
+  type ResourceLoader,
+  SessionManager,
+  SettingsManager,
+} from '@mariozechner/pi-coding-agent'
+import type { Api, Model } from '@mariozechner/pi-ai'
+
 import { loadCapabilityTools, type AgentMode } from './capabilities.js'
-```
 
-在 `createSession` 开头加入：
+export interface AgentLlmConfig {
+  provider: string
+  model: string
+  apiKey: string
+  baseUrl: string
+  maxTokens: number
+  requestTimeoutMs: number
+}
 
-```ts
-const mode: AgentMode =
-  process.env.MBFORGE_AGENT_MODE === 'edit' ? 'edit' : 'readonly'
-const capabilityTools = await loadCapabilityTools(mode)
-```
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : {}
+}
 
-把 `createAgentSession({...})` 的参数改为：
+function stringValue(value: unknown, fallback: string, maxLength = 512): string {
+  if (typeof value !== 'string') return fallback
+  const trimmed = value.trim()
+  return trimmed.length > 0 && trimmed.length <= maxLength ? trimmed : fallback
+}
 
-```ts
-    settingsManager,
-    resourceLoader,
-    sessionManager: SessionManager.inMemory(),
-    tools: capabilityTools.map((tool) => tool.name),
-    customTools: capabilityTools,
-```
+function numberValue(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : fallback
+}
 
-把 `getSystemPrompt` 改为：
+function defaultBaseUrl(provider: string): string {
+  if (provider === 'deepseek') return 'https://api.deepseek.com/v1'
+  if (provider === 'ollama') return 'http://127.0.0.1:11434/v1'
+  if (provider === 'anthropic') return 'https://api.anthropic.com'
+  return 'https://api.openai.com/v1'
+}
 
-```ts
+async function loadPersistedLlmConfig(): Promise<Record<string, unknown>> {
+  const settingsPath =
+    process.env.MBFORGE_SETTINGS_PATH ?? join(homedir(), 'MBForge', 'settings.json')
+  try {
+    const parsed = JSON.parse(await readFile(settingsPath, 'utf8')) as unknown
+    return asRecord(asRecord(parsed).llm)
+  } catch {
+    return {}
+  }
+}
+
+function mergeConfig(raw: unknown, persisted: Record<string, unknown>): Record<string, unknown> {
+  const value = asRecord(raw)
+  const merged = { ...persisted }
+  for (const [key, candidate] of Object.entries(value)) {
+    if (candidate !== '' && candidate !== '***') merged[key] = candidate
+  }
+  return merged
+}
+
+export function readConfig(
+  raw: unknown,
+  persisted: Record<string, unknown>,
+): AgentLlmConfig {
+  const value = mergeConfig(raw, persisted)
+  const provider = stringValue(
+    value.provider ?? process.env.MBFORGE_AGENT_PROVIDER,
+    'openai_compatible',
+    80,
+  ).toLowerCase()
+  const apiKey = stringValue(
+    value.api_key ?? value.apiKey ?? process.env.MBFORGE_AGENT_API_KEY,
+    provider === 'ollama' ? 'ollama' : '',
+    4096,
+  )
+  const model = stringValue(
+    value.model ?? process.env.MBFORGE_AGENT_MODEL,
+    'gpt-4o-mini',
+    256,
+  )
+  const baseUrl = stringValue(
+    value.base_url ?? value.baseUrl ?? process.env.MBFORGE_AGENT_BASE_URL,
+    defaultBaseUrl(provider),
+    2048,
+  ).replace(/\/$/, '')
+  const requestTimeoutSeconds = numberValue(
+    value.request_timeout ?? process.env.MBFORGE_AGENT_REQUEST_TIMEOUT,
+    60,
+    1,
+    600,
+  )
+
+  if (provider !== 'ollama' && !apiKey) {
+    throw new Error('An API key is required for the configured LLM provider')
+  }
+
+  return {
+    provider,
+    model,
+    apiKey,
+    baseUrl,
+    maxTokens: Math.round(
+      numberValue(value.max_tokens ?? value.maxTokens, 4096, 256, 32768),
+    ),
+    requestTimeoutMs: Math.round(requestTimeoutSeconds * 1000),
+  }
+}
+
+export async function readPersistedConfig(raw: unknown): Promise<AgentLlmConfig> {
+  return readConfig(raw, await loadPersistedLlmConfig())
+}
+
+function createConfiguredModel(config: AgentLlmConfig): {
+  authStorage: AuthStorage
+  modelRegistry: ModelRegistry
+  model: Model<Api>
+} {
+  const authStorage = AuthStorage.inMemory()
+  const modelRegistry = ModelRegistry.inMemory(authStorage)
+  const api: Api = config.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions'
+  const providerName = `mbforge-${config.provider}`
+
+  modelRegistry.registerProvider(providerName, {
+    name: config.provider,
+    api,
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    authHeader: api === 'openai-completions',
+    models: [
+      {
+        id: config.model,
+        name: config.model,
+        api,
+        reasoning: false,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: config.maxTokens,
+        compat:
+          api === 'openai-completions'
+            ? {
+                supportsStore: false,
+                supportsDeveloperRole: false,
+                supportsReasoningEffort: false,
+                supportsUsageInStreaming: false,
+                maxTokensField: 'max_tokens',
+              }
+            : undefined,
+      },
+    ],
+  })
+
+  const model = modelRegistry.find(providerName, config.model)
+  if (!model) throw new Error('Could not register the configured LLM model')
+  return { authStorage, modelRegistry, model }
+}
+
+export async function createSession(
+  config: AgentLlmConfig,
+  mode: AgentMode,
+): Promise<AgentSession> {
+  const { authStorage, modelRegistry, model } = createConfiguredModel(config)
+  const settingsManager = SettingsManager.inMemory({
+    compaction: { enabled: false },
+    retry: {
+      enabled: false,
+      provider: { timeoutMs: config.requestTimeoutMs, maxRetries: 0 },
+    },
+    defaultThinkingLevel: 'off',
+  })
+  const capabilityTools = await loadCapabilityTools(mode)
+  const resourceLoader: ResourceLoader = {
+    getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+    getSkills: () => ({ skills: [], diagnostics: [] }),
+    getPrompts: () => ({ prompts: [], diagnostics: [] }),
+    getThemes: () => ({ themes: [], diagnostics: [] }),
+    getAgentsFiles: () => ({ agentsFiles: [] }),
     getSystemPrompt: () =>
       'You are the MBForge molecular-science assistant. ' +
       `You are in ${mode} mode. ` +
@@ -1498,22 +1662,225 @@ const capabilityTools = await loadCapabilityTools(mode)
         : 'Only read-only capabilities are available; never attempt to change library state. ') +
       'Search the library before making claims. Separate source-backed facts from hypotheses, ' +
       'cite returned identifiers, and never claim a search result is a validated design recommendation.',
-```
+    getAppendSystemPrompt: () => [],
+    extendResources: () => {},
+    reload: async () => {},
+  }
 
-删除 `agent/src/tool.ts`。
-
-- [ ] **Step 3: 更新会话创建后的工具存在性检查**
-
-把原来的 `molecule_search` 检查替换为：
-
-```ts
-if (!session.getAllTools().some((tool) => tool.name === 'resolve_document')) {
-  session.dispose()
-  throw new Error('MBForge capability tools were not registered')
+  const { session } = await createAgentSession({
+    model,
+    thinkingLevel: 'off',
+    authStorage,
+    modelRegistry,
+    settingsManager,
+    resourceLoader,
+    sessionManager: SessionManager.inMemory(),
+    tools: capabilityTools.map((tool) => tool.name),
+    customTools: capabilityTools,
+  })
+  if (!session.getAllTools().some((tool) => tool.name === 'resolve_document')) {
+    session.dispose()
+    throw new Error('MBForge capability tools were not registered')
+  }
+  return session
 }
 ```
 
-- [ ] **Step 4: 构建与类型检查**
+- [ ] **Step 3: 写 `agent/src/cli.ts`**
+
+```ts
+import { stdin as input, stdout as output } from 'node:process'
+import { createInterface } from 'node:readline/promises'
+
+import type { AgentSession } from '@mariozechner/pi-coding-agent'
+
+import type { AgentMode } from './capabilities.js'
+import { createSession, readPersistedConfig } from './runtime.js'
+
+interface CliArgs {
+  mode: AgentMode
+  prompt?: string
+  tokenFile?: string
+}
+
+function usage(): string {
+  return [
+    'Usage: mbforge-agent [--mode readonly|edit] [--prompt <text>] [--token-file <path>]',
+    '',
+    '  --mode        readonly (default) or edit; edit enables mutating capabilities',
+    '  --prompt, -p  run one prompt and exit',
+    '  --token-file  capability token path (default: manifest token_path)',
+  ].join('\n')
+}
+
+function parseArgs(argv: string[]): CliArgs {
+  let mode: AgentMode =
+    process.env.MBFORGE_AGENT_MODE === 'edit' ? 'edit' : 'readonly'
+  let prompt: string | undefined
+  let tokenFile = process.env.MBFORGE_CAPABILITY_TOKEN_FILE
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]
+    if (argument === '--mode') {
+      const value = argv[++index]
+      if (value !== 'readonly' && value !== 'edit') {
+        throw new Error('--mode must be readonly or edit')
+      }
+      mode = value
+    } else if (argument === '--prompt' || argument === '-p') {
+      prompt = argv[++index]
+    } else if (argument === '--token-file') {
+      tokenFile = argv[++index]
+    } else if (argument === '--help' || argument === '-h') {
+      console.log(usage())
+      process.exit(0)
+    } else {
+      throw new Error(`unknown argument: ${argument}`)
+    }
+  }
+
+  if (tokenFile) process.env.MBFORGE_CAPABILITY_TOKEN_FILE = tokenFile
+  return { mode, prompt, tokenFile }
+}
+
+async function promptOnce(session: AgentSession, message: string): Promise<void> {
+  const unsubscribe = session.subscribe((event) => {
+    if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
+      process.stdout.write(event.assistantMessageEvent.delta)
+    } else if (event.type === 'tool_execution_start') {
+      process.stderr.write(`\n[tool] ${event.toolName} start\n`)
+    } else if (event.type === 'tool_execution_end') {
+      process.stderr.write(`[tool] ${event.toolName} ${event.isError ? 'error' : 'done'}\n`)
+    }
+  })
+  try {
+    await session.prompt(message, { expandPromptTemplates: false })
+  } finally {
+    unsubscribe()
+    process.stdout.write('\n')
+  }
+  const error = session.agent.state.errorMessage
+  if (error) throw new Error(error)
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2))
+  const config = await readPersistedConfig({})
+  const session = await createSession(config, args.mode)
+  let readline: ReturnType<typeof createInterface> | undefined
+
+  process.on('SIGINT', () => {
+    if (session.isStreaming) {
+      void session.abort()
+      return
+    }
+    session.dispose()
+    process.exit(0)
+  })
+
+  try {
+    if (args.prompt) {
+      await promptOnce(session, args.prompt)
+      return
+    }
+
+    readline = createInterface({ input, output })
+    console.log(`MBForge agent (${args.mode}). /exit to quit.`)
+    for (;;) {
+      const line = (await readline.question('mbforge> ')).trim()
+      if (!line) continue
+      if (line === '/exit' || line === '/quit') break
+      if (line === '/mode') {
+        console.log(args.mode)
+        continue
+      }
+      try {
+        await promptOnce(session, line)
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        console.error(`error: ${detail}`)
+      }
+    }
+  } finally {
+    readline?.close()
+    session.dispose()
+  }
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exitCode = 1
+})
+```
+
+- [ ] **Step 4: 更新 `agent/package.json` scripts**
+
+```json
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "cli": "node dist/cli.js",
+    "dev:cli": "npm run build && npm run cli"
+  }
+```
+
+- [ ] **Step 5: 修改 `agent/src/server.ts`**
+
+删除：
+
+```ts
+import { moleculeSearchTool } from './tool.js'
+```
+
+把模型配置与会话创建函数从 `server.ts` 删除（`AgentLlmConfig`、`asRecord`、`stringValue`、`numberValue`、`defaultBaseUrl`、`loadPersistedLlmConfig`、`mergeConfig`、`readConfig`、`createConfiguredModel`、`createSession`），改为：
+
+```ts
+import { createSession, readPersistedConfig, type AgentLlmConfig } from './runtime.js'
+```
+
+`getSession` 中创建会话改为：
+
+```ts
+async function getSession(sessionId: string, config: AgentLlmConfig): Promise<SessionEntry> {
+  const signature = JSON.stringify(config)
+  const existing = sessions.get(sessionId)
+  if (existing && existing.signature === signature) return existing
+  existing?.session.dispose()
+
+  const mode = process.env.MBFORGE_AGENT_MODE === 'edit' ? 'edit' : 'readonly'
+  const session = await createSession(config, mode)
+  const entry: SessionEntry = { config, signature, session, tail: Promise.resolve() }
+  sessions.set(sessionId, entry)
+  while (sessions.size > maxSessions) {
+    const oldest = sessions.keys().next().value
+    if (!oldest) break
+    const evicted = sessions.get(oldest)
+    evicted?.session.dispose()
+    sessions.delete(oldest)
+  }
+  return entry
+}
+```
+
+`handleChat` 中读取配置改为：
+
+```ts
+const config = await readPersistedConfig(input.config ?? existing?.config)
+```
+
+同时删除 `server.ts` 中不再使用的 imports：`readFile`、`homedir`、`join`、`AuthStorage`、`createAgentSession`、`createExtensionRuntime`、`ModelRegistry`、`ResourceLoader`、`SettingsManager`、`Api`、`Model`。
+
+删除 `agent/src/tool.ts`。
+
+- [ ] **Step 6: 确认检查位置**
+
+工具存在性检查只保留在 `runtime.ts` 的 `createSession` 内；`server.ts` 不再保留自己的 `createSession` 或 `getAllTools` 检查。搜索确认：
+
+Run: `rg -n "getAllTools|molecule_search" agent/src`
+Expected: 只命中 `runtime.ts` 的 `resolve_document` 检查；无 `molecule_search`。
+
+- [ ] **Step 7: 构建与类型检查**
 
 Run: `npm --prefix agent run build`
 Expected: PASS。
@@ -1521,7 +1888,27 @@ Expected: PASS。
 Run: `npm --prefix agent run check`
 Expected: PASS。
 
-- [ ] **Step 5: 手工 smoke**
+- [ ] **Step 8: CLI smoke**
+
+先启动后端（`uv run python -m mbforge --no-browser`），再执行：
+
+```bash
+curl -s http://127.0.0.1:18792/api/v1/capabilities/guide >/dev/null
+npm --prefix agent run build
+node agent/dist/cli.js --mode readonly --prompt "Find a document named sample.pdf and report its status."
+```
+
+Expected: stdout 输出流式回答；stderr 出现 `[tool] resolve_document start/done` 或 `get_document`；进程正常退出。只读模式下写能力不会出现在工具列表。
+
+再验证 edit 模式：
+
+```bash
+node agent/dist/cli.js --mode edit --token-file library/.mbforge/capability-token --prompt "List the first 3 documents."
+```
+
+Expected: 能成功调用只读能力；令牌被读取时不打印明文。
+
+- [ ] **Step 9: HTTP 手工 smoke**
 
 Run:
 
@@ -1537,12 +1924,12 @@ Find a document named sample.pdf and tell me whether its patent facts are ready.
 
 Expected: 工具调用日志出现 `resolve_document`（或 `get_document`），回答引用返回的 `doc_id`/`status`；不应再出现 `molecule_search`。
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add agent/src/capabilities.ts agent/src/server.ts
+git add agent/src/capabilities.ts agent/src/runtime.ts agent/src/cli.ts agent/src/server.ts agent/package.json
 git rm agent/src/tool.ts
-git commit -m "feat(agent): consume capability manifest"
+git commit -m "feat(agent): add CLI-first capability client"
 ```
 
 ---
