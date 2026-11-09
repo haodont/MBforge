@@ -27,6 +27,7 @@ removed from the active path.
 ## Active plans
 
 - [Source layout reorganization](../docs/plan-source-layout-reorganization.md)
+- [Capability platform](../docs/plan-capability-platform.md)
 - [SLANet-1M as table parser on the Hiro-Layout path](../docs/plan-slanet-1m-table-parser.md)
 - [Backend architecture](../docs/wiki/architecture.md)
 - [Pipeline contract](../docs/wiki/pipeline.md)

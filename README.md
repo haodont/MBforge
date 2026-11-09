@@ -109,6 +109,16 @@ is the only runtime evidence store and there is no intermediate branch artifact.
 Text spans and downstream artifacts carry the resulting `evidence_id` rather
 than duplicating the evidence payload.
 
+## Capability API
+
+MBForge exposes agent-callable capabilities under `/api/v1/capabilities`.
+`GET /api/v1/capabilities` returns the manifest; `GET /api/v1/capabilities/guide`
+returns a Markdown guide with input schemas. Read-only calls need no credential.
+Mutating calls require `X-MBForge-Token`; the token is created at
+`{library_root}/.mbforge/capability-token` and is read by the harness only in
+edit mode. Patent extraction is asynchronous: `submit_extraction` returns a
+`run_id`, then poll `get_run` and read `get_patent_result`.
+
 ## Verification
 
 ```bash
