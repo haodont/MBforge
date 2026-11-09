@@ -1,5 +1,6 @@
 """Agent-callable capability registry."""
 
+from . import read as _read  # noqa: F401 — registers read capabilities
 from .registry import (
     Capability,
     CapabilityContext,
