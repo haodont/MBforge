@@ -145,7 +145,9 @@ async def resolve_document(
     def _search() -> list[dict[str, Any]]:
         store = LibraryStore.get(context.library_root)
         exact = store.load_document(request.query)
-        documents = [exact] if exact is not None else store.search_documents(request.query)
+        documents = (
+            [exact] if exact is not None else store.search_documents(request.query)
+        )
         return [document.to_dict() for document in documents[: request.limit]]
 
     rows = await asyncio.to_thread(_search)
@@ -176,9 +178,7 @@ async def get_document_markdown(
 ) -> CapabilityResult:
     path = LibraryLayout(context.library_root).document_md(request.doc_id)
     if not path.is_file():
-        raise NotFoundError(
-            "document markdown not available", detail=request.doc_id
-        )
+        raise NotFoundError("document markdown not available", detail=request.doc_id)
     text = await asyncio.to_thread(path.read_text, encoding="utf-8")
     chunk = text[request.offset : request.offset + request.max_chars]
     next_offset = (
@@ -275,9 +275,7 @@ async def search_molecules_capability(
     return CapabilityResult(data=SearchMoleculesOutput(items=items))
 
 
-async def get_run(
-    context: CapabilityContext, request: GetRunInput
-) -> CapabilityResult:
+async def get_run(context: CapabilityContext, request: GetRunInput) -> CapabilityResult:
     tasks = await ingest.list_tasks(context.library_root)
     rows = [task for task in tasks if task.get("run_id") == request.run_id]
     if not rows:
@@ -292,7 +290,9 @@ async def get_run(
             doc_id=rows[0].get("doc_id"),
             status=status or "unknown",
             nodes=[
-                RunNode(stage=str(row.get("stage", "")), status=str(row.get("status", "")))
+                RunNode(
+                    stage=str(row.get("stage", "")), status=str(row.get("status", ""))
+                )
                 for row in rows
             ],
         )

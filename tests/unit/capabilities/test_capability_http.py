@@ -16,9 +16,7 @@ def test_manifest_lists_read_and_write_capabilities(app_client: TestClient) -> N
     assert Path(body["token_path"]).parts[-2:] == (".mbforge", "capability-token")
 
 
-def test_guide_creates_token_file(
-    app_client: TestClient, tmp_library: Path
-) -> None:
+def test_guide_creates_token_file(app_client: TestClient, tmp_library: Path) -> None:
     response = app_client.get("/api/v1/capabilities/guide")
     assert response.status_code == 200
     assert "submit_extraction" in response.text
@@ -39,8 +37,10 @@ def test_valid_token_reaches_business_validation(
 ) -> None:
     app_client.get("/api/v1/capabilities/guide")
     token = (
-        tmp_library / ".mbforge" / "capability-token"
-    ).read_text(encoding="utf-8").strip()
+        (tmp_library / ".mbforge" / "capability-token")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
     response = app_client.post(
         "/api/v1/capabilities/submit_extraction",
         json={"doc_id": "missing"},
