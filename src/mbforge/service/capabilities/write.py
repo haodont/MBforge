@@ -24,6 +24,17 @@ from mbforge.service.use_cases.pipeline import ingest
 
 _ACTIVE_RUN_STATUSES = {"pending", "processing", "blocked"}
 
+_document_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def _document_lock(library_root: str, doc_id: str) -> asyncio.Lock:
+    key = (library_root, doc_id)
+    lock = _document_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _document_locks[key] = lock
+    return lock
+
 
 class ImportPdfInput(BaseModel):
     path: str = Field(..., min_length=1, max_length=4096)
@@ -88,7 +99,10 @@ async def _active_run_id(library_root: str, doc_id: str) -> str | None:
     tasks = await ingest.list_tasks(library_root)
     for task in tasks:
         if task.get("doc_id") == doc_id and task.get("status") in _ACTIVE_RUN_STATUSES:
-            return str(task.get("run_id") or "")
+            run_id = task.get("run_id")
+            if run_id:
+                return str(run_id)
+            return None
     return None
 
 
@@ -104,14 +118,15 @@ async def import_pdf(
 async def submit_extraction(
     context: CapabilityContext, request: SubmitExtractionInput
 ) -> CapabilityResult:
-    store = LibraryStore.get(context.library_root)
-    document = await asyncio.to_thread(store.load_document, request.doc_id)
-    if document is None:
-        raise NotFoundError("document not found", detail=request.doc_id)
-    active = await _active_run_id(context.library_root, request.doc_id)
-    if active:
-        raise ConflictError("document already has an active run", detail=active)
-    run_id = await ingest.enqueue(context.library_root, request.doc_id)
+    async with _document_lock(context.library_root, request.doc_id):
+        store = LibraryStore.get(context.library_root)
+        document = await asyncio.to_thread(store.load_document, request.doc_id)
+        if document is None:
+            raise NotFoundError("document not found", detail=request.doc_id)
+        active = await _active_run_id(context.library_root, request.doc_id)
+        if active:
+            raise ConflictError("document already has an active run", detail=active)
+        run_id = await ingest.enqueue(context.library_root, request.doc_id)
     return CapabilityResult(
         data=SubmitExtractionOutput(run_id=run_id, doc_id=request.doc_id)
     )
@@ -120,15 +135,19 @@ async def submit_extraction(
 async def reingest_document(
     context: CapabilityContext, request: ReingestDocumentInput
 ) -> CapabilityResult:
-    store = LibraryStore.get(context.library_root)
-    document = await asyncio.to_thread(store.load_document, request.doc_id)
-    if document is None:
-        raise NotFoundError("document not found", detail=request.doc_id)
-    active = await _active_run_id(context.library_root, request.doc_id)
-    if active:
-        raise ConflictError("document already has an active run", detail=active)
-    await asyncio.to_thread(store.clear_pipeline_data, request.doc_id)
-    run_id = await ingest.enqueue(context.library_root, request.doc_id)
+    async with _document_lock(context.library_root, request.doc_id):
+        store = LibraryStore.get(context.library_root)
+        document = await asyncio.to_thread(store.load_document, request.doc_id)
+        if document is None:
+            raise NotFoundError("document not found", detail=request.doc_id)
+        source = await asyncio.to_thread(store.resolve_file, request.doc_id)
+        if source is None:
+            raise NotFoundError("document source file not found", detail=request.doc_id)
+        active = await _active_run_id(context.library_root, request.doc_id)
+        if active:
+            raise ConflictError("document already has an active run", detail=active)
+        await asyncio.to_thread(store.clear_pipeline_data, request.doc_id)
+        run_id = await ingest.enqueue(context.library_root, request.doc_id)
     return CapabilityResult(
         data=ReingestDocumentOutput(run_id=run_id, doc_id=request.doc_id)
     )
