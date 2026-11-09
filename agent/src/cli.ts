@@ -22,6 +22,12 @@ function usage(): string {
   ].join('\n')
 }
 
+function requireValue(argv: string[], index: number, flag: string): string {
+  const value = argv[index]
+  if (!value || value.startsWith('-')) throw new Error(`${flag} requires a value`)
+  return value
+}
+
 function parseArgs(argv: string[]): CliArgs {
   let mode: AgentMode =
     process.env.MBFORGE_AGENT_MODE === 'edit' ? 'edit' : 'readonly'
@@ -37,9 +43,9 @@ function parseArgs(argv: string[]): CliArgs {
       }
       mode = value
     } else if (argument === '--prompt' || argument === '-p') {
-      prompt = argv[++index]
+      prompt = requireValue(argv, ++index, '--prompt')
     } else if (argument === '--token-file') {
-      tokenFile = argv[++index]
+      tokenFile = requireValue(argv, ++index, '--token-file')
     } else if (argument === '--help' || argument === '-h') {
       console.log(usage())
       process.exit(0)

@@ -25,11 +25,11 @@ export interface AgentLlmConfig {
   requestTimeoutMs: number
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+export function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
 }
 
-function stringValue(value: unknown, fallback: string, maxLength = 512): string {
+export function stringValue(value: unknown, fallback: string, maxLength = 512): string {
   if (typeof value !== 'string') return fallback
   const trimmed = value.trim()
   return trimmed.length > 0 && trimmed.length <= maxLength ? trimmed : fallback

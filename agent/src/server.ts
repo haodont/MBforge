@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 
 import type { AgentSession } from '@mariozechner/pi-coding-agent'
 
-import { createSession, readPersistedConfig, type AgentLlmConfig } from './runtime.js'
+import { asRecord, createSession, readPersistedConfig, stringValue, type AgentLlmConfig } from './runtime.js'
 
 interface ChatRequest {
   message: string
@@ -20,16 +20,6 @@ interface SessionEntry {
 
 const sessions = new Map<string, SessionEntry>()
 const maxSessions = 32
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
-}
-
-function stringValue(value: unknown, fallback: string, maxLength = 512): string {
-  if (typeof value !== 'string') return fallback
-  const trimmed = value.trim()
-  return trimmed.length > 0 && trimmed.length <= maxLength ? trimmed : fallback
-}
 
 async function getSession(sessionId: string, config: AgentLlmConfig): Promise<SessionEntry> {
   const signature = JSON.stringify(config)
