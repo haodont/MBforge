@@ -15,7 +15,6 @@ describe('queryKeys', () => {
       [queryKeys.documents.list(), ['documents', 'list'], 'documents.list'],
       [queryKeys.ingest.queue('/tmp/lib'), ['ingest', 'queue', '/tmp/lib'], 'ingest.queue'],
       [queryKeys.molecules.list('/lib'), ['molecules', 'list', '/lib'], 'molecules.list'],
-      [queryKeys.notes.list('/r'), ['notes', '/r'], 'notes.list'],
     ]
     for (const [actual, expected, name] of cases) {
       expect(actual, name).toEqual(expected)

@@ -90,7 +90,6 @@ def _fake_extract_molecules(
     max_pages: int | None = None,
     cancel_check: Any = None,
     staging_dir: Any = None,
-    ocr_config: Any = None,
     ocr_spans_by_page: Any = None,
 ) -> list:
     """Stand-in for extract_molecules_from_pdf that drops one staged crop."""

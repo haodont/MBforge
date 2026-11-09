@@ -17,7 +17,6 @@ something to silently classify as a figure.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from types import MappingProxyType
 
 TEXT = "text"
 TABLE = "table"
@@ -79,8 +78,3 @@ def is_text(kind: str) -> bool:
 def kind_rank(kind: str) -> int:
     """Sort rank for reading order."""
     return _CATEGORY_ORDER[category_of(kind)]
-
-
-def kind_categories() -> Mapping[str, str]:
-    """Read-only view of the registry."""
-    return MappingProxyType(_KIND_CATEGORY)

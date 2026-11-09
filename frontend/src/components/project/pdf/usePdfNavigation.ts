@@ -93,10 +93,10 @@ export function usePdfNavigation(args: UsePdfNavigationArgs): UsePdfNavigationRe
   const { doc, libraryRoot, initialPage, initialSnapshot } = args
 
   const [currentPage, setCurrentPage] = useState(initialPage ?? initialSnapshot?.currentPage ?? 1)
-  const [pdfScale, setPdfScale] = useState(Math.max(1, initialSnapshot?.pdfScale ?? 1))
+  const [pdfScale, setPdfScale] = useState(Math.min(5, Math.max(0.5, initialSnapshot?.pdfScale ?? 1)))
   const [pdfPageCount, setPdfPageCount] = useState(0)
-  const [showTextLayer, setShowTextLayer] = useState(true)
-  const [showTextPanel, setShowTextPanel] = useState(false)
+  const [showTextLayer, setShowTextLayer] = useState(initialSnapshot?.showTextLayer ?? true)
+  const [showTextPanel, setShowTextPanel] = useState(initialSnapshot?.showTextPanel ?? false)
   const [pageJumpInput, setPageJumpInput] = useState('')
 
   const [pageInfo, setPageInfo] = useState<PageRenderInfo | null>(null)
@@ -192,8 +192,8 @@ export function usePdfNavigation(args: UsePdfNavigationArgs): UsePdfNavigationRe
     setPageTextItems(prev => { const next = new Map(prev); next.set(page, items); return next })
   }, [])
 
-  const handleZoomIn = useCallback(() => setPdfScale(s => Math.min(s + 0.3, 5)), [])
-  const handleZoomOut = useCallback(() => setPdfScale(s => Math.max(s - 0.3, 1)), [])
+  const handleZoomIn = useCallback(() => setPdfScale(s => Math.min(s + 0.2, 5)), [])
+  const handleZoomOut = useCallback(() => setPdfScale(s => Math.max(s - 0.2, 0.5)), [])
   const handleZoomReset = useCallback(() => setPdfScale(1), [])
 
   const handleJumpToPage = useCallback((): number => {
@@ -213,8 +213,14 @@ export function usePdfNavigation(args: UsePdfNavigationArgs): UsePdfNavigationRe
     } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
       e.preventDefault()
       setCurrentPage(p => Math.min(pdfPageCount || 1, p + 1))
+    } else if (e.key === '+' || e.key === '=') {
+      e.preventDefault()
+      handleZoomIn()
+    } else if (e.key === '-' || e.key === '_') {
+      e.preventDefault()
+      handleZoomOut()
     }
-  }, [pdfPageCount])
+  }, [handleZoomIn, handleZoomOut, pdfPageCount])
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     const el = pdfScrollRef.current

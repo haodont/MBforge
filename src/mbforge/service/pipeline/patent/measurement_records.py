@@ -12,7 +12,7 @@ the document printed, and it must be storable, citable and countable.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from mbforge.contracts.measurement import (
@@ -216,41 +216,6 @@ def _owner_of(
     return direct or indirect
 
 
-def unattributed_reason(
-    measurement: Mapping[str, Any],
-    entries_by_id: Mapping[str, Mapping[str, Any]],
-    *,
-    document_has_detections: bool,
-    unmatched_designations: Collection[str] = (),
-) -> str | None:
-    """Explain why a reading has no structure, or ``None`` when it has one.
-
-    A single "unattributed" count cannot tell a medicinal chemist whether the
-    document never drew the compound (a fact about the source) or whether a
-    structure was detected and the rules could not bind it (a defect worth
-    fixing). This is the pure classifier behind that split.
-
-    ``unmatched_designations`` is the set of designations for which the document
-    *did* print a structure that no rule managed to bind. A designation absent
-    from both the entries' structures and that set was never drawn at all.
-    """
-    if _owner_of(measurement, entries_by_id):
-        return None
-    entry_id = _optional_text(measurement.get("compound_entry_id"))
-    entry = entries_by_id.get(entry_id) if entry_id else None
-    label_key = _text(entry.get("label_key")) if entry else ""
-    if label_key and label_key in unmatched_designations:
-        # A structure this document drew fits the designation, but no rule tied
-        # them together. That is recoverable work, not a property of the source.
-        return "structure_detected_unmatched"
-    if not document_has_detections:
-        return "document_has_no_detections"
-    if not entry_id:
-        return "no_printed_designation"
-    # The designation is printed; the document simply never drew its structure.
-    return "designation_without_structure"
-
-
 def measurement_attributions(
     *,
     doc_id: str,
@@ -305,4 +270,4 @@ def measurement_attributions(
     return attributions
 
 
-__all__ = ["measurement_attributions", "measurement_records", "unattributed_reason"]
+__all__ = ["measurement_attributions", "measurement_records"]

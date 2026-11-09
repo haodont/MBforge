@@ -110,17 +110,6 @@ CREATE TABLE IF NOT EXISTS molecule_images (
     moldet_conf REAL,
     FOREIGN KEY (mol_id) REFERENCES molecules(mol_id)
 );
-CREATE TABLE IF NOT EXISTS molecule_relations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    mol_a_id TEXT NOT NULL,
-    mol_b_id TEXT NOT NULL,
-    relation_type TEXT NOT NULL,
-    score REAL,
-    metadata TEXT DEFAULT '{}',
-    UNIQUE(mol_a_id, mol_b_id, relation_type),
-    FOREIGN KEY (mol_a_id) REFERENCES molecules(mol_id),
-    FOREIGN KEY (mol_b_id) REFERENCES molecules(mol_id)
-);
 CREATE TABLE IF NOT EXISTS molecule_detections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mol_id TEXT,
@@ -143,7 +132,6 @@ CREATE INDEX IF NOT EXISTS idx_m_status ON molecules(status);
 CREATE INDEX IF NOT EXISTS idx_m_type ON molecules(source_type);
 CREATE INDEX IF NOT EXISTS idx_m_canonical ON molecules(canonical_smiles);
 CREATE INDEX IF NOT EXISTS idx_mi_mol ON molecule_images(mol_id);
-CREATE INDEX IF NOT EXISTS idx_mr_type ON molecule_relations(relation_type);
 CREATE INDEX IF NOT EXISTS idx_md_doc_page ON molecule_detections(doc_id, page);
 CREATE INDEX IF NOT EXISTS idx_md_mol ON molecule_detections(mol_id);
 CREATE INDEX IF NOT EXISTS idx_md_evidence_id ON molecule_detections(evidence_id);
@@ -262,92 +250,6 @@ CREATE TABLE IF NOT EXISTS markush_decisions (
 );
 CREATE INDEX IF NOT EXISTS idx_md_entity ON markush_decisions(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_md_action ON markush_decisions(action);
--- Attachment sites, R-group options, and mount relationships
--- (suggested / confirmed). ``markush_sites`` requires explicit atom-map
--- numbers via ``[*:1]``-style SMILES — implicit mapping by * position
--- order is intentionally disallowed.
-CREATE TABLE IF NOT EXISTS markush_sites (
-    site_id TEXT PRIMARY KEY,
-    scaffold_id TEXT NOT NULL,
-    site_label TEXT NOT NULL,
-    atom_map_num INTEGER,
-    attachment_count INTEGER NOT NULL DEFAULT 1,
-    bond_type TEXT,
-    source_text TEXT DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'pending',
-    properties TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (scaffold_id) REFERENCES markush_scaffolds(scaffold_id)
-);
-CREATE INDEX IF NOT EXISTS idx_mst_scaffold ON markush_sites(scaffold_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mst_label ON markush_sites(scaffold_id, site_label);
-CREATE TABLE IF NOT EXISTS markush_options (
-    option_id TEXT PRIMARY KEY,
-    site_id TEXT NOT NULL,
-    fragment_id TEXT,
-    normalized_smiles TEXT,
-    definition_text TEXT NOT NULL DEFAULT '',
-    constraints TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (site_id) REFERENCES markush_sites(site_id),
-    FOREIGN KEY (fragment_id) REFERENCES markush_fragments(fragment_id)
-);
-CREATE INDEX IF NOT EXISTS idx_mo_site ON markush_options(site_id);
-CREATE INDEX IF NOT EXISTS idx_mo_fragment ON markush_options(fragment_id);
-CREATE TABLE IF NOT EXISTS markush_mounts (
-    mount_id TEXT PRIMARY KEY,
-    site_id TEXT NOT NULL,
-    fragment_id TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    confidence REAL,
-    reasons TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL DEFAULT 'suggested',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (site_id) REFERENCES markush_sites(site_id),
-    FOREIGN KEY (fragment_id) REFERENCES markush_fragments(fragment_id)
-);
-CREATE INDEX IF NOT EXISTS idx_mmnt_site ON markush_mounts(site_id);
-CREATE INDEX IF NOT EXISTS idx_mmnt_fragment ON markush_mounts(fragment_id);
-CREATE INDEX IF NOT EXISTS idx_mmnt_status ON markush_mounts(status);
--- Bounded enumeration: persist enumeration runs and
--- generated candidates so users can review them before promotion to the
--- ``molecules`` table. ``theoretical_count`` is computed up front so the
--- API can refuse oversized runs without doing the work.
-CREATE TABLE IF NOT EXISTS markush_generation_runs (
-    run_id TEXT PRIMARY KEY,
-    scaffold_id TEXT NOT NULL,
-    selection TEXT NOT NULL,
-    theoretical_count INTEGER NOT NULL,
-    requested_limit INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    error TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    completed_at TEXT,
-    FOREIGN KEY (scaffold_id) REFERENCES markush_scaffolds(scaffold_id)
-);
-CREATE INDEX IF NOT EXISTS idx_mgen_scaffold ON markush_generation_runs(scaffold_id);
-CREATE INDEX IF NOT EXISTS idx_mgen_status ON markush_generation_runs(status);
-CREATE TABLE IF NOT EXISTS markush_generated_candidates (
-    generated_id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    scaffold_id TEXT NOT NULL,
-    combination_key TEXT NOT NULL,
-    smiles TEXT NOT NULL,
-    canonical_smiles TEXT NOT NULL,
-    assignments TEXT NOT NULL,
-    validation_status TEXT NOT NULL,
-    review_status TEXT NOT NULL DEFAULT 'pending',
-    properties TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(run_id, combination_key),
-    FOREIGN KEY (run_id) REFERENCES markush_generation_runs(run_id)
-);
-CREATE INDEX IF NOT EXISTS idx_mgc_run ON markush_generated_candidates(run_id);
-CREATE INDEX IF NOT EXISTS idx_mgc_review ON markush_generated_candidates(review_status);
 """
 
 # Canonical page evidence shared by Extract, Markdown and all interpretation
@@ -395,6 +297,20 @@ CREATE TABLE IF NOT EXISTS molecule_corrections (
 );
 CREATE INDEX IF NOT EXISTS idx_mc_mol ON molecule_corrections(mol_id, created_at);
 
+-- AI assistance for one review item: a suggestion a human accepts or rejects.
+-- Kept in its own table because review rows are rebuilt on every publication,
+-- and a paid model answer must survive that.
+CREATE TABLE IF NOT EXISTS review_assists (
+    kind TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    model TEXT DEFAULT '',
+    vision INTEGER NOT NULL DEFAULT 0,
+    answer TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (kind, item_id)
+);
 CREATE TABLE IF NOT EXISTS review_items (
     item_id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,

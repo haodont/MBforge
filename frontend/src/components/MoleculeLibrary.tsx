@@ -9,14 +9,12 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { AddMoleculeDialog } from '@/components/ui/AddMoleculeDialog'
 import { useAppContext } from '@/context/AppContext'
 import { useMoleculeLibrary } from '@/hooks/useMoleculeLibrary'
-import { useMoleculeAnalysis } from '@/hooks/useMoleculeAnalysis'
 import MoleculeFiltersComponent from '@/components/molecule/MoleculeFilters'
 import MoleculeSearchBox from '@/components/molecule/MoleculeSearchBox'
 import MoleculeTable from '@/components/molecule/MoleculeTable'
 import MoleculeCardGrid from '@/components/molecule/MoleculeCardGrid'
-import MoleculeAnalysisPanel from '@/components/molecule/MoleculeAnalysisPanel'
 import MoleculeDetailDrawer from '@/components/molecule/MoleculeDetailDrawer'
-import { GridIcon, SparklesIcon, TableIcon } from '@/components/icons'
+import { GridIcon, TableIcon } from '@/components/icons'
 import {
   useBulkDeleteMolecules,
   useBulkUpdateMoleculeStatus,
@@ -30,9 +28,6 @@ import './molecule/MoleculeLibrary.css'
 export default function MoleculeLibrary() {
   const { libraryRoot } = useAppContext()
   const { t } = useTranslation()
-  const analyzeSelectionLabel = t('mol.analyzeSelection') === 'mol.analyzeSelection'
-    ? 'Analyze selection'
-    : t('mol.analyzeSelection')
 
   const {
     molecules,
@@ -64,12 +59,6 @@ export default function MoleculeLibrary() {
   const selectCurrentPage = selectCurrentPageAction
   const selectAllResults = selectAllResultsAction
 
-  const {
-    activeTab,
-    setActiveTab,
-    analysisInput,
-  } = useMoleculeAnalysis(molecules, selectedIds)
-
   const bulkUpdateStatus = useBulkUpdateMoleculeStatus()
   const bulkDelete = useBulkDeleteMolecules()
 
@@ -77,7 +66,6 @@ export default function MoleculeLibrary() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [lastClickedId, setLastClickedId] = useState<string | null>(null)
   const [showAddDialog, setShowAddDialog] = useState(false)
-  const [isAnalysisOpen, setIsAnalysisOpen] = useState(false)
   const [bulkStatus, setBulkStatus] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -151,7 +139,7 @@ export default function MoleculeLibrary() {
   return (
     <PageContainer>
       <section className="molecule-library-page">
-        <div className={`molecule-library-workbench${isAnalysisOpen ? ' has-analysis' : ''}`}>
+        <div className="molecule-library-workbench">
           <main className="molecule-library-results">
             <section className="molecule-library-filters">
               <div className="molecule-library-filters__toolbar">
@@ -214,15 +202,6 @@ export default function MoleculeLibrary() {
                 </Button>
                 <Button variant="ghost" size="sm" onClick={selectAllResults} disabled={loading || totalCount === 0}>
                   {t('mol.selectAllResults')}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={<SparklesIcon size={15} />}
-                  onClick={() => setIsAnalysisOpen((open) => !open)}
-                  disabled={selectedIds.size === 0}
-                >
-                  {isAnalysisOpen ? t('mol.hideAnalysis') : analyzeSelectionLabel}
                 </Button>
                 <Select
                   value={bulkStatus}
@@ -321,29 +300,6 @@ export default function MoleculeLibrary() {
 
             </footer>
           </main>
-
-          {isAnalysisOpen && (
-            <aside className="molecule-library-analysis" aria-label={t('mol.analysisTitle')}>
-              <div className="molecule-library-analysis__header">
-                <div>
-                  <span className="molecule-library-analysis__eyebrow">{t('mol.analysisEyebrow')}</span>
-                  <h2>{t('mol.analysisTitle')}</h2>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setIsAnalysisOpen(false)}>
-                  {t('common.close')}
-                </Button>
-              </div>
-              <div className="molecule-library-analysis__content">
-                <MoleculeAnalysisPanel
-                  analysisInput={analysisInput}
-                  activeTab={activeTab}
-                  onTabChange={(tab) => setActiveTab(tab)}
-                  libraryRoot={libraryRoot}
-                  onRefresh={refresh}
-                />
-              </div>
-            </aside>
-          )}
         </div>
       </section>
 

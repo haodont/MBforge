@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mbforge.contracts.measurement import MeasurementQuery
 from mbforge.domain.evidence_kind import category_of
 from mbforge.foundation.errors import ValidationError
 from mbforge.service.ports import get_database, get_repositories
@@ -90,21 +91,64 @@ def query_documents(
 def query_activities(
     library_root: str,
     *,
-    doc_id: str,
+    doc_id: str = "",
     target: str = "",
     assay_description: str = "",
+    metric: str = "",
+    min_value: float | None = None,
+    max_value: float | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """Return a document's activity records (the Patent-stage measurements)."""
-    if not doc_id:
-        raise ValidationError("doc_id is required")
-    return list_activity_records(
-        library_root,
-        doc_id,
+    """Readings in the bound library, filtered by document/target/metric/value.
+
+    ``doc_id`` is optional: a dataset question ("which readings are below
+    40 nM") spans the library, while a document question stays scoped to it.
+    Each reading says why it has no structure instead of leaving the caller to
+    infer it from a null.
+    """
+    if doc_id:
+        return list_activity_records(
+            library_root,
+            doc_id,
+            target=target,
+            assay_description=assay_description,
+            limit=limit,
+            metric=metric,
+            min_value=min_value,
+            max_value=max_value,
+        )
+    repositories = get_repositories(library_root)
+    query = MeasurementQuery(
         target=target,
         assay_description=assay_description,
+        metric=metric,
+        min_value=min_value,
+        max_value=max_value,
         limit=limit,
     )
+    rows = repositories.measurements.list(query)
+    links = repositories.measurements.attributions_for(
+        [row["measurement_id"] for row in rows]
+    )
+    return [
+        {
+            **row,
+            "activity_id": row["measurement_id"],
+            "attributions": links.get(row["measurement_id"], []),
+            "mol_ids": [
+                link["mol_id"] for link in links.get(row["measurement_id"], [])
+            ],
+            "attributed": bool(links.get(row["measurement_id"])),
+        }
+        for row in rows
+    ]
+
+
+def activity_stats(library_root: str, *, doc_id: str = "") -> dict[str, Any]:
+    """Coverage counts: what the document printed vs what reached a structure."""
+    from mbforge.service.use_cases.documents.activity_queries import dataset_stats
+
+    return dataset_stats(library_root, doc_id).model_dump()
 
 
 def query_evidence(
@@ -152,6 +196,7 @@ def run_library_sql(library_root: str, sql: str, *, max_rows: int) -> dict[str, 
 
 
 __all__ = [
+    "activity_stats",
     "library_schema",
     "library_stats",
     "query_activities",

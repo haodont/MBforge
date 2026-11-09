@@ -6,8 +6,7 @@ accepted, an LLM failure or an unready sidecar falls back to the deterministic
 artifact instead of failing the stage, a timeout keeps the validated answers as
 a partial result, and a cancellation stays a cancellation.
 
-Functions under test: ``PatentStage.execute`` and its ``_recorded_items`` /
-``_answer_submission`` / ``_combine_merges`` helpers
+Functions under test: ``PatentStage.execute``
 (``mbforge.service.pipeline.stages.patent_stage``).
 """
 
@@ -19,14 +18,8 @@ from typing import Any
 
 import pytest
 
-from mbforge.contracts.patent import (
-    DraftAssayMethod,
-    DraftMeasurement,
-    PatentGap,
-    PatentGapAnswer,
-)
+from mbforge.contracts.patent import PatentGapAnswer
 from mbforge.contracts.patent_runtime import (
-    PatentAnalysisBudget,
     PatentAnalysisEvent,
     PatentAnalysisOutcome,
     PatentAnalysisResult,
@@ -37,14 +30,8 @@ from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.domain.evidence import SourceEvidence
 from mbforge.service.pipeline.cancellation import TaskCancelledError
 from mbforge.service.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.service.pipeline.patent.llm_merge import MergeResult
 from mbforge.service.pipeline.run.context import PipelineContext
-from mbforge.service.pipeline.stages.patent_stage import (
-    PatentStage,
-    _answer_submission,
-    _combine_merges,
-    _recorded_items,
-)
+from mbforge.service.pipeline.stages.patent_stage import PatentStage
 from mbforge.service.ports.patent_analysis import configure_patent_analysis_runtime
 from mbforge.service.use_cases.documents.patent_facts import load_patent_facts
 
@@ -53,6 +40,7 @@ DOC = "doc1"
 #: stage produce a gap, and a document with no gap must never call the model.
 LINES = ("实施例1：化合物1的制备", "将原料溶于溶剂。")
 TABLE = "| 化合物编号 | IC50 (nM) |\n| --- | --- |\n| 1 | unreadable |"
+READING = "化合物1的IC50值为< 100 nM。"
 
 
 @dataclass
@@ -68,6 +56,11 @@ class _FakeRuntime:
     outcome: PatentAnalysisOutcome | None = None
     answer_status: str = "answered"
     with_answer: bool = True
+    #: Answer with an assay method only, the way a session settles an
+    #: ``assay_attribution`` gap (the readings stay Python's).
+    assay_only: bool = False
+    #: Hand the same answer back twice, as a session correcting itself does.
+    repeat_answer: bool = False
     evidence_reads: dict[str, bool] = field(default_factory=dict)
     #: Associations the model made, shaped as ``PatentGapLink`` payloads.
     links: list[dict[str, Any]] = field(default_factory=list)
@@ -75,6 +68,55 @@ class _FakeRuntime:
 
     def ensure_ready(self) -> str | None:
         return self.ready_reason
+
+    def _answer(self, scope: PatentTaskScope, gap: Any) -> PatentGapAnswer:
+        answered = self.answer_status == "answered"
+        items: list[dict[str, Any]] = []
+        if answered and not self.assay_only:
+            items = [
+                {
+                    "local_key": "measurement-1",
+                    "metric": "IC50",
+                    "value": {
+                        "raw_text": "IC50 = 42 nM",
+                        "operator": "=",
+                        "value": 42.0,
+                        "unit": "nM",
+                    },
+                    "compound_label_raw": "化合物1",
+                    "compound_label_key": "1",
+                    "page": 1,
+                    "evidence_ids": list(gap.evidence_ids),
+                }
+            ]
+        return PatentGapAnswer.model_validate(
+            {
+                "gap_id": gap.gap_id,
+                "gap_kind": gap.gap_kind,
+                "doc_id": scope.doc_id,
+                "attempt_id": scope.attempt_id,
+                "evidence_signature": scope.evidence_signature,
+                "status": self.answer_status,
+                "evidence_ids": list(gap.evidence_ids),
+                "links": list(self.links) if answered else [],
+                "unanswerable_reason": (
+                    "not_a_fact" if self.answer_status == "unanswerable" else None
+                ),
+                "assay_methods": (
+                    [
+                        {
+                            "local_key": "assay-1",
+                            "target": "CYP3A4",
+                            "endpoint": "IC50",
+                            "evidence_ids": list(gap.evidence_ids),
+                        }
+                    ]
+                    if answered and self.assay_only
+                    else []
+                ),
+                "items": items,
+            }
+        )
 
     def run(
         self,
@@ -97,47 +139,8 @@ class _FakeRuntime:
             )
         answers = []
         if self.with_answer and gaps:
-            answers = [
-                PatentGapAnswer.model_validate(
-                    {
-                        "gap_id": gaps[0].gap_id,
-                        "gap_kind": gaps[0].gap_kind,
-                        "doc_id": scope.doc_id,
-                        "attempt_id": scope.attempt_id,
-                        "evidence_signature": scope.evidence_signature,
-                        "status": self.answer_status,
-                        "evidence_ids": list(gaps[0].evidence_ids),
-                        "links": (
-                            list(self.links) if self.answer_status == "answered" else []
-                        ),
-                        "unanswerable_reason": (
-                            "not_a_fact"
-                            if self.answer_status == "unanswerable"
-                            else None
-                        ),
-                        "items": (
-                            [
-                                {
-                                    "local_key": "measurement-1",
-                                    "metric": "IC50",
-                                    "value": {
-                                        "raw_text": "IC50 = 42 nM",
-                                        "operator": "=",
-                                        "value": 42.0,
-                                        "unit": "nM",
-                                    },
-                                    "compound_label_raw": "化合物1",
-                                    "compound_label_key": "1",
-                                    "page": 1,
-                                    "evidence_ids": list(gaps[0].evidence_ids),
-                                }
-                            ]
-                            if self.answer_status == "answered"
-                            else []
-                        ),
-                    }
-                )
-            ]
+            answer = self._answer(scope, gaps[0])
+            answers = [answer, answer] if self.repeat_answer else [answer]
         return PatentAnalysisResult(
             outcome=self.outcome or PatentAnalysisOutcome(ok=True, status="succeeded"),
             gap_answers=answers,
@@ -192,149 +195,6 @@ def _ctx(
 
 def _enable_analysis(patch_config: Any) -> None:
     patch_config(lambda cfg: setattr(cfg.patent_analysis, "enabled", True))
-
-
-def test_recorded_readings_bind_to_the_gap_and_batches_stay_distinct() -> None:
-    """The Python-side merge helpers, with the model's answers only as input.
-
-    A method-only answer must still attach to the reading the rules recorded: the
-    binding is Python's, using the value verbatim (a resent reading could drift),
-    a gap that names no recorded fact binds nothing rather than guessing a row,
-    and candidates from different batches stay distinct (key is the item id).
-    """
-    scope = PatentTaskScope(
-        library_root="/library",
-        doc_id=DOC,
-        run_id="run-1",
-        attempt_id="attempt-1",
-        evidence_signature="sig-1",
-        budget=PatentAnalysisBudget(
-            max_model_turns=1,
-            wall_clock_seconds=5,
-            max_total_tokens=1000,
-            digest_char_budget=1000,
-        ),
-    )
-    gap = PatentGap(
-        gap_id="assay_method_unresolved:ev-1",
-        gap_kind="assay_attribution",
-        code="assay_method_unresolved",
-        evidence_ids=["ev-1"],
-        excerpt="| 化合物编号 | IC50 (nM) |\n| 1 | 26.3 |",
-        rule_context={"related_fact_id": "measurement-1"},
-    )
-    recorded = [
-        {
-            "measurement_id": "measurement-1",
-            "metric": "IC50",
-            "mol_id": "mol-1",
-            "value": {
-                "raw_text": "< 100 nM",
-                "operator": "<",
-                "original_value": 100.0,
-                "original_unit": "nM",
-                "qualitative_value": "",
-            },
-            "evidence_ids": ["ev-1"],
-            "provenance": {"reference_raw": "化合物1", "reference_key": "1"},
-        }
-    ]
-    answer = PatentGapAnswer(
-        gap_id=gap.gap_id,
-        gap_kind=gap.gap_kind,
-        doc_id=DOC,
-        attempt_id=scope.attempt_id,
-        evidence_signature=scope.evidence_signature,
-        status="answered",
-        assay_methods=[
-            DraftAssayMethod(
-                local_key="assay-1",
-                target="CYP3A4",
-                endpoint="IC50",
-                evidence_ids=["ev-1"],
-            )
-        ],
-    )
-
-    items = _recorded_items(answer, gap, recorded)
-    assert len(items) == 1
-    assert items[0].assay_local_key == "assay-1"
-    assert items[0].value.raw_text == "< 100 nM"
-    assert items[0].value.operator == "<"
-    assert items[0].compound_label_raw == "化合物1"
-    assert items[0].molecule_ref == "mol-1"
-    draft = _answer_submission(answer, scope, items or None)
-    assert [item.local_key for item in draft.measurements] == [items[0].local_key]
-
-    # An answer that does send the readings keeps them; Python must not replace a
-    # value the model actually read with the recorded one.
-    resent = answer.model_copy(
-        update={
-            "items": [
-                DraftMeasurement(
-                    local_key="reading-1",
-                    metric="IC50",
-                    value={
-                        "raw_text": "26.3",
-                        "operator": "=",
-                        "value": 26.3,
-                        "unit": "nM",
-                    },
-                    evidence_ids=["ev-1"],
-                )
-            ]
-        }
-    )
-    assert _recorded_items(resent, gap, recorded) == []
-    assert _answer_submission(resent, scope).measurements[0].value.raw_text == "26.3"
-
-    # A gap that names no recorded fact binds nothing rather than guessing a row.
-    assert (
-        _recorded_items(answer, gap.model_copy(update={"rule_context": {}}), recorded)
-        == []
-    )
-
-    # A method-only answer must also retain a recorded dimensionless reading.
-    logarithmic = _recorded_items(
-        answer,
-        gap,
-        [
-            {
-                **recorded[0],
-                "metric": "pIC50",
-                "value": {
-                    "raw_text": "6.9",
-                    "operator": "=",
-                    "original_value": 6.9,
-                    "original_unit": "",
-                },
-            }
-        ],
-    )
-    preserved = _answer_submission(answer, scope, logarithmic).measurements[0]
-    assert preserved.metric == "pIC50"
-    assert preserved.value.value == 6.9
-    assert preserved.value.unit == ""
-    assert preserved.value.missing_fields == []
-
-    first = MergeResult(
-        measurements=[],
-        candidates=[{"review_item_id": "item-1", "reason": "llm_only"}],
-        stats={"conflict": 0},
-    )
-    second = MergeResult(
-        measurements=[],
-        candidates=[{"review_item_id": "item-2", "reason": "llm_only"}],
-        stats={"conflict": 1},
-    )
-
-    combined = _combine_merges([first, second])
-
-    assert [item["review_item_id"] for item in combined.candidates] == [
-        "item-1",
-        "item-2",
-    ]
-    assert combined.stats["conflict"] == 1
 
 
 def test_the_llm_pass_is_opt_in_and_never_called_without_a_gap(
@@ -451,6 +311,43 @@ def test_an_accepted_submission_is_merged_into_a_hybrid_artifact(
     assert gap.evidence_ids == [blocks[2].evidence_id]
     assert "IC50" in gap.excerpt
     assert gap.rule_context["structures"][0]["mol_id"] == "CC"
+
+    # A method-only answer leaves the reading to Python: the recorded rule value is
+    # published unchanged and agrees with the answer, never retyped by the model.
+    recorded_root = tmp_path / "recorded"
+    recorded_ctx, _ = _ctx(recorded_root, lines=(*LINES, READING), table=None)
+    recorded_runtime = _FakeRuntime(assay_only=True)
+    configure_patent_analysis_runtime(recorded_runtime)
+
+    recorded_result = PatentStage().execute(recorded_ctx)
+
+    assert recorded_result.status == "success"
+    assert recorded_runtime.calls["gaps"][0].gap_kind == "assay_attribution"
+    recorded = load_patent_facts(recorded_root, DOC)
+    assert recorded is not None
+    assert recorded.measurements[0]["value"]["raw_text"] == "< 100 nM"
+    bound = [
+        item
+        for item in recorded.review_candidates
+        if item["reason"] == "llm_only" and item["llm"]["value_text"] == "< 100 nM"
+    ]
+    assert len(bound) == 1
+    assert bound[0]["llm"]["measurement"]["assay_local_key"] == "assay-1"
+
+    # Two submissions in one run reach the artifact as one set: the later answer
+    # supersedes the same slot instead of forking a duplicate.
+    union_root = tmp_path / "union"
+    union_ctx, _ = _ctx(union_root)
+    union_runtime = _FakeRuntime(repeat_answer=True)
+    configure_patent_analysis_runtime(union_runtime)
+
+    PatentStage().execute(union_ctx)
+
+    union = load_patent_facts(union_root, DOC)
+    assert union is not None
+    assert union.llm["gaps"]["answered"] == 2
+    assert union.stats["llm_merge"]["llm_only"] == 2
+    assert len(union.review_candidates) == 1
 
 
 def test_an_association_reaches_the_persisted_activity(

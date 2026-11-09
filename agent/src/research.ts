@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { SessionManager, defineTool } from '@earendil-works/pi-coding-agent'
 import { Type } from '@earendil-works/pi-ai'
 import { startSse, writeSse, sendJson } from './http.js'
-import { asRecord, loadPersistedLlmConfig, readConfig, sanitizeError, type AgentLlmConfig } from './llm.js'
+import { asRecord, loadPersistedLlmConfig, readConfig, sanitizeError, stringValue, type AgentLlmConfig } from './llm.js'
 import { createSessionForSpec } from './session.js'
 import { postTool, searchLibraryParameters } from './tool.js'
 import { researchPrompt } from './prompts.js'
@@ -70,12 +70,66 @@ export async function handleResearchChat(request: IncomingMessage, response: Ser
     defineTool({ name: 'query_evidence', label: 'Read source evidence', description: 'Read source text and identifiers from a registered document in the bound library.',
       parameters: Type.Object({ doc_id: Type.String({ maxLength: 128 }), page: Type.Optional(Type.Integer({ minimum: 1 })), text: Type.Optional(Type.String({ maxLength: 512 })) }),
       async execute(_id, params, signal) { return result(await scopedPostTool(credential, '/api/v1/research/runtime/query-evidence', { credential, query: params }, signal)) } }),
-    defineTool({ name: 'query_activities', label: 'Read activities', description: 'Read accepted activity records. Preserve comparator, unit, species and assay distinctions.',
-      parameters: Type.Object({ doc_id: Type.String({ maxLength: 128 }), target: Type.Optional(Type.String({ maxLength: 256 })) }),
+    defineTool({ name: 'recognize_molecules', label: 'Recognize drawn molecules', description: 'Run the local MolDet + MolParser recognizers over one page of a bound document (optionally one PDF-point region). Returns SMILES/E-SMILES, PDF-point bbox and OCR-read printed labels, read-only. Use it for structure or SMILES questions and to tie a printed designation to its drawing; never author a SMILES yourself, and report an empty result as "not detected".',
+      parameters: Type.Object({
+        doc_id: Type.String({ minLength: 1, maxLength: 128 }),
+        page: Type.Integer({ minimum: 1 }),
+        region: Type.Optional(Type.Array(Type.Number(), { minItems: 4, maxItems: 4 })),
+        max_molecules: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+      }),
+      async execute(_id, params, signal) { return result(await scopedPostTool(credential, '/api/v1/research/runtime/recognize-molecules', { credential, ...params }, signal)) } }),
+    defineTool({ name: 'query_activities', label: 'Read activities', description: 'Read accepted activity records, optionally library-wide. Preserve comparator, unit, species and assay distinctions; each row says why it has no structure.',
+      parameters: Type.Object({
+        doc_id: Type.Optional(Type.String({ maxLength: 128 })),
+        target: Type.Optional(Type.String({ maxLength: 256 })),
+        metric: Type.Optional(Type.String({ maxLength: 64 })),
+        min_value: Type.Optional(Type.Number()),
+        max_value: Type.Optional(Type.Number()),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+      }),
       async execute(_id, params, signal) { return result(await scopedPostTool(credential, '/api/v1/research/runtime/query-activities', { credential, query: params }, signal)) } }),
+    defineTool({ name: 'activity_stats', label: 'Activity coverage', description: 'Read how many printed readings exist and how many reached a structure, with the reason each unattributed reading has none. Use it before claiming there is no activity data.',
+      parameters: Type.Object({ doc_id: Type.Optional(Type.String({ maxLength: 128 })) }),
+      async execute(_id, params, signal) { return result(await scopedPostTool(credential, '/api/v1/research/runtime/activity-stats', { credential, doc_id: params.doc_id ?? '' }, signal)) } }),
     defineTool({ name: 'query_tasks', label: 'Read task status', description: 'Read current queue status; reading does not start or cancel tasks.',
       parameters: Type.Object({ run_id: Type.Optional(Type.String({ maxLength: 128 })) }),
       async execute(_id, params, signal) { return result(await scopedPostTool(credential, '/api/v1/research/runtime/query-tasks', { credential, ...params }, signal)) } }),
+    defineTool({ name: 'propose_review', label: 'Propose a review item',
+      description: 'Record a correction you found in an existing target a human has not reviewed yet (evidence row, measurement, molecule, entry or designation). The proposal enters the review center for a human to confirm or reject; it never changes data itself, and a target a human already decided is refused. Cite the evidence ids you actually read, and never invent a value you did not see.',
+      parameters: Type.Object({
+        doc_id: Type.Optional(Type.String({ maxLength: 128 })),
+        target_kind: Type.Union([Type.Literal('evidence'), Type.Literal('measurement'), Type.Literal('molecule'), Type.Literal('entry'), Type.Literal('designation')]),
+        target_id: Type.String({ minLength: 1, maxLength: 200 }),
+        field: Type.Optional(Type.String({ maxLength: 80 })),
+        before: Type.Optional(Type.String({ maxLength: 4000 })),
+        after: Type.String({ minLength: 1, maxLength: 4000 }),
+        rationale: Type.Optional(Type.String({ maxLength: 2000 })),
+        evidence_ids: Type.Optional(Type.Array(Type.String({ maxLength: 128 }), { maxItems: 32 })),
+      }),
+      async execute(_id, params, signal) {
+        const payload = await scopedPostTool<{ items: Array<Record<string, unknown>> }>(credential, '/api/v1/research/runtime/propose-review', { credential, items: [params] }, signal)
+        const refs = (Array.isArray(payload.items) ? payload.items : [])
+          .filter(item => item && item.action !== 'refused')
+          .map(item => {
+            const record = asRecord(item.payload)
+            const proposal = asRecord(record.proposal)
+            return {
+              item_id: stringValue(item.item_id, '', 128),
+              kind: 'ai_review',
+              doc_id: stringValue(proposal.doc_id, '', 128),
+              target_kind: stringValue(proposal.target_kind, '', 40),
+              target_id: stringValue(proposal.target_id, '', 200),
+              field: stringValue(proposal.field, '', 80),
+              before_actual: stringValue(record.before_actual, '', 4000),
+              after: stringValue(proposal.after, '', 4000),
+              rationale: stringValue(proposal.rationale, '', 2000),
+              status: stringValue(item.status, 'pending', 20),
+            }
+          })
+          .filter(ref => ref.item_id !== '')
+        if (refs.length > 0) emit('review', { items: refs })
+        return result(payload)
+      } }),
     defineTool({ name: 'start_patent_analysis', label: 'Analyze selected patents', description: 'Queue Patent analysis only for explicitly authorized selected document identifiers. Repeating the same request reuses the existing task.',
       parameters: Type.Object({ doc_ids: Type.Array(Type.String({ maxLength: 128 }), { minItems: 1, maxItems: 8 }) }),
       async execute(_id, params, signal) {

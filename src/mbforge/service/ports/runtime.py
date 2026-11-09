@@ -9,6 +9,7 @@ stay ``Any``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -62,7 +63,9 @@ class HiroLayoutCapability(Protocol):
 
 
 class TableSlanetCapability(Protocol):
-    def predict_table(self, crop: Any) -> Any: ...
+    def predict_table(
+        self, crop: Any, *, molecule_cells: Sequence[Mapping[str, Any]] = ()
+    ) -> Any: ...
 
 
 class OcrCropLabelsCapability(Protocol):

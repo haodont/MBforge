@@ -1,1 +1,1 @@
-"""Markush domain services: enumeration, review decisions, and sites."""
+"""Markush domain services: review decisions."""

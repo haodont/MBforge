@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from mbforge.service.pipeline.layout.labels import category_of_label, region_type_of
+from mbforge.service.pipeline.layout.labels import region_type_of
 
 #: Contract render resolution: 144 DPI = 2 px/pt (matches ``_OCR_RENDER_PX_PER_PT``).
 DEFAULT_RENDER_DPI = 144.0
@@ -108,11 +108,6 @@ def build_regions(
     return regions, page_frame
 
 
-def region_category(region: dict[str, Any]) -> str:
-    """Evidence category of one region."""
-    return category_of_label(str(region.get("label", "")))
-
-
 def molecule_regions(
     molecules: Sequence[Any],
     *,
@@ -175,19 +170,10 @@ def molecule_regions(
     return regions
 
 
-def is_text_region(region: dict[str, Any]) -> bool:
-    """Whether this region carries running text (i.e. should be OCR'd)."""
-    from mbforge.service.pipeline.layout.labels import TEXT_REGION_TYPES
-
-    return str(region.get("type", "")) in TEXT_REGION_TYPES
-
-
 __all__ = [
     "DEFAULT_RENDER_DPI",
     "build_regions",
-    "is_text_region",
     "molecule_regions",
     "px_box_to_pdf",
     "px_per_pt",
-    "region_category",
 ]

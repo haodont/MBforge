@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from mbforge.contracts.review_proposal import ReviewProposal, ReviewProposalResult
+
 ReviewKind = Literal[
     "low_conf_molecule",
     "review_required",
@@ -20,6 +22,7 @@ ReviewKind = Literal[
     "markush_link",
     "patent_fact_review",
     "smiles_correction",
+    "ai_review",
 ]
 ReviewAction = Literal["confirm", "reject", "reopen"]
 
@@ -90,6 +93,61 @@ class ReviewClearRequest(BaseModel):
 class ReviewClearResponse(BaseModel):
     deleted_items: int = 0
     deleted_candidates: int = 0
+
+
+class ReviewAssistItemRequest(BaseModel):
+    kind: str
+    id: str
+
+
+class ReviewAssistRequest(BaseModel):
+    library_root: str | None = None
+    #: Empty means "the oldest pending items without a suggestion".
+    items: list[ReviewAssistItemRequest] = Field(default_factory=list, max_length=20)
+    limit: int | None = Field(default=None, ge=1, le=10)
+    force: bool = False
+
+
+class ReviewAssistResult(BaseModel):
+    kind: str
+    item_id: str
+    status: str = "error"
+    model: str = ""
+    vision: bool = False
+    answer: str = ""
+    error: str = ""
+    created_at: str | None = None
+
+
+class ReviewAssistResponse(BaseModel):
+    items: list[ReviewAssistResult] = Field(default_factory=list)
+
+
+class ReviewFilterDecisionRequest(BaseModel):
+    """Batch decision over the pending queue, filtered server-side.
+
+    ``target_kind`` narrows AI proposals by what they point at: ``evidence``
+    approves every text-level proposal, and ``doc_id`` scopes one patent.
+    """
+
+    library_root: str | None = None
+    kind: str | None = Field(default=None, max_length=40)
+    doc_id: str | None = Field(default=None, max_length=128)
+    target_kind: str | None = Field(default=None, max_length=40)
+    action: ReviewAction
+    reason: str = Field(default="", max_length=500)
+    limit: int = Field(default=200, ge=1, le=500)
+
+
+class ReviewProposeRequest(BaseModel):
+    """AI proposals for evidence the assistant found unaddressed."""
+
+    library_root: str | None = None
+    items: list[ReviewProposal] = Field(..., min_length=1, max_length=50)
+
+
+class ReviewProposeResponse(BaseModel):
+    items: list[ReviewProposalResult] = Field(default_factory=list)
 
 
 class ReviewHistoryResponse(BaseModel):

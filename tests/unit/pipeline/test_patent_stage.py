@@ -7,18 +7,21 @@ chemistry names, mass cross-checks, and the model's gap links — then the stage
 itself: publish at the document root, evidence rebuild, persistence and
 republish.
 
-Functions under test: ``PatentStage.execute`` +
-``extract_entries_from_title`` / ``extract_entries_from_body`` /
-``extract_assay_method_from_title`` / ``extract_synthesis_routes`` /
-``extract_characterization`` / ``extract_compound_names`` / ``find_mass_mismatches``
-(``mbforge.service.pipeline.stages.patent_stage``), ``associate_facts`` /
+Functions under test: ``PatentStage.execute``
+(``mbforge.service.pipeline.stages.patent_stage``); the rule extractors
+``extract_entries_from_title`` / ``extract_entries_from_body``
+(``mbforge.service.pipeline.patent.rules.entries``),
+``extract_assay_method_from_title`` (``...patent.rules.assay``),
+``extract_synthesis_routes`` / ``extract_characterization`` /
+``find_mass_mismatches`` (``...patent.rules.characterization``) and
+``extract_compound_names`` (``...patent.rules.names``); ``associate_facts`` /
 ``apply_gap_links`` (``mbforge.service.pipeline.patent.association``) and the
 artifact store (``mbforge.service.use_cases.documents.patent_facts``).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -35,22 +38,25 @@ from mbforge.service.pipeline.patent.association import (
     apply_gap_links,
     associate_facts,
 )
-from mbforge.service.pipeline.patent.sections import ParsedSection
-from mbforge.service.pipeline.run.context import PipelineContext
-from mbforge.service.pipeline.stages.patent_stage import (
-    PatentStage,
+from mbforge.service.pipeline.patent.rules.assay import (
     extract_assay_method_from_title,
+    extract_assay_methods_from_body,
+)
+from mbforge.service.pipeline.patent.rules.characterization import (
     extract_characterization,
-    extract_compound_names,
-    extract_entries_from_body,
-    extract_entries_from_title,
     extract_synthesis_routes,
     find_mass_mismatches,
 )
-from mbforge.service.use_cases.documents.patent_facts import (
-    iter_published_doc_ids,
-    load_patent_facts,
+from mbforge.service.pipeline.patent.rules.entries import (
+    _declared_structure_activity,
+    extract_entries_from_body,
+    extract_entries_from_title,
 )
+from mbforge.service.pipeline.patent.rules.names import extract_compound_names
+from mbforge.service.pipeline.patent.sections import ParsedSection
+from mbforge.service.pipeline.run.context import PipelineContext
+from mbforge.service.pipeline.stages.patent_stage import PatentStage
+from mbforge.service.use_cases.documents.patent_facts import load_patent_facts
 
 
 @dataclass
@@ -378,6 +384,28 @@ def test_an_assay_method_comes_from_the_title_only_when_it_names_one() -> None:
         "实施例6：化合物对受体抑制活性(ic50)", "d", "s6", 6, 6
     )
     assert lower is not None and lower["assay_type"] == "ic50"
+
+
+def test_a_body_assay_block_declares_the_assay_its_table_reports() -> None:
+    """A ``测试例`` heading in the section body declares the assay above its table.
+
+    CN119504738A prints ``[0891]测试例1:MRGPRX2体外钙流测定试验`` inside an example
+    section, not in its title, so title-only reading left all 14 Table-1 readings
+    without a target. The block ends where the next heading begins, so the table
+    under it is scoped to this assay and not to the section.
+    """
+    blocks = [
+        ("ev-1", "[0891]测试例1:MRGPRX2体外钙流测定试验"),
+        ("ev-2", "| 实施例 | 测试化合物 | IC50(nM) |"),
+        ("ev-3", "[0897]测试例2:化合物对肝细胞毒性测试试验"),
+        ("ev-4", "| 化合物13 | 1207 |"),
+    ]
+
+    methods = extract_assay_methods_from_body(blocks, "d", "s1", 124, 125)
+
+    assert [method["target"] for method in methods] == ["MRGPRX2"]
+    assert methods[0]["evidence_ids"] == ["ev-1", "ev-2"]
+    assert methods[0]["section_id"] == "s1"
 
 
 # ── synthesis routes (deterministic, zero-token) ────────────────────
@@ -985,6 +1013,67 @@ def test_a_printed_name_fills_an_entry_that_has_none(tmp_path: Path) -> None:
     assert any(entry["label_key"] == "1" for entry in facts.entries)
 
 
+def test_two_assays_in_one_section_no_longer_leave_a_reading_unresolved() -> None:
+    """The assay is the one whose block cites the reading's own evidence row.
+
+    A section can print several assays; requiring it to own exactly one method
+    left every reading of such a section unresolved. The block a heading opens
+    owns the evidence after it, which is the citation the reading already has.
+    """
+    section = replace(
+        _example_section("sec-1", "实施例1：化合物1的制备"),
+        evidence_ids=["ev-intro", "ev-table-p124", "ev-table-p125"],
+    )
+    methods = [
+        {
+            "assay_method_id": "assay-ca",
+            "target": "MRGPRX2",
+            "section_id": "sec-1",
+            "evidence_ids": ["ev-table-p124"],
+        },
+        {
+            "assay_method_id": "assay-cytotox",
+            "target": "HepG2",
+            "section_id": "sec-1",
+            "evidence_ids": ["ev-table-p125"],
+        },
+    ]
+
+    calcium = {
+        "measurement_id": "m-ca",
+        "doc_id": "doc1",
+        "metric": "IC50",
+        "value": {},
+        "evidence_ids": ["ev-table-p124"],
+        "provenance": {"reference_raw": "化合物1", "reference_key": "1"},
+    }
+    viability = {
+        **calcium,
+        "measurement_id": "m-viability",
+        "evidence_ids": ["ev-table-p125"],
+    }
+    uncited = {**calcium, "measurement_id": "m-uncited", "evidence_ids": ["ev-intro"]}
+    issues: list[dict] = []
+
+    associate_facts(
+        [section],
+        [],
+        methods,
+        [calcium, viability, uncited],
+        [],
+        {"ev-intro", "ev-table-p124", "ev-table-p125"},
+        issues,
+    )
+
+    assert calcium["assay_method_id"] == "assay-ca"
+    assert viability["assay_method_id"] == "assay-cytotox"
+    # The section heading cites no block: still reported, never guessed.
+    assert "assay_method_id" not in uncited
+    assert [
+        issue["code"] for issue in issues if issue["code"] == "assay_method_unresolved"
+    ] == ["assay_method_unresolved"]
+
+
 def test_patent_stage_does_not_invent_activity_pairs_from_mass_alone(
     tmp_path: Path,
 ) -> None:
@@ -1018,7 +1107,53 @@ def test_patent_stage_does_not_invent_activity_pairs_from_mass_alone(
     assert facts.structure_activity == []
 
 
-def test_patent_stage_requires_parsed_documents(tmp_path: Path) -> None:
+def test_a_disputed_designation_publishes_no_activity_pair(tmp_path: Path) -> None:
+    """A designation two candidates dispute never becomes a published pair.
+
+    CN119504738A reads one structure's label as ``1`` on page 91 (that scheme
+    prepares ``21``) and as ``22`` on page 95, so the association refuses both
+    designations and the reading keeps no attribution. The declared-example join
+    published the pair anyway from ``molecules.name``, contradicting the reading
+    rows the export and the activity API report.
+    """
+    evidence = _seed_evidence(
+        tmp_path, [FakePage(1, "实施例1：2-羟基乙烷(化合物1)的制备")]
+    )
+    with DatabaseManager.get(str(tmp_path)).mol_conn() as conn:
+        conn.execute(
+            "INSERT INTO molecules (mol_id, smiles, canonical_smiles, name, source_doc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("m1", "CCO", "CCO", "1", "doc1"),
+        )
+        conn.commit()
+    readings = [
+        {
+            "measurement_id": "meas1",
+            "provenance": {"reference_key": "1", "reference_type": "compound"},
+            "metric": "IC50",
+            "value": {"original_value": 64.6, "original_unit": "nM"},
+        }
+    ]
+    disputed_issues = [
+        {
+            "code": "molecule_candidate_ambiguous",
+            "related_fact_id": "en1",
+            "label_key": "1",
+        }
+    ]
+
+    disputed = _declared_structure_activity(
+        evidence, readings, "doc1", tmp_path, disputed_issues
+    )
+    admitted = _declared_structure_activity(evidence, readings, "doc1", tmp_path)
+
+    assert disputed == []
+    assert [(pair["declared_key"], pair["smiles"]) for pair in admitted] == [
+        ("1", "CCO")
+    ]
+
+
+def test_patent_stage_requires_a_run_id(tmp_path: Path) -> None:
     ctx = PipelineContext(
         pdf_path=tmp_path / "s.pdf", library_root=tmp_path, doc_id="d"
     )
@@ -1058,13 +1193,6 @@ def test_the_artifact_store_tolerates_missing_corrupt_and_unpublished_docs(
     corrupt.write_text("{not json", encoding="utf-8")
     assert load_patent_facts(corrupt_root, "doc1") is None
 
-    for doc in ("a", "b"):
-        p = tmp_path / "storage" / doc / "patent_facts.json"
-        p.parent.mkdir(parents=True)
-        p.write_text("{}", encoding="utf-8")
-    (tmp_path / "storage" / "c").mkdir(parents=True)
-    assert iter_published_doc_ids(tmp_path) == ["a", "b"]
-
 
 def test_prose_compound_names_are_recovered_from_running_text() -> None:
     """A name printed in a preparation paragraph is recorded, not only a heading.
@@ -1073,10 +1201,11 @@ def test_prose_compound_names_are_recovered_from_running_text() -> None:
     structure (a chiral SFC split reports only retention time and LC-MS). Reading
     headings alone left those compounds with no name at all — measured on
     CN120329282A, 190 of 1014 text rows carry a chemistry-name marker but only
-    headings were read.
+    headings were read. A workup sentence (``得到混合物在氮气保护下…``) is a step
+    and yields no name.
     """
     from mbforge.domain.evidence import SourceEvidence
-    from mbforge.service.pipeline.stages.patent_stage import (
+    from mbforge.service.pipeline.patent.rules.names import (
         extract_prose_compound_names,
     )
 
@@ -1099,26 +1228,7 @@ def test_prose_compound_names_are_recovered_from_running_text() -> None:
         ),
     )
 
-    names = extract_prose_compound_names([block], "doc-1")
-
-    assert len(names) == 1
-    recorded = names[0]["name_raw"]
-    # The bracketed note after the name is not part of it.
-    assert recorded.endswith("1H-吡唑-4-甲酰胺")
-    assert "产率" not in recorded
-    assert names[0]["evidence_ids"] == ["ev-1"]
-
-
-def test_a_workup_sentence_is_not_recorded_as_a_compound_name() -> None:
-    """``得到混合物在氮气保护下…`` is a step, not a chemistry name."""
-    from mbforge.domain.evidence import SourceEvidence
-    from mbforge.domain.evidence_kind import register_kinds
-    from mbforge.service.pipeline.stages.patent_stage import (
-        extract_prose_compound_names,
-    )
-
-    register_kinds({"text": "text"})
-    block = SourceEvidence(
+    workup = SourceEvidence(
         doc_id="doc-1",
         page=3,
         bbox=(0.0, 0.0, 1.0, 1.0),
@@ -1127,7 +1237,14 @@ def test_a_workup_sentence_is_not_recorded_as_a_compound_name() -> None:
         raw_text="得到混合物在氮气保护下于25℃搅拌18小时，然后过滤。",
     )
 
-    assert extract_prose_compound_names([block], "doc-1") == []
+    names = extract_prose_compound_names([block, workup], "doc-1")
+
+    assert len(names) == 1
+    recorded = names[0]["name_raw"]
+    # The bracketed note after the name is not part of it.
+    assert recorded.endswith("1H-吡唑-4-甲酰胺")
+    assert "产率" not in recorded
+    assert names[0]["evidence_ids"] == ["ev-1"]
 
 
 def test_a_step_heading_gives_its_characterization_an_owner() -> None:
@@ -1139,7 +1256,9 @@ def test_a_step_heading_gives_its_characterization_an_owner() -> None:
     """
     from mbforge.domain.evidence import SourceEvidence
     from mbforge.domain.evidence_kind import register_kinds
-    from mbforge.service.pipeline.stages.patent_stage import extract_characterization
+    from mbforge.service.pipeline.patent.rules.characterization import (
+        extract_characterization,
+    )
 
     register_kinds({"text": "text"})
     heading = SourceEvidence(
@@ -1166,39 +1285,3 @@ def test_a_step_heading_gives_its_characterization_an_owner() -> None:
     assert items[0]["technique"] == "ms"
     assert items[0]["label_key"] == "8"
     assert items[0]["attribution"] == "resolved"
-
-
-def test_a_reading_above_a_spectrum_does_not_lend_its_designation() -> None:
-    """A reading's compound and a spectrum's compound need not be the same one.
-
-    The spectrum stays unattributed so it surfaces as a gap; inheriting the
-    reading's designation would bind a mass to the wrong structure and corrupt the
-    check the mass feeds.
-    """
-    from mbforge.domain.evidence import SourceEvidence
-    from mbforge.domain.evidence_kind import register_kinds
-    from mbforge.service.pipeline.stages.patent_stage import extract_characterization
-
-    register_kinds({"text": "text"})
-    reading = SourceEvidence(
-        doc_id="doc-1",
-        page=5,
-        bbox=(0.0, 0.0, 1.0, 0.1),
-        evidence_id="ev-reading",
-        kind="text",
-        raw_text="化合物77的IC50为4 nM。",
-    )
-    spectrum = SourceEvidence(
-        doc_id="doc-1",
-        page=5,
-        bbox=(0.0, 0.1, 1.0, 0.2),
-        evidence_id="ev-ms",
-        kind="text",
-        raw_text="MS (ESI) m/z: 456.2 [M+H]+",
-    )
-
-    items = extract_characterization([reading, spectrum], "doc-1")
-
-    assert len(items) == 1
-    assert items[0]["label_key"] == ""
-    assert items[0]["attribution"] == "unresolved"

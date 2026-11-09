@@ -157,14 +157,6 @@ ignore = [
     "E501",  # line-too-long (handled by formatter)
 ]
 
-[tool.ruff.lint.per-file-ignores]
-# (molscribe_inference vendored code removed with the MolParser migration.)
-# Vendored third-party parser (CMNP). It is a self-contained pure-stdlib module
-# maintained in its own repository; reformatting it here would make every
-# re-vendor a conflict. The MBForge-side seam is ``chemname/__init__.py``, which
-# is linted normally.
-"src/mbforge/foundation/chemname/parser.py" = ["E", "F", "N", "UP", "B", "C4", "SIM", "W"]
-
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
@@ -172,7 +164,9 @@ convention = "google"
 quote-style = "double"
 indent-style = "space"
 
-# Vendored third-party code keeps its upstream formatting, so a re-vendor is a
-# clean file copy instead of a diff against a locally reformatted file.
-exclude = ["src/mbforge/foundation/chemname/parser.py"]
+[tool.vulture]
+min_confidence = 90
+paths = ["src", "tests"]
+ignore_decorators = ["@router.*", "@app.*", "@pytest.fixture"]
+ignore_names = ["_stage_modules"]
 

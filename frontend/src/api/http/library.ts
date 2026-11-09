@@ -401,11 +401,15 @@ export async function fetchReportJson(
 export async function fetchPatentFacts(
   docId: string,
   libraryRoot: string
-): Promise<{ ok: true; data: PatentFactsArtifact } | { ok: false; error: string }> {
+): Promise<{ ok: true; data: PatentFactsArtifact | null } | { ok: false; error: string }> {
   try {
     const data = await httpGet<PatentFactsArtifact>(artifactUrl(`/documents/${encodeURIComponent(docId)}/patent-facts`, libraryRoot))
     return { ok: true, data }
   } catch (e) {
+    // Patent analysis runs on demand, so a document that has not been analyzed
+    // yet legitimately has no facts. That is an empty state, not a load
+    // failure: callers show the "not analyzed" pane and must not retry a 404.
+    if (e instanceof AppError && e.context?.http_status === 404) return { ok: true, data: null }
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }

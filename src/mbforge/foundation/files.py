@@ -8,10 +8,7 @@ import json as _json
 import re
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from PIL import Image
+from typing import Any
 
 
 def sha256_file(path: Path) -> str:
@@ -26,20 +23,6 @@ def sha256_file(path: Path) -> str:
 def sha256_text(text: str) -> str:
     """计算文本 SHA256."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def sha256_bytes(data: bytes) -> str:
-    """计算字节内容 SHA256."""
-    return hashlib.sha256(data).hexdigest()
-
-
-def md5_file(path: Path) -> str:
-    """计算文件 MD5."""
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def dir_size_bytes(path: Path) -> int:
@@ -94,13 +77,3 @@ def decode_base64_to_tempfile(image_base64: str, ext: str = "png") -> str:
     with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as f:
         f.write(data)
         return f.name
-
-
-def decode_base64_image(image_base64: str) -> Image.Image:
-    """将 base64 编码的图片解码为 PIL Image 对象."""
-    from io import BytesIO
-
-    from PIL import Image
-
-    data = base64.b64decode(image_base64)
-    return Image.open(BytesIO(data))

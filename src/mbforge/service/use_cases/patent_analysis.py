@@ -648,10 +648,10 @@ def _label_tokens(value: str) -> set[str]:
 
 def _molecule_label_tokens(molecule: Any) -> set[str]:
     """Every designation token this recognized structure answers to."""
-    from mbforge.service.pipeline.patent.association import _candidate_label_keys
+    from mbforge.service.pipeline.patent.candidate_labels import candidate_label_keys
 
     tokens: set[str] = set()
-    for key in _candidate_label_keys(molecule):
+    for key in candidate_label_keys(molecule):
         tokens |= _label_tokens(key)
     return tokens
 

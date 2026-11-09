@@ -170,6 +170,28 @@ describe('Tabs', () => {
     fireEvent.click(tab3)
     expect(onChange).toHaveBeenCalledOnce()
   })
+
+  it('closes a closable tab without selecting it', () => {
+    const onChange = vi.fn()
+    const onTabClose = vi.fn()
+    render(
+      <Tabs
+        items={[
+          { key: 'a', label: 'Alpha' },
+          { key: 'b', label: 'Beta', closable: true },
+        ]}
+        activeKey="a"
+        onChange={onChange}
+        onTabClose={onTabClose}
+        closeLabel="Close tab"
+      />,
+    )
+    const close = screen.getByRole('button', { name: 'Close tab: Beta' })
+    fireEvent.click(close)
+    expect(onTabClose).toHaveBeenCalledWith('b')
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Close tab: Alpha' })).not.toBeInTheDocument()
+  })
 })
 
 describe('TabPanel', () => {

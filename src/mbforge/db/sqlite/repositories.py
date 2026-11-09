@@ -19,15 +19,16 @@ from mbforge.contracts.measurement import (
 )
 from mbforge.contracts.research import ResearchSession, ResearchSessionSummary
 from mbforge.db import (
+    detection_store,
     document_backup,
     document_records,
-    markush_enumeration_store,
-    markush_sites_store,
     markush_transitions,
     measurement_store,
+    molecule_candidates,
     molecule_store,
     patent_analysis_store,
     research_store,
+    review_assist_store,
     review_store,
     source_evidence,
 )
@@ -283,16 +284,16 @@ class SqliteMoleculeRepository:
     def load_detections(
         self, doc_id: str, page: int | None = None
     ) -> list[dict[str, Any]]:
-        return molecule_store.load_detections(self.library_root, doc_id, page)
+        return detection_store.load_detections(self.library_root, doc_id, page)
 
     def save_detections(self, detections: Sequence[dict[str, Any]]) -> None:
-        molecule_store.save_detections(self.library_root, detections)
+        detection_store.save_detections(self.library_root, detections)
 
     def detection_counts(self) -> tuple[int, int]:
-        return molecule_store.detection_counts(self.library_root)
+        return detection_store.detection_counts(self.library_root)
 
     def clear_detections(self, doc_id: str | None = None) -> int:
-        return molecule_store.clear_detections(self.library_root, doc_id)
+        return detection_store.clear_detections(self.library_root, doc_id)
 
     def molecules_for_recorrection(
         self, doc_id: str | None = None
@@ -306,7 +307,9 @@ class SqliteMoleculeRepository:
         molecule_store.apply_corrections(self.library_root, updates)
 
     def persist_candidates(self, doc_id: str, candidates: Sequence[Any]) -> int:
-        return molecule_store.persist_candidates(self.library_root, doc_id, candidates)
+        return molecule_candidates.persist_candidates(
+            self.library_root, doc_id, candidates
+        )
 
     def replace_document_candidates(
         self,
@@ -314,14 +317,14 @@ class SqliteMoleculeRepository:
         candidates: Sequence[Any],
         activity_updates: Sequence[dict[str, Any]] | None = None,
     ) -> int:
-        return molecule_store.replace_document_candidates(
+        return molecule_candidates.replace_document_candidates(
             self.library_root, doc_id, candidates, activity_updates
         )
 
 
 @dataclass
 class SqliteMarkushRepository:
-    """Repository facade for Markush review, sites, and enumeration.
+    """Repository facade for Markush review candidates.
 
     Owns its connections: every method opens a unified-database transaction so
     callers never thread a ``conn``.
@@ -342,110 +345,6 @@ class SqliteMarkushRepository:
     def update_candidate(self, **kwargs: Any) -> Any:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
             return markush_transitions.update_candidate(conn, **kwargs)
-
-    # --- Attachment sites ---
-
-    def scaffold_site_context(self, scaffold_id: str) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.scaffold_site_context(conn, scaffold_id)
-
-    def insert_site(self, **kwargs: Any) -> None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            markush_sites_store.insert_site(conn, **kwargs)
-
-    def get_site_row(self, site_id: str) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.get_site_row(conn, site_id)
-
-    def list_site_rows(self, scaffold_id: str) -> list[dict[str, Any]]:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.list_site_rows(conn, scaffold_id)
-
-    def update_site_row(self, **kwargs: Any) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.update_site_row(conn, **kwargs)
-
-    # --- Options ---
-
-    def site_status(self, site_id: str) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.site_status(conn, site_id)
-
-    def fragment_status(self, fragment_id: str) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.fragment_status(conn, fragment_id)
-
-    def fragment_smiles(self, fragment_id: str) -> str | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.fragment_smiles(conn, fragment_id)
-
-    def insert_option(self, **kwargs: Any) -> None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            markush_sites_store.insert_option(conn, **kwargs)
-
-    def get_option_row(self, option_id: str) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.get_option_row(conn, option_id)
-
-    def list_option_rows(self, site_id: str) -> list[dict[str, Any]]:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.list_option_rows(conn, site_id)
-
-    # --- Mounts ---
-
-    def find_mount_row(self, site_id: str, fragment_id: str) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.find_mount_row(conn, site_id, fragment_id)
-
-    def insert_mount(self, **kwargs: Any) -> None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            markush_sites_store.insert_mount(conn, **kwargs)
-
-    def get_mount_row(self, mount_id: str) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.get_mount_row(conn, mount_id)
-
-    def apply_mount_decision(self, **kwargs: Any) -> None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            markush_sites_store.apply_mount_decision(conn, **kwargs)
-
-    def list_mount_rows(self, **kwargs: Any) -> list[dict[str, Any]]:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_sites_store.list_mount_rows(conn, **kwargs)
-
-    # --- Enumeration ---
-
-    def resolve_authorized_selection(
-        self, *, scaffold_id: str, selection: list[Any]
-    ) -> Any:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_enumeration_store.resolve_authorized_selection(
-                conn, scaffold_id=scaffold_id, selection=selection
-            )
-
-    def insert_generation_run_terminal(self, **kwargs: Any) -> None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            markush_enumeration_store.insert_generation_run_terminal(conn, **kwargs)
-
-    def record_enumeration_run(self, **kwargs: Any) -> int:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_enumeration_store.record_enumeration_run(conn, **kwargs)
-
-    def get_generated_candidate(self, generated_id: str) -> dict[str, Any] | None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_enumeration_store.get_generated_candidate(conn, generated_id)
-
-    def confirm_generated_candidate(self, **kwargs: Any) -> None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            markush_enumeration_store.confirm_generated_candidate(conn, **kwargs)
-
-    def reject_generated_candidate(self, **kwargs: Any) -> None:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            markush_enumeration_store.reject_generated_candidate(conn, **kwargs)
-
-    def list_run_results(self, run_id: str) -> list[dict[str, Any]]:
-        with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
-            return markush_enumeration_store.list_run_results(conn, run_id)
 
 
 @dataclass
@@ -535,6 +434,24 @@ class SqliteReviewRepository:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
             return review_store.get_item(conn, kind, item_id)
 
+    def get_assist(self, kind: str, item_id: str) -> dict[str, Any] | None:
+        return review_assist_store.get(self.library_root, kind, item_id)
+
+    def upsert_assist(self, suggestion: dict[str, Any]) -> None:
+        review_assist_store.upsert(self.library_root, suggestion)
+
+    def assists_for(
+        self, keys: Sequence[tuple[str, str]]
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        return review_assist_store.for_items(self.library_root, keys)
+
+    def pending_without_assist(
+        self, kinds: Sequence[str], limit: int
+    ) -> list[dict[str, str]]:
+        return review_assist_store.pending_without_suggestion(
+            self.library_root, kinds=kinds, limit=limit
+        )
+
     def stats(self) -> dict[str, Any]:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
             return review_store.stats(conn)
@@ -605,6 +522,27 @@ class SqliteMeasurementRepository:
 
     def document_label_numbers(self, doc_id: str) -> set[str]:
         return molecule_store.document_label_numbers(self.library_root, doc_id)
+
+    def unlabeled_structure_count(self, doc_id: str) -> int:
+        return measurement_store.unlabeled_structure_count(self.library_root, doc_id)
+
+    def bind_attribution(
+        self,
+        *,
+        measurement_id: str,
+        mol_id: str,
+        doc_id: str,
+        evidence_id: str = "",
+        method: str = "human",
+    ) -> str:
+        return measurement_store.bind_attribution(
+            self.library_root,
+            measurement_id=measurement_id,
+            mol_id=mol_id,
+            doc_id=doc_id,
+            evidence_id=evidence_id,
+            method=method,
+        )
 
 
 @dataclass

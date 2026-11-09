@@ -1,6 +1,6 @@
 """LibraryLayout — single authority for all library paths.
 
-Resolves both **library-level** paths (``library.db``, ``storage/``, ``notes/``)
+Resolves both **library-level** paths (``library.db``, ``storage/``)
 and **document-level** artifact paths (``storage/{doc_id}/{file_name}``, etc.).
 All file reads / writes that touch a path under the library root go through
 this class so the storage layout is defined in one place and path traversal
@@ -14,7 +14,6 @@ Library-level:
 * ``queue.lock``                  — ingest-worker ownership lock (internal).
 * ``procs/``                      — runtime process registry (internal).
 * ``backups/``                    — pre-mutation document snapshots (internal).
-* ``notes/``                      — user-editable notes.
 * ``storage/``                    — document artifact root.
 
 Document-level (under ``storage/{doc_id}/``):
@@ -185,22 +184,9 @@ class LibraryLayout:
         """``{root}/backups/`` — pre-mutation document snapshots."""
         return self._root / "backups"
 
-    @property
-    def notes_dir(self) -> Path:
-        """``{root}/notes/`` — user-editable notes.
-
-        This is the only library-level path users are expected to
-        hand-edit or back up themselves.
-        """
-        return self._root / "notes"
-
     def ensure_library_root(self) -> Path:
         """Create the library root directory if missing and return it."""
         return self._ensure_dir(self._root)
-
-    def ensure_notes_dir(self) -> Path:
-        """Create ``notes/`` if missing and return the path."""
-        return self._ensure_dir(self.notes_dir)
 
     @property
     def research_sessions_dir(self) -> Path:
@@ -333,18 +319,6 @@ def extract_library_root(payload: dict[str, Any] | Any) -> str:
     """Read the canonical field, with one centralized legacy alias."""
     data = payload if isinstance(payload, dict) else payload.model_dump()
     return str(data.get("library_root") or data.get("libraryRoot") or "")
-
-
-def resolve_root(body: dict[str, Any] | None = None) -> str:
-    """Resolve library root from a request body or global config."""
-    b = body or {}
-    root = extract_library_root(b)
-    if root:
-        return str(resolve_library_root(root))
-    cfg = load_global_config()
-    if cfg.library_root:
-        return str(resolve_library_root())
-    return ""
 
 
 @dataclass(frozen=True, slots=True)

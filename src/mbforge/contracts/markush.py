@@ -104,8 +104,6 @@ class MarkushCandidateDetail(MarkushCandidate):
 
     scaffold_id: str | None = None
     fragment_id: str | None = None
-    enumeration_eligible: bool = False
-    enumeration_block_reasons: list[str] = Field(default_factory=list)
     evidence: list[MarkushEvidenceItem] = Field(default_factory=list)
     decisions: list[MarkushDecisionItem] = Field(default_factory=list)
 

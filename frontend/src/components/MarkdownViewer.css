@@ -1,0 +1,162 @@
+.markdown-viewer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.markdown-viewer__toolbar {
+  justify-content: flex-start;
+  gap: 12px;
+  height: 48px;
+  padding: 0 16px;
+}
+
+.markdown-viewer__title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.markdown-viewer__mode {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-base);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.markdown-viewer__mode-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.markdown-viewer__mode-button.is-active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.markdown-viewer__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.markdown-toc {
+  flex: 0 0 220px;
+  overflow: auto;
+  padding: 18px 12px 24px 20px;
+  border-right: 1px solid var(--border);
+}
+
+.markdown-toc__title {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.markdown-toc__item {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.markdown-toc__item:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.markdown-toc__item--level-2 {
+  padding-left: 14px;
+}
+
+.markdown-toc__item--level-3 {
+  padding-left: 24px;
+  font-size: 11px;
+}
+
+.markdown-viewer__document {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+.markdown-viewer__document .markdown-preview {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 32px;
+}
+
+.markdown-viewer__state {
+  padding: 40px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.markdown-viewer__state--error {
+  color: var(--danger);
+}
+
+.markdown-viewer__source {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 32px;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.markdown-page-link {
+  display: inline-flex;
+  align-items: center;
+  margin: 2px 0;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.markdown-page-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .markdown-toc {
+    display: none;
+  }
+
+  .markdown-viewer__document .markdown-preview,
+  .markdown-viewer__source {
+    padding: 18px;
+  }
+}

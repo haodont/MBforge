@@ -20,13 +20,7 @@ from mbforge.service.pipeline.activity.normalization import (
     normalize_activity_metric,
     normalize_reference_label,
 )
-from mbforge.service.pipeline.activity.parsing import (
-    _html_table_to_markdown,
-    _is_activity_table,
-    _parse_simple_activity_table,
-    _simple_activity_table_is_complete,
-    looks_like_activity_table,
-)
+from mbforge.service.pipeline.activity.table_scan import scan_table_evidence
 
 logger = get_logger("mbforge.service.pipeline.activity.extraction")
 
@@ -303,11 +297,12 @@ def _issue(
     evidence_ids: Sequence[str],
     *,
     fact_id: str | None = None,
+    severity: str = "warning",
 ) -> dict[str, Any]:
     return {
         "code": code,
         "message": message,
-        "severity": "warning",
+        "severity": severity,
         "evidence_ids": list(evidence_ids),
         "related_fact_id": fact_id,
     }
@@ -382,20 +377,6 @@ def _measurement_from_record(
         row_idx=record.row_idx,
         col_idx=record.col_idx,
     )
-
-
-def _table_text(raw_text: str) -> str | None:
-    stripped = raw_text.strip()
-    if re.search(r"<table\b", stripped, re.IGNORECASE):
-        if not re.search(r"</table\s*>", stripped, re.IGNORECASE):
-            return None
-        return _html_table_to_markdown(raw_text)
-    if any(
-        line.strip().startswith("|") and line.strip().endswith("|")
-        for line in raw_text.splitlines()
-    ):
-        return raw_text
-    return None
 
 
 def _known_unit(unit: str) -> bool:
@@ -605,6 +586,10 @@ def extract_activity_measurements_from_evidence(
     ids_seen: dict[str, int] = {}
     text_blocks: list[SourceEvidence] = []
     table_index = 0
+    #: The last activity table read from its own header: its page, its evidence
+    #: row and its Markdown. A fragment on the next page reuses that header: the
+    #: print continues, only the header does not.
+    last_activity_table: tuple[int | None, str, str] | None = None
 
     # A wide table that crosses a layout boundary can be stored as two evidence
     # rows whose text overlaps: the second begins with the first's content. Read
@@ -649,41 +634,25 @@ def extract_activity_measurements_from_evidence(
             # would duplicate every cell it shares with that one.
             continue
         table_index += 1
-        table_text = _table_text(item.raw_text)
-        if table_text is None:
-            if looks_like_activity_table(item.raw_text):
-                issues.append(
-                    _issue(
-                        "unsupported_table_format",
-                        "activity table format is not supported",
-                        [item.evidence_id],
-                    )
-                )
-            continue
-        records = _parse_simple_activity_table(
-            table_text,
+        scan = scan_table_evidence(
+            item,
             table_idx=table_index - 1,
-            page_num=item.page,
+            previous=last_activity_table,
             legend=legend,
         )
-        if not _is_activity_table(table_text) or not records:
-            if looks_like_activity_table(item.raw_text):
-                issues.append(
-                    _issue(
-                        "complex_activity_table",
-                        "activity table is incomplete or ambiguous",
-                        [item.evidence_id],
-                    )
-                )
-            continue
-        if not _simple_activity_table_is_complete(table_text, records):
+        if scan.last_activity is not None:
+            last_activity_table = scan.last_activity
+        records = scan.records
+        if scan.refusal_code is not None:
             issues.append(
                 _issue(
-                    "complex_activity_table",
-                    "activity table contains unparsed cells",
-                    [item.evidence_id],
+                    scan.refusal_code,
+                    scan.refusal_message,
+                    list(scan.refusal_ids),
+                    severity=scan.refusal_severity,
                 )
             )
+        if not records:
             continue
         for record in records:
             measurement = _measurement_from_record(

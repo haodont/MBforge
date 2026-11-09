@@ -24,7 +24,7 @@ import { usePdfNavigation } from './usePdfNavigation'
 import { usePdfDetections } from './usePdfDetections'
 import { usePdfOcr } from './usePdfOcr'
 import { usePdfOverlay } from './usePdfOverlay'
-import { viewerSnapshots } from './viewerSnapshots'
+import { loadPersistedViewerState, viewerSnapshots } from './viewerSnapshots'
 
 export { clearViewerSnapshot } from './usePdfDetections'
 
@@ -35,10 +35,15 @@ export function usePdfViewer(
   initialPage?: number,
 ) {
   const saved = viewerSnapshots.get(viewerKey)
+  const persisted = loadPersistedViewerState(doc.doc_id)
 
   // Confidence threshold — UI filter for visible detections. Owned by the
   // façade because no other hook consults or mutates it.
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.3)
+  const [showMoleculeOverlay, setShowMoleculeOverlay] = useState(
+    persisted?.showMoleculeOverlay ?? true,
+  )
+  const [showOcrOverlay, setShowOcrOverlay] = useState(persisted?.showOcrOverlay ?? true)
 
   // Overlay data — seeded from the snapshot and refreshed by the single
   // document overlay request.
@@ -58,7 +63,13 @@ export function usePdfViewer(
           showTextLayer: saved.showTextLayer,
           showTextPanel: saved.showTextPanel,
         }
-      : undefined,
+      : persisted
+        ? {
+            currentPage: persisted.currentPage,
+            pdfScale: persisted.pdfScale,
+            showTextLayer: persisted.showTextLayer,
+          }
+        : undefined,
   })
 
   const handleOverlayLoaded = useCallback(
@@ -170,6 +181,8 @@ export function usePdfViewer(
     pdfPageCount: navigation.pdfPageCount,
     showTextLayer: navigation.showTextLayer, setShowTextLayer: navigation.setShowTextLayer,
     showTextPanel: navigation.showTextPanel, setShowTextPanel: navigation.setShowTextPanel,
+    showMoleculeOverlay, setShowMoleculeOverlay,
+    showOcrOverlay, setShowOcrOverlay,
     pageJumpInput: navigation.pageJumpInput, setPageJumpInput: navigation.setPageJumpInput,
     // scroll container / page-render state
     pdfUrl: navigation.pdfUrl, pdfLoading: navigation.pdfLoading, pdfScrollRef: navigation.pdfScrollRef,

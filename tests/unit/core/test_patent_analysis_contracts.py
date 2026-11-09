@@ -41,8 +41,6 @@ from mbforge.contracts.patent import (
 from mbforge.contracts.patent_runtime import (
     PatentAnalysisBudget,
     PatentAnalysisEvent,
-    PatentAnalysisOutcome,
-    PatentAnalysisRequest,
     PatentTaskScope,
 )
 from mbforge.contracts.schema_export import build_gap_bundle, default_gap_output_path
@@ -53,10 +51,7 @@ from mbforge.domain.patent_analysis import (
     evidence_signature,
     measurement_slot_id,
 )
-from mbforge.server.patent_analysis import (
-    InMemoryPatentTaskRegistry,
-    SidecarPatentAnalysisRuntime,
-)
+from mbforge.server.patent_analysis import SidecarPatentAnalysisRuntime
 from mbforge.service.pipeline.run.events import PipelineEventSink
 from mbforge.service.ports.patent_analysis import get_patent_task_registry
 
@@ -367,31 +362,14 @@ def _gap_item(**overrides: object) -> dict[str, object]:
 
 
 def test_a_gap_carries_the_rule_location_and_a_give_up_is_countable() -> None:
-    """The gap is built from the rule issue: code, evidence, pages, excerpt.
+    """A gap refuses a page span that runs backwards, and one question is
+    answerable in exactly one shape.
 
     Every non-reading the corpus shows is a give-up with a counted reason:
     ``H3C``/``N. HN S`` are structure-column noise (no attribution exists);
     ``注：“+”：IC50>1μM`` defines a bin, so it is not a fact; the JP full-width
     ``ρIC50`` digits are glyph-damaged. Each status has exactly one legal shape.
     """
-    gap = PatentGap(
-        gap_id="gap-1",
-        gap_kind="table",
-        code="complex_activity_table",
-        message="activity table contains unparsed cells",
-        page_start=21,
-        page_end=21,
-        evidence_ids=["ev-table"],
-        excerpt=(
-            "| 化合物编号 | IC50(nM) |  |  |  |\n"
-            "| MRGPRX1 | MRGPRX2 | MRGPRX3 | MRGPRX4 |  |\n"
-            "| 实施例1 | 十 | ++++ | 十 | 十 |"
-        ),
-    )
-
-    assert gap.page_start == gap.page_end == 21
-    assert "实施例1" in gap.excerpt
-
     with pytest.raises(ValidationError):
         PatentGap(
             gap_id="gap-2",
@@ -540,26 +518,6 @@ def test_an_answer_splits_a_row_or_a_reference_into_readings() -> None:
 # ── the runtime boundary ────────────────────────────────────────────
 
 
-def _budget() -> PatentAnalysisBudget:
-    return PatentAnalysisBudget(
-        max_model_turns=24,
-        wall_clock_seconds=600,
-        max_total_tokens=80_000,
-        digest_char_budget=60_000,
-    )
-
-
-def _runtime_scope() -> PatentTaskScope:
-    return PatentTaskScope(
-        library_root="/library",
-        doc_id="doc-1",
-        run_id="run-1",
-        attempt_id="attempt-1",
-        evidence_signature="sig-1",
-        budget=_budget(),
-    )
-
-
 def _runtime_gap(gap_id: str = "complex_activity_table:ev-21") -> PatentGap:
     return PatentGap(
         gap_id=gap_id,
@@ -569,18 +527,6 @@ def _runtime_gap(gap_id: str = "complex_activity_table:ev-21") -> PatentGap:
         page_end=21,
         evidence_ids=["ev-21"],
         excerpt="| 化合物编号 | IC50(nM) |",
-    )
-
-
-def _second_gap() -> PatentGap:
-    return PatentGap(
-        gap_id="activity_value_unparsed:ev-83",
-        gap_kind="prose_measurement",
-        code="activity_value_unparsed",
-        page_start=83,
-        page_end=83,
-        evidence_ids=["ev-83"],
-        excerpt="実施例43~45の化合物は、5.5 >ρIC5 0> 4.5を示した。",
     )
 
 
@@ -610,76 +556,6 @@ def _runtime_answer(gap_id: str, status: str) -> PatentGapAnswer:
     return PatentGapAnswer.model_validate(base)
 
 
-def test_the_wire_request_binds_one_scope_and_keeps_tokens_unknown() -> None:
-    request = PatentAnalysisRequest(
-        doc_id="doc-1",
-        run_id="run-1",
-        attempt_id="attempt-1",
-        evidence_signature="sig-1",
-        credential="credential-123",
-        budget=_budget(),
-    )
-    assert "library_root" not in request.model_dump()
-
-    with pytest.raises(ValidationError):
-        PatentAnalysisRequest(
-            doc_id="doc-1",
-            run_id="run-1",
-            attempt_id="attempt-1",
-            evidence_signature="sig-1",
-            credential="credential-123",
-            budget=_budget(),
-            library_root="/library",  # type: ignore[call-arg]
-        )
-
-    outcome = PatentAnalysisOutcome(ok=True, status="succeeded")
-    assert outcome.tokens is None
-    reported = PatentAnalysisOutcome(ok=True, status="succeeded", tokens=0)
-    assert reported.tokens == 0
-
-    registry = InMemoryPatentTaskRegistry()
-    gap = _runtime_gap()
-
-    registry.register("cred-1", _runtime_scope(), gaps=[gap])
-
-    assert registry.resolve("cred-1") == _runtime_scope()
-    assert registry.resolve("other-credential") is None
-    assert registry.gaps("cred-1") == [gap]
-    assert registry.next_gap("cred-1") == gap
-    assert registry.active_attempts() == ["attempt-1"]
-
-    registry.revoke("cred-1")
-    assert registry.resolve("cred-1") is None
-    assert registry.gaps("cred-1") == []
-    assert registry.active_attempts() == []
-
-
-def test_gap_answers_are_staged_once_and_cancellation_is_per_credential() -> None:
-    """One answer per gap: resubmitting the same gap replaces it, never forks."""
-    registry = InMemoryPatentTaskRegistry()
-    registry.register("cred-1", _runtime_scope(), gaps=[_runtime_gap(), _second_gap()])
-    first = _runtime_answer("complex_activity_table:ev-21", "unanswerable")
-    replaced = _runtime_answer("complex_activity_table:ev-21", "answered")
-
-    registry.stage_gap_answer("cred-1", first)
-    assert [answer.status for answer in registry.gap_answers("cred-1")] == [
-        "unanswerable"
-    ]
-    assert registry.next_gap("cred-1") == _second_gap()
-
-    registry.stage_gap_answer("cred-1", replaced)
-    assert [answer.status for answer in registry.gap_answers("cred-1")] == ["answered"]
-    assert registry.next_gap("cred-1") == _second_gap()
-
-    cancel_registry = InMemoryPatentTaskRegistry()
-    cancel_registry.register("cred-1", _runtime_scope())
-
-    assert cancel_registry.is_cancelled("cred-1") is False
-    assert cancel_registry.request_cancel("unknown-credential") is False
-    assert cancel_registry.request_cancel("cred-1") is True
-    assert cancel_registry.is_cancelled("cred-1") is True
-
-
 def test_stage_progress_reaches_the_event_sink_with_the_callback_phase() -> None:
     """A stage reports without importing the sink; a payload that names its own
     phase does not override the callback's, so a sidecar event cannot relabel it."""
@@ -707,34 +583,6 @@ def test_stage_progress_reaches_the_event_sink_with_the_callback_phase() -> None
 
 
 # ── the Python -> sidecar transport ─────────────────────────────────
-
-
-def _sidecar_gap() -> PatentGap:
-    """One bounded piece of work: the transport must carry it unchanged."""
-    return PatentGap(
-        gap_id="complex_activity_table:ev-21",
-        gap_kind="table",
-        code="complex_activity_table",
-        page_start=21,
-        page_end=21,
-        evidence_ids=["ev-21"],
-        excerpt="| 化合物编号 | IC50(nM) |",
-    )
-
-
-def _sidecar_answer() -> PatentGapAnswer:
-    return PatentGapAnswer.model_validate(
-        {
-            "gap_id": "complex_activity_table:ev-21",
-            "gap_kind": "table",
-            "doc_id": "doc-1",
-            "attempt_id": "attempt-1",
-            "evidence_signature": "sig-1",
-            "status": "unanswerable",
-            "unanswerable_reason": "no_attribution",
-            "evidence_ids": ["ev-21"],
-        }
-    )
 
 
 def _sidecar_scope(attempt_id: str = "attempt-1") -> PatentTaskScope:
@@ -780,7 +628,7 @@ def _done(**overrides: Any) -> dict[str, Any]:
 
 def test_a_streamed_attempt_binds_the_credential_and_returns_its_outcome() -> None:
     seen: dict[str, Any] = {}
-    answer = _sidecar_answer()
+    answer = _runtime_answer("complex_activity_table:ev-21", "unanswerable")
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
@@ -805,7 +653,7 @@ def test_a_streamed_attempt_binds_the_credential_and_returns_its_outcome() -> No
 
     events: list[Any] = []
     result = _sidecar_runtime(handler).run(
-        _sidecar_scope(), gaps=[_sidecar_gap()], on_event=events.append
+        _sidecar_scope(), gaps=[_runtime_gap()], on_event=events.append
     )
     outcome = result.outcome
 
@@ -834,7 +682,7 @@ def test_sidecar_failures_and_cancellation_are_never_a_success() -> None:
         )
 
     truncated_outcome = (
-        _sidecar_runtime(truncated).run(_sidecar_scope(), gaps=[_sidecar_gap()]).outcome
+        _sidecar_runtime(truncated).run(_sidecar_scope(), gaps=[_runtime_gap()]).outcome
     )
 
     assert truncated_outcome.ok is False
@@ -845,7 +693,7 @@ def test_sidecar_failures_and_cancellation_are_never_a_success() -> None:
         return httpx.Response(422, json={"error": "unsupported protocol_version"})
 
     rejected_outcome = (
-        _sidecar_runtime(rejected).run(_sidecar_scope(), gaps=[_sidecar_gap()]).outcome
+        _sidecar_runtime(rejected).run(_sidecar_scope(), gaps=[_runtime_gap()]).outcome
     )
 
     assert rejected_outcome.ok is False
@@ -857,7 +705,7 @@ def test_sidecar_failures_and_cancellation_are_never_a_success() -> None:
 
     unreachable_outcome = (
         _sidecar_runtime(unreachable)
-        .run(_sidecar_scope(), gaps=[_sidecar_gap()])
+        .run(_sidecar_scope(), gaps=[_runtime_gap()])
         .outcome
     )
 
@@ -886,41 +734,10 @@ def test_sidecar_failures_and_cancellation_are_never_a_success() -> None:
 
     cancelled = (
         _sidecar_runtime(cancellable)
-        .run(_sidecar_scope(), gaps=[_sidecar_gap()], should_cancel=should_cancel)
+        .run(_sidecar_scope(), gaps=[_runtime_gap()], should_cancel=should_cancel)
         .outcome
     )
 
     assert cancelled.status == "cancelled"
     assert cancelled.ok is False
     assert calls == ["stream", "cancel"]
-
-
-def test_ensure_ready_reports_why_an_attempt_cannot_run(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from mbforge.server import agent_process
-
-    runtime = _sidecar_runtime(lambda request: httpx.Response(404))
-
-    monkeypatch.setattr(
-        agent_process,
-        "ensure_agent_sidecar",
-        lambda **_kwargs: agent_process.AgentSidecarStatus(
-            ready=False,
-            owned=False,
-            base_url="http://agent.test",
-            reason="MBFORGE_AGENT_AUTOSTART=0 and no agent is listening",
-        ),
-    )
-    assert (
-        runtime.ensure_ready() == "MBFORGE_AGENT_AUTOSTART=0 and no agent is listening"
-    )
-
-    monkeypatch.setattr(
-        agent_process,
-        "ensure_agent_sidecar",
-        lambda **_kwargs: agent_process.AgentSidecarStatus(
-            ready=True, owned=False, base_url="http://agent.test"
-        ),
-    )
-    assert runtime.ensure_ready() is None

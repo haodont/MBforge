@@ -186,12 +186,6 @@ class InMemoryPatentTaskRegistry:
             attempt = self._attempts.get(credential)
             return attempt.cancelled.is_set() if attempt is not None else False
 
-    def active_attempts(self) -> list[str]:
-        with self._lock:
-            return sorted(
-                attempt.scope.attempt_id for attempt in self._attempts.values()
-            )
-
 
 def create_patent_task_registry() -> InMemoryPatentTaskRegistry:
     """Build the process-local task registry for the composition root."""

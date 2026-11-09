@@ -159,69 +159,6 @@ def test_confirm_actions_mint_the_matching_artifact(database, repo) -> None:
     assert fragment["status"] == "confirmed"
 
 
-def test_candidate_detail_gates_enumeration_on_confirmed_relationships(
-    database, repo
-) -> None:
-    """Enumeration needs a confirmed scaffold wired to a site + option; every
-    other state reports its own block reason."""
-    fragment_candidate = _seed_one(database)
-    fragment_decision = apply_decision(
-        repo,
-        candidate_id=fragment_candidate,
-        expected_version=1,
-        action="confirm_fragment",
-    )
-    with database.mol_conn() as conn:
-        detail = get_candidate_detail(conn, fragment_candidate)
-    assert detail.fragment_id == fragment_decision["fragment_id"]
-    assert detail.scaffold_id is None
-    assert detail.enumeration_eligible is False
-    assert detail.enumeration_block_reasons == ["candidate is not a confirmed scaffold"]
-
-    scaffold_candidate = _seed_one(database, label="Formula I")
-    scaffold_decision = apply_decision(
-        repo,
-        candidate_id=scaffold_candidate,
-        expected_version=1,
-        action="confirm_scaffold",
-    )
-    with database.mol_conn() as conn:
-        detail = get_candidate_detail(conn, scaffold_candidate)
-    assert detail.scaffold_id == scaffold_decision["scaffold_id"]
-    assert detail.fragment_id is None
-    assert detail.enumeration_eligible is False
-    assert detail.enumeration_block_reasons == ["no confirmed attachment site"]
-
-    scaffold_id = str(scaffold_decision["scaffold_id"])
-    with database.mol_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO markush_sites
-                (site_id, scaffold_id, site_label, atom_map_num, status)
-            VALUES ('site-1', ?, 'R1', 1, 'confirmed')
-            """,
-            (scaffold_id,),
-        )
-        conn.execute(
-            """
-            INSERT INTO markush_fragments
-                (fragment_id, doc_id, label, smiles, status)
-            VALUES ('fragment-1', 'doc-1', 'R1', 'F', 'confirmed')
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO markush_options
-                (option_id, site_id, fragment_id, status)
-            VALUES ('option-1', 'site-1', 'fragment-1', 'confirmed')
-            """
-        )
-        detail = get_candidate_detail(conn, scaffold_candidate)
-
-    assert detail.enumeration_eligible is True
-    assert detail.enumeration_block_reasons == []
-
-
 def test_decision_versioning_rejects_stale_and_invalid_transitions(
     database, repo
 ) -> None:

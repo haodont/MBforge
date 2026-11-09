@@ -200,3 +200,55 @@ def test_agent_library_sql_reads_and_refuses_writes(
         ).json()
         assert refused["success"] is False
         assert refused["error"]
+
+
+def test_agent_recognize_molecules_tool_resolves_pdf_and_forwards_region(
+    monkeypatch,
+) -> None:
+    """The recognizer tool resolves the PDF server-side and forwards the region."""
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agent, "resolve_library_root", lambda _: "C:/library")
+    monkeypatch.setattr(
+        agent, "resolve_pdf_path", lambda root, doc_id: Path(f"{root}/{doc_id}.pdf")
+    )
+
+    from mbforge.service.use_cases.molecule import recognition
+
+    def fake_recognize(pdf_path: str, **kwargs):
+        captured.update(pdf_path=pdf_path, kwargs=kwargs)
+        return {
+            "page": kwargs["page"],
+            "page_width_pts": 612.0,
+            "page_height_pts": 792.0,
+            "dpi": 200.0,
+            "region": kwargs["region"],
+            "count": 1,
+            "truncated": False,
+            "molecules": [{"index": 0, "smiles": "CCO", "labels": ["22A"]}],
+        }
+
+    monkeypatch.setattr(recognition, "recognize_page_molecules", fake_recognize)
+
+    response = TestClient(create_app()).post(
+        "/api/v1/agent/tools/recognize-molecules",
+        json={
+            "doc_id": "doc-1",
+            "page": 3,
+            "region": [0, 0, 306, 792],
+            "max_molecules": 5,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tool"] == "recognize_molecules"
+    assert body["count"] == 1
+    assert body["molecules"][0]["smiles"] == "CCO"
+    assert Path(captured["pdf_path"]) == Path("C:/library/doc-1.pdf")
+    assert captured["kwargs"] == {
+        "page": 3,
+        "region": [0, 0, 306, 792],
+        "max_molecules": 5,
+    }

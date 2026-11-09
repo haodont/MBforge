@@ -8,7 +8,7 @@ export interface AgentLlmConfig {
 }
 
 export interface AgentChatEvent {
-  type: 'delta' | 'tool' | 'task' | 'artifact' | 'done' | 'error'
+  type: 'delta' | 'tool' | 'task' | 'artifact' | 'review' | 'done' | 'error'
   data: Record<string, unknown>
 }
 

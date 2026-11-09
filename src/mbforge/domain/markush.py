@@ -26,19 +26,7 @@ from typing import Any
 
 from rdkit import Chem, RDLogger
 
-from mbforge.foundation.errors import MBForgeError
-
 RDLogger.DisableLog("rdApp.*")
-
-
-# ── Site validation ─────────────────────────────────────────────────────────
-
-
-class MarkushSiteError(MBForgeError):
-    """Raised for validation / state-machine violations in site ops."""
-
-    status_code = 422
-    error_code = "validation_error"
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
@@ -418,7 +406,6 @@ def check_response(
 __all__ = [
     "MarkushRGroupDefinition",
     "MarkushSite",
-    "MarkushSiteError",
     "MatchLevel",
     "ParsedMarkush",
     "SiteJudgment",

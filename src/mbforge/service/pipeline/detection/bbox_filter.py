@@ -7,7 +7,6 @@ shifted/scaled boxes renders once.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 
 BBox = tuple[float, float, float, float]
@@ -47,18 +46,3 @@ def add_bbox_keep_larger(
                 kept[i] = (bbox, payload)
             return
     kept.append((bbox, payload))
-
-
-def dedupe_keep_larger(
-    items: Iterable[tuple[BBox, Any]],
-    iou_threshold: float = 0.5,
-) -> list[tuple[BBox, Any]]:
-    """Filter an iterable of (bbox, payload) pairs, larger box wins on overlap.
-
-    Order is preserved and overlapping boxes collapse to the larger one, so
-    callers can post-process an already-built list (e.g. source evidence).
-    """
-    kept: list[tuple[BBox, Any]] = []
-    for bbox, payload in items:
-        add_bbox_keep_larger(kept, bbox, payload, iou_threshold)
-    return kept

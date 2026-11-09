@@ -65,24 +65,6 @@ export const queryKeys = {
       [...queryKeys.molecules.all, 'validation', smiles] as const,
     svg: (smiles: string, width: number, height: number) =>
       [...queryKeys.molecules.all, 'svg', smiles, width, height] as const,
-    clusters: () => [...queryKeys.molecules.all, 'clusters'] as const,
-    clusterMembers: (clusterId: string) =>
-      [...queryKeys.molecules.all, 'cluster-members', clusterId] as const,
-    relationStats: () => [...queryKeys.molecules.all, 'relation-stats'] as const,
-    relations: (molId: string) =>
-      [...queryKeys.molecules.all, 'relations', molId] as const,
-    substructure: (query: string, threshold: number) =>
-      [...queryKeys.molecules.all, 'substructure', query, threshold] as const,
-    analogs: (molId: string, minSimilarity: number) =>
-      [...queryKeys.molecules.all, 'analogs', molId, minSimilarity] as const,
-  },
-
-  notes: {
-    all: ['notes'] as const,
-    list: (libraryRoot: string) =>
-      [...queryKeys.notes.all, libraryRoot] as const,
-    backlinks: (libraryRoot: string, targetId: string) =>
-      [...queryKeys.notes.all, 'backlinks', libraryRoot, targetId] as const,
   },
 
   settings: {

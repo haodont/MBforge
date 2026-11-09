@@ -30,10 +30,10 @@ register_kinds({"text": TEXT, "tab": TABLE})
 DOC = "activity-evidence"
 
 
-def _evidence(raw_text: str, *, kind: str = "text") -> SourceEvidence:
+def _evidence(raw_text: str, *, kind: str = "text", page: int = 1) -> SourceEvidence:
     return SourceEvidence.create(
         doc_id=DOC,
-        page=1,
+        page=page,
         bbox=(10.0, 20.0, 100.0, 40.0),
         raw_text=raw_text,
         kind=kind,
@@ -270,6 +270,80 @@ def test_table_measurements_share_evidence_id_and_complex_cells_skip_the_table()
         assert measurements == [], case
         assert [issue["code"] for issue in issues] == ["complex_activity_table"], case
         assert issues[0]["evidence_ids"] == [block.evidence_id], case
+
+
+def test_page_split_activity_table_continuation_is_read() -> None:
+    """A table that continues on the next page keeps its columns, not its header.
+
+    CN119504738A pp.124-125 prints Table 1 as two evidence rows: the first
+    carries the header, the second resumes with a data row and the separator the
+    layout pass emitted for that fragment. The resumed rows are read under the
+    previous header; a headerless table two pages later is not.
+    """
+    header = (
+        "| 实施例 | 测试化合物 | IC50(nM) |\n"
+        "| --- | --- | --- |\n"
+        "| 1 | 化合物1 | 64.6 |\n"
+        "| 2 | 化合物2 | 12.8 |"
+    )
+    continuation = (
+        "| 23 | 化合物23 | 69.3 |\n| --- | --- | --- |\n| 24 | 化合物24 | 23.97 |"
+    )
+    first = _evidence(header, kind="tab", page=124)
+    second = _evidence(continuation, kind="tab", page=125)
+    measurements, issues = extract_activity_measurements_from_evidence(
+        [first, second], DOC
+    )
+
+    # Inheriting a header is a documented continuation, not a guess: the audit
+    # issue keeps both rows citable and makes silent inheritance impossible.
+    assert [issue["code"] for issue in issues] == ["table_header_inherited"]
+    assert issues[0]["evidence_ids"] == [first.evidence_id, second.evidence_id]
+    assert [
+        (item["value"]["original_value"], item["page_num"], item["evidence_ids"])
+        for item in measurements
+    ] == [
+        (64.6, 124, [first.evidence_id]),
+        (12.8, 124, [first.evidence_id]),
+        (69.3, 125, [second.evidence_id]),
+        (23.97, 125, [second.evidence_id]),
+    ]
+
+    # A same-shaped fragment that does not parse under the borrowed header is a
+    # refusal, and a refusal must be visible: this row used to leave no trace.
+    unreadable = _evidence(
+        "| 23 | 化合物23 | unreadable |\n| --- | --- | --- |",
+        kind="tab",
+        page=125,
+    )
+    _, refusal = extract_activity_measurements_from_evidence([first, unreadable], DOC)
+    assert [issue["code"] for issue in refusal] == ["complex_activity_table"]
+    assert refusal[0]["evidence_ids"] == [first.evidence_id, unreadable.evidence_id]
+
+    # A different table on the next page prints its own header: it is not a tail,
+    # so it is neither read under the borrowed metric nor reported as a refusal
+    # (the rat PK table printed beside Table 1 on p125).
+    other = _evidence(
+        "| 测试化合物 | Cmax (ng/mL) | AUC0-t (h*ng/mL) |\n| --- | --- | --- |\n"
+        "| 化合物13 | 1207 | 14585 |",
+        kind="tab",
+        page=125,
+    )
+    other_measurements, other_issues = extract_activity_measurements_from_evidence(
+        [first, other], DOC
+    )
+    assert [item["value"]["original_value"] for item in other_measurements] == [
+        64.6,
+        12.8,
+    ]
+    assert other_issues == []
+
+    far = _evidence(continuation, kind="tab", page=127)
+    far_measurements, far_issues = extract_activity_measurements_from_evidence(
+        [first, far], DOC
+    )
+    assert [item["page_num"] for item in far_measurements] == [124, 124]
+    assert far_issues == []
 
 
 # (case, text, kind) — published text that holds no reading of its own.

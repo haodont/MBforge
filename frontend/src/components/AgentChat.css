@@ -61,3 +61,9 @@
   .research-welcome { padding: var(--space-3) 0; }
   .research-welcome__icon { margin-bottom: var(--space-4); }
 }
+.research-review-card { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); }
+.research-review-card__head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.research-review-card__change { margin: 0; }
+.research-review-card__reason { margin: 0; color: var(--text-secondary); font-size: var(--text-sm); }
+.research-review-card__error { margin: 0; color: var(--danger); font-size: var(--text-sm); }
+.research-review-card__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

@@ -10,12 +10,8 @@ correct is data, a transport failure stays a real HTTP error.
 Tools:
     get-gap              one bounded gap, or the next unanswered one
     request-excerpt      the one bounded follow-up excerpt a gap may ask for
-    submit-gap-answer    validate one gap answer against its gap and stage it
     list-molecules       existing recognized structures (never creates one)
-    read-evidence        evidence rows by id, or a bounded page window
-    search-evidence      paged text search over the bound document's evidence
-    deterministic-draft  the rule-based draft, read by category
-    submit-facts         validate one structured draft and stage it
+    submit-gap-answer    validate one gap answer against its gap and stage it
 """
 
 from __future__ import annotations

@@ -301,12 +301,18 @@ def _update_reply(
 
 async def stream_turn(turn: PreparedTurn) -> AsyncIterator[ResearchEvent]:
     if turn.replay:
-        from mbforge.contracts.research import ResearchArtifactEvent, ResearchTaskEvent
+        from mbforge.contracts.research import (
+            ResearchArtifactEvent,
+            ResearchReviewEvent,
+            ResearchTaskEvent,
+        )
 
         for reference in turn.replay.task_refs:
             yield ResearchTaskEvent(reference=reference)
         for artifact in turn.replay.artifact_refs:
             yield ResearchArtifactEvent(reference=artifact)
+        for review in turn.replay.review_refs:
+            yield ResearchReviewEvent(items=[review])
         yield ResearchDone(text=turn.replay.content, status=turn.replay.status)
         return
     if turn.credential is None:
@@ -349,6 +355,23 @@ async def stream_turn(turn: PreparedTurn) -> AsyncIterator[ResearchEvent]:
                         }
                     ),
                 )
+            elif event.type == "review":
+                reference = event.items[0] if event.items else None
+                if reference is not None:
+                    await asyncio.to_thread(
+                        _update_reply,
+                        turn,
+                        lambda message, ref=reference: message.model_copy(
+                            update={
+                                "review_refs": [
+                                    item
+                                    for item in message.review_refs
+                                    if item.item_id != ref.item_id
+                                ]
+                                + [ref]
+                            }
+                        ),
+                    )
             elif event.type in ("done", "error"):
                 if event.type == "done":
                     text, status = event.text, event.status

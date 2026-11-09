@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -271,8 +272,112 @@ def _decode(
     return tokens, cell_boxes
 
 
-def _cell_texts(image: np.ndarray, cell_boxes: list[np.ndarray]) -> dict[int, str]:
-    """Recognize each cell box on the original crop with local RapidOCR."""
+def _clip_box(
+    box: Sequence[float], width: float, height: float
+) -> tuple[int, int, int, int] | None:
+    """Clip a pixel box to the image; ``None`` when nothing is left."""
+    if len(box) != 4:
+        return None
+    x0, y0, x1, y1 = (float(value) for value in box)
+    x0, y0 = max(0.0, x0), max(0.0, y0)
+    x1, y1 = min(float(width), x1), min(float(height), y1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return int(x0), int(y0), int(np.ceil(x1)), int(np.ceil(y1))
+
+
+def _mask_molecule_areas(
+    image: np.ndarray, boxes: Sequence[Sequence[float]]
+) -> np.ndarray:
+    """Return a copy of the crop with the molecule boxes painted white.
+
+    A table cell that draws a structure must not be read as text: its atom
+    labels and bond glyphs are otherwise recognized and joined into the cell
+    (measured on the dev corpus: up to 260 chemistry-looking cells in one
+    document). The table *structure* model still sees the untouched crop; only
+    cell-text recognition consumes this copy.
+    """
+    if not boxes:
+        return image
+    masked = image.copy()
+    height, width = masked.shape[:2]
+    for box in boxes:
+        clipped = _clip_box(box, width, height)
+        if clipped is None:
+            continue
+        x0, y0, x1, y1 = clipped
+        masked[y0:y1, x0:x1] = 255
+    return masked
+
+
+def _cell_index_for_box(
+    box: Sequence[float], cell_boxes: Sequence[Sequence[float]]
+) -> int | None:
+    """Index of the cell that holds the largest share of *box*, or ``None``.
+
+    Overlap area (not the centre point) decides: a drawing that spills into a
+    neighbour cell still belongs to the cell that contains most of it, and a box
+    outside every cell produces no token at all.
+    """
+    if len(box) != 4:
+        return None
+    best_index: int | None = None
+    best_area = 0.0
+    for index, cell in enumerate(cell_boxes):
+        if len(cell) != 4:
+            continue
+        ix0 = max(float(box[0]), float(cell[0]))
+        iy0 = max(float(box[1]), float(cell[1]))
+        ix1 = min(float(box[2]), float(cell[2]))
+        iy1 = min(float(box[3]), float(cell[3]))
+        area = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+        if area > best_area:
+            best_index, best_area = index, area
+    return best_index
+
+
+def _inject_molecule_tokens(
+    texts: dict[int, str],
+    cell_boxes: Sequence[Sequence[float]],
+    molecule_cells: Sequence[Mapping[str, Any]],
+) -> dict[int, str]:
+    """Put each molecule's token into its cell, keeping the cell's own text.
+
+    A table that draws structures is still a table: the token records the
+    molecule's row/column position (the cell index), and any printed label left
+    beside the masked drawing stays next to it.
+    """
+    if not molecule_cells:
+        return texts
+    per_cell: dict[int, list[str]] = {}
+    for item in molecule_cells:
+        bbox = item.get("bbox")
+        token = str(item.get("token") or "")
+        if not bbox or not token:
+            continue
+        index = _cell_index_for_box(bbox, cell_boxes)
+        if index is None:
+            continue
+        per_cell.setdefault(index, []).append(token)
+    if not per_cell:
+        return texts
+    merged = dict(texts)
+    for index, tokens in sorted(per_cell.items()):
+        residual = (merged.get(index) or "").strip()
+        merged[index] = " ".join([*tokens, residual]) if residual else " ".join(tokens)
+    return merged
+
+
+def _cell_texts(
+    image: np.ndarray,
+    cell_boxes: list[np.ndarray],
+    mask_boxes: Sequence[Sequence[float]] = (),
+) -> dict[int, str]:
+    """Recognize each cell box on the original crop with local RapidOCR.
+
+    ``mask_boxes`` (crop pixels) are molecule drawings; they are blanked in a
+    copy of the crop so their glyphs never reach the recognizer.
+    """
     if not cell_boxes:
         return {}
     height, width = image.shape[:2]
@@ -296,7 +401,9 @@ def _cell_texts(image: np.ndarray, cell_boxes: list[np.ndarray]) -> dict[int, st
     from mbforge.foundation.inference.ocr import page_text
 
     try:
-        recognized = page_text.read_text_in_boxes(image, valid)
+        recognized = page_text.read_text_in_boxes(
+            _mask_molecule_areas(image, mask_boxes), valid
+        )
     except Exception as exc:  # noqa: BLE001 — enrichment must never raise
         logger.warning("SLANet cell OCR failed: %s", exc)
         return {}
@@ -330,8 +437,18 @@ def _assemble_html(
     return "".join(parts)
 
 
-def predict_table(image: np.ndarray | Any) -> str:
+def predict_table(
+    image: np.ndarray | Any,
+    *,
+    molecule_cells: Sequence[Mapping[str, Any]] = (),
+) -> str:
     """Recognize one table-region crop; return an HTML table (or ``""``).
+
+    ``molecule_cells`` are structure drawings inside the crop, each as
+    ``{"token": "[MOL:0]", "bbox": [x0, y0, x1, y1]}`` in crop pixels. They are
+    blanked before cell text recognition, and the token is written into the cell
+    that holds the drawing — so the table reads as text while the molecule keeps
+    its row/column position.
 
     Never raises: missing weights, malformed crops and inference errors all
     degrade to an empty string.
@@ -358,7 +475,9 @@ def predict_table(image: np.ndarray | Any) -> str:
         )
         if not tokens:
             return ""
-        texts = _cell_texts(image, cell_boxes)
+        mask_boxes = [item["bbox"] for item in molecule_cells if item.get("bbox")]
+        texts = _cell_texts(image, cell_boxes, mask_boxes)
+        texts = _inject_molecule_tokens(texts, cell_boxes, molecule_cells)
         return _assemble_html(tokens, cell_boxes, texts)
     except Exception as exc:  # noqa: BLE001 — enrichment must never break a run
         logger.warning("SLANet-1M predict failed: %s", exc)

@@ -14,6 +14,7 @@ from mbforge.domain.patent import (
     designation_key,
     entry_id,
 )
+from mbforge.service.pipeline.patent.candidate_labels import candidate_label_keys
 from mbforge.service.pipeline.patent.sections import (
     ParsedSection as DocumentSection,
 )
@@ -85,61 +86,23 @@ def _append_issue(
     fact_id: str | None,
     *,
     severity: str = "warning",
+    label_key: str | None = None,
 ) -> None:
     if any(
         issue.get("code") == code and issue.get("related_fact_id") == fact_id
         for issue in issues
     ):
         return
-    issues.append(
-        {
-            "code": code,
-            "message": message,
-            "severity": severity,
-            "evidence_ids": list(dict.fromkeys(evidence_ids)),
-            "related_fact_id": fact_id,
-        }
-    )
-
-
-def _candidate_label_keys(candidate: Any) -> set[str]:
-    from mbforge.service.pipeline.detection.label_normalization import (
-        LabelKind,
-        normalize_coref_label,
-    )
-
-    properties = getattr(candidate, "properties", {})
-    properties = properties if isinstance(properties, dict) else {}
-    values: list[str] = []
-    for key in (
-        "ocr_labels_primary",
-        "ocr_labels",
-        "raw_coref_label",
-        "normalized_label",
-        "label",
-        "formula_label",
-    ):
-        value = properties.get(key)
-        if isinstance(value, str):
-            values.append(value)
-        elif isinstance(value, list):
-            values.extend(item for item in value if isinstance(item, str))
-
-    # A designation also reaches a candidate through ``name``: when the crop's
-    # label was read off the scheme rather than off a caption it is stored there
-    # and nowhere else, which made the candidate invisible to every rule below.
-    # The normalizer still decides what is a designation — a printed chemistry
-    # name yields no key, so this cannot invent an association.
-    name = getattr(candidate, "name", "")
-    if isinstance(name, str) and name.strip():
-        values.append(name)
-
-    keys: set[str] = set()
-    for value in values:
-        normalized = normalize_coref_label(value)
-        if normalized is not None and normalized.kind is LabelKind.COMPOUND:
-            keys.add(normalized.normalized)
-    return keys
+    issue: dict[str, Any] = {
+        "code": code,
+        "message": message,
+        "severity": severity,
+        "evidence_ids": list(dict.fromkeys(evidence_ids)),
+        "related_fact_id": fact_id,
+    }
+    if label_key is not None:
+        issue["label_key"] = label_key
+    issues.append(issue)
 
 
 def _candidate_evidence_ids(candidate: Any, valid_ids: set[str]) -> list[str]:
@@ -514,8 +477,22 @@ def associate_facts(
             for section in matching_sections
             for method in methods_by_section.get(section.section_id, [])
         ]
-        if len(matching_sections) == 1 and len(matching_methods) == 1:
-            measurement["assay_method_id"] = matching_methods[0]["assay_method_id"]
+        # A section can print several assays (``测试例1`` … ``测试例4``). The
+        # method whose own evidence block cites this reading's row settles which
+        # one; otherwise the section has to own exactly one method.
+        citing = [
+            method
+            for method in matching_methods
+            if set(evidence_ids) & set(method.get("evidence_ids") or [])
+        ]
+        if len(citing) == 1:
+            chosen = citing[0]
+        elif len(matching_sections) == 1 and len(matching_methods) == 1:
+            chosen = matching_methods[0]
+        else:
+            chosen = None
+        if chosen is not None:
+            measurement["assay_method_id"] = chosen["assay_method_id"]
         else:
             _append_issue(
                 issues,
@@ -536,7 +513,7 @@ def associate_facts(
 
     candidate_matches: dict[str, list[tuple[Any, set[str], list[str]]]] = {}
     for candidate in filter_persistable_candidates("", list(candidates), warn=False):
-        keys = _candidate_label_keys(candidate)
+        keys = candidate_label_keys(candidate)
         evidence_ids = _candidate_evidence_ids(candidate, valid_evidence_ids)
         if not keys:
             if evidence_ids:
@@ -584,6 +561,7 @@ def associate_facts(
                 f"compound label {label_key} matches multiple Detection candidates",
                 list(dict.fromkeys(eid for _, _, ids in matches for eid in ids)),
                 fact_entry_id,
+                label_key=label_key,
             )
             continue
         candidate, _, candidate_evidence_ids = matches[0]

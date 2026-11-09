@@ -4,14 +4,15 @@ import { useTranslation } from 'react-i18next'
 import ChatMarkdown from './chat/ChatMarkdown'
 import { useDocuments, useIngestQueue, useSettings } from '@/api/query/hooks'
 import { useMolecule, useMoleculePage } from '@/api/query/hooks/useMolecules'
-import { readArtifactReference, readTaskReference, streamResearchChat } from '@/api/http/research'
+import { readArtifactReference, readReviewReference, readTaskReference, streamResearchChat } from '@/api/http/research'
 import { useCreateResearchSession, useDeleteResearchSession, useImportResearchHistory, useLoadResearchSession, useResearchSession, useResearchSessions } from '@/api/query/hooks/useResearch'
 import { useAppContext } from '@/context/AppContext'
 import { BotIcon, FileTextIcon, PlusIcon, SendIcon, SettingsIcon, SparklesIcon, UserIcon, XIcon } from '@/components/icons'
 import { Badge, Button, Chip, IconButton, InlineAlert, Input, Modal, Tabs, TextArea } from './ui'
 import { historyKey, readHistory } from './research/history'
-import type { ResearchArtifactReference, ResearchMessage, ResearchMoleculeReference, ResearchSession, ResearchTaskReference, ResearchSessionSummary } from '@/api/http/research'
+import type { ResearchArtifactReference, ResearchMessage, ResearchMoleculeReference, ResearchReviewReference, ResearchSession, ResearchTaskReference, ResearchSessionSummary } from '@/api/http/research'
 import { ResearchArtifactCard, ResearchTaskPanel } from './research/ResearchReferences'
+import ResearchReviewCard from './research/ResearchReviewCard'
 import './AgentChat.css'
 
 const newId = () => crypto.randomUUID()
@@ -125,6 +126,7 @@ export default function AgentChat() {
     let session: ResearchSession | null = null
     const receivedTasks: ResearchTaskReference[] = []
     const receivedArtifacts: ResearchArtifactReference[] = []
+    const receivedReviews: ResearchReviewReference[] = []
     try {
       const saved = active ?? await createSession.mutateAsync(t('research.new'))
       controller.signal.throwIfAborted()
@@ -154,6 +156,17 @@ export default function AgentChat() {
             receivedArtifacts.splice(0, receivedArtifacts.length, ...receivedArtifacts.filter(item => item.doc_id !== reference.doc_id), reference)
             updateMessage(assistantId, { artifactRefs: [...receivedArtifacts] })
           }
+        }
+        if (event.type === 'review') {
+          const items = Array.isArray(event.data.items) ? event.data.items : []
+          for (const item of items) {
+            const reference = readReviewReference(item)
+            if (!reference) continue
+            const existing = receivedReviews.findIndex(entry => entry.item_id === reference.item_id)
+            if (existing >= 0) receivedReviews.splice(existing, 1, reference)
+            else receivedReviews.push(reference)
+          }
+          if (receivedReviews.length > 0) updateMessage(assistantId, { reviewRefs: [...receivedReviews] })
         }
         if (event.type === 'done') {
           responseState.terminal = true
@@ -258,6 +271,10 @@ export default function AgentChat() {
                 reference={reference} documents={documents} tasks={queue.data} pending={queue.isPending} failed={queue.isError} libraryRoot={libraryRoot} onOpen={openAnalysis} />)}</div>}
               {!!message.artifactRefs?.length && <div className="research-message__references">{message.artifactRefs.map(reference => <ResearchArtifactCard key={reference.doc_id + ':' + reference.run_id}
                 reference={reference} documents={documents} libraryRoot={libraryRoot} onOpen={openAnalysis} />)}</div>}
+              {!!message.reviewRefs?.length && <div className="research-message__references">{message.reviewRefs.map(reference => <ResearchReviewCard key={reference.item_id}
+                reference={reference} libraryRoot={libraryRoot} busy={busy}
+                onDecided={next => updateMessage(message.id, { reviewRefs: (message.reviewRefs ?? []).map(entry => entry.item_id === reference.item_id ? { ...entry, status: next } : entry) })}
+                onBatchDecided={(ids, next) => updateMessage(message.id, { reviewRefs: (message.reviewRefs ?? []).map(entry => ids.includes(entry.item_id) ? { ...entry, status: next } : entry) })} />)}</div>}
             </div>
           </article>
         ))}

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -73,6 +75,31 @@ def test_document_evidence_resolution_scopes_to_its_document(
         f"/api/v1/library/documents/doc-other/evidence/{evidence.evidence_id}"
     )
     assert foreign.status_code == 404
+
+
+def test_missing_patent_facts_are_an_expected_not_found_not_a_stack_trace(
+    app_client: TestClient, tmp_library: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A document that has not run Patent analysis has no facts artifact.
+
+    Patent analysis is scheduled on demand, so this read answers a plain 404
+    the viewer renders as "not analyzed". The operator log must keep that
+    expected client outcome as one record — no traceback that reads like a
+    crash.
+    """
+    with caplog.at_level(logging.INFO, logger="mbforge.server.app"):
+        response = app_client.get(
+            "/api/v1/library/documents/doc-not-analysed/patent-facts"
+        )
+
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "not_found"
+    record = next(
+        item
+        for item in caplog.records
+        if "patent_facts.json not found" in item.getMessage()
+    )
+    assert not record.exc_info
 
 
 def test_library_import_registers_and_enqueues_processing_run(

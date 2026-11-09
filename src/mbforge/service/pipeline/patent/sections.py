@@ -208,16 +208,6 @@ def section_id(doc_id: str, page_start: int | None, title: str) -> str:
     return stable_id("section", doc_id, str(page_start or 0), title)
 
 
-def segment_page_headings(pages: Sequence[Any]) -> list[tuple[int, str]]:
-    """Return ``(page_num, line)`` anchors from extracted page text."""
-    anchors: list[tuple[int, str]] = []
-    for page in pages:
-        for line in str(getattr(page, "text", "")).splitlines():
-            if match_section_heading(line):
-                anchors.append((int(page.page_num), line))
-    return anchors
-
-
 def _candidate_ids(section_text: str) -> list[str]:
     ids: list[str] = []
     for block in _ESMILES_BLOCK_RE.finditer(section_text):
@@ -330,5 +320,4 @@ __all__ = [
     "section_id",
     "section_role",
     "section_title",
-    "segment_page_headings",
 ]

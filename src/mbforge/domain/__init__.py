@@ -2,7 +2,7 @@
 
 Convenience re-export of the stable public domain surface so callers can
 ``from mbforge.domain import Molecule, SourceEvidence``.  Function-heavy
-helpers (parser, coverage, enumeration, provenance, stage runner) stay in
+helpers (parser, coverage, provenance, stage runner) stay in
 their own modules and are NOT re-exported here to avoid widening the
 public namespace with generic names.
 """

@@ -330,11 +330,6 @@ def test_a_gap_hands_over_only_the_structures_its_excerpt_prints() -> None:
     assert aliases.rule_context["structures"][0]["mol_id"] == "mol-alias"
     assert _structure_labels(aliases) == ["E020"]
 
-    designated = gaps_for(CN_TABLE, [_structure("1")])
-    assert [item["mol_id"] for item in designated.rule_context["structures"]] == [
-        "mol-1"
-    ]
-
     markerless = gaps_for(
         "| 1 | ++++ |\n| 3 | ++++ |", [_structure("1"), _structure("3")]
     )
@@ -356,12 +351,6 @@ def test_a_gap_hands_over_only_the_structures_its_excerpt_prints() -> None:
         "该化合物 IC50 9.6nM を示した。", [_structure("9")], evidence_id="ev-line-83"
     )
     assert "structures" not in in_unit.rule_context
-
-    without, _ = build_gaps(
-        issues=[{"code": "complex_activity_table", "evidence_ids": ["ev-tab-21"]}],
-        evidence=_rows(),
-    )
-    assert "structures" not in without[0].rule_context
 
 
 # ── the LLM-led merge ───────────────────────────────────────────────

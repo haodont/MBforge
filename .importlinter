@@ -1,0 +1,78 @@
+[importlinter]
+root_package = mbforge
+include_external_packages = False
+
+[importlinter:contract:domain]
+name = domain has no outward dependencies
+type = forbidden
+source_modules =
+    mbforge.domain
+forbidden_modules =
+    mbforge.service
+    mbforge.db
+    mbforge.api
+    mbforge.server
+
+[importlinter:contract:db]
+name = db does not import service, api or server
+type = forbidden
+source_modules =
+    mbforge.db
+forbidden_modules =
+    mbforge.service
+    mbforge.api
+    mbforge.server
+
+[importlinter:contract:service]
+name = service does not import db, api or server
+type = forbidden
+source_modules =
+    mbforge.service
+forbidden_modules =
+    mbforge.db
+    mbforge.api
+    mbforge.server
+
+[importlinter:contract:api]
+name = api does not import db or server
+type = forbidden
+source_modules =
+    mbforge.api
+forbidden_modules =
+    mbforge.db
+    mbforge.server
+
+[importlinter:contract:foundation]
+name = foundation does not import higher layers
+type = forbidden
+source_modules =
+    mbforge.foundation
+forbidden_modules =
+    mbforge.service
+    mbforge.db
+    mbforge.api
+    mbforge.server
+ignore_imports =
+    mbforge.foundation.inference.molparser -> mbforge.domain.types
+
+[importlinter:contract:ports]
+name = ports do not import implementations
+type = forbidden
+source_modules =
+    mbforge.ports
+forbidden_modules =
+    mbforge.service
+    mbforge.db
+    mbforge.api
+    mbforge.server
+
+[importlinter:contract:contracts]
+name = contracts do not import implementations
+type = forbidden
+source_modules =
+    mbforge.contracts
+forbidden_modules =
+    mbforge.service
+    mbforge.db
+    mbforge.api
+    mbforge.server

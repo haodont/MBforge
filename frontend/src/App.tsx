@@ -22,7 +22,6 @@ import ResearchShelf from './components/research/ResearchShelf'
 import { XIcon } from './components/icons'
 
 const MoleculeLibrary = lazy(() => import('./components/MoleculeLibrary'))
-const Knowledge = lazy(() => import('./components/Knowledge'))
 const ProcessingQueue = lazy(() => import('./components/project/ProcessingQueue'))
 const SettingsPage = lazy(() => import('./components/settings/SettingsPage'))
 const ReviewCenter = lazy(() => import('./components/review/ReviewCenter'))
@@ -75,7 +74,53 @@ function AppShellOrBootstrap() {
   const [libraryStatusChecked, setLibraryStatusChecked] = useState(false)
   const [libraryStatusError, setLibraryStatusError] = useState<Error | null>(null)
   const [libraryStatusRetry, setLibraryStatusRetry] = useState(0)
-  const [viewExpanded, setViewExpanded] = useState(false)
+  const [viewExpanded, setViewExpanded] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      const saved = window.localStorage.getItem('mbforge_view_expanded')
+      if (saved !== null) return saved === 'true'
+    } catch {
+      // Privacy mode / disabled storage: fall through to the route default.
+    }
+    return !window.location.pathname.startsWith('/agent')
+  })
+
+  const viewExpandedPersisted = useRef(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!viewExpandedPersisted.current) {
+      viewExpandedPersisted.current = true
+      return
+    }
+    try {
+      window.localStorage.setItem('mbforge_view_expanded', String(viewExpanded))
+    } catch {
+      // Quota / privacy mode: keep the in-memory preference only.
+    }
+  }, [viewExpanded])
+
+  // Entering a result view for the first time should feel like a reader.
+  useEffect(() => {
+    if (currentPage === 'agent' || typeof window === 'undefined') return
+    try {
+      if (window.localStorage.getItem('mbforge_view_expanded') === null) setViewExpanded(true)
+    } catch {
+      // Storage unavailable: the route default already applies.
+    }
+  }, [currentPage])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (currentPage === 'agent') return
+      if (event.key.toLowerCase() !== 'f' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+      event.preventDefault()
+      setViewExpanded(value => !value)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [currentPage])
 
   useIngestNotifications(libraryRoot)
 
@@ -150,20 +195,13 @@ function AppShellOrBootstrap() {
         </div>
       )
     }
-    if (location.pathname.startsWith('/notes')) {
-      return (
-        <div className="app-shell--no-library">
-          <Knowledge />
-        </div>
-      )
-    }
     if (location.pathname.startsWith('/docs')) {
       return <div className="app-shell--no-library"><Docs /></div>
     }
     return <LibraryBootstrap />
   }
 
-  if (location.pathname === '/') return <Navigate to="/agent" replace />
+  if (location.pathname === '/') return <Navigate to="/workspace" replace />
   const hasView = activeTabId !== null || currentPage !== 'agent'
   const utility = currentPage === 'settings' || currentPage === 'docs'
   const closeView = () => { setViewExpanded(false); setActiveTabId(null); void navigate('/agent') }
@@ -179,8 +217,17 @@ function AppShellOrBootstrap() {
             <header className="research-view__header">
               <Tabs id="research-view-tabs" size="sm" variant="underline"
                 items={[{ key: 'overview', label: t(currentPage === 'agent' ? 'research.materials' : `nav.${currentPage}`) },
-                  ...openTabs.map(tab => ({ key: tab.id, label: tab.title }))]}
-                activeKey={activeTabId ?? 'overview'} onChange={key => setActiveTabId(key === 'overview' ? null : key)} />
+                  ...openTabs.map(tab => ({ key: tab.id, label: tab.title, closable: true }))]}
+                activeKey={activeTabId ?? 'overview'}
+                onChange={key => setActiveTabId(key === 'overview' ? null : key)}
+                onTabClose={tabId => {
+                  if (activeTabId === tabId) {
+                    const tab = openTabs.find(t => t.id === tabId)
+                    if (tab) clearViewerSnapshot(`${tab.id}:${tab.doc.doc_id}`)
+                  }
+                  closeTab(tabId)
+                }}
+                closeLabel={t('research.closeTab')} />
               {!utility && <Button variant="ghost" size="sm" ariaPressed={viewExpanded} onClick={() => setViewExpanded(value => !value)}>{t(viewExpanded ? 'research.showConversation' : 'research.expandResult')}</Button>}
               <Button variant="ghost" size="sm" icon={<XIcon size={14} />} onClick={closeView}>{t('research.returnChat')}</Button>
             </header>
@@ -198,7 +245,6 @@ function AppShellOrBootstrap() {
 function pageFromPath(pathname: string): string {
   const page = pathname.split('/').filter(Boolean)[0]
   if (page === 'analysis') return 'molecules'
-  if (page === 'notes') return 'knowledge'
   return page || 'agent'
 }
 
@@ -238,7 +284,7 @@ function TabContent({
       return (
         <MarkdownViewer
           libraryRoot={activeTab.libraryRoot}
-          docId={activeTab.doc.doc_id}
+          doc={activeTab.doc}
           onClose={() => closeTab(activeTab.id)}
         />
       )
@@ -276,13 +322,12 @@ function AppRoutes() {
   return (
     <AnimatePresence initial={false}>
       <Routes location={location} key={routeKey}>
-        <Route path="/" element={<Navigate to="/agent" replace />} />
+        <Route path="/" element={<Navigate to="/workspace" replace />} />
         <Route path="/workspace" element={page(<Workspace />)} />
         <Route path="/molecules" element={page(<MoleculeLibrary />)} />
         <Route path="/analysis" element={<Navigate to="/molecules" replace />} />
         <Route path="/settings" element={page(<SettingsPage />)} />
         <Route path="/queue" element={page(<ProcessingQueue />)} />
-        <Route path="/notes" element={page(<Knowledge />)} />
         <Route path="/docs" element={page(<Docs />)} />
         <Route path="/docs/:slug" element={page(<Docs />)} />
         <Route path="/review" element={page(<ReviewCenter />)} />

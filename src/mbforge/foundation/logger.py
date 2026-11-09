@@ -1,9 +1,8 @@
 """MBForge logging configuration and structured diagnostics.
 
 Sets up console, rotating file, and in-memory ring-buffer handlers.
-Exposes ``get_logger`` for module-level loggers, decorators for call
-tracing, and helpers for pushing diagnostic records consumed by the
-``/api/v1/diagnostics`` endpoints.
+Exposes ``get_logger`` for module-level loggers and helpers for reading and
+pushing diagnostic records consumed by the ``/api/v1/diagnostics`` endpoints.
 """
 
 from __future__ import annotations
@@ -11,18 +10,15 @@ from __future__ import annotations
 import collections
 import contextlib
 import contextvars
-import functools
-import inspect
 import json
 import logging
 import os
 import sys
 import threading
 import traceback
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from mbforge.foundation.paths import APP_NAME, GLOBAL_APP_DIR
 
@@ -284,78 +280,6 @@ def get_logger(name: str) -> logging.Logger:
         level = getattr(logging, env_level, logging.INFO)
         setup_logging(level=level)
     return logging.getLogger(name)
-
-
-# ---------- 诊断工具 ----------
-
-T = TypeVar("T")
-
-
-def log_call(
-    level: int = logging.DEBUG,
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
-    """装饰器：自动记录函数进入/退出及耗时.
-
-    用法:
-        @log_call()
-        def my_func(x, y):
-            ...
-    """
-
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        func_name = f"{func.__module__}.{func.__qualname__}"
-        func_logger = get_logger(func.__module__)
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            # 构建参数摘要（避免记录过大对象）
-            sig = inspect.signature(func)
-            bound = sig.bind(*args, **kwargs)
-            bound.apply_defaults()
-            args_summary = []
-            for k, v in bound.arguments.items():
-                if k in ("self", "cls"):
-                    continue
-                rep = repr(v)
-                if len(rep) > 80:
-                    rep = rep[:77] + "..."
-                args_summary.append(f"{k}={rep}")
-            args_str = ", ".join(args_summary)
-
-            func_logger.log(level, f"[CALL] → {func_name}({args_str})")
-            import time
-
-            t0 = time.perf_counter()
-            try:
-                result = func(*args, **kwargs)
-                elapsed = (time.perf_counter() - t0) * 1000
-                func_logger.log(level, f"[OK]   ← {func_name} | {elapsed:.1f}ms")
-                return result
-            except Exception as e:
-                elapsed = (time.perf_counter() - t0) * 1000
-                func_logger.log(
-                    logging.ERROR,
-                    f"[ERR]  ← {func_name} | {elapsed:.1f}ms | {type(e).__name__}: {e}",
-                )
-                raise
-
-        return wrapper
-
-    return decorator
-
-
-def log_exception(logger: logging.Logger, msg: str = "") -> None:
-    """记录当前异常及完整堆栈.
-
-    用法:
-        try:
-            ...
-        except Exception:
-            log_exception(logger, "PDF渲染失败")
-    """
-    exc_text = traceback.format_exc()
-    prefix = f"{msg} | " if msg else ""
-    logger.error(f"{prefix}Exception details:\n{exc_text}")
 
 
 # ---------- 诊断：JSON 格式化器 + 内存环形缓冲 ----------

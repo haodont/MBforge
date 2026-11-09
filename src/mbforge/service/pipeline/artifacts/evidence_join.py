@@ -21,9 +21,7 @@ from typing import Any
 
 from mbforge.domain.evidence import SourceEvidence, _normalise_bbox
 from mbforge.domain.evidence_kind import (
-    IMAGE,
     MOLECULE,
-    category_of,
     kind_rank,
     register_kinds,
 )
@@ -31,6 +29,7 @@ from mbforge.domain.molecule import Molecule
 from mbforge.domain.types import ExtractionResult
 from mbforge.foundation.layout import LibraryLayout
 from mbforge.foundation.logger import get_logger
+from mbforge.service.pipeline.artifacts.evidence_dedupe import join_evidence_dedupe
 from mbforge.service.pipeline.artifacts.evidence_models import PageFrame
 from mbforge.service.pipeline.extract.text import ExtractedDocument
 from mbforge.service.pipeline.layout.labels import kind_vocab
@@ -229,85 +228,6 @@ def _evidence_sort_key(
     )
 
 
-def _join_evidence_dedupe(
-    items: Sequence[SourceEvidence],
-) -> list[SourceEvidence]:
-    """Arbitrate evidence so one location yields one row.
-
-    Two rules:
-
-    1. **One row per location** ``(doc_id, page, bbox)``.  ``evidence_id`` is the
-       location, and it is the table's PRIMARY KEY, so two claims on the same box
-       must collapse to a single row before the insert.  The surviving row keeps
-       the winner's ``kind``.
-    2. **Molecule over figure** for overlapping (but not identical) boxes.  Text is
-       never discarded here — its raw text is an independent fact used by
-       OCR/layout readers.
-
-    A claim that carries content is never displaced by one that does not:
-    ``raw_text`` outranks box geometry, so a layout region re-typed to a molecule
-    (R3) — which claims the molecule with MolDet's own geometry but no payload —
-    leaves the molecule pass' row, and its SMILES, in place.
-
-    Comparison is by **category**, not by raw label: producers name their regions
-    freely (``chem`` / ``figcx`` / …), so two figure regions from one model can
-    carry different labels while playing the same role.
-    """
-    from mbforge.service.pipeline.detection.bbox_filter import bbox_area, bbox_iou
-
-    def sort_key(item: SourceEvidence) -> tuple[Any, ...]:
-        # Molecule first, then content, then larger box, then the higher-ranked
-        # category.  Content before size: the two sides of an overlap are usually
-        # one molecule seen by two detectors, and only the molecule pass' row
-        # holds the recognition payload.  The size and rank keys only ever decide
-        # between equally content-bearing boxes, so the winner stays deterministic.
-        return (
-            item.page,
-            0 if category_of(item.kind) == MOLECULE else 1,
-            0 if item.raw_text else 1,
-            -bbox_area(item.bbox),
-            -kind_rank(item.kind),
-            item.evidence_id,
-        )
-
-    geometric = {MOLECULE, IMAGE}
-    kept: list[SourceEvidence] = []
-    seen_locations: set[tuple[str, int, tuple[float, float, float, float]]] = set()
-    for item in sorted(items, key=sort_key):
-        location = (item.doc_id, item.page, item.bbox)
-        if location in seen_locations:
-            continue
-        discard = False
-        item_category = category_of(item.kind)
-        for existing in kept:
-            if existing.page != item.page:
-                continue
-            existing_category = category_of(existing.kind)
-            if existing_category not in geometric or item_category not in geometric:
-                continue
-            iou = bbox_iou(existing.bbox, item.bbox)
-            same_region_kind = existing_category == item_category
-            if same_region_kind and iou <= 0.5:
-                continue
-            if not same_region_kind and iou <= 0.0:
-                continue
-            if existing_category == MOLECULE and item_category == IMAGE:
-                discard = True
-                break
-            if existing_category == item_category == MOLECULE:
-                # Molecule boxes are sorted content-then-size-first, so the
-                # first box wins and lower-value duplicate detections drop out.
-                discard = True
-                break
-            if existing_category == item_category == IMAGE:
-                discard = True
-                break
-        if not discard:
-            kept.append(item)
-            seen_locations.add(location)
-    return kept
-
-
 def _location_precedence(item: SourceEvidence) -> tuple[int, str]:
     """Ordering used when two claims share one location.  Higher wins.
 
@@ -340,6 +260,11 @@ def mint_evidence(
         _bbox_in_frame(result.bbox_pdf, frame)
 
     order_hint = _reading_order_hint(extracted)
+    from mbforge.service.pipeline.artifacts.table_molecule_cells import (
+        resolve_table_molecule_tokens,
+    )
+
+    resolve_table_molecule_tokens(list(extracted.pages), results)
     by_id: dict[str, SourceEvidence] = {}
 
     def add(item: SourceEvidence) -> None:
@@ -396,7 +321,7 @@ def mint_evidence(
             )
         )
 
-    evidence = _join_evidence_dedupe(list(by_id.values()))
+    evidence = join_evidence_dedupe(list(by_id.values()))
     evidence.sort(key=lambda item: _evidence_sort_key(item, order_hint))
     # Persist the order that was just computed. A page's rows carry a
     # zero-based position so the SQL loader can reproduce a two-column reading

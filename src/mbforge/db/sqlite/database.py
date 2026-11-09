@@ -122,18 +122,6 @@ class DatabaseManager:
                     chunk,
                 )
 
-        # molecule_relations references molecules from both sides, so pass
-        # the id list twice. Each chunk sees at most chunk_size ids per side.
-        for start in range(0, len(actual_ids), chunk_size):
-            chunk = actual_ids[start : start + chunk_size]
-            chunk_placeholders = ",".join("?" for _ in chunk)
-            conn.execute(
-                f"DELETE FROM molecule_relations "
-                f"WHERE mol_a_id IN ({chunk_placeholders}) "
-                f"OR mol_b_id IN ({chunk_placeholders})",
-                chunk + chunk,
-            )
-
         _chunked("molecule_images", "mol_id", actual_ids)
         _chunked("molecule_detections", "mol_id", actual_ids)
         _chunked("molecules", "mol_id", actual_ids)

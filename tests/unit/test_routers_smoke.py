@@ -55,8 +55,6 @@ ROUTES: list[tuple[str, str, dict | None, tuple[int, ...]]] = [
     ("POST", "/api/v1/chem/validate-smiles", {}, (200, 422)),
     # detection-cache
     ("POST", "/api/v1/detection-cache/stats", {}, (200, 422)),
-    # notes
-    ("POST", "/api/v1/notes/list", {}, (200, 422)),
     # settings
     ("GET", "/api/v1/settings", None, (200,)),
     # resource

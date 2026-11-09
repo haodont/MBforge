@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from mbforge.contracts.measurement import DESIGNATION_UNBOUND_KIND
 from mbforge.contracts.patent import PATENT_FACT_REVIEW_KIND
+from mbforge.contracts.review_proposal import AI_REVIEW_KIND
 from mbforge.domain.patent_analysis import candidate_set_signature
 from mbforge.domain.review import (
     ReviewConflictError,
@@ -31,6 +33,7 @@ from mbforge.service.pipeline.patent.decisions import (
 )
 from mbforge.service.ports.repositories import LibraryRepositories, ReviewRepository
 from mbforge.service.use_cases.markush.review import apply_decision
+from mbforge.service.use_cases.review_proposals import apply_proposal_payload
 
 logger = get_logger(__name__)
 
@@ -113,6 +116,12 @@ def decide(
         )
         if mol_id and chosen:
             review.set_molecule_name(mol_id, str(chosen))
+    applied = False
+    if kind == AI_REVIEW_KIND and new_status == "confirmed":
+        # A confirmed proposal is applied only now, by the human decision.
+        applied = apply_proposal_payload(review, payload, choice)
+    if kind == DESIGNATION_UNBOUND_KIND and new_status == "confirmed":
+        applied = _bind_unbound_reading(payload, choice, library_root)
     review.record_review_decision(
         entity_type="review_item",
         entity_id=item_id,
@@ -122,7 +131,7 @@ def decide(
         reason=reason,
         snapshot=payload,
     )
-    return {"id": item_id, "kind": kind, "status": new_status}
+    return {"id": item_id, "kind": kind, "status": new_status, "applied": applied}
 
 
 def _apply_smiles_correction(
@@ -362,6 +371,14 @@ def queue_page(
             )
         ):
             item["payload"] = {**payload, "revision": state["revision"]}
+    # A stored AI suggestion travels with its item; a poll may also pull one
+    # for the oldest unassisted items (bounded and single-flight inside).
+    from mbforge.foundation.layout import resolve_library_root
+    from mbforge.service.use_cases import review_assist
+
+    root = str(resolve_library_root(library_root))
+    review_assist.attach_suggestions(root, items)
+    review_assist.schedule_auto_assist(root)
     return ReviewQueueResponse(
         items=[ReviewQueueItem(**item) for item in items],
         total=total,
@@ -434,6 +451,94 @@ def decide_items(
             updated += 1
             results.append(result)
     return ReviewDecisionResponse(updated=updated, skipped=skipped, results=results)
+
+
+class _DecisionRow:
+    """Request-shaped row for :func:`decide_items`."""
+
+    __slots__ = ("choice", "expected_revision", "id", "kind")
+
+    def __init__(self, kind: str, item_id: str) -> None:
+        self.kind = kind
+        self.id = item_id
+        self.choice = None
+        self.expected_revision = None
+
+
+def decide_filtered(
+    library_root: str | None,
+    *,
+    kind: str | None,
+    doc_id: str | None,
+    target_kind: str | None,
+    action: str,
+    reason: str,
+    limit: int,
+) -> ReviewDecisionResponse:
+    """Decide every pending item matching the filter, in one batch.
+
+    This is the "approve all text" / "approve the whole patent" path: the filter
+    is resolved here, never trusted from the model, and every item still goes
+    through the same per-kind decision handler as a single click.
+    """
+    repositories = _get_repositories(library_root)
+    rows, _total = repositories.review.list_queue(
+        kind=kind or None,
+        status="pending",
+        doc_id=doc_id or None,
+        page=1,
+        page_size=limit,
+    )
+    chosen: list[_DecisionRow] = []
+    for row in rows:
+        if target_kind:
+            payload = row.get("payload")
+            proposal = payload.get("proposal") if isinstance(payload, dict) else None
+            if not isinstance(proposal, dict):
+                continue
+            if proposal.get("target_kind") != target_kind:
+                continue
+        chosen.append(_DecisionRow(str(row["kind"]), str(row["id"])))
+    if not chosen:
+        return ReviewDecisionResponse(updated=0, skipped=0, results=[])
+    return decide_items(library_root, action, reason, chosen)
+
+
+def _bind_unbound_reading(
+    payload: Any, choice: str | None, library_root: str | None
+) -> bool:
+    """Write the attribution the reviewer picked for a printed reading.
+
+    The chosen structure must be one of the candidates the item was built from:
+    the model never supplies the target, and a value outside that list is refused
+    instead of becoming an unattributable link.
+    """
+    if not isinstance(payload, dict):
+        return False
+    candidates = payload.get("candidates")
+    allowed = {
+        str(item.get("mol_id"))
+        for item in candidates or []
+        if isinstance(item, dict) and item.get("mol_id")
+    }
+    measurement_id = str(payload.get("measurement_id") or "")
+    chosen = str(choice or "")
+    if not measurement_id or chosen not in allowed:
+        raise ReviewConflictError(
+            "the decided structure is not one of the printed candidates"
+        )
+    evidence_ids = payload.get("evidence_ids")
+    evidence_id = (
+        str(evidence_ids[0]) if isinstance(evidence_ids, list) and evidence_ids else ""
+    )
+    _get_repositories(library_root).measurements.bind_attribution(
+        measurement_id=measurement_id,
+        mol_id=chosen,
+        doc_id=str(payload.get("doc_id") or ""),
+        evidence_id=evidence_id,
+        method="human",
+    )
+    return True
 
 
 def clear_all_review_queue(library_root: str | None) -> dict[str, int]:

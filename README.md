@@ -23,10 +23,9 @@ FastAPI backend.
   called.
 - Local storage per library: SQLite business data and document artifacts; no
   third-party knowledge-index runtime is required.
-- Knowledge-base search, molecule search, activity data, per-library Markdown
-  notes, and a unified review center covering molecule, Markush and evidence
-  items — Markush structures are classified during Extract and reviewed in that
-  center (R-group enumeration is API-only for now).
+- Knowledge-base search, molecule search, activity data, and a unified review
+  center covering molecule, Markush and evidence items — Markush structures are
+  classified during Extract and reviewed in that center.
 - Workspace document import accepts multiple PDFs at once, rejects duplicate
   filenames, and reports partial failures; each imported document is registered
   and listed right away as 待处理 and starts processing immediately (unless
@@ -167,7 +166,6 @@ one document, and `file_name` is unique. The canonical layout is:
 ├── queue.lock                          # ingest-worker ownership lock
 ├── procs/                              # runtime process registry
 ├── backups/                            # pre-mutation document snapshots
-├── notes/                              # user-editable notes + notes_index.json
 └── storage/{doc_id}/                   # document artifacts
     ├── {file_name}                     # the imported PDF, under its original name
     ├── document.md

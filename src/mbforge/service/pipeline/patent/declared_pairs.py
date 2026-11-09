@@ -26,21 +26,32 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from mbforge.domain.evidence_kind import IMAGE, MOLECULE, UnknownKind, category_of
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
 
 #: ``实施例1: <name>(化合物1)的制备`` — the Chinese declaration this module reads.
 _EXAMPLE_HEADING = re.compile(
-    r"实施例\s*(?P<example>\d+)\s*[:：]\s*(?P<body>[^\n]{10,400})"
+    r"实施例\s*(?P<example>\d+)\s*[:：]\s*(?P<body>[^\n]{2,400})"
 )
 #: ``Example 1. 3-(2,4-Difluorophenoxy)-7-(...)-1,6-naphthyridine`` — the US form.
 #: The name must be in the same evidence row, after a period or colon.
 _EXAMPLE_HEADING_EN = re.compile(
     r"\bExample\s*(?P<example>\d+)\s*(?:[.:：]|\s-\s)\s*(?P<body>[^\n]{10,400})"
 )
-#: The designation the heading prints for its product, Chinese form.
-_DECLARED_DESIGNATION = re.compile(r"[(（]\s*化合物\s*(?P<key>\d+[A-Za-z-]*)\s*[)）]")
+#: The designation the heading prints for its product, Chinese form. The
+#: filing also writes ``(目标化合物11)``; the qualifier is the document saying
+#: "the product of this example", not a different designation.
+_DECLARED_DESIGNATION = re.compile(
+    r"[(（]\s*(?:目标)?\s*化合物\s*(?P<key>\d+[A-Za-z-]*)\s*[)）]"
+)
+#: ``实施例17：目标化合物17的制备`` declares the same relation without
+#: parentheses. Only a heading that *starts* with the phrase counts, so a name
+#: that merely mentions a prepared compound cannot claim the example.
+_BARE_DECLARATION = re.compile(
+    r"^\s*(?:目标)?\s*化合物\s*(?P<key>\d+[A-Za-z-]*)\s*(?:的)?\s*(?:制备|合成)"
+)
 #: The designation in an English filing: ``Compound 1`` / ``(Compound 1)``.
 _DECLARED_DESIGNATION_EN = re.compile(r"\b[Cc]ompound\s+(?P<key>\d+[A-Za-z]?)\b")
 #: PDF typesetting splits a word across a line: ``dif-luoropiperidin`` is
@@ -100,6 +111,23 @@ class StructureActivityPair:
     calculated_mz: float | None
 
 
+def _is_text_row(row: object) -> bool:
+    """Whether evidence can print a declaration.
+
+    A molecule row stores its detection JSON, whose nearby-text fields repeat
+    headings verbatim: reading it would mint a second declaration of the same
+    example on the detection's page, and shift that section's product mass.
+    A producer that never registered its label is treated as text, not dropped.
+    """
+    kind = str(getattr(row, "kind", "") or "")
+    if not kind:
+        return True
+    try:
+        return category_of(kind) not in {IMAGE, MOLECULE}
+    except UnknownKind:
+        return True
+
+
 def extract_declared_examples(
     evidence: Sequence[object], doc_id: str
 ) -> list[DeclaredExample]:
@@ -109,6 +137,8 @@ def extract_declared_examples(
     """
     sections: list[dict] = []
     for row in evidence:
+        if not _is_text_row(row):
+            continue
         text = str(getattr(row, "raw_text", "") or "")
         page = int(getattr(row, "page", 0) or 0)
         evidence_id = str(getattr(row, "evidence_id", "") or "")
@@ -170,6 +200,11 @@ def _parse_heading(text: str) -> tuple[str, str, str] | None:
             name = body[: designation.start()].strip()
             name = _SALT_SUFFIX.sub("", name).strip(" ，,。;；：:")
             return heading.group("example"), designation.group("key"), name
+        bare = _BARE_DECLARATION.match(body)
+        if bare is not None:
+            # ``实施例17：目标化合物17的制备`` states its product without
+            # parentheses: the heading prepares that designation and no other.
+            return heading.group("example"), bare.group("key"), ""
 
     heading = _EXAMPLE_HEADING_EN.search(text)
     if heading is not None:

@@ -17,6 +17,7 @@ import PageEvidencePane from '@/components/project/PageEvidencePane'
 import MoleculePatentFacts from './MoleculePatentFacts'
 import type { ExtractionResult } from '@/types'
 import type { PatentFactsArtifact } from '@/api/http/library'
+import type { DocumentEvidenceItem } from '@/api/http/library'
 import type { PdfSidePaneTab } from './usePdfSidebarState'
 import PatentAnalysisPane from './PatentAnalysisPane'
 import './PatentAnalysisPane.css'
@@ -36,6 +37,8 @@ interface Props {
   patentFacts: PatentFactsArtifact | null
   patentFactsLoadError?: boolean
   onOpenEvidence: (evidenceId: string, page?: number | null) => void
+  onEvidenceSelect?: (item: DocumentEvidenceItem) => void
+  onEvidenceHover?: (item: DocumentEvidenceItem | null) => void
   onDetect: () => void
   setSelectedDetection: Dispatch<SetStateAction<number | null>>
   setEditingDetectionIndex: Dispatch<SetStateAction<number | null>>
@@ -56,6 +59,8 @@ export default function PdfSidebar({
   patentFacts,
   patentFactsLoadError,
   onOpenEvidence,
+  onEvidenceSelect,
+  onEvidenceHover,
   onDetect,
   setSelectedDetection,
   setEditingDetectionIndex,
@@ -107,6 +112,8 @@ export default function PdfSidebar({
                 page={currentPage}
                 libraryRoot={libraryRoot}
                 selectedEvidenceId={selectedEvidenceId}
+                onSelectEvidence={onEvidenceSelect}
+                onHoverEvidence={onEvidenceHover}
               />
             )}
             {sidePaneTab === 'molecules' && (

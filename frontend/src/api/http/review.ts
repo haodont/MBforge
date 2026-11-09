@@ -13,6 +13,8 @@ export type ReviewKind =
   | 'markush_link'
   | 'patent_fact_review'
   | 'smiles_correction'
+  | 'ai_review'
+  | 'designation_unbound'
 export type ReviewStatus = 'pending' | 'confirmed' | 'rejected'
 export type ReviewAction = 'confirm' | 'reject' | 'reopen'
 
@@ -162,6 +164,32 @@ export async function reviewDecide(
     () => httpPost<ReviewDecisionResponse>('/api/v1/review/decide', {
       library_root: libraryRoot,
       items,
+      action,
+      reason,
+    }),
+    ErrorCode.MoleculeSearch,
+  )
+}
+
+export interface ReviewFilterDecision {
+  kind?: ReviewKind
+  docId?: string
+  targetKind?: string
+}
+
+/** Decide every pending item matching a server-side filter in one batch. */
+export async function reviewDecideFiltered(
+  libraryRoot: string,
+  filter: ReviewFilterDecision,
+  action: ReviewAction,
+  reason = '',
+): Promise<ReviewDecisionResponse> {
+  return await invokeWithError(
+    () => httpPost<ReviewDecisionResponse>('/api/v1/review/decide-filtered', {
+      library_root: libraryRoot,
+      kind: filter.kind,
+      doc_id: filter.docId,
+      target_kind: filter.targetKind,
       action,
       reason,
     }),

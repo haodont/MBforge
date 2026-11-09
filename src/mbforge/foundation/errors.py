@@ -8,24 +8,6 @@ from typing import Any, Literal
 # Maps to standard log levels when recorded to the structured log/ring buffer.
 Severity = Literal["debug", "info", "warning", "error", "fatal"]
 
-_SEVERITY_BY_STATUS: dict[int, str] = {
-    400: "warning",
-    401: "warning",
-    403: "warning",
-    404: "info",
-    409: "warning",
-    422: "warning",
-    500: "error",
-    502: "error",
-    503: "error",
-    504: "error",
-}
-
-
-def http_status_to_severity(status: int) -> Severity:
-    """Map an HTTP status code to a Severity, with 'error' as the fallback."""
-    return _SEVERITY_BY_STATUS.get(status, "error")  # type: ignore[return-value]
-
 
 class MBForgeError(Exception):
     """Base exception with HTTP status code, error code, and structured context.
@@ -60,19 +42,9 @@ class MBForgeError(Exception):
         super().__init__(message)
 
 
-class ProjectNotValidError(MBForgeError):
-    status_code = 400
-    error_code = "project_not_valid"
-
-
 class ModelNotAvailableError(MBForgeError):
     status_code = 503
     error_code = "model_not_available"
-
-
-class ConfigError(MBForgeError):
-    status_code = 400
-    error_code = "config_error"
 
 
 class ValidationError(MBForgeError):
@@ -103,13 +75,3 @@ class ConflictError(MBForgeError):
 class ResourceNotAvailableError(MBForgeError):
     status_code = 503
     error_code = "resource_not_available"
-
-
-class ToolExecutionError(MBForgeError):
-    status_code = 500
-    error_code = "tool_execution_error"
-
-
-class LLMProviderError(MBForgeError):
-    status_code = 502
-    error_code = "llm_provider_error"

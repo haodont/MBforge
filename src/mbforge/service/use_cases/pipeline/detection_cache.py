@@ -56,17 +56,6 @@ def load_cached_detections(library_root: str, doc_id: str, page: int) -> dict[st
     }
 
 
-def load_all_cached_detections(library_root: str, doc_id: str) -> list[dict[str, Any]]:
-    """Return every interactive ``molecule_detections`` row for *doc_id*.
-
-    Document-level counterpart of :func:`load_cached_detections` — one query
-    for all pages so the PDF viewer can prime its whole overlay in a single
-    request instead of one query per page turn.
-    """
-    rows = get_repositories(library_root).molecules.load_detections(doc_id)
-    return [_row_to_result(r) for r in rows]
-
-
 def save_detections(library_root: str, detections: list[dict]) -> None:
     get_repositories(library_root).molecules.save_detections(detections)
 

@@ -123,20 +123,27 @@ and the unused `match_activities()` matcher no longer exist.
 
 ### 3.1 The measurement is never minted (dropped at parse time)
 
-`service/pipeline/activity/extraction.py` + `activity/parsing/tables.py`:
+`service/pipeline/activity/table_scan.py` (one table evidence row) and
+`activity/parsing/tables.py` (the table itself):
 
 - A table row whose **first (label) cell is empty is skipped**
-  (`tables.py:157-160`).
-- A row **shorter than a metric column** silently drops that column
-  (`tables.py:163`). No issue is emitted.
+  (`tables.py` `_read_table_layout`).
+- A row **shorter than a metric column** silently drops that column. No issue is
+  emitted.
 - A table whose header carries no activity signal is not an activity table
-  (`_is_activity_table`, `tables.py:39-53`) → no records.
+  (`_is_activity_table`).
 - A table with an **unparsable activity cell** is discarded whole with
-  `complex_activity_table` (`extraction.py:487`, `:496`).
-- An activity signal in an unsupported table layout → `unsupported_table_format`
-  (`extraction.py:472`).
+  `complex_activity_table`.
+- An activity signal in an unsupported table layout → `unsupported_table_format`.
 - A prose metric with no deterministically parsable value →
-  `activity_value_unparsed` (`extraction.py:331`, `:349`, `:369`).
+  `activity_value_unparsed`.
+- A **page-split table** used to be dropped silently: the continuation prints no
+  header, so it was neither read nor reported. It is now read under the previous
+  page's header — adjacent page only, same column count, first cell a designation,
+  no header band — and published with a `table_header_inherited` issue citing both
+  evidence rows. A continuation-shaped row that cannot be read raises
+  `complex_activity_table`; a table that prints its own header is never borrowed
+  over.
 
 ### 3.2 The measurement exists but has no resolvable compound reference
 
@@ -193,6 +200,17 @@ so 247 designations are unresolved today (34 of one document's 66 entries are
 to be invisible to every rule; the normalizer still decides what counts as a
 designation, so a printed chemistry name yields no key. (On the 13-document corpus
 this rescue is currently 0 — the fix is a contract, not a measured recall gain.)
+
+### 3.5b The designation is disputed, so no pair is published
+
+`association.py` emits `molecule_candidate_ambiguous` when two candidates print the
+same designation (or one candidate prints two), and the entry keeps no structure.
+The declared-example join (`entries._declared_structure_activity`) used to publish
+the pair anyway from `molecules.name`, which is whichever label read arrived first;
+`structure_activity` then contradicted the reading's own attribution and reached the
+export. The issue now carries its `label_key` and the join withholds the
+designation, so a disputed label produces no pair anywhere.
+
 
 ### 3.6 The molecule is found but the persist gate drops it
 

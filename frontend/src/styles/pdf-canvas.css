@@ -336,6 +336,18 @@
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+.pdf-evidence-item.is-interactive {
+  cursor: pointer;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.pdf-evidence-item.is-interactive:hover,
+.pdf-evidence-item.is-interactive:focus-visible {
+  background: var(--bg-base);
+  box-shadow: 0 0 0 1px var(--border);
+  outline: none;
+}
+
 .pdf-evidence-item__topline {
   display: flex;
   align-items: flex-start;

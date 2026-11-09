@@ -364,7 +364,8 @@ def test_gap_worklist_serves_the_gap_then_advances_after_a_valid_answer(
     app_client: TestClient, tmp_library: Path
 ) -> None:
     """``get-gap`` serves the excerpt and its remaining count; a valid
-    ``submit-gap-answer`` stages it and leaves no next gap."""
+    ``submit-gap-answer`` stages it and leaves no next gap. Resubmitting the same
+    gap replaces that staged answer, and a cancelled attempt refuses new ones."""
     gap = _seed_gap(tmp_library)
     _register(tmp_library, gaps=[gap])
 
@@ -388,6 +389,26 @@ def test_gap_worklist_serves_the_gap_then_advances_after_a_valid_answer(
     after = app_client.post(f"{TOOLS}/get-gap", json={"credential": CRED}).json()
     assert after["success"] is False
     assert "all gaps are answered" in after["error"]
+
+    # The same gap submitted twice replaces its staged answer instead of forking.
+    resubmitted = app_client.post(
+        f"{TOOLS}/submit-gap-answer",
+        json={"credential": CRED, "answer": _gap_answer(gap)},
+    ).json()
+    assert resubmitted["success"] is True
+    counted = app_client.post(
+        f"{TOOLS}/get-gap", json={"credential": CRED, "gap_id": gap.gap_id}
+    ).json()
+    assert counted["answered"] == 1
+
+    # A cancelled attempt refuses further answers, through the same endpoint.
+    assert get_patent_task_registry().request_cancel(CRED) is True
+    cancelled = app_client.post(
+        f"{TOOLS}/submit-gap-answer",
+        json={"credential": CRED, "answer": _gap_answer(gap)},
+    ).json()
+    assert cancelled["success"] is False
+    assert "attempt was cancelled" in cancelled["error"]
 
 
 def _structure_gap(root: Path) -> PatentGap:

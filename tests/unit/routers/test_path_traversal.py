@@ -12,7 +12,6 @@ Covered routers:
   ``POST /api/v1/detection-cache/save``
 * library router — ``POST /api/v1/library/import`` and
   ``GET /api/v1/library/documents/{doc_id}/crop``
-* notes router — ``POST /api/v1/notes/get|save|delete``
 * pdf router — ``POST /api/v1/pdf/render-pages``
 
 Each test loops over its payload table so one collected item still covers
@@ -47,16 +46,6 @@ _TRAVERSAL_CROP_PATHS = [
     "../../secret",
     "sub/../../../secret",
 ]
-
-_NOTE_PAYLOAD = {
-    "id": "note-id",
-    "title": "Note",
-    "content": "content",
-    "tags": [],
-    "links": [],
-    "createdAt": "2024-01-01",
-    "updatedAt": "2024-01-02",
-}
 
 
 def _assert_rejected(
@@ -193,27 +182,6 @@ def test_library_import_rejects_traversal_filename_and_ignores_client_root(
         assert response.status_code == 200, response.text
         doc_id = response.json()["document"]["doc_id"]
         assert (tmp_library / "storage" / doc_id / "sample.pdf").is_file(), root
-
-
-def test_notes_endpoints_reject_traversal_note_id(
-    app_client: TestClient, tmp_library: Path
-) -> None:
-    """A traversal ``id`` is rejected by notes get/save/delete alike."""
-    for note_id in _TRAVERSAL_DOC_IDS:
-        payloads = (
-            ("get", {"library_root": str(tmp_library), "id": note_id}),
-            (
-                "save",
-                {
-                    "library_root": str(tmp_library),
-                    "note": {**_NOTE_PAYLOAD, "id": note_id},
-                },
-            ),
-            ("delete", {"library_root": str(tmp_library), "id": note_id}),
-        )
-        for route, payload in payloads:
-            response = app_client.post(f"/api/v1/notes/{route}", json=payload)
-            _assert_rejected(response, f"{route} id={note_id!r}")
 
 
 def test_pdf_render_pages_rejects_outside_paths_and_accepts_in_library(

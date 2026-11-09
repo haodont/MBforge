@@ -11,10 +11,6 @@ vi.mock('@/hooks/useMoleculeLibrary', () => ({
   useMoleculeLibrary: vi.fn(),
 }))
 
-vi.mock('@/hooks/useMoleculeAnalysis', () => ({
-  useMoleculeAnalysis: vi.fn(),
-}))
-
 vi.mock('@/components/molecule/MoleculeFilters', () => ({
   default: () => <div data-testid="molecule-filters" />,
 }))
@@ -25,10 +21,6 @@ vi.mock('@/components/molecule/MoleculeTable', () => ({
 
 vi.mock('@/components/molecule/MoleculeCardGrid', () => ({
   default: () => <div data-testid="molecule-card-grid" />,
-}))
-
-vi.mock('@/components/molecule/MoleculeAnalysisPanel', () => ({
-  default: () => <div data-testid="molecule-analysis-panel" />,
 }))
 
 vi.mock('@/components/molecule/MoleculeDetailDrawer', () => ({
@@ -49,8 +41,6 @@ vi.mock('react-i18next', () => ({
       if (key === 'common.close') return 'Close'
       if (key === 'mol.viewTable') return 'Table view'
       if (key === 'mol.viewCard') return 'Card view'
-      if (key === 'mol.analyzeSelection') return 'Analyze selection'
-      if (key === 'mol.hideAnalysis') return 'Hide analysis'
       if (key === 'mol.title') return 'Molecules'
       return key
     },
@@ -58,7 +48,6 @@ vi.mock('react-i18next', () => ({
 }))
 
 import { useAppContext } from '@/context/AppContext'
-import { useMoleculeAnalysis } from '@/hooks/useMoleculeAnalysis'
 import { useMoleculeLibrary } from '@/hooks/useMoleculeLibrary'
 import MoleculeLibrary from '../MoleculeLibrary'
 
@@ -112,30 +101,13 @@ describe('MoleculeLibrary', () => {
       clearSelection: vi.fn(),
       refresh: vi.fn(),
     })
-    vi.mocked(useMoleculeAnalysis).mockReturnValue({
-      activeTab: 'analytics',
-      setActiveTab: vi.fn(),
-      selectedMolecules: [],
-      analysisInput: [],
-      hasSelection: true,
-    })
   })
 
-  it('drives the analysis panel and view mode from the library surface', () => {
+  it('switches the results view mode from the page header', () => {
     renderLibrary()
 
-    // Results stay full width until a selected molecule is analyzed.
     expect(screen.getByTestId('molecule-table')).toBeInTheDocument()
-    expect(screen.queryByText('Selected 1 / 12')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('molecule-analysis-panel')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Analyze selection'))
-    expect(screen.getByTestId('molecule-analysis-panel')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByText('Close'))
-    expect(screen.queryByTestId('molecule-analysis-panel')).not.toBeInTheDocument()
-
-    // The page header switches the results view mode.
     fireEvent.click(screen.getByRole('button', { name: 'Card view' }))
     expect(setViewMode).toHaveBeenCalledWith('card')
   })

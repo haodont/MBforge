@@ -62,10 +62,3 @@ def _existing_run_ids(storage_dir: Path) -> set[str]:
             if isinstance(run_id, str) and run_id:
                 used.add(run_id)
     return used
-
-
-def safe_run_id(run_id: str) -> bool:
-    """Return True when *run_id* is safe to embed in a storage path."""
-    return bool(run_id) and all(
-        ch.isascii() and (ch.isalnum() or ch in "_-") for ch in run_id
-    )

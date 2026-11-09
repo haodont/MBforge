@@ -86,6 +86,9 @@ test('research restores Pi messages without replaying actions or storing runtime
     assert.ok(requests[0].tools.some(tool => tool.function.name === 'load_skill'))
     assert.ok(requests[0].tools.some(tool => tool.function.name === 'search_structures'))
     assert.ok(requests[0].tools.some(tool => tool.function.name === 'search_papers'))
+    // Structure questions must route through the local recognizer, not the model's memory.
+    assert.ok(requests[0].tools.some(tool => tool.function.name === 'recognize_molecules'))
+    assert.ok(requests[0].messages.some(message => typeof message.content === 'string' && message.content.includes('recognize_molecules')))
     assert.ok(requests[2].messages.some(message => message.role === 'assistant' && message.content === 'Queued the selected patent.'))
     assert.ok(requests[2].messages.some(message => message.role === 'tool'))
     assert.ok(requests.every(request => !request.tools.some(tool => ['bash', 'read', 'write', 'edit', 'library_sql'].includes(tool.function.name))))

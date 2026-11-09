@@ -362,8 +362,3 @@ def extract_label_reads(
         logger.warning("Crop-label OCR failed: %s", exc)
         return []
     return _label_reads_from_result(result)
-
-
-def extract_label_texts(image: Image.Image) -> list[str]:
-    """OCR an "others" image and return identifier-like label strings."""
-    return [text for text, _, _, _ in extract_label_reads(image)]

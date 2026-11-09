@@ -20,7 +20,7 @@ import { getUserFacingError } from '@/utils/errors'
 import ReviewEvidenceComparison from './ReviewEvidenceComparison'
 import './ReviewCenter.css'
 
-const KINDS: Array<'all' | ReviewKind> = ['all', 'low_conf_molecule', 'review_required', 'unparsable_smiles', 'missing_evidence', 'ambiguous_coref', 'markush_link', 'patent_fact_review', 'smiles_correction']
+const KINDS: Array<'all' | ReviewKind> = ['all', 'low_conf_molecule', 'review_required', 'unparsable_smiles', 'missing_evidence', 'ambiguous_coref', 'markush_link', 'patent_fact_review', 'smiles_correction', 'ai_review', 'designation_unbound']
 const PAGE_SIZE = 25
 
 function labelForKind(kind: string, t: (key: string) => string): string {
@@ -186,6 +186,12 @@ function ReviewDetail({ item, t, onDecide, onOpenSource, libraryRoot, busy }: { 
   const display = (value: unknown): string => typeof value === 'string' || typeof value === 'number' ? String(value) : ''
   const cropUrl = item.doc_id && item.crop_relpath ? cropImageUrl(item.doc_id, item.crop_relpath, libraryRoot) : null
   const coref = item.kind === 'ambiguous_coref' ? (item.payload as { ocr_labels?: string[]; coref_primary?: string }) : null
+  // An AI proposal is shown as a before/after pair: the value the store holds
+  // beside the value the assistant suggests, so the reviewer sees the change.
+  const aiPayload = item.kind === 'ai_review' ? (item.payload as { proposal?: { target_kind?: string; target_id?: string; field?: string; after?: string; rationale?: string }; before_actual?: string }) : null
+  // A reading with no bound structure: the reviewer picks one of the drawn candidates.
+  const unbound = item.kind === 'designation_unbound' ? (item.payload as { designation?: string; candidates?: Array<{ mol_id?: string; smiles?: string; name?: string }> }) : null
+  const aiProposal = aiPayload?.proposal ?? null
   return <section className="review-center__detail" aria-label={t('review.detail')}>
     <h2>{item.name || item.smiles || item.id}</h2>
     <div className="review-center__detail-meta">{labelForKind(item.kind, t)} · {t(`review.status.${item.status}`)}{item.confidence !== null ? ` · ${Math.round(item.confidence * 100)}%` : ''}</div>
@@ -200,13 +206,35 @@ function ReviewDetail({ item, t, onDecide, onOpenSource, libraryRoot, busy }: { 
     ) : (
       <>
         <div className="review-center__detail-actions">
-          <Button size="sm" icon={<CheckIcon size={14} />} disabled={item.status !== 'pending' || busy} onClick={() => onDecide('confirm')}>{t('review.confirm')}</Button>
+          <Button size="sm" icon={<CheckIcon size={14} />} disabled={item.status !== 'pending' || busy} onClick={() => onDecide('confirm', choice)}>{t('review.confirm')}</Button>
           <Button size="sm" icon={<XIcon size={14} />} disabled={item.status !== 'pending' || busy} onClick={() => onDecide('reject')}>{t('review.reject')}</Button>
           <Button size="sm" variant="ghost" disabled={item.status === 'pending' || busy} onClick={() => onDecide('reopen')}>{t('review.reopen')}</Button>
           {item.doc_id && item.page && <Button size="sm" variant="ghost" icon={<ExternalLinkIcon size={14} />} onClick={() => onOpenSource(item)}>{t('review.openSource')}</Button>}
         </div>
         <ReviewEvidenceComparison item={item} cropUrl={cropUrl} libraryRoot={libraryRoot} onOpenPdf={(docId, page, bbox) => onOpenSource({ ...item, doc_id: docId, page, bbox })} />
         {coref && Array.isArray(coref.ocr_labels) && coref.ocr_labels.length > 0 && <div><strong>{t('review.corefLabels')}</strong><div role="radiogroup" aria-label={t('review.corefLabels')}>{coref.ocr_labels.map(label => <label key={label} style={{ display: 'block' }}><input type="radio" name={'coref-' + item.id} checked={choice === label} onChange={() => setChoice(label)} /> {label}{label === coref.coref_primary ? ' · ' + t('review.corefSuggested') : ''}</label>)}</div></div>}
+        {unbound && (
+          <div>
+            <strong>{t('review.unboundPick')}</strong>
+            <div role="radiogroup" aria-label={t('review.unboundPick')}>
+              {(unbound.candidates ?? []).map(candidate => (
+                <label key={candidate.mol_id} style={{ display: 'block' }}>
+                  <input type="radio" name={'unbound-' + item.id} checked={choice === candidate.mol_id} onChange={() => setChoice(candidate.mol_id ?? null)} />
+                  {' '}{candidate.name || candidate.mol_id}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {aiProposal && (
+          <div className="review-center__proposal">
+            <p><strong>{t('review.aiProposal.target', { kind: aiProposal.target_kind, id: aiProposal.target_id })}</strong></p>
+            <p><strong>{t('review.aiProposal.field')}</strong> {aiProposal.field || 'name'}</p>
+            <p><strong>{t('review.aiProposal.before')}</strong><br />{display(aiPayload?.before_actual) || '—'}</p>
+            <p><strong>{t('review.aiProposal.after')}</strong><br />{display(aiProposal.after)}</p>
+            {aiProposal.rationale && <p><strong>{t('review.aiProposal.rationale')}</strong><br />{aiProposal.rationale}</p>}
+          </div>
+        )}
         {item.smiles && <p><strong>SMILES</strong><br />{item.smiles}</p>}
         {item.reasons.length > 0 && <p><strong>{t('review.reasons')}</strong><br />{item.reasons.join(' · ')}</p>}
         {item.context_text && <div><strong>{t('review.context')}</strong><pre>{item.context_text}</pre></div>}

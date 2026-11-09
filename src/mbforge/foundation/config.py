@@ -98,6 +98,16 @@ class LayoutConfig(BaseModel):
     cross_model: bool = True
     #: Table recognizer backend id (reserved for backend switching).
     table_recognizer: str = "slanet"
+    #: Mask MolDet molecule boxes inside a table crop before its cell text is
+    #: recognized, and write a ``[MOL:n]`` placeholder into the cell that holds
+    #: the drawing. A structure drawn in a table column otherwise leaks its atom
+    #: labels and bond glyphs into the cell text (measured on the dev corpus: up
+    #: to 260 chemistry-looking cells in one document). The placeholder keeps the
+    #: molecule's row/column position and is replaced by the printed label the
+    #: molecule pass reads from the crop. Off by default: it changes table
+    #: evidence text, so it stays opt-in until the corpus review records the
+    #: comparison (see TODO/INDEX.md).
+    mask_table_molecules: bool = False
     max_pages_per_doc: int | None = None
 
 
@@ -196,6 +206,40 @@ class WebSearchConfig(BaseModel):
     api_key: str = Field(default="", max_length=4096)
 
 
+class ReviewAssistConfig(BaseModel):
+    """AI assistance for the review center: suggestions only, never decisions.
+
+    A review item is exactly the place the rules refused to decide, so the model
+    gets the printed text and the original images and answers with a suggestion.
+    It can choose among the candidates it is shown and nothing else: it never
+    writes a structure, a value or a status.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    #: Pull assistance for pending items when the queue is listed (bounded,
+    #: single-flight, and only for items without a stored suggestion yet).
+    auto: bool = False
+    #: One model call per item, so this is also the per-request model budget.
+    max_items: int = Field(default=2, ge=1, le=10)
+    #: Send the original images. The chat model may itself be multimodal
+    #: (LongCat accepts text+image); a dedicated ``vlm`` entry is optional and,
+    #: when present, the sidecar prefers it. A provider that refuses images is
+    #: retried text-only and the answer is recorded with ``vision = false``.
+    images: bool = True
+    #: Crop plus page render. Zero sends text only.
+    max_images: int = Field(default=2, ge=0, le=4)
+    image_max_px: int = Field(default=1100, ge=320, le=2000)
+    image_dpi: int = Field(default=150, ge=72, le=300)
+    #: Bounded base64 payload per image; a larger one is downscaled or dropped.
+    image_max_bytes: int = Field(default=1_200_000, ge=100_000, le=4_000_000)
+    text_char_budget: int = Field(default=6000, ge=500, le=20000)
+    timeout_seconds: float = Field(default=120.0, ge=5, le=600)
+    #: Structures the model may choose from; never a free-form answer.
+    max_candidates: int = Field(default=8, ge=1, le=24)
+
+
 class AppConfig(BaseModel):
     """全局应用配置 — 唯一 schema."""
 
@@ -218,6 +262,7 @@ class AppConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
     patent_analysis: PatentAnalysisConfig = Field(default_factory=PatentAnalysisConfig)
+    review: ReviewAssistConfig = Field(default_factory=ReviewAssistConfig)
 
 
 # 历史文件名（用于一次性迁移）

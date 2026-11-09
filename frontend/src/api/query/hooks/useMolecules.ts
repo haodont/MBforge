@@ -1,4 +1,4 @@
-/** React Query hooks for the molecule library, chem, and analytics APIs. */
+/** React Query hooks for the molecule library and chem APIs. */
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -21,29 +21,12 @@ import type { MoleculeCorrection, MoleculeLocationMatch } from '@/api/http/molec
 import {
   chemDescriptors,
   chemValidateSmiles,
-  molAddRelation,
-  molAssignCluster,
-  molDedupBatch,
-  molDeleteRelation,
-  molFindAnalogsWithActivity,
-  molFindByMolecule,
-  molGetClusterMembers,
-  molGetStats,
-  molListClusters,
-  molRemoveFromCluster,
-  molSearchSubstructure,
   smilesToRdkitSvg,
   validateSmiles,
 } from '@/api/http/molecule_chem'
 import type {
-  AnalogWithActivity,
   ChemDescriptors,
-  ClusterInfo,
-  DedupResult,
-  MoleculeRelation,
-  RelationStats,
   SmilesValidation,
-  SubstructureMatch,
   ValidateResponse,
 } from '@/api/http/molecule_chem'
 import { updateMoleculeEvidence } from '@/api/http/library'
@@ -142,58 +125,6 @@ export function useSmilesToRdkitSvg(
   })
 }
 
-/** All molecule clusters in the library. */
-export function useMoleculeClusters() {
-  return useQuery<ClusterInfo[]>({
-    queryKey: queryKeys.molecules.clusters(),
-    queryFn: () => molListClusters(),
-  })
-}
-
-/** The member list of a single cluster. */
-export function useClusterMembers(clusterId: string | null) {
-  return useQuery<ClusterInfo>({
-    queryKey: queryKeys.molecules.clusterMembers(clusterId ?? ''),
-    queryFn: () => molGetClusterMembers(clusterId as string),
-    enabled: Boolean(clusterId),
-  })
-}
-
-/** Aggregate relation statistics. */
-export function useRelationStats() {
-  return useQuery<RelationStats>({
-    queryKey: queryKeys.molecules.relationStats(),
-    queryFn: () => molGetStats(),
-  })
-}
-
-/** Relations anchored at a single molecule. */
-export function useMoleculeRelations(molId: string | null) {
-  return useQuery<MoleculeRelation[]>({
-    queryKey: queryKeys.molecules.relations(molId ?? ''),
-    queryFn: () => molFindByMolecule(molId as string),
-    enabled: Boolean(molId),
-  })
-}
-
-/** Substructure search results for a query SMILES. */
-export function useSubstructureSearch(query: string | null, threshold: number) {
-  return useQuery<SubstructureMatch[]>({
-    queryKey: queryKeys.molecules.substructure(query ?? '', threshold),
-    queryFn: () => molSearchSubstructure(query as string, threshold),
-    enabled: Boolean(query),
-  })
-}
-
-/** Activity-annotated analogs of a reference molecule. */
-export function useAnalogSearch(molId: string | null, minSimilarity: number) {
-  return useQuery<AnalogWithActivity[]>({
-    queryKey: queryKeys.molecules.analogs(molId ?? '', minSimilarity),
-    queryFn: () => molFindAnalogsWithActivity(molId as string, minSimilarity),
-    enabled: Boolean(molId),
-  })
-}
-
 // ── Writes ───────────────────────────────────────────────────────────
 
 /** Persist an edited molecule record. */
@@ -251,82 +182,6 @@ export function useUpdateMoleculeEvidence() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
       void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
-    },
-  })
-}
-
-/** Assign a molecule to a cluster. */
-export function useAssignCluster() {
-  const qc = useQueryClient()
-
-  return useMutation<number, unknown, { molId: string; clusterId: string }>({
-    mutationFn: ({ molId, clusterId }) => molAssignCluster(molId, clusterId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.molecules.clusters() })
-      void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
-    },
-  })
-}
-
-/** Remove a molecule from a cluster. */
-export function useRemoveFromCluster() {
-  const qc = useQueryClient()
-
-  return useMutation<boolean, unknown, { molId: string; clusterId: string }>({
-    mutationFn: ({ molId, clusterId }) => molRemoveFromCluster(molId, clusterId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.molecules.clusters() })
-      void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
-    },
-  })
-}
-
-/** Create a molecule relation. */
-export function useAddRelation() {
-  const qc = useQueryClient()
-
-  return useMutation<
-    number,
-    unknown,
-    {
-      molAId: string
-      molBId: string
-      relationType: string
-      score?: number
-    }
-  >({
-    mutationFn: ({ molAId, molBId, relationType, score }) =>
-      molAddRelation(molAId, molBId, relationType, score),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
-    },
-  })
-}
-
-/** Delete a molecule relation. */
-export function useDeleteRelation() {
-  const qc = useQueryClient()
-
-  return useMutation<boolean, unknown, { id: number }>({
-    mutationFn: ({ id }) => molDeleteRelation(id),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
-    },
-  })
-}
-
-/** Run duplicate detection over a batch of molecules. */
-export function useDedupBatch() {
-  const qc = useQueryClient()
-
-  return useMutation<
-    DedupResult,
-    unknown,
-    { newMols: Array<[string, string]>; sameAsThreshold?: number }
-  >({
-    mutationFn: ({ newMols, sameAsThreshold }) => molDedupBatch(newMols, sameAsThreshold),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
     },
   })
 }

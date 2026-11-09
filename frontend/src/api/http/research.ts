@@ -5,6 +5,19 @@ import type { AgentChatEvent } from './agent'
 export interface ResearchMoleculeReference { mol_id: string; name: string }
 export interface ResearchTaskReference { task_id: string; run_id: string; doc_id: string; stage?: string; status?: string }
 export interface ResearchArtifactReference { doc_id: string; run_id: string; revision: number }
+/** One AI proposal raised during the reply; approving it uses the review API. */
+export interface ResearchReviewReference {
+  item_id: string
+  kind: string
+  doc_id?: string
+  target_kind?: string
+  target_id?: string
+  field?: string
+  before_actual?: string
+  after?: string
+  rationale?: string
+  status?: string
+}
 export interface ResearchMessage {
   id: string
   role: 'user' | 'assistant'
@@ -13,6 +26,7 @@ export interface ResearchMessage {
   request_id?: string
   taskRefs?: ResearchTaskReference[]
   artifactRefs?: ResearchArtifactReference[]
+  reviewRefs?: ResearchReviewReference[]
 }
 export interface ResearchSession {
   id: string
@@ -33,7 +47,7 @@ interface ResearchContext {
 interface StoredMessage {
   id: string; request_id: string; role: 'user' | 'assistant'; content: string
   status: 'pending' | 'complete' | 'stopped' | 'failed'
-  task_refs: ResearchTaskReference[]; artifact_refs: ResearchArtifactReference[]
+  task_refs: ResearchTaskReference[]; artifact_refs: ResearchArtifactReference[]; review_refs?: ResearchReviewReference[]
 }
 interface StoredSession {
   id: string; title: string; updated_at: number; revision: number
@@ -48,7 +62,7 @@ const context = (session: Pick<ResearchSession, 'documentIds' | 'moleculeRefs' |
 const fromStored = (session: StoredSession): ResearchSession => ({
   id: session.id, title: session.title, updatedAt: session.updated_at * 1000,
   documentIds: session.context.document_ids, moleculeRefs: session.context.molecule_refs, taskRefs: session.context.task_refs,
-  messages: session.messages.map(({ task_refs, artifact_refs, ...message }) => ({ ...message, taskRefs: task_refs, artifactRefs: artifact_refs })),
+  messages: session.messages.map(({ task_refs, artifact_refs, review_refs, ...message }) => ({ ...message, taskRefs: task_refs, artifactRefs: artifact_refs, reviewRefs: review_refs ?? [] })),
 })
 const sessionUrl = (id: string, root: string) => `/api/v1/research/sessions/${encodeURIComponent(id)}?library_root=${encodeURIComponent(root)}`
 
@@ -98,6 +112,25 @@ export function readTaskReference(value: unknown): ResearchTaskReference | null 
   const ref = value as Record<string, unknown>
   return validId(ref.task_id) && validId(ref.run_id) && validId(ref.doc_id) ? { task_id: ref.task_id, run_id: ref.run_id, doc_id: ref.doc_id } : null
 }
+export function readReviewReference(value: unknown): ResearchReviewReference | null {
+  if (!value || typeof value !== 'object') return null
+  const ref = value as Record<string, unknown>
+  if (!validId(ref.item_id)) return null
+  const text = (field: string): string => typeof ref[field] === 'string' ? ref[field] : ''
+  return {
+    item_id: ref.item_id,
+    kind: text('kind') || 'ai_review',
+    doc_id: text('doc_id'),
+    target_kind: text('target_kind'),
+    target_id: text('target_id'),
+    field: text('field'),
+    before_actual: text('before_actual'),
+    after: text('after'),
+    rationale: text('rationale'),
+    status: text('status') || 'pending',
+  }
+}
+
 export function readArtifactReference(value: unknown): ResearchArtifactReference | null {
   if (!value || typeof value !== 'object') return null
   const ref = value as Record<string, unknown>

@@ -88,6 +88,53 @@ export const moleculeSearchTool = defineTool({
   },
 })
 
+export const recognizeMoleculesParameters = Type.Object({
+  doc_id: Type.String({
+    minLength: 1,
+    maxLength: 256,
+    description: 'doc_id of the imported document that contains the page.',
+  }),
+  page: Type.Integer({ minimum: 1, description: '1-based page number of the stored PDF.' }),
+  region: Type.Optional(
+    Type.Array(Type.Number(), {
+      minItems: 4,
+      maxItems: 4,
+      description:
+        'Optional [x0, y0, x1, y1] in PDF points (bottom-left origin). Keeps only structures intersecting that region, e.g. one table row or figure.',
+    }),
+  ),
+  max_molecules: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 20,
+      description: 'Cap on recognized structures (default 10).',
+    }),
+  ),
+}, { additionalProperties: false })
+
+export const recognizeMoleculesTool = defineTool({
+  name: 'recognize_molecules',
+  label: 'Recognize drawn molecules',
+  description:
+    'Run the local MolDet + MolParser recognizers over one page of an imported document and return every structure they find: SMILES, E-SMILES, pixel and PDF-point bbox, detection score, and any printed labels read by OCR (e.g. "22A"). Use it for structural / SMILES / "what is drawn here" questions, and to tie a designation from an activity table to its drawn structure. It is read-only and never invents chemistry; an empty list means the detectors found no structure on that page.',
+  promptSnippet: 'recognize structures drawn on a document page',
+  promptGuidelines: [
+    'Use the returned smiles verbatim; never author or complete a SMILES yourself, and say "not detected" when the tool returns none.',
+    'Read labels together with bbox_pdf: match the printed designation you are discussing to labels before claiming an identity.',
+    'Pass region (PDF points, bottom-left origin) when the page holds several structures, so unrelated drawings do not enter the answer.',
+    'Cite the page and the doc_id; the call persists nothing and does not change extracted facts.',
+  ],
+  parameters: recognizeMoleculesParameters,
+  async execute(_toolCallId, params, signal) {
+    const payload = await postTool<Record<string, unknown>>(
+      '/api/v1/agent/tools/recognize-molecules',
+      { ...params },
+      signal,
+    )
+    return toolResult('recognize_molecules', payload, { payload })
+  },
+})
+
 export const libraryStatsTool = defineTool({
   name: 'library_stats',
   label: 'Library statistics',

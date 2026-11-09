@@ -16,10 +16,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from mbforge.domain.evidence_kind import MOLECULE, TEXT, register_kinds
 from mbforge.service.pipeline.patent.declared_pairs import (
     extract_declared_examples,
     pair_structure_activity,
 )
+
+register_kinds({"text": TEXT, "molecule": MOLECULE})
 
 
 @dataclass
@@ -27,6 +30,7 @@ class _Row:
     evidence_id: str
     page: int
     raw_text: str
+    kind: str = "text"
 
 
 def _corpus() -> list[_Row]:
@@ -69,6 +73,39 @@ def test_the_product_mass_is_the_last_one_printed_in_the_section() -> None:
     examples = extract_declared_examples(_corpus(), "doc-1")
 
     assert examples[0].product_mz == 544.2
+
+
+def test_a_declaration_without_parentheses_or_with_the_target_qualifier_is_read() -> (
+    None
+):
+    """``(目标化合物11)`` and ``目标化合物17的制备`` both declare the product.
+
+    CN119504738A prints both forms for the compounds Table 1 reports; requiring a
+    bare ``(化合物N)`` dropped them from the join entirely (21 -> 24 declared
+    examples on that document). A detection payload is not text and never declares.
+    """
+    rows = [
+        _Row("ev-1", 77, "[0469] 实施例11：目标化合物11制备"),
+        _Row("ev-2", 86, "[0552] 实施例17：目标化合物17的制备"),
+        _Row(
+            "ev-3",
+            75,
+            "[0452] 实施例10：顺式-N1-(2-甲氧基异喹啉-1-基)环己烷(目标化合物10)的合成",
+        ),
+        _Row(
+            "ev-4",
+            77,
+            '{"nearby_text": "实施例11：目标化合物11制备"}',
+            kind="molecule",
+        ),
+    ]
+    examples = extract_declared_examples(rows, "doc-1")
+
+    assert [(item.example, item.declared_key) for item in examples] == [
+        ("11", "11"),
+        ("17", "17"),
+        ("10", "10"),
+    ]
 
 
 def test_a_reading_joins_to_the_structure_the_document_declares() -> None:

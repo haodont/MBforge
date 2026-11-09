@@ -23,6 +23,11 @@ from pydantic import BaseModel, ConfigDict, Field
 #: observed data.
 EvidenceGrade = Literal["measured", "predicted", "derived", "suggested"]
 
+#: Review kind for a printed reading whose structure the rules could not bind
+#: while the document does draw candidate structures on that page. A human
+#: picks one on confirm, which writes the attribution (method=human).
+DESIGNATION_UNBOUND_KIND = "designation_unbound"
+
 #: Review lifecycle of a reading or an attribution.
 ReviewStatus = Literal["pending", "accepted", "rejected"]
 
@@ -116,6 +121,9 @@ class MeasurementQuery(BaseModel):
     evidence_grade: str = ""
     review_status: str = ""
     metric: str = ""
+    #: Canonical-value window: a dataset question such as "IC50 < 40 nM".
+    min_value: float | None = None
+    max_value: float | None = None
     limit: int = Field(200, ge=1, le=1000)
 
 
@@ -130,6 +138,9 @@ class MeasurementQuery(BaseModel):
 #: - ``designation_without_structure`` — the document prints the designation but
 #:   never draws its structure (SFC/LC-MS-only compounds: ``77-A``, ``77-B``).
 #:   Not a defect: the source genuinely carries no structure to bind.
+#: - ``label_not_read`` — structures were drawn but their printed designations
+#:   were never read (or the read was ambiguous). Recoverable extraction work;
+#:   counting it as ``designation_without_structure`` would understate the backlog.
 #: - ``structure_detected_unmatched`` — a structure exists in the document but
 #:   no rule could tie it to this designation. This is the real extraction gap.
 #: - ``document_has_no_detections`` — the document yielded no structures at all,
@@ -137,6 +148,7 @@ class MeasurementQuery(BaseModel):
 UnattributedReason = Literal[
     "no_printed_designation",
     "designation_without_structure",
+    "label_not_read",
     "structure_detected_unmatched",
     "document_has_no_detections",
 ]
@@ -165,6 +177,7 @@ class MeasurementDatasetStats(BaseModel):
 
 
 __all__ = [
+    "DESIGNATION_UNBOUND_KIND",
     "AttributionMethod",
     "EvidenceGrade",
     "LinkingStatus",

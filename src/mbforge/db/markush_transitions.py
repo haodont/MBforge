@@ -189,54 +189,6 @@ def _candidate_destination(
     return scaffold_id, fragment["fragment_id"] if fragment else None
 
 
-def _enumeration_eligibility(
-    conn: sqlite3.Connection,
-    scaffold_id: str | None,
-) -> tuple[bool, list[str]]:
-    """Return whether a confirmed scaffold has an enumerable confirmed relation."""
-    if scaffold_id is None:
-        return False, ["candidate is not a confirmed scaffold"]
-    scaffold = conn.execute(
-        "SELECT status FROM markush_scaffolds WHERE scaffold_id = ?",
-        (scaffold_id,),
-    ).fetchone()
-    if scaffold is None or scaffold["status"] != "confirmed":
-        return False, ["candidate is not a confirmed scaffold"]
-    site = conn.execute(
-        """
-        SELECT 1 FROM markush_sites
-        WHERE scaffold_id = ? AND status = 'confirmed'
-        LIMIT 1
-        """,
-        (scaffold_id,),
-    ).fetchone()
-    if site is None:
-        return False, ["no confirmed attachment site"]
-    relation = conn.execute(
-        """
-        SELECT 1
-        FROM markush_sites AS site
-        JOIN markush_fragments AS fragment ON fragment.status = 'confirmed'
-        LEFT JOIN markush_options AS option
-          ON option.site_id = site.site_id
-         AND option.fragment_id = fragment.fragment_id
-         AND option.status = 'confirmed'
-        LEFT JOIN markush_mounts AS mount
-          ON mount.site_id = site.site_id
-         AND mount.fragment_id = fragment.fragment_id
-         AND mount.status = 'confirmed'
-        WHERE site.scaffold_id = ?
-          AND site.status = 'confirmed'
-          AND (option.option_id IS NOT NULL OR mount.mount_id IS NOT NULL)
-        LIMIT 1
-        """,
-        (scaffold_id,),
-    ).fetchone()
-    if relation is None:
-        return False, ["no confirmed fragment relationship"]
-    return True, []
-
-
 def get_candidate_detail(
     conn: sqlite3.Connection, candidate_id: str
 ) -> MarkushCandidateDetail:
@@ -270,16 +222,10 @@ def get_candidate_detail(
         candidate_id,
         candidate.properties,
     )
-    enumeration_eligible, enumeration_block_reasons = _enumeration_eligibility(
-        conn,
-        scaffold_id,
-    )
     return MarkushCandidateDetail(
         **candidate.model_dump(),
         scaffold_id=scaffold_id,
         fragment_id=fragment_id,
-        enumeration_eligible=enumeration_eligible,
-        enumeration_block_reasons=enumeration_block_reasons,
         evidence=[_row_to_evidence(r) for r in evidence],
         decisions=[_row_to_decision(r) for r in decisions],
     )

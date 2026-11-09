@@ -63,12 +63,48 @@ def list_measurements(
     return enriched
 
 
+def _document_context(library_root: str | None, doc_id: str) -> dict[str, Any]:
+    """Drawings and label coverage for one document, read once per document."""
+    repositories = get_repositories(library_root)
+    if not doc_id:
+        return {"drawn": set(), "unlabeled": 0, "detections": 0}
+    return {
+        "drawn": repositories.measurements.document_label_numbers(doc_id),
+        "unlabeled": repositories.measurements.unlabeled_structure_count(doc_id),
+        "detections": repositories.measurements.document_detection_count(doc_id),
+    }
+
+
+def _unattributed_reason(
+    designation: str, drawn: set[str], unlabeled: int, detections: int
+) -> str:
+    """Why one unattributed reading has no structure.
+
+    The distinction is the product value: a source that never drew the compound
+    and a label the pipeline never read are different facts, and only the second
+    is recoverable work.
+    """
+    if not designation:
+        return "no_printed_designation"
+    if designation in drawn:
+        return "structure_detected_unmatched"
+    if detections == 0:
+        return "document_has_no_detections"
+    if unlabeled > 0:
+        return "label_not_read"
+    return "designation_without_structure"
+
+
 def list_activity_records(
     library_root: str | None,
     doc_id: str,
     target: str = "",
     assay_description: str = "",
     limit: int = 200,
+    *,
+    metric: str = "",
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> list[dict[str, Any]]:
     """Activity records for a document, shaped for the HTTP/agent response.
 
@@ -82,8 +118,24 @@ def list_activity_records(
         doc_id=doc_id,
         target=target,
         assay_description=assay_description,
+        metric=metric,
         limit=limit,
     )
+    if min_value is not None:
+        readings = [
+            row
+            for row in readings
+            if row.get("canonical_value") is not None
+            and row["canonical_value"] >= min_value
+        ]
+    if max_value is not None:
+        readings = [
+            row
+            for row in readings
+            if row.get("canonical_value") is not None
+            and row["canonical_value"] <= max_value
+        ]
+    context = _document_context(library_root, doc_id)
     records: list[dict[str, Any]] = [
         {
             "activity_id": row["measurement_id"],
@@ -128,7 +180,18 @@ def list_activity_records(
             "review_status": row["review_status"],
             "attributed": row["attributed"],
             "mol_ids": row["mol_ids"],
-            "reasons": [],
+            "reasons": (
+                []
+                if row["attributed"]
+                else [
+                    _unattributed_reason(
+                        str(row.get("reference_key") or "").strip(),
+                        context["drawn"],
+                        context["unlabeled"],
+                        context["detections"],
+                    )
+                ]
+            ),
         }
         for row in readings
     ]
@@ -161,32 +224,24 @@ def dataset_stats(
 
     by_reason: dict[str, int] = {}
     attached = 0
-    drawn_by_doc: dict[str, set[str]] = {}
+    context_by_doc: dict[str, dict[str, Any]] = {}
     for row in rows:
         if row.get("entry_id") or row.get("reference_key"):
             attached += 1
         if row.get("attributed_id"):
             continue
         doc = row["doc_id"]
-        if doc not in drawn_by_doc:
-            drawn_by_doc[doc] = repositories.measurements.document_label_numbers(doc)
-        drawn = drawn_by_doc[doc]
+        if doc not in context_by_doc:
+            context_by_doc[doc] = _document_context(library_root, doc)
+        context = context_by_doc[doc]
         # Compare the full designation: ``77-A`` is not ``77``, and treating it
         # as the same number would claim a structure the document never drew.
-        designation = str(row.get("reference_key") or "").strip()
-        if not designation:
-            reason = "no_printed_designation"
-        elif not drawn:
-            # No structure was detected anywhere in this document.
-            reason = "document_has_no_detections"
-        elif designation in drawn:
-            # The document drew a structure under this very designation and still
-            # no rule bound it — recoverable extraction work.
-            reason = "structure_detected_unmatched"
-        else:
-            # Structures were drawn for other compounds; this designation has
-            # none (chiral SFC/LC-MS-only entries such as 77-A / 77-B).
-            reason = "designation_without_structure"
+        reason = _unattributed_reason(
+            str(row.get("reference_key") or "").strip(),
+            context["drawn"],
+            context["unlabeled"],
+            context["detections"],
+        )
         by_reason[reason] = by_reason.get(reason, 0) + 1
 
     return stats.model_copy(

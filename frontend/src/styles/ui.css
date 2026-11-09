@@ -399,6 +399,55 @@
   font-weight: 600;
 }
 
+.ui-tabs__tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-tabs__tab-wrap {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  flex-shrink: 0;
+}
+.ui-tabs__tab--closable {
+  padding-right: 28px;
+}
+.ui-tabs__close {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background-color var(--dur-fast), color var(--dur-fast), opacity var(--dur-fast);
+}
+.ui-tabs__close:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+  color: var(--text-primary);
+  opacity: 1;
+}
+.ui-tabs__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  opacity: 1;
+}
+.ui-tabs__close:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
 .ui-tabs--pills .ui-tabs__tab,
 .ui-tabs--segment .ui-tabs__tab {
   border-radius: var(--radius-md);

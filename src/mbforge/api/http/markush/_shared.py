@@ -19,17 +19,3 @@ def resolve_repositories(library_root: str | None) -> LibraryRepositories:
     if not library_root:
         raise ValidationError("library_root is required")
     return get_repositories(library_root)
-
-
-def to_selections(items: list) -> list:
-    """Map a Pydantic selection list to the internal ``SiteSelection`` objects."""
-    from mbforge.domain.enumeration import SiteSelection
-
-    return [
-        SiteSelection(
-            site_label=i.site_label,
-            atom_map_num=i.atom_map_num,
-            fragments=list(i.fragments),
-        )
-        for i in items
-    ]

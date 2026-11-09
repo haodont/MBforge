@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PdfCanvas from '@/components/PdfCanvas'
 import ScrollColumn from '../ui/ScrollColumn'
@@ -12,6 +12,7 @@ import PdfSidebar from './pdf/PdfSidebar'
 import PdfFloatingControls from './pdf/PdfFloatingControls'
 import PdfContinuousView from './pdf/PdfContinuousView'
 import LocationHighlight from './pdf/LocationHighlight'
+import { savePersistedViewerState } from './pdf/viewerSnapshots'
 import MoleculeEditorDialog from '@/components/molecule/MoleculeEditorDialog'
 import { cropImageUrl, resolveDocumentEvidence } from '@/api/http/library'
 import type { DocumentEvidenceItem } from '@/api/http/library'
@@ -46,16 +47,19 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
   ref,
 ) {
   const { t } = useTranslation()
+  const persistKey = doc.doc_id
   // Destructure at the hook call site: the hook's return object also carries
   // refs (pdfScrollRef / pageInfoRef), and reading properties off that object
   // during render trips react-hooks/refs. Destructured values are plain state.
   const {
     currentPage, setCurrentPage,
     isDetecting, selectedDetection, setSelectedDetection,
-    pageInfo, pdfScale,
-    showTextLayer,
+    pageInfo, pageInfoRef, pdfScale, setPdfScale,
+    showTextLayer, setShowTextLayer,
+    showMoleculeOverlay, setShowMoleculeOverlay,
+    showOcrOverlay, setShowOcrOverlay,
     pageJumpInput, setPageJumpInput,
-    setShowTextPanel, pdfPageCount,
+    pdfPageCount,
     ocrBlocks, selectedOcrIndex, setSelectedOcrIndex,
     pdfUrl, pdfLoading, pdfScrollRef,
     currentDetections, hasTextLayer, canDetect,
@@ -72,10 +76,11 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
     selectedEvidenceId, setSelectedEvidenceId,
     editingDetectionIndex, setEditingDetectionIndex,
     continuousMode, toggleContinuousMode,
-  } = usePdfSidebarState({ pageInfo, initialSidePaneTab, sidePaneRequestId })
+  } = usePdfSidebarState({ pageInfo, initialSidePaneTab, sidePaneRequestId, viewerKey: persistKey })
   const { data: patentFactsResult } = useDocumentPatentFacts(doc.doc_id, libraryRoot)
   const patentFacts = patentFactsResult?.ok ? patentFactsResult.data : null
   const [evidenceTarget, setEvidenceTarget] = useState<(DocumentEvidenceItem & { requestId: number }) | null>(null)
+  const [hoveredEvidence, setHoveredEvidence] = useState<DocumentEvidenceItem | null>(null)
   const [evidenceError, setEvidenceError] = useState('')
   const evidenceRequest = useRef(0)
   const openPatentEvidence = useCallback((evidenceId: string) => {
@@ -90,12 +95,63 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
       if (request === evidenceRequest.current) setEvidenceError(getUserFacingError(error, t('patentAnalysis.sourceUnavailable')))
     })
   }, [doc.doc_id, libraryRoot, pdfPageCount, setSidePaneTab, t])
+  const selectEvidenceItem = useCallback((item: DocumentEvidenceItem) => {
+    const request = ++evidenceRequest.current
+    setEvidenceError('')
+    setHoveredEvidence(item)
+    setEvidenceTarget({ ...item, requestId: request })
+    setSidePaneTab('evidence')
+  }, [setSidePaneTab])
+  const handleEvidenceHover = useCallback((item: DocumentEvidenceItem | null) => {
+    setHoveredEvidence(item)
+  }, [])
+  const fitScale = useCallback((mode: 'width' | 'page') => {
+    const container = pdfScrollRef.current
+    const info = pageInfoRef.current
+    if (!container || !info) return
+    const width = Math.max(1, container.clientWidth - 32)
+    const height = Math.max(1, container.clientHeight - 32)
+    const aspect = info.originalWidth / info.originalHeight
+    const scale = continuousMode
+      ? mode === 'width'
+        ? width / info.originalWidth
+        : Math.min(width / info.originalWidth, height / info.originalHeight)
+      : mode === 'width'
+        ? (width / height) * (info.originalHeight / info.originalWidth)
+        : Math.min(1, width / (height * aspect))
+    setPdfScale(Math.min(5, Math.max(0.5, scale)))
+  }, [continuousMode, pageInfoRef, pdfScrollRef, setPdfScale])
   const pdfCanvasStyle = useMemo(() => ({
     background: '#fff',
     boxShadow: 'var(--shadow-md)',
   }), [])
-  const openTextPanel = useCallback(() => setShowTextPanel(true), [setShowTextPanel])
   const handleContinuousPageChange = useCallback((page: number) => setCurrentPage(page), [setCurrentPage])
+
+  useEffect(() => {
+    savePersistedViewerState(persistKey, {
+      currentPage,
+      pdfScale,
+      showTextLayer,
+      showMoleculeOverlay,
+      showOcrOverlay,
+      continuousMode,
+    })
+  }, [
+    persistKey,
+    currentPage,
+    pdfScale,
+    showTextLayer,
+    showMoleculeOverlay,
+    showOcrOverlay,
+    continuousMode,
+  ])
+
+  const highlightedBBox = useMemo<[number, number, number, number] | null>(() => {
+    if (hoveredEvidence?.page === currentPage) return hoveredEvidence.bbox
+    if (evidenceTarget?.page === currentPage) return evidenceTarget.bbox
+    if (initialPage === currentPage && initialBbox) return initialBbox
+    return null
+  }, [hoveredEvidence, evidenceTarget, currentPage, initialPage, initialBbox])
 
   // 覆盖层读源：文档打开时一次性加载全文 bbox（流水线 v2 证据 ∪ 交互识别写入的
   // molecule_detections，后端逐页去重，含低置信/被拒候选，框颜色编码置信度）；
@@ -154,20 +210,27 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
                   showTextLayer={showTextLayer && hasTextLayer}
                   scrollRootRef={pdfScrollRef}
                   overlay={(
-                    <PdfOverlays
-                      detections={visibleDetections}
-                      ocrBlocks={ocrBlocks}
-                      pageInfo={pageInfo}
-                      currentPage={currentPage}
-                      selectedDetection={selectedDetection}
-                      selectedOcrIndex={selectedOcrIndex}
-                      isDetecting={isDetecting}
-                      onMoleculeClick={onMoleculeClick}
-                      onRecognize={handleRecognizePage}
-                      setSelectedDetection={setSelectedDetection}
-                      setSelectedOcrIndex={setSelectedOcrIndex}
-                      setSelectedEvidenceId={setSelectedEvidenceId}
-                    />
+                    <>
+                      <PdfOverlays
+                        detections={visibleDetections}
+                        ocrBlocks={ocrBlocks}
+                        pageInfo={pageInfo}
+                        currentPage={currentPage}
+                        selectedDetection={selectedDetection}
+                        selectedOcrIndex={selectedOcrIndex}
+                        isDetecting={isDetecting}
+                        showMolecules={showMoleculeOverlay}
+                        showOcr={showOcrOverlay}
+                        onMoleculeClick={onMoleculeClick}
+                        onRecognize={handleRecognizePage}
+                        setSelectedDetection={setSelectedDetection}
+                        setSelectedOcrIndex={setSelectedOcrIndex}
+                        setSelectedEvidenceId={setSelectedEvidenceId}
+                      />
+                      {highlightedBBox && pageInfo && (
+                        <LocationHighlight bbox={highlightedBBox} pageInfo={pageInfo} />
+                      )}
+                    </>
                   )}
                   onPageChange={handleContinuousPageChange}
                   onPageRendered={handlePageRendered}
@@ -186,7 +249,6 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
                   onPageRendered={handlePageRendered}
                   onImageReady={handleImageReady}
                   onTextContent={handleTextContent}
-                  onTextLayerClick={openTextPanel}
                   onPageCount={handlePageCount}
                   style={pdfCanvasStyle}
                 />
@@ -200,14 +262,16 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
                   selectedDetection={selectedDetection}
                   selectedOcrIndex={selectedOcrIndex}
                   isDetecting={isDetecting}
+                  showMolecules={showMoleculeOverlay}
+                  showOcr={showOcrOverlay}
                   onMoleculeClick={onMoleculeClick}
                   onRecognize={handleRecognizePage}
                   setSelectedDetection={setSelectedDetection}
                   setSelectedOcrIndex={setSelectedOcrIndex}
                   setSelectedEvidenceId={setSelectedEvidenceId}
                 />
-                {initialPage === currentPage && initialBbox && pageInfo && (
-                  <LocationHighlight bbox={initialBbox} pageInfo={pageInfo} />
+                {highlightedBBox && pageInfo && (
+                  <LocationHighlight bbox={highlightedBBox} pageInfo={pageInfo} />
                 )}
               </>}
             </div>
@@ -218,6 +282,8 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onZoomReset={handleZoomReset}
+            onFitWidth={() => fitScale('width')}
+            onFitPage={() => fitScale('page')}
             currentPage={currentPage}
             pdfPageCount={pdfPageCount}
             pageJumpInput={pageJumpInput}
@@ -227,6 +293,12 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
             onNextPage={() => { setCurrentPage(p => p + 1); requestAnimationFrame(() => pdfScrollRef.current?.focus()) }}
             continuousMode={continuousMode}
             onToggleContinuous={toggleContinuousMode}
+            showMolecules={showMoleculeOverlay}
+            onToggleMolecules={() => setShowMoleculeOverlay(v => !v)}
+            showOcr={showOcrOverlay}
+            onToggleOcr={() => setShowOcrOverlay(v => !v)}
+            showTextLayer={showTextLayer}
+            onToggleTextLayer={() => setShowTextLayer(v => !v)}
           />
         </div>
 
@@ -246,6 +318,8 @@ const PdfViewer = forwardRef<PdfViewerHandle, Props>(function PdfViewer(
           patentFacts={patentFacts}
           patentFactsLoadError={patentFactsResult?.ok === false}
           onOpenEvidence={openPatentEvidence}
+          onEvidenceSelect={selectEvidenceItem}
+          onEvidenceHover={handleEvidenceHover}
           onDetect={() => handleDetectPage(true)}
           setSelectedDetection={setSelectedDetection}
           setEditingDetectionIndex={setEditingDetectionIndex}

@@ -11,7 +11,7 @@ export interface TagProps {
 /**
  * Tag 标签/芯片组件。
  *
- * 替代 notes/TagPill.tsx 的功能，作为 ui/ 层统一原子组件。
+ * 统一原子组件。
  */
 export default function Tag({
   children,

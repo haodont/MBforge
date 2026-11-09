@@ -131,10 +131,6 @@ class PatentTaskRegistry(Protocol):
         """Whether the attempt has been cancelled."""
         ...
 
-    def active_attempts(self) -> list[str]:
-        """Attempt IDs currently registered."""
-        ...
-
 
 _runtime: PatentAnalysisRuntime | None = None
 _registry: PatentTaskRegistry | None = None

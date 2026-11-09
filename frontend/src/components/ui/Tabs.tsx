@@ -10,6 +10,8 @@ export interface TabItem {
   disabled?: boolean
   /** 角标（如未读数）*/
   badge?: string | number
+  /** 显示关闭按钮（需配合 Tabs.onTabClose） */
+  closable?: boolean
 }
 
 export interface TabsProps {
@@ -20,6 +22,10 @@ export interface TabsProps {
   defaultActiveKey?: string
   /** tab 切换回调 */
   onChange?: (key: string) => void
+  /** 可关闭 tab 的关闭回调（配合 TabItem.closable） */
+  onTabClose?: (key: string) => void
+  /** 关闭按钮的无障碍标签 */
+  closeLabel?: string
   /** 标签位置（预留字段，未来支持 bottom 布局）*/
   position?: 'top' | 'bottom'
   /** 变体 */
@@ -41,6 +47,8 @@ interface TabButtonProps {
   tabsId?: string
   className?: string
   onClick: (key: string, disabled?: boolean) => void
+  onClose?: (key: string) => void
+  closeLabel?: string
 }
 
 function TabButton({
@@ -51,17 +59,20 @@ function TabButton({
   tabsId,
   className,
   onClick,
+  onClose,
+  closeLabel = 'Close tab',
 }: TabButtonProps) {
   const cls = [
     'ui-tabs__tab',
     `ui-tabs__tab--${size}`,
     isActive && 'ui-tabs__tab--active',
+    item.closable && onClose && 'ui-tabs__tab--closable',
     className,
   ]
     .filter(Boolean)
     .join(' ')
 
-  return (
+  const tab = (
     <button
       type="button"
       role="tab"
@@ -72,7 +83,7 @@ function TabButton({
       disabled={item.disabled}
       className={cls}
     >
-      {item.label}
+      <span className="ui-tabs__tab-label">{item.label}</span>
       {item.badge !== undefined && <span className="ui-tabs__badge">{item.badge}</span>}
       {variant === 'underline' && isActive && (
         <motion.span
@@ -82,6 +93,28 @@ function TabButton({
         />
       )}
     </button>
+  )
+
+  if (!item.closable || !onClose) return tab
+
+  return (
+    <span className="ui-tabs__tab-wrap">
+      {tab}
+      <button
+        type="button"
+        className="ui-tabs__close"
+        aria-label={typeof item.label === 'string' ? `${closeLabel}: ${item.label}` : closeLabel}
+        disabled={item.disabled}
+        onClick={e => {
+          e.stopPropagation()
+          onClose(item.key)
+        }}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <path d="M3 3l6 6M9 3L3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+    </span>
   )
 }
 
@@ -96,6 +129,8 @@ export default function Tabs({
   activeKey,
   defaultActiveKey,
   onChange,
+  onTabClose,
+  closeLabel,
 
   position: _position = 'top',
   variant = 'default',
@@ -127,6 +162,8 @@ export default function Tabs({
         tabsId={id}
         className={className}
         onClick={handleClick}
+        onClose={onTabClose}
+        closeLabel={closeLabel}
       />
     )
   }

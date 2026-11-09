@@ -63,9 +63,8 @@ def test_label_ocr_degrades_without_engine(monkeypatch) -> None:
     """Labelling is enrichment only: an OCR engine crash yields no reads, and a
     missing onnxruntime backend yields ``None`` — never an exception.
 
-    The read-level contract (not the one-line ``extract_label_texts`` wrapper)
-    owns the error boundary; ``onnx`` is optional now that torch is the primary
-    engine.
+    The read-level API owns the error boundary; ``onnx`` is optional now that
+    torch is the primary engine.
     """
 
     class _Boom:

@@ -22,6 +22,8 @@ interface Props {
   selectedDetection: number | null
   selectedOcrIndex: number | null
   isDetecting: boolean
+  showMolecules?: boolean
+  showOcr?: boolean
   onMoleculeClick?: (info: {
     page: number
     bbox?: [number, number, number, number] | null
@@ -40,13 +42,15 @@ const PdfOverlays = memo(function PdfOverlays({
   selectedDetection,
   selectedOcrIndex,
   isDetecting,
+  showMolecules = true,
+  showOcr = true,
   onMoleculeClick,
   onRecognize,
   setSelectedDetection,
   setSelectedOcrIndex,
   setSelectedEvidenceId,
 }: Props) {
-  const pageOverlay = pageInfo && detections.length > 0 ? (
+  const pageOverlay = showMolecules && pageInfo && detections.length > 0 ? (
     <MoleculeOverlay
       detections={detections}
       renderWidth={pageInfo.width}
@@ -67,7 +71,7 @@ const PdfOverlays = memo(function PdfOverlays({
     />
   ) : null
 
-  const ocrPageOverlay = pageInfo && ocrBlocks.length > 0 ? (
+  const ocrPageOverlay = showOcr && pageInfo && ocrBlocks.length > 0 ? (
     <OcrOverlay
       blocks={ocrBlocks}
       renderWidth={pageInfo.width}

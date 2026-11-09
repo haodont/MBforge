@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from mbforge.contracts.measurement import DESIGNATION_UNBOUND_KIND
 from mbforge.contracts.patent import PATENT_FACT_REVIEW_KIND, PatentConflict
 from mbforge.foundation.ids import stable_id
 from mbforge.foundation.layout import LibraryLayout
@@ -88,7 +89,9 @@ def publish_document_facts(
         forget_decisions=stale,
         expected_revision=expected_revision,
     )
-    review_items = _queue_review_items(root, doc_id, artifact, revision)
+    review_items = _queue_review_items(
+        root, doc_id, artifact, revision, candidates=eligible
+    )
     projection = LibraryLayout(root).patent_facts_json(doc_id)
     try:
         write_json_atomic(
@@ -174,7 +177,12 @@ def _with_decisions(
 
 
 def _queue_review_items(
-    library_root: Path, doc_id: str, artifact: PatentFactsArtifact, revision: int
+    library_root: Path,
+    doc_id: str,
+    artifact: PatentFactsArtifact,
+    revision: int,
+    *,
+    candidates: Sequence[Any] = (),
 ) -> int:
     """Queue one review item per pending fact (idempotent per item id).
 
@@ -207,6 +215,9 @@ def _queue_review_items(
         )
         queued += 1
     queued += _queue_mass_mismatches(review, doc_id, artifact)
+    queued += _queue_unbound_readings(
+        review, doc_id, artifact, candidates, library_root=library_root
+    )
     return queued
 
 
@@ -255,6 +266,164 @@ def _queue_mass_mismatches(
                 "adduct": issue.get("adduct"),
                 "evidence_ids": list(issue.get("evidence_ids") or [])[:10],
                 "raw_text": issue.get("raw_text"),
+            },
+        )
+        queued += 1
+    return queued
+
+
+def _designation_scope(artifact: PatentFactsArtifact) -> dict[str, set[int]]:
+    """Page ranges of the sections whose title declares each designation.
+
+    A table reading cites ``化合物11``; the compound is drawn in the example
+    section titled ``实施例11：目标化合物11制备``. The section title is the
+    document telling us where to look, without guessing a page.
+    """
+    import re
+
+    scope: dict[str, set[int]] = {}
+    for section in artifact.sections:
+        if hasattr(section, "model_dump"):
+            section = section.model_dump()
+        if not isinstance(section, dict):
+            continue
+        start = section.get("page_start")
+        end = section.get("page_end")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        title = str(section.get("title") or "")
+        for match in re.finditer(
+            r"化合物\s*([0-9]{1,4}[A-Za-z]?(?:-[A-Za-z])?)", title
+        ):
+            scope.setdefault(match.group(1), set()).update(range(start, end + 1))
+    return scope
+
+
+def _queue_unbound_readings(
+    review: Any,
+    doc_id: str,
+    artifact: PatentFactsArtifact,
+    candidates: Sequence[Any],
+    *,
+    library_root: str | Path | None = None,
+) -> int:
+    """Queue one item per printed reading whose structure could not be bound.
+
+    The candidates are not "the page the table is on": a reading sits in a result
+    table while its compound is drawn in the example section that prepares it.
+    So the scope is the section that declares the designation (its page range),
+    plus the reading page itself. A reading whose section drew nothing is a source
+    fact, not a review question, and is not queued.
+
+    Confirming the item with ``choice=<candidate mol_id>`` writes the attribution
+    (method=human) — that is the only thing a decision on this kind does.
+    """
+    if library_root is not None:
+        # Every recognized structure, not only the persistable ones: a drawing
+        # the pipeline flagged for review is still a candidate a human can pick.
+        from mbforge.service.pipeline.artifacts.hydration import load_detections
+
+        try:
+            loaded = load_detections(library_root, doc_id)
+        except Exception as exc:  # noqa: BLE001 - one bad payload must not block
+            # A malformed detection payload is a data defect, not a publication
+            # failure: the review items are a convenience over the published facts.
+            logger.warning(
+                "Could not gather unbound-reading candidates for %s: %s",
+                doc_id,
+                exc,
+            )
+            loaded = None
+        if loaded:
+            candidates = list(loaded[0])
+    drawn: list[tuple[set[int], dict[str, str]]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        detections = list(getattr(candidate, "detections", []) or [])
+        if not detections or detections[0].page is None:
+            continue
+        smiles = str(getattr(candidate, "canonical_smiles", "") or "")
+        if not smiles or smiles in seen:
+            continue
+        seen.add(smiles)
+        raw_page = int(detections[0].page)
+        # Page bases differ across producers; accepting both neighbours keeps the
+        # scope right without a page-basis assumption that is easy to get wrong.
+        pages = {raw_page - 1, raw_page, raw_page + 1}
+        drawn.append(
+            (
+                pages,
+                {
+                    "mol_id": smiles,
+                    "smiles": smiles,
+                    "name": str(getattr(candidate, "name", "") or ""),
+                },
+            )
+        )
+    sections = {}
+    for raw_section in artifact.sections:
+        section = (
+            raw_section.model_dump()
+            if hasattr(raw_section, "model_dump")
+            else raw_section
+        )
+        if isinstance(section, dict) and section.get("section_id"):
+            sections[str(section["section_id"])] = section
+    entries = {
+        str(entry.get("entry_id")): entry
+        for entry in artifact.entries
+        if isinstance(entry, dict) and entry.get("entry_id")
+    }
+    declared = _designation_scope(artifact)
+    queued = 0
+    for measurement in artifact.measurements:
+        if not isinstance(measurement, dict):
+            continue
+        if measurement.get("mol_id"):
+            continue
+        entry = entries.get(str(measurement.get("compound_entry_id") or ""))
+        if entry is not None and entry.get("entity_id"):
+            continue
+        provenance = measurement.get("provenance")
+        provenance = provenance if isinstance(provenance, dict) else {}
+        designation = str(provenance.get("reference_key") or "")
+        measurement_id = str(measurement.get("measurement_id") or "")
+        page = measurement.get("page_num")
+        if not designation or not measurement_id:
+            continue
+        scope: set[int] = set()
+        if isinstance(page, int):
+            scope.update({page - 1, page, page + 1})
+        section = None
+        if entry is not None:
+            section = sections.get(str(entry.get("section_id") or ""))
+        if section is not None:
+            start = section.get("page_start")
+            end = section.get("page_end")
+            if isinstance(start, int) and isinstance(end, int):
+                scope.update(range(start, end + 1))
+        scope |= declared.get(designation, set())
+        picked = [item for pages, item in drawn if pages & scope]
+        if not picked:
+            continue
+        review.insert_review_item(
+            item_id=stable_id("unbound", doc_id, measurement_id),
+            kind=DESIGNATION_UNBOUND_KIND,
+            doc_id=doc_id,
+            page=page if isinstance(page, int) else None,
+            name=designation,
+            reasons=["designation_without_structure"],
+            context_text=str(measurement.get("raw_text") or "")[:300] or None,
+            payload={
+                "doc_id": doc_id,
+                "measurement_id": measurement_id,
+                "designation": designation,
+                "metric": measurement.get("metric"),
+                "value": measurement.get("value"),
+                "page": page,
+                "section_id": (entry or {}).get("section_id"),
+                "evidence_ids": list(measurement.get("evidence_ids") or [])[:10],
+                "candidates": picked[:8],
             },
         )
         queued += 1
@@ -473,21 +642,8 @@ def _repair_projection(
         return "pending"
 
 
-def iter_published_doc_ids(library_root: str | Path) -> list[str]:
-    """Return document IDs with a current Patent facts artifact."""
-    root = LibraryLayout(library_root).storage_root
-    if not root.is_dir():
-        return []
-    out: list[str] = []
-    for child in sorted(root.iterdir()):
-        if (child / "patent_facts.json").is_file():
-            out.append(child.name)
-    return out
-
-
 __all__ = [
     "PublicationResult",
-    "iter_published_doc_ids",
     "load_patent_facts",
     "publish_document_facts",
 ]

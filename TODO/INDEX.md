@@ -2,6 +2,262 @@
 
 This directory records active architecture and implementation plans.
 
+## Agent molecule-recognition tool (2026-11-09)
+
+A whole-document comparison on `CN120118069A` measured what the chat model can
+do on its own: given page images it found the activity pages (98–102) and read
+all 69 values exactly, but it could **not** emit a single SMILES from a drawn
+structure (one structure page burned its full 24k-token budget on reasoning and
+returned empty content). Structure reading therefore belongs to the local
+detectors, exposed to the model as a tool instead of an expectation.
+
+`recognize_molecules` now runs MolDetv2 + MolParser over one page of a stored
+document and returns, per structure: SMILES, E-SMILES, pixel box, PDF-point box
+(bottom-left origin, the overlay contract), detection score and OCR-read printed
+labels. It is read-only and never persists anything.
+
+- Service: `service/use_cases/molecule/recognition.py` (`recognize_page_molecules`).
+  The router resolves `(library_root, doc_id)` and passes an absolute PDF path,
+  so path policy stays in the API layer.
+- HTTP: `POST /api/v1/agent/tools/recognize-molecules` (chat sidecar tools) and
+  `POST /api/v1/research/runtime/recognize-molecules` (research turns, credential-
+  scoped). Both accept `doc_id`, 1-based `page`, optional `region` in PDF points
+  and `max_molecules` (cap 20, truncation reported rather than silent).
+- Agent teaching: the tool description + `promptGuidelines` in `agent/src/tool.ts`
+  state the workflow (query_documents → find the page → recognize; pass `region`
+  for one table cell) and the hard rule — use returned SMILES verbatim, never
+  author one. The research system prompt names the tool in its local-retrieval
+  loop, and both chat surfaces register it.
+- Tests: `tests/unit/services/test_molecule_recognition.py` protects the PDF-point
+  box contract, the region filter and truncation visibility; `agent/src/research.test.ts`
+  asserts the research turn exposes the tool and teaches it in the system prompt.
+
+Pending: exercise the tool from a live chat turn on a structure-heavy patent,
+then decide whether the model should be allowed to cite a label→SMILES match as
+evidence (currently it reports tool output, not a new fact).
+
+## Table-embedded molecules (2026-11-06)
+
+Structures drawn *inside* a table cell were being read as cell text: the table
+producer runs SLANet-1M on the whole crop and recognizes every detected line
+whose centre falls in a cell, so atom labels and bond glyphs became cell
+content. Measured on the 13-document development corpus: up to **260
+chemistry-looking cells in one document** (`0 HN. NH 0 CF3 N`, `N HN S CH3 O`),
+and table-embedded molecules are the norm there (68/68 tables, 104/105, 56/64 in
+the worst three; 409 molecules in one document).
+
+`layout.mask_table_molecules` (default **off**) now makes the table read as
+text: molecule boxes from the layout producer's own MolDet pass are blanked in a
+copy of the table crop **for cell-text recognition only** (structure inference
+still sees the original crop), and a `[MOL:n]` token is written into the cell
+that holds the drawing, preserving its row/column position. The token → molecule
+mapping (PDF points) rides on the region (`molecule_cells`), and evidence
+minting replaces a token with the printed label the molecule pass read from the
+crop (`name`, else `ocr_labels[0]`); an unlabelled molecule keeps its token
+rather than an invented number. Non-table text evidence is unchanged, and a
+table without embedded molecules behaves exactly as before.
+
+Pending: run the 13-document A/B with the flag on, confirm table/measurement/
+Patent outputs do not regress, then decide whether to default it on.
+`scripts/table_mask_ab.py` runs that comparison over a library's table pages
+(no writes). Measured so far (table pages only, chemistry-looking cells off →
+on): CN121270515A 0 → 0 (8 tables, no table molecules — control),
+KR20250121245A 12 → 0 (26 tables / 126 molecules masked), WO2025002360A1
+15 → 3 (20/218), WO2025223036A1 265 → 3 (56/317), CN119504738A 10 → 0 (3/11,
+rows and cells unchanged). Table structure counts were stable apart from model
+run-to-run nondeterminism (one row on two documents). The full corpus run is
+left to the script: the 400-page JP document makes a serial 13-document pass
+long, and the five documents above cover clean, heavy and control shapes.
+
+## Activity pair truth (2026-11-06)
+
+Two deterministic defects are fixed on `CN119504738A` (the only document in the
+local library): no model call, no re-extract, both covered by unit tests.
+
+1. **A page-split activity table is read under its own page's header.** Table 1
+   prints 14 IC50 readings across pp.124-125. Page 125 resumes with a data row and
+   no header, so the Markdown converter promoted that row to the header and the
+   parser dropped all 7 rows with **0 readings, 0 issues and no LLM gap** —
+   invisible in every surface. `service/pipeline/activity/table_scan.py` now owns
+   one table evidence row: direct parse, then cross-page header inheritance
+   (adjacent page only, same column count, first cell a designation, no header
+   band), then a refusal that is always reported. Inherited readings stay
+   auditable through `table_header_inherited`, which cites both evidence rows.
+   Measured: **7 → 14 readings, 3 → 7 structure links, 0 silent drops**.
+2. **A disputed designation never becomes a published pair.** One structure is
+   detected with labels `1` and `22` (p.91 prepares `21`), so the association
+   refuses both and the reading keeps no attribution — but the declared-example
+   join published `化合物1 IC50 64.6` beside that structure, so the artifact's
+   `structure_activity` contradicted `measurement_attribution` and the export.
+   The ambiguity issue now carries its `label_key` and
+   `_declared_structure_activity` withholds that designation. Measured: the
+   declared pairs equal the SQL attribution set (2, 4, 10, 24, 27, 30, 1A) and
+   the compound-1 pair is gone. `candidate_label_keys` moved to
+   `patent/candidate_labels.py` (three importers shared a private helper).
+
+3. **The assay is declared in the body, not in the title.** `[0891]测试例1:MRGPRX2体外
+   钙流测定试验` sits inside an example section, and the assay rule read section
+   titles only, so all 14 readings carried `assay_method_unresolved` and no
+   target. `rules/assay.py` now reads body assay blocks (`测试例` / `试验例` /
+   `Test Example`); each block owns the evidence after it up to the next heading,
+   and the association picks the method whose block cites the reading's own row
+   when a section prints several assays. The receptor token also needed ASCII
+   boundaries — `\b` does not fire between `MRGPRX2` and the CJK text after it.
+   Measured: **14/14 readings carry `assay_method_id` and `target="MRGPRX2"`**,
+   and `assay_method_unresolved` is gone. `assay_description` stays empty: no
+   printed description flows into the method yet.
+4. **A declaration without parentheses is still a declaration.** `(目标化合物11)`
+   and `实施例17：目标化合物17的制备` both state the product; requiring a bare
+   `(化合物N)` dropped them. Declared examples on this document: **21 → 39**, now
+   covering every designation Table 1 prints. A molecule detection payload may no
+   longer mint a declaration — it repeats nearby headings verbatim, which put a
+   second copy of the same example on the detection's page.
+Still open on the same document, measured: **24 of 450 recognised structures
+print a designation** (11%), so 11/14/17/23/32/33 stay unowned even though the
+document now declares an example for each of them; `assay_description` stays
+empty because no printed description reaches the method; `review_items = 0`
+because both mint inputs are empty (`review_candidates` needs an LLM merge, and
+every `smiles_mass_mismatch` issue carries `mol_id = ""`).
+
+## Unbound readings, honest coverage, read surface (2026-11-07)
+
+Three ordered follow-ups are implemented and measured on the live library
+(`CN119504738A`: 14 readings, 7 attributed).
+
+1. **A reading with no structure is now a review item.** Publishing mints one
+   `designation_unbound` item per unattributed reading whose designation's own
+   example section drew structures (the scope is the section page range plus the
+   reading page; a document that drew nothing there is a source fact, not a
+   question). Each item carries the page candidates; confirming it with
+   `choice=<candidate mol_id>` writes `measurement_attribution` with
+   `method="human"` and marks the reading accepted. A choice outside the
+   candidates is refused. AI assist knows the kind. Measured: **7 items** for the
+   seven unowned readings (1, 11, 14, 17, 23, 32, 33), 4-8 candidates each, and
+   the live queue is 211 rows (204 Markush + 7 unbound).
+2. **Coverage no longer calls recoverable work undrawn.** `dataset_stats` now
+   reads whether the document drew structures whose designation was never read
+   and reports `label_not_read` instead of `designation_without_structure`.
+   Measured on the same document: `{structure_detected_unmatched: 1,
+   label_not_read: 6}` — five of which are the recovery targets, and the one
+   `unmatched` is compound 1, whose structure carries a disputed label.
+3. **The read surface answers dataset questions.** `query_activities` accepts an
+   empty `doc_id` (library scope), `metric`, `min_value` and `max_value`, and each
+   row carries its `reasons` classification instead of `[]`. New
+   `activity_stats` tool/route reports printed vs attributed plus the reason
+   split, so the assistant can check coverage before claiming there is no data.
+   The activity HTTP route gained the same filters.
+
+Still open from this pass: the export CSV does not carry the attribution
+method/confidence, `query_activities` has no `has_more` cursor, and the
+`measurements.review_status` flag still has no queue semantics of its own.
+Tests: 434 unit tests pass (3 pre-existing recorrection environment errors), and
+the new service/router tests cover minting, binding, candidate refusal, the
+`label_not_read` classification and the value filter.
+
+## AI review proposals (2026-11-07)
+
+The assistant may file a review item at any time for a target a human has not
+reviewed yet. A proposal is not a decision: it enters the review center as
+`ai_review` with the target, the field, the value it suggests, the value the
+store actually holds, the rationale and the evidence ids it read. A human
+confirms or rejects it, and only that decision writes a value.
+
+- Entry points: `POST /api/v1/review/propose` (any caller) and
+  `POST /api/v1/research/runtime/propose-review` (the credential-scoped route
+  behind the chat tool `propose_review`). The agent tool's description states the
+  rule it is held to: cite what was read, never invent a value, and expect a
+  decided target to be refused.
+- Idempotent and freeze-safe: one item per
+  `(doc_id, target_kind, target_id, field)` (`stable_id`). A second proposal for
+  the same field while it is pending **revises** that item (revision counter plus
+  a bounded history of superseded proposals). Once a human confirms or rejects
+  it, the item is in `confirmed`/`rejected` and every further proposal for that
+  target is **refused** with `a human already decided this target`; nothing is
+  overwritten. Reopening is a human action (`reopen`), never an AI one.
+- Anti-hallucination: the target must exist (evidence rows and molecules are
+  resolved before insert; an invented id is refused), and `before_actual` is read
+  from the store next to the model's claimed `before`, so a wrong claim is
+  visible in the item instead of trusted.
+- What a confirm applies: a molecule `name` (through the existing review
+  repository setter) is written on confirm; evidence text, readings, entries and
+  designations are **record-only** — rewriting the source text or a reading is a
+  pipeline change, so the confirmed item is the audit of the decision instead.
+  Extending an applier is a deliberate, testable step per target kind.
+- UI: `ai_review` is a filter kind in the review center with a before/after
+  card (current store value vs suggested value, field, rationale).
+
+Verified: propose → revise → human confirm applies the molecule name → further
+proposal refused (service tests, including an invented target and a record-only
+evidence target); the same chain through `POST /api/v1/review/propose` →
+`/review/queue?kind=ai_review` → `/review/decide` (router test); the full unit
+suite (425 passed) and the frontend lint/type-check.
+
+### In-chat review and batch approval (2026-11-07)
+
+- The proposal tool emits a `review` SSE event with the recorded item; the reply
+  stores it in `review_refs`, so a reloaded conversation still shows the cards.
+  Each card shows the target field, `before_actual → after` and the rationale,
+  with **同意 / 驳回**: both call the same `POST /api/v1/review/decide` the review
+  center uses, so deciding in the chat and deciding in the center are one path.
+- Two batch paths sit on the card: **同意整篇** (`doc_id` = the proposal's
+  document) and **同意所有文本** (`target_kind=evidence`). They call
+  `POST /api/v1/review/decide-filtered`, which resolves the filter server-side and
+  runs every matching pending item through its own decision handler — the model
+  never chooses what gets approved. The review center keeps its selection-based
+  bulk action.
+- The filtered batch is bounded (`limit` default 200, max 500) and does one
+  decision per item, so a kind-specific side effect is not skipped; the response
+  reports `updated`/`skipped`/per-item results.
+- Contract coverage: `ResearchReviewEvent` is part of the discriminated
+  `ResearchEvent` union (a test validates the frame the sidecar emits).
+
+## Review AI assist (2026-11-06)
+
+The review center is where the deterministic pipeline already refused to decide
+(an unread designation, a context-flagged structure, a reading no structure
+owns). It can now pull one bounded model answer per item and store it as a
+suggestion beside the item. The model receives the printed text of the page and
+the original images — the crop the detector cut out and the rendered page — never
+a filesystem path, and it may only answer by naming one of the candidates it was
+given or `cannot_decide`.
+
+- Packet and storage: `service/use_cases/review_assist.py` builds the packet
+  (`contracts/review_assist.py`), the crop is resolved only through
+  `LibraryLayout.crop` (a path outside the document crops dir is never read), and
+  the page image is rendered with PyMuPDF under the configured pixel/byte caps.
+  The answer lands in `review_assists` keyed by `(kind, item_id)`, so a re-run
+  replaces it instead of duplicating it and a republished review row keeps it.
+- Provider call: the Node sidecar owns it (`agent/src/review-assist.ts`,
+  `POST /v1/review-assist`), supporting the OpenAI-compatible, Anthropic and
+  Ollama image shapes. Python reaches it through the `ReviewAssistRuntime` port,
+  so a sidecar that is down comes back as `unavailable`, never as an exception.
+- Pulls are bounded twice: per request by `review.max_items` (one model call
+  each) and, for the automatic pull, single-flight with a 60 s cooldown. With
+  `review.auto` the review queue poll starts one background pull; without it the
+  reviewer pulls through `POST /api/v1/review/assist`.
+- A suggestion is **not** a decision: the item stays `pending`, no status, SMILES
+  or value is written, and the queue response carries the suggestion under
+  `payload.ai_assist` for the reviewer to accept or reject.
+- Images go to the chat model by default: LongCat-2.5 is multimodal, so a
+  separate `vlm` entry is optional (the sidecar prefers it when configured). A
+  provider that rejects the image is retried text-only and the answer is
+  recorded with `vision = false` instead of failing the item;
+  `review.images = false` turns the capture off entirely.
+
+Verified offline: packet text/images/caps and the path guard, stored-answer reuse,
+the disabled switch, the automatic switch, the route round trip, and the three
+provider payload shapes (`agent/src/review-assist.test.ts`, run in-process
+because the sandbox blocks the node test runner's child processes).
+
+Verified live (2026-11-07): one real call through the sidecar on the live
+library, markush candidate on p97 with a 20.5 kB crop and a 246 kB page JPEG;
+`LongCat-2.5`, `vision = true`, 46.8 s, answered `answer=2` (化合物23) and cited
+both the printed `23` in the page image and the paragraph `[p96 b812521f]`,
+rejecting 23-3 and 23-4 by their SMILES. This is one sample, not an accuracy
+measurement.
+Remaining: the review UI does not render `payload.ai_assist` yet; the 20-case
+human grading below (correct / unhelpful / misleading) is not done.
+
 ## Structure–activity export (2026-10-30)
 
 [Export contract and real-corpus audit](../docs/qa/structure-activity-export-20261030.md).
@@ -76,6 +332,34 @@ span output; raw HTML is now retained for review with a warning and failure coun
 The test service was stopped; no production backend switch
 has been made. See the report for the unresolved association/interval work.
 
+## Focus (2026-11-02)
+
+The product scope is the patent reader: import → layout/OCR/table → source
+evidence → facts and measurements → review/export. The agent conversation and
+its research tools are retained. Removed from the active surface: the notes /
+knowledge base, the fake molecule Analytics/Relations panel and its
+cluster/relation/analog/substructure stubs, the Markush attachment-site and
+enumeration API, and the chat landing page (`/` now opens `/workspace`).
+
+Reading UX pass: the viewer now restores page/zoom/continuous mode and overlay
+choices per document, opens result views in focus mode (`f` toggles it), offers
+fit-width/fit-page and 50–500% zoom, can hide molecule/layout/text layers,
+highlights an evidence paragraph or PDF box in both directions, and the
+Markdown reader has a heading TOC plus clickable page-marker links that open the
+PDF at that page.
+
+## Code weight pass (2026-11-04)
+
+Deleted the unwired `foundation/chemname` vendored parser (2,511 lines) and
+`service/pipeline/examples`, plus 29 dead symbols that had no caller outside
+their own definition. `patent_stage.py` shrank 1,917 → 990 lines by moving the
+rule extractors into `service/pipeline/patent/rules/`; `molecule_store.py`
+shrank 1,026 → 707 by moving detection I/O and candidate persistence into
+`detection_store.py` and `molecule_candidates.py`. The six patent test files
+went 4,503 → 4,170 lines with no public contract lost. CI now enforces vulture,
+import-linter layer contracts and a file-size budget
+(`[tool.vulture]`, `.importlinter`, `scripts/check_file_sizes.py`).
+
 ## Current pipeline
 
 `Extract → Markdown → Patent` is the registered pipeline, but the stages are
@@ -105,6 +389,16 @@ with **no structural requirement**. `measurement_attribution` holds the optional
 improves. `measurements.evidence_grade` separates a printed figure (`measured`)
 from a model output; Phase A writes only `measured`, and compute paths must
 supply their own grade rather than reuse it.
+
+A table that breaks across a page is now read as one table: a headerless
+continuation reuses the previous evidence row's activity header when the column
+count matches and the fragment sits on the adjacent page
+(`activity/parsing/tables.py::parse_activity_table_continuation`). On
+CN119504738A pp.124–125 (Table 1) that took the document from 7 to 14 readings;
+the same run attributes 7 of them, so 7 molecules carry `activity`/`activity_type`/
+`units` where 3 did before. Readings whose printed designation has no unambiguous
+recognized structure (missing or duplicated OCR labels) stay unattributed and
+pending review rather than guessed.
 
 An earlier development replay (`.tmp/e2e` artifacts): **36 artifact readings → 36
 SQL rows, 0 dropped, 12 attributed**. Before this change the same data reached
@@ -214,8 +508,8 @@ Repository and runtime ports live in the neutral `mbforge/ports/` (implemented
 by `db`), and the cross-layer request/read models they reference in
 `mbforge/contracts/` (re-exported by the `service` DTO modules), so `db`
 implements the ports without importing `service`. The Markush SQL now lives in
-`db/markush_*_store.py` behind `MarkushRepository`, so no `service`/`api` module
-can obtain a raw connection. `foundation/inference/assets.py` defines the
+`db/markush_candidates.py` and `db/markush_transitions.py` behind
+`MarkushRepository`, so no `service`/`api` module can obtain a raw connection. `foundation/inference/assets.py` defines the
 `ResourceResolver` seam the composition root injects, so the inference backends
 never import `server`.
 
@@ -332,12 +626,15 @@ never import `server`.
   which were deleted with the Python implementation they covered.
 - The frontend locale files were pruned to keys the components reference;
   dynamic-key prefixes (`nav.*`, `mol.status.*`, `errors.*`, …) were preserved.
-- The unreachable Markush frontend workspace and its HTTP client were removed;
-  Markush structures are still classified during Extract, and review items of
-  kind `markush_link` remain in the review center.
+- Markush classification and review remain; the unreachable frontend workspace,
+  its HTTP client, and the attachment-site/enumeration API were removed. Extract
+  still queues scaffolds/fragments/candidates, and `markush_link` review items
+  remain in the review center.
 - SAR was removed: the fail-closed `/api/v1/sar` stub and
-  `frontend/src/components/sar/` are gone, and the molecule analysis panel now
-  exposes only analytics and relations. Reintroducing SAR requires the Phase C
+  `frontend/src/components/sar/` are gone. The follow-up molecule analysis
+  panel (Analytics/Relations) was also removed: every backend function it called
+  threw “no HTTP route available yet”. MoleculeLibrary keeps the list, detail,
+  correction and bulk actions. Reintroducing SAR requires the Phase C
   preconditions in [the activity plan](../docs/plan-activity-extraction.md).
 - Deterministic activity extraction is proven on a 13-patent corpus (CN/US/WO/KR/
   JP/IL) but only 2 of those documents yield any measurement today: the others
@@ -376,8 +673,7 @@ never import `server`.
   page and refused a second lookup. Both are unit-verified; in the live run itself the
   model answered a *table* gap (`llm_links_applied = 0`), so the link path was not
   reached — see [the live association test](../docs/qa/patent-live-association-20261016.md).
-  The v1 `PatentDraft.associations` field is still validated and
-  never consumed, but nothing populates it: the sidecar wires only the gap tools
+  The sidecar wires only the gap tools
   (`submit-facts` has no caller), so the v1 draft path is dormant rather than
   half-wired.
 - **Activity recall round (2026-10-16).** `uv run python .tmp/e2e/activity_recall.py`

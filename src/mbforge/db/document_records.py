@@ -126,8 +126,10 @@ def update_status(library_root: str | Path, doc_id: str, status: str) -> None:
 
 
 def delete_many(library_root: str | Path, doc_ids: Sequence[str]) -> None:
-    """Remove document rows in one transaction (idempotent).
+    """Remove document rows and their ingest bookkeeping in one transaction.
 
+    Queue rows, run history, stage dependencies and logs are document-scoped;
+    leaving them behind makes a deleted document look like a stalled run.
     Follows ``delete_molecule_records``: chunk the ``IN (…)`` list so a large
     selection does not exceed SQLite's ``SQLITE_MAX_VARIABLE_NUMBER``.
     """
@@ -140,6 +142,15 @@ def delete_many(library_root: str | Path, doc_ids: Sequence[str]) -> None:
         for start in range(0, len(ids), chunk_size):
             chunk = ids[start : start + chunk_size]
             placeholders = ",".join("?" for _ in chunk)
+            for table in (
+                "ingest_stage_deps",
+                "ingest_logs",
+                "ingest_queue",
+                "ingest_runs",
+            ):
+                kb.execute(
+                    f"DELETE FROM {table} WHERE doc_id IN ({placeholders})", chunk
+                )
             kb.execute(f"DELETE FROM documents WHERE doc_id IN ({placeholders})", chunk)
 
 

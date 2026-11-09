@@ -169,3 +169,15 @@
 }
 
 /* ===== Tool Buttons ===== */
+@media (max-width: 640px) {
+  .pdf-floating-fit {
+    display: none;
+  }
+}
+
+/* The reading-layer menu lives in the bottom floating bar, so it must open
+   upward instead of being clipped by the viewport edge. */
+.pdf-floating-bar .ui-menu__popover {
+  top: auto;
+  bottom: calc(100% + 6px);
+}

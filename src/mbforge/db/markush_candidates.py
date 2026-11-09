@@ -23,7 +23,6 @@ import sqlite3
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
-from mbforge.domain.molecule import MarkushFragment, MarkushScaffold
 from mbforge.domain.provenance import (
     _RECOGNITION_VERSION,
     _candidate_properties,
@@ -278,49 +277,6 @@ def persist_review_candidates(
     return inserted
 
 
-# ---------------------------------------------------------------------------
-# Entity read helpers — return typed value objects instead of raw rows
-# ---------------------------------------------------------------------------
-
-
-def get_scaffolds_by_doc(
-    conn: sqlite3.Connection,
-    doc_id: str,
-) -> list[MarkushScaffold]:
-    """Return all scaffolds for a document as :class:`MarkushScaffold` entities."""
-    rows = conn.execute(
-        "SELECT * FROM markush_scaffolds WHERE doc_id = ? ORDER BY created_at",
-        (doc_id,),
-    ).fetchall()
-    return [MarkushScaffold.from_row(dict(r)) for r in rows]
-
-
-def get_fragments_by_doc(
-    conn: sqlite3.Connection,
-    doc_id: str,
-    *,
-    scaffold_id: str | None = None,
-) -> list[MarkushFragment]:
-    """Return fragments for a document, optionally filtered by scaffold.
-
-    Returns :class:`MarkushFragment` entities.
-    """
-    if scaffold_id is not None:
-        rows = conn.execute(
-            "SELECT * FROM markush_fragments "
-            "WHERE doc_id = ? AND scaffold_id = ? ORDER BY created_at",
-            (doc_id, scaffold_id),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM markush_fragments WHERE doc_id = ? ORDER BY created_at",
-            (doc_id,),
-        ).fetchall()
-    return [MarkushFragment.from_row(dict(r)) for r in rows]
-
-
 __all__ = [
-    "get_fragments_by_doc",
-    "get_scaffolds_by_doc",
     "persist_review_candidates",
 ]

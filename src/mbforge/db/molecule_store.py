@@ -1,9 +1,12 @@
 """SQLite data access for the molecule catalog.
 
 Owns every query the molecule use cases need (list, get, create, update,
-delete, stats, search, corrections, detection-cache lookup) so the service
-layer never executes SQL.  Functions return raw row dicts; the service layer
+delete, stats, search, corrections, identity, evidence) so the service layer
+never executes SQL.  Functions return raw row dicts; the service layer
 normalizes and shapes them.
+
+Detection-cache I/O lives in ``detection_store``; candidate publication lives
+in ``molecule_candidates``.
 """
 
 from __future__ import annotations
@@ -479,98 +482,6 @@ def identity_fields(
     }
 
 
-def load_detections(
-    library_root: str | Path, doc_id: str, page: int | None = None
-) -> list[dict[str, Any]]:
-    """Return ``molecule_detections`` rows for a document (all pages or one)."""
-    db = DatabaseManager.get(str(library_root))
-    db.initialize()
-    try:
-        with db.mol_conn() as conn:
-            if page is None:
-                rows = conn.execute(
-                    "SELECT * FROM molecule_detections WHERE doc_id = ?",
-                    (doc_id,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM molecule_detections WHERE doc_id = ? AND page = ?",
-                    (doc_id, page),
-                ).fetchall()
-    except Exception as exc:  # noqa: BLE001 - fresh library may lack the table
-        logger.debug("load detections failed: %s", exc)
-        return []
-    return [dict(row) for row in rows]
-
-
-def save_detections(
-    library_root: str | Path, detections: Sequence[dict[str, Any]]
-) -> None:
-    """Insert/replace interactive detection rows (``molecule_detections``)."""
-    db = DatabaseManager.get(str(library_root))
-    db.initialize()
-    with db.mol_conn() as conn:
-        for det in detections:
-            mol_id = det.get("mol_id")
-            if mol_id:
-                # molecule_detections.mol_id FK-references molecules(mol_id);
-                # FE sends a display name, so keep it only if it is a real row.
-                exists = conn.execute(
-                    "SELECT 1 FROM molecules WHERE mol_id = ?", (mol_id,)
-                ).fetchone()
-                if not exists:
-                    mol_id = None
-            conn.execute(
-                "INSERT OR REPLACE INTO molecule_detections "
-                "(mol_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1, "
-                "crop_relpath, conf_moldet, vlm_verified_esmiles) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    mol_id,
-                    det.get("doc_id"),
-                    det.get("page"),
-                    det.get("bbox_x0"),
-                    det.get("bbox_y0"),
-                    det.get("bbox_x1"),
-                    det.get("bbox_y1"),
-                    det.get("crop_relpath"),
-                    det.get("conf_moldet"),
-                    det.get("vlm_verified_esmiles")
-                    or det.get("esmiles")
-                    or det.get("smiles"),
-                ),
-            )
-
-
-def detection_counts(library_root: str | Path) -> tuple[int, int]:
-    """Return ``(cached_page_count, cached_doc_count)`` for the detection cache."""
-    db = DatabaseManager.get(str(library_root))
-    db.initialize()
-    with db.mol_conn() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS page_count, "
-            "COUNT(DISTINCT doc_id) AS doc_count "
-            "FROM molecule_detections"
-        ).fetchone()
-    if row is None:
-        return 0, 0
-    return int(row["page_count"]), int(row["doc_count"])
-
-
-def clear_detections(library_root: str | Path, doc_id: str | None = None) -> int:
-    """Delete cached detections (one document, or all); return row count."""
-    db = DatabaseManager.get(str(library_root))
-    db.initialize()
-    with db.mol_conn() as conn:
-        if doc_id is None:
-            cursor = conn.execute("DELETE FROM molecule_detections")
-        else:
-            cursor = conn.execute(
-                "DELETE FROM molecule_detections WHERE doc_id = ?", (doc_id,)
-            )
-        return int(cursor.rowcount)
-
-
 def molecules_for_recorrection(
     library_root: str | Path, doc_id: str | None = None
 ) -> list[dict[str, Any]]:
@@ -693,229 +604,6 @@ def apply_corrections(
                 )
 
 
-# Document-scoped tables cleaned before (re)persisting a document's candidates,
-# in deletion order. The shared ``molecules`` table is intentionally absent:
-# the same canonical SMILES may be referenced by other documents.
-DOC_SCOPED_MOLECULE_TABLES: tuple[str, ...] = (
-    "molecule_detections",
-    "markush_fragments",
-    "markush_review_candidates",
-    "markush_evidence",
-    "markush_scaffolds",
-)
-# ``measurements`` / ``measurement_attribution`` are deliberately absent above:
-# they are cleared by ``measurement_store.delete_document_measurements`` so the
-# attribution rows go before the readings they reference. Callers that replace a
-# document's derived rows must clear both.
-
-# Caps for the merged evidence context text (PIPE-05). The total cap preserves
-# the historical 500-char storage budget of ``evidence.context_text``; the
-# per-item cap keeps one huge excerpt from starving the others.
-_CONTEXT_ITEM_CAP = 300
-_CONTEXT_TOTAL_CAP = 500
-_DOCUMENT_CONTEXT_MARKER = "[context:document]"
-
-
-def _clean_contexts(texts: Any, *, exclude: set[str] | None = None) -> list[str]:
-    """Trim, cap and stably dedupe context strings, preserving order."""
-    if not isinstance(texts, list):
-        return []
-    cleaned: list[str] = []
-    seen: set[str] = set(exclude) if exclude else set()
-    for text in texts:
-        if not isinstance(text, str):
-            continue
-        item = text.strip()[:_CONTEXT_ITEM_CAP]
-        if not item or item in seen:
-            continue
-        seen.add(item)
-        cleaned.append(item)
-    return cleaned
-
-
-def _candidate_context_text(candidate: Any) -> str:
-    properties = getattr(candidate, "properties", {})
-    if not isinstance(properties, dict):
-        return ""
-    contexts = _clean_contexts(properties.get("role_contexts"))
-    if not contexts:
-        return ""
-    return (_DOCUMENT_CONTEXT_MARKER + "\n" + "\n".join(contexts))[:_CONTEXT_TOTAL_CAP]
-
-
-def _persist_loop(
-    active_conn: Any, db: Any, doc_id: str, candidates: Sequence[Any]
-) -> int:
-    """Upsert molecules and detection rows on one connection."""
-    persisted = 0
-    for c in candidates:
-        primary = c.detections[0]
-        bbox = primary.bbox
-        conf_moldet = primary.conf_moldet
-        canonical_smiles = c.canonical_smiles
-        context_text = _candidate_context_text(c)
-        evidence_source = getattr(primary, "source", "image")
-        if evidence_source not in {"image", "text", "manual"}:
-            evidence_source = "image"
-        # Remove stale FTS entries before touching the row so that FTS5
-        # external-content DELETE can still see the old values.
-        db.delete_molecule_from_mol_search(active_conn, canonical_smiles)
-        active_conn.execute(
-            """
-            INSERT INTO molecules
-                (mol_id, smiles, esmiles, name, source_doc, source_type,
-                 status, canonical_smiles)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
-            ON CONFLICT(mol_id) DO UPDATE SET
-                canonical_smiles = COALESCE(molecules.canonical_smiles, excluded.canonical_smiles),
-                source_doc = COALESCE(NULLIF(molecules.source_doc, ''), excluded.source_doc),
-                name = CASE
-                    WHEN TRIM(COALESCE(molecules.name, '')) = '' THEN excluded.name
-                    ELSE molecules.name
-                END
-            """,
-            (
-                canonical_smiles,
-                canonical_smiles,
-                c.esmiles,
-                c.name or "",
-                doc_id,
-                evidence_source,
-                canonical_smiles,
-            ),
-        )
-        db.sync_molecule_to_mol_search(active_conn, canonical_smiles)
-        db.sync_molecule_fingerprint(active_conn, canonical_smiles)
-        # ``molecule_detections`` is UNIQUE(mol_id, doc_id, page): a patent often
-        # draws the same structure more than once on a page (a scheme and its
-        # table row), and a plain INSERT raises on the second one — which used to
-        # abort the whole document's persist and leave almost every molecule
-        # without a detection row. The first occurrence keeps its evidence link;
-        # a later duplicate is the same fact for this purpose.
-        if primary.page is None:
-            # ``page`` is NOT NULL; a detection without one must never be
-            # defaulted to page 1.
-            persisted += 1
-            continue
-        active_conn.execute(
-            """
-            INSERT INTO molecule_detections (
-                mol_id, doc_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1,
-                crop_relpath, conf_moldet,
-                vlm_verified_esmiles, evidence_id, context_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(mol_id, doc_id, page) DO UPDATE SET
-                evidence_id = COALESCE(molecule_detections.evidence_id, excluded.evidence_id),
-                context_text = CASE
-                    WHEN TRIM(COALESCE(molecule_detections.context_text, '')) = ''
-                        THEN excluded.context_text
-                    ELSE molecule_detections.context_text
-                END
-            """,
-            (
-                canonical_smiles,
-                doc_id,
-                primary.page,
-                bbox[0] if bbox else None,
-                bbox[1] if bbox else None,
-                bbox[2] if bbox else None,
-                bbox[3] if bbox else None,
-                primary.image_path,
-                conf_moldet,
-                c.esmiles,
-                getattr(primary, "evidence_id", None),
-                context_text,
-            ),
-        )
-        persisted += 1
-    return persisted
-
-
-def persist_candidates(
-    library_root: str | Path, doc_id: str, candidates: Sequence[Any]
-) -> int:
-    """Upsert the given candidates and their detection/evidence rows."""
-    db = DatabaseManager.get(str(library_root))
-    db.initialize()
-    with db.mol_conn() as active_conn:
-        return _persist_loop(active_conn, db, doc_id, candidates)
-
-
-def persist_candidates_in_transaction(
-    conn: Any,
-    db: Any,
-    doc_id: str,
-    candidates: Sequence[Any],
-    activity_updates: Sequence[dict[str, Any]] | None = None,
-) -> int:
-    """Persist the document's candidates on *conn*; the caller owns the transaction.
-
-    Structure ownership belongs to Extract, which stores every concrete structure
-    it recognizes. The Patent stage passes only the handful it could prove a
-    reading belongs to, so it must not clear the document's detections: doing so
-    deleted everything this pass did not mention (a 113-page patent went from 290
-    stored molecules to 8, all of them stripped of their detection rows), and a
-    document whose facts came out empty lost its structures entirely.
-
-    Only the ``molecule_detections`` of **these** candidates are replaced, so
-    re-publishing the same facts stays idempotent while every other structure
-    keeps its row. Clearing a document's structures when its facts are empty is
-    not this stage's job — that belongs to re-extraction, which is what replaced
-    the evidence.
-    """
-    if not candidates:
-        return 0
-    mol_ids = sorted(
-        {
-            str(getattr(candidate, "canonical_smiles", "") or "")
-            for candidate in candidates
-        }
-        - {""}
-    )
-    for start in range(0, len(mol_ids), 500):
-        chunk = mol_ids[start : start + 500]
-        placeholders = ",".join("?" for _ in chunk)
-        conn.execute(
-            "DELETE FROM molecule_detections "
-            f"WHERE doc_id = ? AND mol_id IN ({placeholders})",
-            [doc_id, *chunk],
-        )
-    persisted = _persist_loop(conn, db, doc_id, candidates)
-    for update in activity_updates or ():
-        conn.execute(
-            "UPDATE molecules SET activity = ?, activity_type = ?, units = ? "
-            "WHERE mol_id = ?",
-            (
-                update["activity"],
-                update["activity_type"],
-                update["units"],
-                update["mol_id"],
-            ),
-        )
-    return persisted
-
-
-def replace_document_candidates(
-    library_root: str | Path,
-    doc_id: str,
-    candidates: Sequence[Any],
-    activity_updates: Sequence[dict[str, Any]] | None = None,
-) -> int:
-    """Replace a document's derived rows, then persist and set activity.
-
-    Runs in one transaction: deletes the document's document-scoped rows so a
-    retry does not duplicate detections/evidence, persists the candidates, then
-    applies ``activity_updates`` (each with mol_id/activity/activity_type/units)
-    to their ``molecules`` rows.
-    """
-    db = DatabaseManager.get(str(library_root))
-    db.initialize()
-    with db.transaction() as (_kb_conn, active_conn):
-        return persist_candidates_in_transaction(
-            active_conn, db, doc_id, candidates, activity_updates
-        )
-
-
 # Projection of a molecule_detections row into the flat molecule-evidence
 # contract. ``kind``/``source_type`` are derived from crop presence (preserving
 # the retired ``evidence`` table's semantics); ``page`` is converted to the
@@ -999,11 +687,9 @@ def evidence_for_molecules(
 __all__ = [
     "apply_corrections",
     "bulk_update_status",
-    "clear_detections",
     "create",
     "delete",
     "detection_cache_matches",
-    "detection_counts",
     "detections_for_molecules",
     "evidence_for_molecules",
     "find_row",
@@ -1012,12 +698,7 @@ __all__ = [
     "list_corrections",
     "list_molecule_evidence",
     "list_page",
-    "load_detections",
     "molecules_for_recorrection",
-    "persist_candidates",
-    "persist_candidates_in_transaction",
-    "replace_document_candidates",
-    "save_detections",
     "search_similarity",
     "search_substructure",
     "search_text",

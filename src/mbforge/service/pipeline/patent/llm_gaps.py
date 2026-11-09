@@ -90,9 +90,10 @@ MAX_GAP_STRUCTURES = 20
 #: limit is what the model can cite back.
 MAX_GAP_PASSAGES = 20
 
-#: Reports for a passage whose owner the rules could not read. They are emitted by
-#: ``patent_stage._family_issues`` one per passage, and grouped here: attributing
-#: them one gap per row would cost a model turn for every printed spectrum.
+#: Reports for a passage whose owner the rules could not read. They are emitted
+#: by ``patent.rules.characterization._family_issues`` one per passage, and
+#: grouped here: attributing them one gap per row would cost a model turn for
+#: every printed spectrum.
 FAMILY_ISSUE_CODES: tuple[str, ...] = (
     "characterization_attribution",
     "compound_name_unresolved",

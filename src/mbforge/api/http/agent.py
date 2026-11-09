@@ -23,7 +23,7 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from mbforge.api.http._path_utils import resolve_library_root
+from mbforge.api.http._path_utils import resolve_library_root, resolve_pdf_path
 from mbforge.foundation.errors import ValidationError
 from mbforge.service.use_cases.agent_queries import (
     library_schema,
@@ -135,9 +135,13 @@ async def agent_query_documents(
 
 
 class AgentQueryActivitiesRequest(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=256)
+    #: Optional: an empty doc_id asks the whole library.
+    doc_id: str = Field("", max_length=256)
     target: str = Field("", max_length=256)
     assay_description: str = Field("", max_length=256)
+    metric: str = Field("", max_length=64)
+    min_value: float | None = None
+    max_value: float | None = None
     limit: int = Field(50, ge=1, le=200)
 
 
@@ -153,6 +157,9 @@ async def agent_query_activities(
         doc_id=body.doc_id,
         target=body.target,
         assay_description=body.assay_description,
+        metric=body.metric,
+        min_value=body.min_value,
+        max_value=body.max_value,
         limit=body.limit,
     )
     return AgentResultsResponse(tool="query_activities", results=results)
@@ -182,6 +189,55 @@ async def agent_query_evidence(
         limit=body.limit,
     )
     return AgentResultsResponse(tool="query_evidence", results=results)
+
+
+# ---------------------------------------------------------------------------
+# recognize_molecules — read-only MolDet + MolParser pass over one page
+# ---------------------------------------------------------------------------
+class AgentRecognizeMoleculesRequest(BaseModel):
+    """A page (optionally one region) of an imported document."""
+
+    doc_id: str = Field(..., min_length=1, max_length=256)
+    page: int = Field(..., ge=1)
+    #: PDF points, bottom-left origin; keeps one table cell / figure.
+    region: list[float] | None = Field(None, min_length=4, max_length=4)
+    max_molecules: int = Field(10, ge=1, le=20)
+
+
+class AgentRecognizeMoleculesResponse(BaseModel):
+    success: bool = True
+    tool: Literal["recognize_molecules"] = "recognize_molecules"
+    page: int
+    page_width_pts: float
+    page_height_pts: float
+    dpi: float
+    region: list[float] | None = None
+    count: int = 0
+    truncated: bool = False
+    molecules: list[dict] = Field(default_factory=list)
+
+
+@router.post(
+    "/tools/recognize-molecules", response_model=AgentRecognizeMoleculesResponse
+)
+async def agent_recognize_molecules(
+    body: AgentRecognizeMoleculesRequest,
+) -> AgentRecognizeMoleculesResponse:
+    """Recognize the structures drawn on one page of a library document."""
+
+    from mbforge.service.use_cases.molecule.recognition import (
+        recognize_page_molecules,
+    )
+
+    pdf_path = resolve_pdf_path(str(resolve_library_root(None)), body.doc_id)
+    result = await asyncio.to_thread(
+        recognize_page_molecules,
+        str(pdf_path),
+        page=body.page,
+        region=body.region,
+        max_molecules=body.max_molecules,
+    )
+    return AgentRecognizeMoleculesResponse(**result)
 
 
 # ---------------------------------------------------------------------------

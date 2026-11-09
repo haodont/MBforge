@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 vi.mock('@/api/query/hooks', () => ({
   useDocumentEvidence: vi.fn(),
@@ -42,13 +42,19 @@ function mockEvidence(items: DocumentEvidenceItem[]) {
   } as unknown as ReturnType<typeof useDocumentEvidence>)
 }
 
-function renderPane(selectedEvidenceId?: string) {
+function renderPane(
+  selectedEvidenceId?: string,
+  onSelectEvidence?: (item: DocumentEvidenceItem) => void,
+  onHoverEvidence?: (item: DocumentEvidenceItem | null) => void,
+) {
   return render(
     <PageEvidencePane
       docId="doc-1"
       page={2}
       libraryRoot="/tmp/lib"
       selectedEvidenceId={selectedEvidenceId}
+      onSelectEvidence={onSelectEvidence}
+      onHoverEvidence={onHoverEvidence}
     />,
   )
 }
@@ -148,5 +154,42 @@ describe('PageEvidencePane', () => {
     expect(selectedBlocks[0]).toHaveClass('is-selected')
     expect(selectedBlocks[0]).toHaveTextContent('pdf.evidenceContinued')
     expect(screen.getByText('[0003]')).toBeInTheDocument()
+  })
+
+  it('selects a paragraph with the union bbox of its rows', () => {
+    mockEvidence([
+      evidence({
+        evidence_id: 'ev-a',
+        raw_text: '[0003] First line',
+        paragraph_id: 'p-0003',
+        paragraph_number: '0003',
+        paragraph_start: true,
+        bbox: [10, 700, 300, 720],
+      }),
+      evidence({
+        evidence_id: 'ev-b',
+        raw_text: 'second line',
+        paragraph_id: 'p-0003',
+        paragraph_number: '0003',
+        bbox: [20, 680, 320, 699],
+      }),
+    ])
+    const onSelect = vi.fn()
+    const onHover = vi.fn()
+    const { container } = renderPane(undefined, onSelect, onHover)
+    const block = container.querySelector<HTMLElement>('.pdf-evidence-item')
+    expect(block).not.toBeNull()
+
+    fireEvent.mouseEnter(block as HTMLElement)
+    expect(onHover).toHaveBeenCalledWith(expect.objectContaining({
+      evidence_id: 'ev-a',
+      bbox: [10, 680, 320, 720],
+    }))
+
+    fireEvent.click(block as HTMLElement)
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({
+      evidence_id: 'ev-a',
+      bbox: [10, 680, 320, 720],
+    }))
   })
 })

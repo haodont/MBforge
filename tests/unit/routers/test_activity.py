@@ -271,6 +271,104 @@ def test_attribution_gap_is_split_by_whether_the_structure_exists(
     }
 
 
+def test_readings_filter_by_value_and_say_why_they_have_no_structure(
+    app_client: TestClient, tmp_library: Path
+) -> None:
+    """A dataset question filters by metric/value; each row explains its gap."""
+    from mbforge.service.use_cases.agent_queries import activity_stats
+
+    replace_document_measurements(
+        tmp_library,
+        "doc-1",
+        [
+            MeasurementRecord(
+                measurement_id="m-low",
+                doc_id="doc-1",
+                entry_id="entry-4",
+                reference_key="4",
+                metric="IC50",
+                activity_type="IC50",
+                original_value=12.0,
+                original_unit="nM",
+                canonical_value=12.0,
+                canonical_unit="nM",
+            ),
+            MeasurementRecord(
+                measurement_id="m-high",
+                doc_id="doc-1",
+                entry_id="entry-9",
+                reference_key="9",
+                metric="IC50",
+                activity_type="IC50",
+                original_value=120.0,
+                original_unit="nM",
+                canonical_value=120.0,
+                canonical_unit="nM",
+            ),
+        ],
+    )
+
+    filtered = app_client.get(
+        "/api/v1/activities/documents/doc-1",
+        params={
+            "library_root": str(tmp_library),
+            "metric": "IC50",
+            "max_value": 40,
+        },
+    )
+
+    assert filtered.status_code == 200
+    rows = filtered.json()
+    assert [row["value"] for row in rows] == [12.0]
+    # Nothing is bound, and the document drew nothing: that is a source fact.
+    assert rows[0]["reasons"] == ["document_has_no_detections"]
+    assert activity_stats(str(tmp_library), doc_id="doc-1")["total"] == 2
+
+
+def test_an_unread_label_is_reported_as_recoverable_not_as_undrawn(
+    tmp_library: Path,
+) -> None:
+    """A drawn-but-unread designation is backlog, not a source fact.
+
+    ``document_label_numbers`` only knows the designations the pipeline read; when
+    the document drew structures whose number was never read, calling the missing
+    designation "never drawn" understates the extraction gap.
+    """
+    replace_document_measurements(
+        tmp_library,
+        "doc-1",
+        [
+            MeasurementRecord(
+                measurement_id="m-undrawn",
+                doc_id="doc-1",
+                entry_id="entry-77a",
+                reference_key="77-A",
+                metric="IC50",
+                activity_type="IC50",
+                original_value=2.0,
+                original_unit="nM",
+            )
+        ],
+    )
+    db = DatabaseManager.get(str(tmp_library))
+    db.initialize()
+    with db.mol_conn() as conn:
+        conn.execute(
+            "INSERT INTO molecules (mol_id, smiles, canonical_smiles, name, source_doc) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("mol-unlabeled", "CCO", "CCO", "", "doc-1"),
+        )
+        conn.execute(
+            "INSERT INTO molecule_detections (mol_id, doc_id, page) VALUES (?, ?, ?)",
+            ("mol-unlabeled", "doc-1", 1),
+        )
+        conn.commit()
+
+    stats = dataset_stats(str(tmp_library), "doc-1")
+
+    assert stats.unattributed_by_reason == {"label_not_read": 1}
+
+
 def test_export_preserves_readings_stereochemistry_and_citations_and_refuses_stale_sources(
     app_client: TestClient,
     tmp_library: Path,

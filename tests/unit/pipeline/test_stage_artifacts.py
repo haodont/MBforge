@@ -308,3 +308,64 @@ def test_evidence_readers_restore_pages_and_hydrate_context(tmp_path: Path) -> N
             bbox=None,  # type: ignore[arg-type]
             raw_text="legacy",
         )
+
+
+def _layout_extracted_with_table() -> ExtractedDocument:
+    """A layout document whose page carries a masked structure table."""
+    extracted = _layout_extracted()
+    extracted.pages[0].regions.append(
+        {
+            "region_id": "t0",
+            "kind": "tab",
+            "type": "table",
+            "bbox": [5.0, 5.0, 95.0, 60.0],
+            "score": 0.9,
+            "reading_order": 2,
+            "source": "merged",
+            "text": "| Compound | Structure |\n| --- | --- |\n| 1 | [MOL:0] |",
+            "molecule_cells": [
+                {
+                    "token": "[MOL:0]",
+                    "region_id": "m1",
+                    "bbox_pdf": [10.0, 20.0, 30.0, 40.0],
+                }
+            ],
+        }
+    )
+    return extracted
+
+
+def test_masked_table_cells_keep_the_label_read_from_the_crop(tmp_path: Path) -> None:
+    """A masked structure cell reads as its printed number, not a placeholder.
+
+    The layout producer blanks a table's structure drawings before cell OCR, so
+    the cell carries ``[MOL:n]``. The molecule pass reads the printed number off
+    the crop; minting evidence must fold that number back into the cell so the
+    table stays readable and the molecule keeps its row/column position. A
+    molecule with no readable label keeps its token rather than inventing one.
+    """
+    _archive_crop(tmp_path)
+    labelled = next(
+        item
+        for item in _mint(
+            tmp_path,
+            extracted=_layout_extracted_with_table(),
+            results=[replace(_result(), name="4A")],
+        )
+        if item.kind == "tab"
+    )
+    assert labelled.raw_text == "| Compound | Structure |\n| --- | --- |\n| 1 | 4A |"
+    assert "[MOL:0]" not in labelled.raw_text
+
+    unlabelled_root = tmp_path / "unlabelled"
+    _archive_crop(unlabelled_root)
+    unlabelled = next(
+        item
+        for item in _mint(
+            unlabelled_root,
+            extracted=_layout_extracted_with_table(),
+            results=[replace(_result(), name="", properties={})],
+        )
+        if item.kind == "tab"
+    )
+    assert "[MOL:0]" in unlabelled.raw_text

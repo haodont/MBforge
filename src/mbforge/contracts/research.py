@@ -32,6 +32,26 @@ class ResearchMoleculeReference(ResearchModel):
     name: str = Field(max_length=160)
 
 
+class ResearchReviewReference(ResearchModel):
+    """One AI proposal the assistant raised while answering.
+
+    It travels with the reply so the browser can show an approve/reject card
+    inline; approving calls the same review-decision endpoint the review
+    center uses, and the proposal joins that queue either way.
+    """
+
+    item_id: ObjectId
+    kind: str = Field(default="ai_review", max_length=40)
+    doc_id: str = Field(default="", max_length=128)
+    target_kind: str = Field(default="", max_length=40)
+    target_id: str = Field(default="", max_length=200)
+    field: str = Field(default="", max_length=80)
+    before_actual: str = Field(default="", max_length=4000)
+    after: str = Field(default="", max_length=4000)
+    rationale: str = Field(default="", max_length=2000)
+    status: str = Field(default="pending", max_length=20)
+
+
 class ResearchContext(ResearchModel):
     document_ids: list[ObjectId] = Field(default_factory=list, max_length=8)
     molecule_refs: list[ResearchMoleculeReference] = Field(
@@ -51,6 +71,9 @@ class ResearchMessage(ResearchModel):
     task_refs: list[ResearchTaskReference] = Field(default_factory=list, max_length=24)
     artifact_refs: list[ResearchArtifactReference] = Field(
         default_factory=list, max_length=8
+    )
+    review_refs: list[ResearchReviewReference] = Field(
+        default_factory=list, max_length=24
     )
 
 
@@ -144,6 +167,11 @@ class ResearchArtifactEvent(ResearchModel):
     reference: ResearchArtifactReference
 
 
+class ResearchReviewEvent(ResearchModel):
+    type: Literal["review"] = "review"
+    items: list[ResearchReviewReference] = Field(default_factory=list, max_length=24)
+
+
 class ResearchDone(ResearchModel):
     type: Literal["done"] = "done"
     text: str = Field(max_length=60_000)
@@ -160,6 +188,7 @@ ResearchEvent = Annotated[
     | ResearchToolEvent
     | ResearchTaskEvent
     | ResearchArtifactEvent
+    | ResearchReviewEvent
     | ResearchDone
     | ResearchError,
     Field(discriminator="type"),

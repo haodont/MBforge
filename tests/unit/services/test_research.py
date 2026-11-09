@@ -323,3 +323,34 @@ async def test_research_delete_removes_conversation_files_but_keeps_background_t
     assert queue.list_tasks(root) == tasks
     with pytest.raises(NotFoundError):
         research.get_session(root, session.id)
+
+
+def test_a_review_event_survives_the_stream_contract() -> None:
+    """A proposal travels as a first-class event, not prose the UI must parse."""
+    from pydantic import TypeAdapter
+
+    from mbforge.contracts.research import ResearchReviewEvent
+
+    event = TypeAdapter(ResearchEvent).validate_python(
+        {
+            "type": "review",
+            "items": [
+                {
+                    "item_id": "ai-review-1",
+                    "kind": "ai_review",
+                    "doc_id": "doc-1",
+                    "target_kind": "evidence",
+                    "target_id": "ev-1",
+                    "field": "raw_text",
+                    "before_actual": "ICs0 = 64.6 nM",
+                    "after": "IC50 = 64.6 nM",
+                    "rationale": "glyph damage",
+                    "status": "pending",
+                }
+            ],
+        }
+    )
+
+    assert isinstance(event, ResearchReviewEvent)
+    assert event.items[0].after == "IC50 = 64.6 nM"
+    assert event.items[0].doc_id == "doc-1"

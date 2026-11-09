@@ -88,23 +88,6 @@ def _snapshot(conn: Any, doc_id: str) -> dict[str, list[dict[str, Any]]]:
         corrections = _rows_in(conn, "molecule_corrections", "mol_id", mol_ids)
         if corrections:
             snapshot["molecule_corrections"] = corrections
-        relations = _rows_in(conn, "molecule_relations", "mol_a_id", mol_ids)
-        relations.extend(_rows_in(conn, "molecule_relations", "mol_b_id", mol_ids))
-        if relations:
-            snapshot["molecule_relations"] = relations
-
-    scaffold_ids = [row["scaffold_id"] for row in snapshot.get("markush_scaffolds", [])]
-    if scaffold_ids:
-        sites = _rows_in(conn, "markush_sites", "scaffold_id", scaffold_ids)
-        if sites:
-            snapshot["markush_sites"] = sites
-            site_ids = [row["site_id"] for row in sites]
-            options = _rows_in(conn, "markush_options", "site_id", site_ids)
-            if options:
-                snapshot["markush_options"] = options
-            mounts = _rows_in(conn, "markush_mounts", "site_id", site_ids)
-            if mounts:
-                snapshot["markush_mounts"] = mounts
 
     candidate_ids = [
         row["candidate_id"] for row in snapshot.get("markush_review_candidates", [])

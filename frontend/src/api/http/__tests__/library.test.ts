@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cropImageUrl, exportStructureActivity, importDocument } from '../library'
+import { cropImageUrl, exportStructureActivity, fetchPatentFacts, importDocument } from '../library'
 
 describe('cropImageUrl', () => {
   it('encodes Windows library roots and non-ASCII rel_paths into one query string', () => {
@@ -117,5 +117,38 @@ describe('importDocument', () => {
 
     fetchMock.mockResolvedValueOnce(mockFetchResponse({ success: false, error: 'upload too large' }, 413))
     await expect(importDocument(new File(['bytes'], 'huge.pdf'))).rejects.toThrow('upload too large')
+  })
+})
+
+describe('fetchPatentFacts', () => {
+  const originalFetch = globalThis.fetch
+  const fetchMock = vi.fn<typeof globalThis.fetch>()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    globalThis.fetch = fetchMock
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('reads a missing artifact as the not-analyzed empty state and keeps real failures', async () => {
+    // Patent analysis is on demand: an un-analyzed document answers 404. That
+    // must not become a load error (or a retried request) in the viewer.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      success: false,
+      error: 'patent_facts.json not found for doc-1',
+      error_code: 'not_found',
+      severity: 'error',
+    }), { status: 404, statusText: 'Not Found', headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(fetchPatentFacts('doc-1', 'C:\\lib')).resolves.toEqual({ ok: true, data: null })
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      success: false, error: 'disk full', error_code: 'internal_error', severity: 'fatal',
+    }), { status: 500, statusText: 'Internal Server Error', headers: { 'Content-Type': 'application/json' } }))
+
+    const failed = await fetchPatentFacts('doc-1', 'C:\\lib')
+    expect(failed.ok).toBe(false)
   })
 })

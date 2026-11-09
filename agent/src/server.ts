@@ -19,6 +19,7 @@ import {
 } from './llm.js'
 import { createSessionForSpec, type SessionSpec } from './session.js'
 import { handleResearchChat, handleResearchStatus } from './research.js'
+import { handleReviewAssist } from './review-assist.js'
 import { researchPrompt } from './prompts.js'
 import { createWebTools, loadWebConfig } from './web.js'
 import { loadSkillTool, researchSkills } from './skills.js'
@@ -33,6 +34,7 @@ import {
   queryActivitiesTool,
   queryDocumentsTool,
   queryEvidenceTool,
+  recognizeMoleculesTool,
   searchLibraryTool,
 } from './tool.js'
 
@@ -44,6 +46,7 @@ const AGENT_TOOL_NAMES = [
   'query_documents',
   'query_activities',
   'query_evidence',
+  'recognize_molecules',
   'search_library',
   'load_skill',
   'library_sql',
@@ -55,6 +58,7 @@ const AGENT_CUSTOM_TOOLS = [
   queryDocumentsTool,
   queryActivitiesTool,
   queryEvidenceTool,
+  recognizeMoleculesTool,
   searchLibraryTool,
   loadSkillTool,
   librarySqlTool,
@@ -64,6 +68,9 @@ const CHAT_SYSTEM_PROMPT =
   'You are the MBForge molecular-science assistant. Use molecule_search for ' +
   'molecule lookups, and the library tools (library_stats, query_documents, ' +
   'query_activities, query_evidence) for structured library facts; use ' +
+  'recognize_molecules to read the structures actually drawn on a page of an ' +
+  'imported document (doc_id + 1-based page, optional PDF-point region) instead ' +
+  'of authoring a SMILES yourself; use ' +
   'library_sql (read-only SELECT) only for questions the structured tools do ' +
   'not cover. ' +
   'Separate source-backed facts from hypotheses, cite returned molecule ' +
@@ -245,6 +252,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       await handlePatentAnalysis(request, response, body)
     } else if (request.url === '/v1/patent-analysis/cancel') {
       await handlePatentAnalysisCancel(request, response, body)
+    } else if (request.url === '/v1/review-assist') {
+      await handleReviewAssist(request, response, body)
     } else if (request.url === '/v1/models') await handleModels(request, response, body)
     else if (request.url === '/v1/probe') await handleProbe(request, response, body)
     else sendJson(request, response, 404, { error: 'not found' })

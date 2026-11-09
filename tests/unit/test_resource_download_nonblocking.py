@@ -50,7 +50,8 @@ def slow_ensure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(resource_manager.ResourceManager, "ensure", fake_ensure)
 
 
-async def test_resource_download_does_not_block_event_loop(slow_ensure: None) -> None:
+@pytest.mark.usefixtures("slow_ensure")
+async def test_resource_download_does_not_block_event_loop() -> None:
     """Other coroutines make progress while ``ensure`` is sleeping."""
     from mbforge.api.http.system.resource import (
         ResourceIdRequest,

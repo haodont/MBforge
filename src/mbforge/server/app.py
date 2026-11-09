@@ -7,9 +7,7 @@ Replaces the Tauri/Rust shell with a standard web application.
 # Tests:
 #   tests/conftest.py
 #   tests/unit/routers/test_agent.py
-#   tests/unit/routers/test_markush_enumeration_router.py
-#   tests/unit/routers/test_markush_router.py
-#   tests/unit/routers/test_markush_sites_router.py
+#   tests/unit/routers/test_markush_routers.py
 #   tests/unit/routers/test_pipeline.py
 #   tests/unit/test_app.py
 #   tests/unit/test_frontend_fallback.py
@@ -213,7 +211,10 @@ async def _mbforge_error_handler(request: Request, exc: MBForgeError) -> JSONRes
 
     Logs at the level implied by `exc.severity`, pushes a record into the
     diagnostic ring buffer, and returns a JSON body the front-end can
-    introspect via `AppError`.
+    introspect via `AppError`. Only a server fault (5xx) carries a stack
+    trace: a 4xx is an expected client outcome (for example, reading the
+    Patent facts of a document that has not been analyzed yet), and its
+    message already identifies the cause.
     """
     level = _severity_to_level(exc.severity)
     logger.log(
@@ -230,7 +231,7 @@ async def _mbforge_error_handler(request: Request, exc: MBForgeError) -> JSONRes
             "mbforge_category": exc.category,
             "mbforge_context": exc.context,
         },
-        exc_info=isinstance(exc, Exception),
+        exc_info=exc.status_code >= 500,
     )
     push_diagnostic(
         {
@@ -343,6 +344,10 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     from mbforge.service.ports.research import configure_research_runtime
 
     configure_research_runtime(SidecarResearchRuntime(), InMemoryResearchRegistry())
+    from mbforge.server.review_assist import create_review_assist_runtime
+    from mbforge.service.ports.review_assist import configure_review_assist_runtime
+
+    configure_review_assist_runtime(create_review_assist_runtime())
     configure_uvicorn_access_logging()
     app = FastAPI(
         title="MBForge",
@@ -374,7 +379,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
         activity,
         documents,
         library,
-        notes,
         pdf,
         pdf_render,
     )
@@ -409,7 +413,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.include_router(
         detection_cache.router, prefix="/api/v1/detection-cache", tags=["detection"]
     )
-    app.include_router(notes.router, prefix="/api/v1/notes", tags=["notes"])
     app.include_router(settings.router, prefix="/api/v1/settings", tags=["settings"])
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
     app.include_router(readiness.router, prefix="/api/v1", tags=["readiness"])

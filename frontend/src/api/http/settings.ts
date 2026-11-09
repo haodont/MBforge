@@ -26,6 +26,8 @@ export interface VlmConfig {
 export interface LayoutConfig {
   conf_threshold?: number
   cross_model?: boolean
+  /** Mask structures drawn inside table cells before cell text recognition. */
+  mask_table_molecules?: boolean
   max_pages_per_doc?: number | null
 }
 

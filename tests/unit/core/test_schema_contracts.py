@@ -1,5 +1,5 @@
-"""Schema contracts for the Markush review queue, attachment sites, enumeration
-and the committed patent-analysis state row.
+"""Schema contracts for the Markush review queue and the committed
+patent-analysis state row.
 
 Covers ``DatabaseManager.initialize`` DDL (``mbforge.db.sqlite.database``):
 re-import identity keys that must stay unique, the indexes the review UI
@@ -25,7 +25,7 @@ def fresh_db(tmp_path):
 
 def test_unique_identity_keys_reject_duplicate_rows(fresh_db) -> None:
     """Re-import identity keys must fail on duplicates: review-candidate
-    ``source_key``, one site label per scaffold, one combination per run."""
+    ``source_key``."""
     with fresh_db.mol_conn() as conn:
         insert_candidate = (
             "INSERT INTO markush_review_candidates "
@@ -49,39 +49,9 @@ def test_unique_identity_keys_reject_duplicate_rows(fresh_db) -> None:
                 ),
             )
 
-        conn.execute(
-            "INSERT INTO markush_scaffolds (scaffold_id, doc_id, smiles, status) "
-            "VALUES ('sc-1', 'doc-1', '*c1ccc(*)cc1', 'confirmed')"
-        )
-        insert_site = (
-            "INSERT INTO markush_sites "
-            "(site_id, scaffold_id, site_label, atom_map_num, attachment_count, status) "
-            "VALUES (?, 'sc-1', 'R1', ?, 1, 'pending')"
-        )
-        conn.execute(insert_site, ("site-1", 1))
-        conn.commit()
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(insert_site, ("site-2", 2))
-
-        conn.execute(
-            "INSERT INTO markush_generation_runs "
-            "(run_id, scaffold_id, selection, theoretical_count, requested_limit, status) "
-            "VALUES ('run-1', 'sc-1', '[]', 1, 1, 'completed')"
-        )
-        insert_generated = (
-            "INSERT INTO markush_generated_candidates "
-            "(generated_id, run_id, scaffold_id, combination_key, smiles, "
-            " canonical_smiles, assignments, validation_status) "
-            "VALUES (?, 'run-1', 'sc-1', 'k1', ?, ?, '{}', 'valid')"
-        )
-        conn.execute(insert_generated, ("g-1", "F", "F"))
-        conn.commit()
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(insert_generated, ("g-2", "Cl", "Cl"))
-
 
 def test_required_indexes_exist_for_ui_queries(fresh_db) -> None:
-    """Evidence entity/doc lookups and attachment-site lookups are indexed."""
+    """Evidence entity/doc lookups are indexed."""
     with fresh_db.mol_conn() as conn:
         indexes = {
             row[0]
@@ -92,10 +62,6 @@ def test_required_indexes_exist_for_ui_queries(fresh_db) -> None:
     assert {
         "idx_me_entity",
         "idx_me_doc",
-        "idx_mst_scaffold",
-        "idx_mst_label",
-        "idx_mo_site",
-        "idx_mmnt_site",
     } <= indexes
 
 

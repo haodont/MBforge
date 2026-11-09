@@ -75,25 +75,6 @@ def get_model_cache_path() -> Path:
     return path
 
 
-def is_within_global_app_dir(path: str | Path) -> bool:
-    """Return True if ``path`` is the global app dir or inside it.
-
-    Library data must never live inside the application global directory
-    when the user has explicitly set a separate ``library_root``; however,
-    when ``library_root`` defaults to ``GLOBAL_APP_DIR`` this check returns
-    True by design.
-    """
-    try:
-        resolved = Path(path).resolve()
-    except (OSError, ValueError):
-        return False
-    try:
-        resolved.relative_to(GLOBAL_APP_DIR.resolve())
-        return True
-    except ValueError:
-        return False
-
-
 def ensure_hf_mirror() -> None:
     """设置 HuggingFace 镜像环境变量(若未设置)."""
     if not os.environ.get("HF_ENDPOINT"):

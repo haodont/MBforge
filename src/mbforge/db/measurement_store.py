@@ -5,9 +5,8 @@ structural requirement and no ``mol_id``: a reading that no structure owns is
 still a citable fact, and dropping it is what made the previous design lossy.
 ``measurement_attribution`` carries the optional ``reading -> structure`` links.
 
-Both tables are document-scoped: every write deletes the document's rows first
-(listed in ``molecule_store.DOC_SCOPED_MOLECULE_TABLES``), so a re-run replaces
-instead of duplicating.
+Both tables are document-scoped: every write deletes the document's rows first,
+so a re-run replaces instead of duplicating.
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ from mbforge.contracts.measurement import (
     MeasurementRecord,
 )
 from mbforge.db.sqlite.database import DatabaseManager
+from mbforge.foundation.ids import stable_id
 
 _MEASUREMENT_COLUMNS: tuple[str, ...] = (
     "measurement_id",
@@ -181,6 +181,12 @@ def list_measurements(
     if query.metric:
         clauses.append("LOWER(COALESCE(metric, '')) = ?")
         params.append(query.metric.lower())
+    if query.min_value is not None:
+        clauses.append("canonical_value IS NOT NULL AND canonical_value >= ?")
+        params.append(query.min_value)
+    if query.max_value is not None:
+        clauses.append("canonical_value IS NOT NULL AND canonical_value <= ?")
+        params.append(query.max_value)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     sql = (
         f"SELECT * FROM measurements {where} "
@@ -292,6 +298,65 @@ def unattributed_readings(
     return [dict(row) for row in rows]
 
 
+def bind_attribution(
+    library_root: str | Path,
+    *,
+    measurement_id: str,
+    mol_id: str,
+    doc_id: str,
+    evidence_id: str = "",
+    method: str = "human",
+) -> str:
+    """Record one accepted reading -> structure link and return its id.
+
+    This is the human decision path: a review item names the reading and the
+    chosen structure, and the attribution row is written here with the method that
+    produced it, so a human link is never indistinguishable from a rule link.
+    """
+    db = DatabaseManager.get(str(library_root))
+    db.initialize()
+    attribution_id = stable_id("attr", measurement_id, mol_id, method)
+    with db.transaction() as (_kb_conn, conn):
+        conn.execute(
+            "INSERT OR REPLACE INTO measurement_attribution "
+            "(attribution_id, measurement_id, mol_id, doc_id, method, "
+            " confidence, evidence_id, review_status) "
+            "VALUES (?, ?, ?, ?, ?, NULL, ?, 'accepted')",
+            (
+                attribution_id,
+                measurement_id,
+                mol_id,
+                doc_id,
+                method,
+                evidence_id or None,
+            ),
+        )
+        conn.execute(
+            "UPDATE measurements SET review_status = 'accepted' "
+            "WHERE measurement_id = ?",
+            (measurement_id,),
+        )
+    return attribution_id
+
+
+def unlabeled_structure_count(library_root: str | Path, doc_id: str) -> int:
+    """Structures this document drew whose printed designation was not read.
+
+    ``dataset_stats`` uses it to tell "the label was never read" (recoverable)
+    apart from "the document drew no such structure" (a source fact).
+    """
+    if not doc_id:
+        return 0
+    db = DatabaseManager.get(str(library_root))
+    rows = db.execute(
+        "SELECT COUNT(*) AS c FROM molecules "
+        "WHERE source_doc = ? AND TRIM(COALESCE(name, '')) = ''",
+        (doc_id,),
+        db="mol",
+    )
+    return int(rows[0]["c"]) if rows else 0
+
+
 def delete_document_measurements(conn: Any, doc_id: str) -> None:
     """Delete one document's readings and attributions on *conn*."""
     conn.execute("DELETE FROM measurement_attribution WHERE doc_id = ?", (doc_id,))
@@ -299,6 +364,7 @@ def delete_document_measurements(conn: Any, doc_id: str) -> None:
 
 
 __all__ = [
+    "bind_attribution",
     "dataset_stats",
     "delete_document_measurements",
     "insert_attributions_in_transaction",
@@ -307,4 +373,5 @@ __all__ = [
     "list_measurements",
     "replace_document_measurements",
     "unattributed_readings",
+    "unlabeled_structure_count",
 ]

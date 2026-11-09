@@ -31,9 +31,13 @@ def is_log_potency_metric(metric: str) -> bool:
     )
 
 
-def assay_method_id(doc_id: str, section_id: str) -> str:
-    """Deterministic assay-method ID: doc + type + owning section."""
-    return stable_id("assay", doc_id, section_id)
+def assay_method_id(doc_id: str, section_id: str, discriminator: str = "") -> str:
+    """Deterministic assay-method ID: doc + owning section (+ which assay).
+
+    A section can print several assays (``测试例1`` … ``测试例4``); the
+    discriminator keeps their IDs distinct without inventing a new section.
+    """
+    return stable_id("assay", doc_id, section_id, discriminator)
 
 
 def measurement_id(

@@ -37,6 +37,31 @@ jobs:
       - name: Ruff format
         run: uv run --no-sync ruff format src/ tests/ --check
 
+  architecture:
+    name: Backend architecture gates
+    needs: backend-static
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_NO_PROGRESS: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install static-check dependencies
+        run: uv sync --frozen --only-group dev --no-install-project
+      - name: Dead code (vulture)
+        run: uv run --no-sync --with vulture vulture
+      - name: Layer boundaries (import-linter)
+        run: uv run --no-sync --with import-linter lint-imports
+      - name: File size budget
+        run: uv run --no-sync python scripts/check_file_sizes.py
+
   backend-tests:
     name: Backend tests (${{ matrix.os }})
     needs: backend-static
@@ -123,11 +148,12 @@ jobs:
   quality-gate:
     name: Quality gate
     if: always()
-    needs: [backend-static, backend-tests, frontend, agent]
+    needs: [backend-static, architecture, backend-tests, frontend, agent]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       BACKEND_STATIC_RESULT: ${{ needs.backend-static.result }}
+      ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
       BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
       FRONTEND_RESULT: ${{ needs.frontend.result }}
       AGENT_RESULT: ${{ needs.agent.result }}
@@ -135,10 +161,12 @@ jobs:
       - name: Require every quality job to pass
         run: |
           if [ "$BACKEND_STATIC_RESULT" != "success" ] ||
+             [ "$ARCHITECTURE_RESULT" != "success" ] ||
              [ "$BACKEND_TESTS_RESULT" != "success" ] ||
              [ "$FRONTEND_RESULT" != "success" ] ||
              [ "$AGENT_RESULT" != "success" ]; then
             echo "backend-static=$BACKEND_STATIC_RESULT"
+            echo "architecture=$ARCHITECTURE_RESULT"
             echo "backend-tests=$BACKEND_TESTS_RESULT"
             echo "frontend=$FRONTEND_RESULT"
             echo "agent=$AGENT_RESULT"

@@ -305,12 +305,3 @@ export async function molAdminBulkDelete(
   return resp.deleted
 }
 
-/** 添加相似度关系。 */
-export function molAdminAddSimilarity(
-  _libraryRoot: string,
-  _molAId: string,
-  _molBId: string,
-  _score: number,
-): Promise<number> {
-  throw new Error('molAdminAddSimilarity: no HTTP route available yet')
-}

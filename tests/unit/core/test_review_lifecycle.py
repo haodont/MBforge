@@ -1,14 +1,12 @@
 """Regression tests for review-state rules shared by both review entry points.
 
-Covers ``mbforge.domain.review`` (error taxonomy + ``resolve_status_transition``)
-and the shared ``MarkushSiteError`` status mapping.
+Covers ``mbforge.domain.review`` (error taxonomy + ``resolve_status_transition``).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from mbforge.domain.markush import MarkushSiteError
 from mbforge.domain.review import (
     ReviewConflictError,
     ReviewNotFoundError,
@@ -22,7 +20,6 @@ def test_review_errors_inherit_mbforge_error_with_status_code() -> None:
     assert issubclass(ReviewNotFoundError, MBForgeError)
     assert issubclass(ReviewConflictError, MBForgeError)
     assert issubclass(ReviewTransitionError, MBForgeError)
-    assert issubclass(MarkushSiteError, MBForgeError)
 
     assert ReviewNotFoundError.status_code == 404
     assert ReviewNotFoundError.error_code == "not_found"
@@ -30,8 +27,6 @@ def test_review_errors_inherit_mbforge_error_with_status_code() -> None:
     assert ReviewConflictError.error_code == "conflict"
     assert ReviewTransitionError.status_code == 422
     assert ReviewTransitionError.error_code == "validation_error"
-    assert MarkushSiteError.status_code == 422
-    assert MarkushSiteError.error_code == "validation_error"
 
 
 def test_resolve_status_transition_allows_terminal_reopen_and_rejects_invalid() -> None:

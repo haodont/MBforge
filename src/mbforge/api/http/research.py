@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import Field
 from starlette.background import BackgroundTask
 
-from mbforge.api.http._path_utils import resolve_library_root
+from mbforge.api.http._path_utils import resolve_library_root, resolve_pdf_path
 from mbforge.api.http.agent import (
     AgentMoleculeSearchRequest,
     AgentQueryActivitiesRequest,
@@ -25,7 +25,8 @@ from mbforge.contracts.research import (
     ResearchSessionSummary,
     ResearchTurnRequest,
 )
-from mbforge.service.use_cases import agent_queries, research
+from mbforge.contracts.review_proposal import ReviewProposal
+from mbforge.service.use_cases import agent_queries, research, review_proposals
 from mbforge.service.use_cases.documents.patent_facts import load_patent_facts
 from mbforge.service.use_cases.molecule.queries import search_molecules
 from mbforge.service.use_cases.pipeline.ingest import list_tasks
@@ -51,6 +52,15 @@ class CredentialRequest(ResearchModel):
     credential: str = Field(min_length=20, max_length=128)
 
 
+class ActivityStatsRequest(CredentialRequest):
+    doc_id: str = Field(default="", max_length=128)
+
+
+class ProposeReviewRequest(CredentialRequest):
+    #: One bounded batch: a proposal is cheap to record but expensive to read.
+    items: list[ReviewProposal] = Field(..., min_length=1, max_length=10)
+
+
 class MoleculeQueryRequest(CredentialRequest):
     query: AgentMoleculeSearchRequest
 
@@ -65,6 +75,15 @@ class LibraryQueryRequest(CredentialRequest):
 
 class EvidenceQueryRequest(CredentialRequest):
     query: AgentQueryEvidenceRequest
+
+
+class RecognizeMoleculesRequest(CredentialRequest):
+    """Read-only MolDet + MolParser pass over one page of a bound document."""
+
+    doc_id: str = Field(..., min_length=1, max_length=256)
+    page: int = Field(..., ge=1)
+    region: list[float] | None = Field(None, min_length=4, max_length=4)
+    max_molecules: int = Field(10, ge=1, le=20)
 
 
 class ActivityQueryRequest(CredentialRequest):
@@ -199,11 +218,38 @@ async def query_evidence(body: EvidenceQueryRequest):
     )
 
 
+@router.post("/runtime/recognize-molecules")
+async def recognize_molecules(body: RecognizeMoleculesRequest):
+    """Recognize structures drawn on one page; nothing is persisted."""
+    from mbforge.service.use_cases.molecule.recognition import (
+        recognize_page_molecules,
+    )
+
+    scope = research.resolve_scope(body.credential)
+    pdf_path = resolve_pdf_path(scope.library_root, body.doc_id)
+    return await asyncio.to_thread(
+        recognize_page_molecules,
+        str(pdf_path),
+        page=body.page,
+        region=body.region,
+        max_molecules=body.max_molecules,
+    )
+
+
 @router.post("/runtime/query-activities")
 async def query_activities(body: ActivityQueryRequest):
     scope = research.resolve_scope(body.credential)
     return await asyncio.to_thread(
         agent_queries.query_activities, scope.library_root, **body.query.model_dump()
+    )
+
+
+@router.post("/runtime/activity-stats")
+async def activity_stats(body: ActivityStatsRequest):
+    """Coverage of printed readings (per library or per document)."""
+    scope = research.resolve_scope(body.credential)
+    return await asyncio.to_thread(
+        agent_queries.activity_stats, scope.library_root, doc_id=body.doc_id
     )
 
 
@@ -243,6 +289,16 @@ async def patent_facts(body: FactsQueryRequest):
         "review_count": len(facts.review_candidates),
         "truncated": len(facts.assay_methods) > 20 or len(facts.measurements) > 50,
     }
+
+
+@router.post("/runtime/propose-review")
+async def propose_review(body: ProposeReviewRequest):
+    """Record AI proposals; a human decision freezes the target."""
+    scope = research.resolve_scope(body.credential)
+    results = await asyncio.to_thread(
+        review_proposals.propose_items, scope.library_root, body.items
+    )
+    return {"items": [result.model_dump() for result in results]}
 
 
 @router.post("/runtime/start-patent-analysis")

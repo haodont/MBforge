@@ -130,6 +130,7 @@ def extract_layout_text(
         doc_id=doc_id,
         conf=float(config.get("conf_threshold", DEFAULT_CONF)),
         cross_model=bool(config.get("cross_model", True)),
+        mask_table_molecules=bool(config.get("mask_table_molecules", False)),
         max_pages=config.get("max_pages_per_doc"),
         cancel_check=cancel_check,
         detector=detector,
@@ -199,7 +200,7 @@ def extract_layout_text(
 
 def _artifact_region(region: dict[str, Any]) -> dict[str, Any]:
     """Project a layout region onto the evidence region shape."""
-    return {
+    projected = {
         "region_id": str(region.get("region_id", "")),
         "kind": str(region.get("label", "")),
         "type": str(region.get("type", "")),
@@ -209,6 +210,19 @@ def _artifact_region(region: dict[str, Any]) -> dict[str, Any]:
         "source": str(region.get("source", "")),
         "text": str(region.get("text") or ""),
     }
+    # A masked table carries the token → molecule mapping (PDF points); the
+    # evidence layer folds the printed label back into the cell through it.
+    cells = region.get("molecule_cells")
+    if cells:
+        projected["molecule_cells"] = [
+            {
+                "token": str(cell.get("token", "")),
+                "region_id": str(cell.get("region_id", "")),
+                "bbox_pdf": [round(float(v), 2) for v in cell.get("bbox_pdf") or []],
+            }
+            for cell in cells
+        ]
+    return projected
 
 
 def _extract_title(text: str) -> str | None:

@@ -22,7 +22,7 @@ export default function LocationHighlight({
   )
   return (
     <div
-      aria-label="Deep-linked molecule location"
+      aria-label="Highlighted source location"
       style={{
         position: 'absolute',
         top: 0,

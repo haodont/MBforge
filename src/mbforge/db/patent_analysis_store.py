@@ -20,7 +20,7 @@ from mbforge.db.measurement_store import (
     insert_attributions_in_transaction,
     insert_measurements_in_transaction,
 )
-from mbforge.db.molecule_store import persist_candidates_in_transaction
+from mbforge.db.molecule_candidates import persist_candidates_in_transaction
 from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.foundation.errors import ConflictError
 

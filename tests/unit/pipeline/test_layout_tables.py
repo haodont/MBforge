@@ -27,9 +27,15 @@ def _box(label: str, bbox_px: tuple[float, float, float, float]):
 
 
 class _FakeRuntime:
-    def __init__(self, html: str = "", error: Exception | None = None):
+    def __init__(
+        self,
+        html: str = "",
+        error: Exception | None = None,
+        molecules: tuple[tuple[float, float, float, float], ...] = (),
+    ):
         self._html = html
         self._error = error
+        self.predict_calls: list[dict] = []
         self.table_slanet = SimpleNamespace(predict_table=self._predict_table)
         self.hiro_layout = SimpleNamespace(
             detect_regions=lambda image, detector=None, threshold=0.4: [
@@ -38,11 +44,14 @@ class _FakeRuntime:
             ]
         )
         self.moldet = SimpleNamespace(
-            detect_molecules=lambda image: SimpleNamespace(bboxes=[])
+            detect_molecules=lambda image: SimpleNamespace(
+                bboxes=[SimpleNamespace(bbox=box, score=0.9) for box in molecules]
+            )
         )
         self.ocr_page_text = SimpleNamespace(read_text_in_boxes=lambda image, boxes: {})
 
-    def _predict_table(self, crop):
+    def _predict_table(self, crop, *, molecule_cells=()):
+        self.predict_calls.append({"molecule_cells": list(molecule_cells)})
         if self._error is not None:
             raise self._error
         return self._html
@@ -81,6 +90,36 @@ def test_parse_page_image_keeps_table_empty_without_usable_html(monkeypatch) -> 
         assert "html" not in region
         assert not region.get("text")
         assert page.stats["tables_filled"] == 0
+
+
+def test_masked_table_passes_molecule_boxes_in_crop_coordinates(monkeypatch) -> None:
+    """A table that draws a structure is masked, and its mapping is kept.
+
+    The molecule box is handed to the recognizer in crop coordinates (the table
+    is recognized as text, with a token at the structure's cell), and the
+    token → molecule mapping is retained on the region for the evidence layer.
+    Without the flag the table behaves exactly as before.
+    """
+    # normalized bbox → page px (77, 48, 121, 66), inside the table (0, 30, 200, 80)
+    runtime = _FakeRuntime(html=_HTML_TABLE, molecules=((0.35, 0.4, 0.55, 0.55),))
+    page = _parse(runtime, monkeypatch, mask_table_molecules=True)
+
+    cells = runtime.predict_calls[-1]["molecule_cells"]
+    assert [cell["token"] for cell in cells] == ["[MOL:0]"]
+    assert cells[0]["bbox"] == [77.0, 18.0, 121.0, 36.0]  # crop coords (x-0, y-30)
+    region = _table_region(page)
+    kept = region["molecule_cells"]
+    assert len(kept) == 1
+    assert kept[0]["token"] == "[MOL:0]"
+    assert kept[0]["region_id"]
+    assert kept[0]["bbox_pdf"]
+    assert page.stats["tables_molecule_masked"] == 1
+    assert page.stats["table_molecules_masked"] == 1
+
+    plain = _FakeRuntime(html=_HTML_TABLE)
+    page = _parse(plain, monkeypatch)
+    assert plain.predict_calls[-1]["molecule_cells"] == []
+    assert "molecule_cells" not in _table_region(page)
 
 
 def test_parse_page_image_retains_conflicting_spans_for_review(monkeypatch) -> None:

@@ -5,6 +5,7 @@ import {
   reviewQueue,
   reviewStats,
   reviewDecide,
+  reviewDecideFiltered,
   reviewClear,
   reviewHistory,
   type ReviewAction,
@@ -62,6 +63,28 @@ export function useReviewDecide() {
           queryKey: queryKeys.review.history(variables.libraryRoot, item.id),
         })
       }
+    },
+  })
+}
+
+/** Decide a whole filtered batch (all text-level proposals / one document). */
+export function useReviewDecideFiltered() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (args: {
+      libraryRoot: string
+      filter: { kind?: ReviewKind; docId?: string; targetKind?: string }
+      action: ReviewAction
+      reason?: string
+    }) =>
+      reviewDecideFiltered(
+        args.libraryRoot,
+        args.filter,
+        args.action,
+        args.reason ?? '',
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.review.all })
     },
   })
 }

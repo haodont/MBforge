@@ -11,6 +11,8 @@ interface PageEvidencePaneProps {
   page: number
   libraryRoot: string
   selectedEvidenceId?: string | null
+  onSelectEvidence?: (item: DocumentEvidenceItem) => void
+  onHoverEvidence?: (item: DocumentEvidenceItem | null) => void
 }
 
 /** One rendered line of a block, at the indent level the layout gave it. */
@@ -45,6 +47,19 @@ function lineContent(line: EvidenceLine, fallback: string): string {
     .filter(Boolean)
     .join(' ')
   return text || fallback
+}
+
+/** One click target for a whole paragraph, spanning its rows. */
+function unionBBox(items: DocumentEvidenceItem[]): [number, number, number, number] {
+  return items.reduce<[number, number, number, number]>(
+    (box, item) => [
+      Math.min(box[0], item.bbox[0]),
+      Math.min(box[1], item.bbox[1]),
+      Math.max(box[2], item.bbox[2]),
+      Math.max(box[3], item.bbox[3]),
+    ],
+    [Infinity, Infinity, -Infinity, -Infinity],
+  )
 }
 
 /**
@@ -100,7 +115,7 @@ function groupEvidence(items: DocumentEvidenceItem[]): EvidenceGroup[] {
   return groups
 }
 
-export default function PageEvidencePane({ docId, page, libraryRoot, selectedEvidenceId }: PageEvidencePaneProps) {
+export default function PageEvidencePane({ docId, page, libraryRoot, selectedEvidenceId, onSelectEvidence, onHoverEvidence }: PageEvidencePaneProps) {
   const { t } = useTranslation()
   const { data, isLoading } = useDocumentEvidence(docId, page, libraryRoot)
   const items = data?.ok ? data.data : null
@@ -151,15 +166,29 @@ export default function PageEvidencePane({ docId, page, libraryRoot, selectedEvi
           <div className="pdf-evidence-list">
             {groups.map((group) => {
               const header = group.items[0]
+              const target = { ...header, bbox: unionBBox(group.items) }
               const isSelected = group.items.some(
                 item => item.evidence_id === selectedEvidenceId,
               )
               return (
                 <article
                   id={`pdf-evidence-${group.id}`}
-                  className={`pdf-evidence-item${isSelected ? ' is-selected' : ''}`}
+                  className={`pdf-evidence-item${isSelected ? ' is-selected' : ''}${onSelectEvidence ? ' is-interactive' : ''}`}
                   aria-current={isSelected ? 'true' : undefined}
+                  role={onSelectEvidence ? 'button' : undefined}
+                  tabIndex={onSelectEvidence ? 0 : undefined}
                   key={group.id}
+                  onMouseEnter={() => onHoverEvidence?.(target)}
+                  onMouseLeave={() => onHoverEvidence?.(null)}
+                  onFocus={() => onHoverEvidence?.(target)}
+                  onBlur={() => onHoverEvidence?.(null)}
+                  onClick={() => onSelectEvidence?.(target)}
+                  onKeyDown={(event) => {
+                    if (!onSelectEvidence) return
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    onSelectEvidence(target)
+                  }}
                 >
                   <div className="pdf-evidence-item__topline">
                     {group.paragraphNumber ? (

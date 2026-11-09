@@ -12,8 +12,8 @@ how to round-trip to/from a dict or JSON string, so it can be backed by
 either SQLite rows or JSON files without changing the entity itself.
 
 Scope guard: related tables (``molecule_detections``, ``evidence``,
-``molecule_images``, ``molecule_relations``) are NOT part of the
-molecule entity. They are traversed by the service layer.
+``molecule_images``) are NOT part of the molecule entity. They are traversed
+by the service layer.
 
 The same object is used before and after persistence.  A pre-persistence
 instance may have an empty ``mol_id`` and carry transient detection
