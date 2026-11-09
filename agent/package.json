@@ -10,8 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/server.js",
-    "cli": "node dist/cli.js",
-    "dev:cli": "npm run build && npm run cli"
+    "precli": "npm run build",
+    "cli": "pi --offline --no-builtin-tools -e ./dist/extension.js",
+    "dev:cli": "npm run cli"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "0.73.1",

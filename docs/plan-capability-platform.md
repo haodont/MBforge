@@ -1366,6 +1366,8 @@ git commit -m "test(capabilities): cover manifest and edit-mode guard"
 
 ## Task 8: CLI 优先接入 + 现有 Node agent
 
+> 实现修订：CLI 直接复用 pi 的交互式 CLI，通过 `agent/src/extension.ts` 注册能力工具；`agent/src/cli.ts` 已删除。`npm --prefix agent run cli` 启动，`/login` 选择供应商。
+
 CLI 是 v1 的 agent 呈现形式；`server.ts` 保留为前端兼容入口。两者共用同一套能力工具与模型配置，避免 CLI/HTTP 两套会话逻辑。
 
 **Files:**

@@ -119,6 +119,20 @@ Mutating calls require `X-MBForge-Token`; the token is created at
 edit mode. Patent extraction is asynchronous: `submit_extraction` returns a
 `run_id`, then poll `get_run` and read `get_patent_result`.
 
+### Agent CLI
+
+`npm --prefix agent run cli` opens pi's normal interactive CLI with the MBForge
+capability tools registered. Use `/login` to choose a provider (OAuth or API
+key), `/model` to pick a model, `/mbforge` to inspect the active capability
+mode, and then ask in natural language. Read-only is the default; set
+`MBFORGE_AGENT_MODE=edit` (PowerShell: `$env:MBFORGE_AGENT_MODE='edit'`) before
+launching to expose mutating capabilities. The FastAPI backend must be running
+on port 18792.
+
+The CLI is a pi extension (`agent/src/extension.ts`), not a custom REPL:
+built-in coding tools are disabled with `--no-builtin-tools`, while pi's
+provider login, model switching, sessions, and themes remain available.
+
 ## Verification
 
 ```bash
