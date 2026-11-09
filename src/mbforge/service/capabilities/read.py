@@ -146,7 +146,9 @@ async def resolve_document(
         store = LibraryStore.get(context.library_root)
         exact = store.load_document(request.query)
         documents = (
-            [exact] if exact is not None else store.search_documents(request.query)
+            [exact]
+            if exact is not None
+            else store.search_documents(request.query, limit=request.limit + 1)
         )
         return [document.to_dict() for document in documents]
 
@@ -215,13 +217,12 @@ async def list_evidence(
         request.doc_id,
         request.page,
         request.kind,
+        limit=request.limit + 1,
+        offset=request.offset,
     )
-    page = records[request.offset : request.offset + request.limit]
-    next_offset = (
-        request.offset + request.limit
-        if request.offset + request.limit < len(records)
-        else None
-    )
+    truncated = len(records) > request.limit
+    page = records[: request.limit]
+    next_offset = request.offset + request.limit if truncated else None
     return CapabilityResult(
         data=ListEvidenceOutput(
             items=[EvidenceItem(**record.to_dict()) for record in page]
@@ -284,8 +285,7 @@ async def search_molecules_capability(
 
 
 async def get_run(context: CapabilityContext, request: GetRunInput) -> CapabilityResult:
-    tasks = await ingest.list_tasks(context.library_root)
-    rows = [task for task in tasks if task.get("run_id") == request.run_id]
+    rows = await ingest.list_run_tasks(context.library_root, request.run_id)
     if not rows:
         raise NotFoundError("run not found", detail=request.run_id)
 

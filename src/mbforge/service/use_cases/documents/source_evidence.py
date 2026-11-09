@@ -29,6 +29,8 @@ def list_evidence(
     doc_id: str,
     page: int | None = None,
     kind: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[SourceEvidence]:
     """Load one document's source evidence.
 
@@ -42,7 +44,11 @@ def list_evidence(
     ):
         raise ValueError("page must be a positive 1-based integer")
     return get_repositories(str(library_root)).evidence.list(
-        doc_id, page=page, kind=kind
+        doc_id,
+        page=page,
+        kind=kind,
+        limit=limit,
+        offset=offset,
     )
 
 

@@ -54,6 +54,13 @@ def test_source_evidence_queries_resolve_text_and_bbox_intersection(
         for item in list_evidence(tmp_path, "doc-query", page=1, kind="text")
     ] == [text.evidence_id]
     assert [
+        item.evidence_id for item in list_evidence(tmp_path, "doc-query", limit=2)
+    ] == [image.evidence_id, text.evidence_id]
+    assert [
+        item.evidence_id
+        for item in list_evidence(tmp_path, "doc-query", limit=2, offset=2)
+    ] == [other_page.evidence_id]
+    assert [
         item.evidence_id for item in at(tmp_path, "doc-query", 1, [15, 15, 35, 35])
     ] == [image.evidence_id, text.evidence_id]
     assert [

@@ -204,6 +204,8 @@ def list_source_evidence(
     doc_id: str,
     page: int | None = None,
     kind: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[SourceEvidence]:
     """Load one document's canonical evidence rows, optionally filtered."""
     clauses = ["doc_id = ?"]
@@ -214,13 +216,16 @@ def list_source_evidence(
     if kind is not None:
         clauses.append("kind = ?")
         params.append(kind)
+    query = (
+        f"SELECT {_COLUMNS} FROM source_evidence WHERE {' AND '.join(clauses)} "
+        "ORDER BY page, bbox_y1 DESC, bbox_x0, bbox_y0, bbox_x1, evidence_id"
+    )
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
     db = DatabaseManager.get(str(library_root))
     with db.mol_conn() as conn:
-        rows = conn.execute(
-            f"SELECT {_COLUMNS} FROM source_evidence WHERE {' AND '.join(clauses)} "
-            "ORDER BY page, bbox_y1 DESC, bbox_x0, bbox_y0, bbox_x1, evidence_id",
-            params,
-        ).fetchall()
+        rows = conn.execute(query, params).fetchall()
     return [_row_to_evidence(row) for row in rows]
 
 

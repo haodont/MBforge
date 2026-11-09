@@ -189,6 +189,11 @@ async def list_tasks(library_root: str) -> list[dict]:
     return await asyncio.to_thread(_list_with_stage_statuses)
 
 
+async def list_run_tasks(library_root: str, run_id: str) -> list[dict]:
+    """Return one run's ``ingest_queue`` rows without loading every task."""
+    return await asyncio.to_thread(_queue().list_run_tasks, library_root, run_id)
+
+
 def queue_snapshot(library_root: str) -> dict:
     """Return total + per-status counts for ``ingest_queue`` (blocking)."""
     return _queue().queue_snapshot(library_root)
