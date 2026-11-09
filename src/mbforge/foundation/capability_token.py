@@ -9,7 +9,15 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 from pathlib import Path
+
+
+def _read_token(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
 
 
 def capability_token_path(library_root: str | Path) -> Path:
@@ -20,19 +28,22 @@ def capability_token_path(library_root: str | Path) -> Path:
 def ensure_capability_token(library_root: str | Path) -> str:
     """Create the token on first use and return it."""
     path = capability_token_path(library_root)
-    try:
-        existing = path.read_text(encoding="utf-8").strip()
-        if existing:
-            return existing
-    except FileNotFoundError:
-        pass
+    existing = _read_token(path)
+    if existing:
+        return existing
 
     path.parent.mkdir(parents=True, exist_ok=True)
     token = secrets.token_urlsafe(32)
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
-        return path.read_text(encoding="utf-8").strip()
+        for _ in range(10):
+            existing = _read_token(path)
+            if existing:
+                return existing
+            time.sleep(0.01)
+        path.write_text(token, encoding="utf-8")
+        return token
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(token)
     return token
@@ -46,11 +57,11 @@ def verify_capability_token(
     if not presented:
         return False
     path = capability_token_path(library_root)
-    try:
-        expected = path.read_text(encoding="utf-8").strip()
-    except OSError:
+    expected = _read_token(path)
+    if not expected:
         return False
-    return bool(expected) and secrets.compare_digest(
-        presented.encode("utf-8"),
-        expected.encode("utf-8"),
-    )
+    try:
+        presented_bytes = presented.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return secrets.compare_digest(presented_bytes, expected.encode("utf-8"))
