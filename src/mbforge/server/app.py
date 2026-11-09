@@ -344,7 +344,7 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.middleware("http")(_request_path_middleware)
 
     # Register all routers
-    from mbforge.api.http import agent, capabilities, markush, review
+    from mbforge.api.http import capabilities, markush, review
     from mbforge.api.http.documents import (
         activity,
         documents,
@@ -400,7 +400,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.include_router(sar.router, prefix="/api/v1/sar", tags=["sar"])
     app.include_router(markush.router, prefix="/api/v1/markush", tags=["markush"])
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
-    app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent-tools"])
     app.include_router(
         capabilities.router,
         prefix="/api/v1/capabilities",

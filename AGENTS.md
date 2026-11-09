@@ -7,6 +7,7 @@ MBForge is a local AI workbench that turns molecular-science PDFs into a searcha
 
 - `src/mbforge/`: FastAPI backend, organized as five layers plus one support package. `domain/` owns pure business types and rules; `service/` owns DTOs, use cases, pipeline orchestration, ports, and the agent-callable capability registry (`service/capabilities/`); `db/` owns SQLite/filesystem persistence; `api/http/` validates HTTP requests and delegates; `server/` owns runtime services (process governance, ingest queue/worker, model/resource management, LLM client) and `server/app.py` is the composition root; `foundation/` is the shared support package (config, paths, errors, logging, small runtime contracts) with the model inference backends under `foundation/inference/`.
 - `frontend/src/`: React and TypeScript UI. Keep REST clients in `api/http/`, React Query hooks in `api/query/`, and components in `components/`.
+- `agent/`: pi coding-agent CLI extension. `extension.ts` registers backend capabilities as pi tools, and `capabilities.ts` loads the capability manifest over HTTP. There is no standalone HTTP agent service.
 - Frontend UI must reuse the existing component library (`components/ui`) for panels, tabs, buttons, badges, loading, and collapse behavior. Before creating a new interaction or visual primitive, check the library and prefer composition; do not reimplement an existing component's behavior locally.
 - `tests/unit/`: backend tests; frontend tests are colocated as `*.test.ts` or `*.test.tsx`. Long-term documentation belongs in `docs/`.
 
@@ -28,6 +29,7 @@ uv sync
 npm --prefix frontend install
 npm --prefix agent install
 npm --prefix frontend run dev:all
+npm --prefix agent run cli
 uv run pytest tests/ -q
 uv run ruff check src tests
 uv run ruff format src tests --check

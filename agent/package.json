@@ -9,7 +9,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "start": "node dist/server.js",
     "precli": "npm run build",
     "cli": "pi --offline --no-builtin-tools -e ./dist/extension.js",
     "dev:cli": "npm run cli"

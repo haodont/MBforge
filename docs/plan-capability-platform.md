@@ -1,12 +1,14 @@
 # Capability 平台实施计划
 
+> **Status (2026-11-09):** the standalone Node HTTP agent (`agent/src/server.ts`, `agent/src/runtime.ts`) and the web AgentChat page have been removed. The agent is CLI-only (`agent/src/extension.ts` + `agent/src/capabilities.ts`); steps below that create or modify `server.ts`/`runtime.ts` are historical.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 MBForge 的程序功能收敛成一层可被任意 agent 调用的 capability API，专利提取作为异步能力暴露；现有 Node agent 成为第一个客户端。
 
 **Architecture:** Python `service/capabilities` 定义唯一的能力注册表与处理器，HTTP 适配器只做鉴权/序列化。能力 = 用户级任务，不是路由镜像。写能力由 `X-MBForge-Token` 控制；只读模式不加载 token。专利提取只暴露“提交 run + 查状态 + 读结果”，不暴露内部阶段。
 
-**Tech Stack:** Python 3.12、FastAPI、Pydantic v2、现有 service use cases、pytest；Node agent 使用 `@mariozechner/pi-coding-agent` + TypeBox。
+**Tech Stack:** Python 3.12、FastAPI、Pydantic v2、现有 service use cases、pytest；Node agent 使用 `@earendil-works/pi-coding-agent` + TypeBox。
 
 ---
 
