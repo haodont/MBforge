@@ -9,7 +9,6 @@ import { createSession, readPersistedConfig } from './runtime.js'
 interface CliArgs {
   mode: AgentMode
   prompt?: string
-  tokenFile?: string
 }
 
 function usage(): string {
@@ -55,7 +54,7 @@ function parseArgs(argv: string[]): CliArgs {
   }
 
   if (tokenFile) process.env.MBFORGE_CAPABILITY_TOKEN_FILE = tokenFile
-  return { mode, prompt, tokenFile }
+  return { mode, prompt }
 }
 
 async function promptOnce(session: AgentSession, message: string): Promise<void> {

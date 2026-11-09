@@ -27,7 +27,9 @@ async function readToken(path: string): Promise<string> {
 }
 
 export async function loadCapabilityTools(mode: AgentMode) {
-  const response = await fetch(`${backendBaseUrl()}/api/v1/capabilities`)
+  const response = await fetch(`${backendBaseUrl()}/api/v1/capabilities`, {
+    signal: AbortSignal.timeout(10_000),
+  })
   if (!response.ok) {
     throw new Error(`capability manifest failed (${response.status})`)
   }
@@ -65,12 +67,25 @@ export async function loadCapabilityTools(mode: AgentMode) {
             const detail = (await result.text()).slice(0, 400)
             throw new Error(`capability ${capability.name} failed (${result.status}): ${detail}`)
           }
-          const payload = (await result.json()) as { success?: boolean; data?: unknown }
+          const payload = (await result.json()) as {
+            success?: boolean
+            data?: unknown
+            truncated?: boolean
+            next_offset?: number | null
+          }
           if (!payload.success) {
             throw new Error(`capability ${capability.name} returned an error`)
           }
+          const textPayload =
+            payload.truncated || payload.next_offset !== null
+              ? {
+                  data: payload.data ?? null,
+                  truncated: Boolean(payload.truncated),
+                  next_offset: payload.next_offset ?? null,
+                }
+              : (payload.data ?? null)
           return {
-            content: [{ type: 'text', text: JSON.stringify(payload.data ?? null) }],
+            content: [{ type: 'text', text: JSON.stringify(textPayload) }],
             details: payload,
           }
         },
