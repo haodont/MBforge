@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 
 import { Type } from '@mariozechner/pi-ai'
-import { defineTool } from '@mariozechner/pi-coding-agent'
+import { defineTool, type ToolDefinition } from '@mariozechner/pi-coding-agent'
+import type { TSchema } from 'typebox'
 
 interface CapabilityInfo {
   name: string
@@ -17,6 +18,7 @@ interface CapabilityManifest {
 }
 
 export type AgentMode = 'readonly' | 'edit'
+export type CapabilityTool = ToolDefinition<TSchema>
 
 const backendBaseUrl = (): string =>
   process.env.MBFORGE_BACKEND_URL ??
@@ -26,7 +28,9 @@ async function readToken(path: string): Promise<string> {
   return (await readFile(path, 'utf8')).trim()
 }
 
-export async function loadCapabilityTools(mode: AgentMode) {
+export async function loadCapabilityTools(
+  mode: AgentMode,
+): Promise<CapabilityTool[]> {
   const response = await fetch(`${backendBaseUrl()}/api/v1/capabilities`, {
     signal: AbortSignal.timeout(10_000),
   })
