@@ -57,6 +57,12 @@ _REGISTRY: dict[str, Capability] = {}
 
 def register(capability: Capability) -> None:
     """Register one capability; duplicate names are a programming error."""
+    if not capability.name:
+        raise RuntimeError("capability name must not be empty")
+    for label in ("input_model", "output_model"):
+        model = getattr(capability, label)
+        if not isinstance(model, type) or not issubclass(model, BaseModel):
+            raise TypeError(f"{capability.name} {label} must be a BaseModel subclass")
     if capability.name in _REGISTRY:
         raise RuntimeError(f"duplicate capability: {capability.name}")
     _REGISTRY[capability.name] = capability
@@ -83,13 +89,22 @@ async def invoke(
     capability = get_capability(name)
     if capability.mutating and context.mode != "edit":
         raise CapabilityForbiddenError(
-            "capability requires edit mode",
-            detail="send X-MBForge-Token for mutating capabilities",
+            "mutating capability requires edit mode",
+            detail=capability.name,
         )
     try:
         request = capability.input_model.model_validate(payload)
     except PydanticValidationError as exc:
-        raise ValidationError("invalid capability input", detail=str(exc)) from exc
+        errors = exc.errors(include_input=False, include_url=False)
+        fields = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in errors
+        )
+        raise ValidationError(
+            "invalid capability input",
+            detail=fields or "validation failed",
+            context={"validation_errors": errors},
+        ) from exc
     result = await capability.handler(context, request)
     if not isinstance(result.data, capability.output_model):
         raise RuntimeError(
