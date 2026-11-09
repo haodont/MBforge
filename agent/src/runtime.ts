@@ -3,16 +3,15 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import {
-  AuthStorage,
   createAgentSession,
   createExtensionRuntime,
-  ModelRegistry,
+  ModelRuntime,
   type ResourceLoader,
   SessionManager,
   SettingsManager,
   type AgentSession,
-} from '@mariozechner/pi-coding-agent'
-import type { Api, Model } from '@mariozechner/pi-ai'
+} from '@earendil-works/pi-coding-agent'
+import type { Api, Model } from '@earendil-works/pi-ai'
 
 import { loadCapabilityTools, type AgentMode } from './capabilities.js'
 
@@ -111,17 +110,15 @@ export function readConfig(raw: unknown, persisted: Record<string, unknown>): Ag
   }
 }
 
-function createConfiguredModel(config: AgentLlmConfig): {
-  authStorage: AuthStorage
-  modelRegistry: ModelRegistry
+async function createConfiguredModel(config: AgentLlmConfig): Promise<{
+  modelRuntime: ModelRuntime
   model: Model<Api>
-} {
-  const authStorage = AuthStorage.inMemory()
-  const modelRegistry = ModelRegistry.inMemory(authStorage)
+}> {
+  const modelRuntime = await ModelRuntime.create({ refreshOnCreate: false })
   const api: Api = config.provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions'
   const providerName = `mbforge-${config.provider}`
 
-  modelRegistry.registerProvider(providerName, {
+  modelRuntime.registerProvider(providerName, {
     name: config.provider,
     api,
     baseUrl: config.baseUrl,
@@ -150,9 +147,9 @@ function createConfiguredModel(config: AgentLlmConfig): {
     ],
   })
 
-  const model = modelRegistry.find(providerName, config.model)
+  const model = modelRuntime.getModel(providerName, config.model)
   if (!model) throw new Error('Could not register the configured LLM model')
-  return { authStorage, modelRegistry, model }
+  return { modelRuntime, model }
 }
 
 export async function readPersistedConfig(raw: unknown): Promise<AgentLlmConfig> {
@@ -163,7 +160,7 @@ export async function createSession(
   config: AgentLlmConfig,
   mode: AgentMode,
 ): Promise<AgentSession> {
-  const { authStorage, modelRegistry, model } = createConfiguredModel(config)
+  const { modelRuntime, model } = await createConfiguredModel(config)
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },
     retry: {
@@ -187,16 +184,17 @@ export async function createSession(
         : 'Only read-only capabilities are available; never attempt to change library state. ') +
       'Search the library before making claims. Separate source-backed facts from hypotheses, ' +
       'cite returned identifiers, and never claim a search result is a validated design recommendation.',
+    getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [],
+    getAppendSystemPromptSources: () => [],
     extendResources: () => {},
     reload: async () => {},
   }
 
   const { session } = await createAgentSession({
+    modelRuntime,
     model,
     thinkingLevel: 'off',
-    authStorage,
-    modelRegistry,
     settingsManager,
     resourceLoader,
     sessionManager: SessionManager.inMemory(),

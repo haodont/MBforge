@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 
-import type { AgentSession } from '@mariozechner/pi-coding-agent'
+import type { AgentSession } from '@earendil-works/pi-coding-agent'
 
 import { asRecord, createSession, readPersistedConfig, stringValue, type AgentLlmConfig } from './runtime.js'
 
