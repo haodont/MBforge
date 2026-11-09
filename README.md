@@ -133,6 +133,19 @@ The CLI is a pi extension (`agent/src/extension.ts`), not a custom REPL:
 built-in coding tools are disabled with `--no-builtin-tools`, while pi's
 provider login, model switching, sessions, and themes remain available.
 
+For arbitrary OpenAI-compatible providers, install the provider pack once:
+
+```bash
+cd agent
+./node_modules/.bin/pi install npm:@adeildo/pi-providers
+```
+
+Then inside the CLI run `/login` → `Sign in with an API key` →
+`OpenAI-compatible endpoint` and provide a name, base URL, and key. Its chat
+models appear under `/model`. For a batch of providers instead of `/login`,
+add them to `~/.pi/agent/models.json` (see pi's `models.md`); pi's built-in
+provider catalog already includes the common API-key providers.
+
 ## Verification
 
 ```bash
