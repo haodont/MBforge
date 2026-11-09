@@ -129,6 +129,17 @@ The CLI is a pi extension (`agent/src/extension.ts`), not a custom REPL:
 built-in coding tools are disabled with `--no-builtin-tools`, while pi's
 provider login, model switching, sessions, and themes remain available.
 
+The CLI ships the workbench palette as two pi themes (`agent/themes/`),
+derived from `frontend/src/styles/theme.css`. The npm script loads them with
+`--theme ./themes` and picks the pair that matches the terminal background
+(`--use-theme mbforge-light/mbforge-dark`). The startup header shows the
+MBForge wordmark with the live mode, capability count, and backend address; the
+footer shows `⬡ MBForge · <mode> · <n> tools`, and streaming uses a
+molecule-pulse indicator. If the backend is down the CLI still opens for
+`/login`, with the header and footer marked `offline`. Switch themes with
+`/settings` or override one run with
+`npm --prefix agent run cli -- --use-theme dark`.
+
 For arbitrary OpenAI-compatible providers, install the provider pack once:
 
 ```bash

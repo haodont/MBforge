@@ -20,7 +20,7 @@ interface CapabilityManifest {
 export type AgentMode = 'readonly' | 'edit'
 export type CapabilityTool = ToolDefinition<TSchema>
 
-const backendBaseUrl = (): string =>
+export const backendBaseUrl = (): string =>
   process.env.MBFORGE_BACKEND_URL ??
   `http://${process.env.MBFORGE_BACKEND_HOST ?? '127.0.0.1'}:${process.env.MBFORGE_BACKEND_PORT ?? '18792'}`
 

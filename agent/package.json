@@ -10,12 +10,11 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "precli": "npm run build",
-    "cli": "pi --offline --no-builtin-tools -e ./dist/extension.js",
+    "cli": "pi --offline --no-builtin-tools --theme ./themes --use-theme mbforge-light/mbforge-dark -e ./dist/extension.js",
     "dev:cli": "npm run cli"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
     "typebox": "^1.1.24"
   },
   "devDependencies": {
