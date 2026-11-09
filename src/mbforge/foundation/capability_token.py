@@ -50,4 +50,7 @@ def verify_capability_token(
         expected = path.read_text(encoding="utf-8").strip()
     except OSError:
         return False
-    return bool(expected) and secrets.compare_digest(presented, expected)
+    return bool(expected) and secrets.compare_digest(
+        presented.encode("utf-8"),
+        expected.encode("utf-8"),
+    )
