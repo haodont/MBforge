@@ -15,6 +15,7 @@ from mbforge.service.capabilities.registry import (
     CapabilityResult,
     register,
 )
+from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.documents import source_evidence
 from mbforge.service.use_cases.documents.library import LibraryStore
 from mbforge.service.use_cases.documents.patent_facts import load_patent_facts
@@ -137,6 +138,48 @@ class GetRunOutput(BaseModel):
     doc_id: str | None
     status: str
     nodes: list[RunNode]
+
+
+class SearchEvidenceInput(BaseModel):
+    """Literal keyword search over canonical source evidence across documents."""
+
+    query: str = Field(..., min_length=1, max_length=400)
+    doc_id: str = Field("", max_length=128)
+    offset: int = Field(0, ge=0)
+    limit: int = Field(20, ge=1, le=50)
+
+
+class EvidenceMatch(BaseModel):
+    evidence_id: str
+    doc_id: str
+    page: int
+    kind: str
+    title: str
+    file_name: str
+    snippet: str
+    truncated: bool
+
+
+class SearchEvidenceOutput(BaseModel):
+    items: list[EvidenceMatch]
+
+
+class RecognizeMoleculesInput(BaseModel):
+    doc_id: str = Field(..., min_length=1, max_length=128)
+    page: int = Field(..., ge=1)
+    region: list[float] | None = Field(None, min_length=4, max_length=4)
+    max_molecules: int = Field(10, ge=1, le=20)
+
+
+class RecognizeMoleculesOutput(BaseModel):
+    page: int
+    page_width_pts: float
+    page_height_pts: float
+    dpi: float
+    region: list[float] | None = None
+    count: int
+    truncated: bool
+    molecules: list[dict[str, Any]]
 
 
 async def resolve_document(
@@ -308,6 +351,48 @@ async def get_run(context: CapabilityContext, request: GetRunInput) -> Capabilit
     )
 
 
+async def search_evidence(
+    context: CapabilityContext, request: SearchEvidenceInput
+) -> CapabilityResult:
+    """Search extracted SQL evidence without loading the whole library."""
+    rows = await asyncio.to_thread(
+        get_repositories(context.library_root).evidence.search,
+        request.query,
+        doc_id=request.doc_id,
+        limit=request.limit + 1,
+        offset=request.offset,
+    )
+    truncated = len(rows) > request.limit
+    page = rows[: request.limit]
+    return CapabilityResult(
+        data=SearchEvidenceOutput(items=[EvidenceMatch(**row) for row in page]),
+        truncated=truncated,
+        next_offset=request.offset + request.limit if truncated else None,
+    )
+
+
+async def recognize_molecules_capability(
+    context: CapabilityContext, request: RecognizeMoleculesInput
+) -> CapabilityResult:
+    """Run the local MolDet + MolParser pass over one page or region."""
+    from mbforge.service.use_cases.molecule.recognition import (
+        recognize_page_molecules,
+    )
+
+    store = LibraryStore.get(context.library_root)
+    pdf_path = await asyncio.to_thread(store.resolve_file, request.doc_id)
+    if pdf_path is None:
+        raise NotFoundError("document source file not found", detail=request.doc_id)
+    result = await asyncio.to_thread(
+        recognize_page_molecules,
+        pdf_path,
+        page=request.page,
+        region=request.region,
+        max_molecules=request.max_molecules,
+    )
+    return CapabilityResult(data=RecognizeMoleculesOutput(**result))
+
+
 register(
     Capability(
         name="resolve_document",
@@ -366,6 +451,26 @@ register(
         output_model=SearchMoleculesOutput,
         mutating=False,
         handler=search_molecules_capability,
+    )
+)
+register(
+    Capability(
+        name="search_evidence",
+        description="Search extracted SQL source text across documents; returns bounded snippets with document, page, kind and pagination. An empty result does not prove absence.",
+        input_model=SearchEvidenceInput,
+        output_model=SearchEvidenceOutput,
+        mutating=False,
+        handler=search_evidence,
+    )
+)
+register(
+    Capability(
+        name="recognize_molecules",
+        description="Run the local MolDet + MolParser recognizers over one page (optionally one PDF-point region) of a stored document; returns SMILES/E-SMILES, bboxes and printed labels without persisting.",
+        input_model=RecognizeMoleculesInput,
+        output_model=RecognizeMoleculesOutput,
+        mutating=False,
+        handler=recognize_molecules_capability,
     )
 )
 register(

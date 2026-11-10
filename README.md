@@ -135,8 +135,11 @@ MBForge exposes agent-callable capabilities under `/api/v1/capabilities`.
 returns a Markdown guide with input schemas. Read-only calls need no credential.
 Mutating calls require `X-MBForge-Token`; the token is created at
 `{library_root}/.mbforge/capability-token` and is read by the harness only in
-edit mode. Patent extraction is asynchronous: `submit_extraction` returns a
-`run_id`, then poll `get_run` and read `get_patent_result`.
+edit mode. Patent facts are produced by a separate opt-in run:
+`submit_patent_analysis` queues the Patent stage and returns `run_ids`; poll
+`get_run`, then read `get_patent_result`. `submit_extraction` runs Extract +
+Markdown. `search_evidence` searches extracted text across documents, and
+`recognize_molecules` runs the local recognizers on one page without persisting.
 
 ### Agent CLI
 

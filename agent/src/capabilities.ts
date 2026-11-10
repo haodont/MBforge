@@ -20,6 +20,10 @@ interface CapabilityManifest {
 export type AgentMode = 'readonly' | 'edit'
 export type CapabilityTool = ToolDefinition<TSchema>
 
+// The manifest is a trivial local endpoint; a short timeout keeps CLI startup
+// fast when the backend accepts connections but stalls.
+const MANIFEST_TIMEOUT_MS = 2_000
+
 export const backendBaseUrl = (): string =>
   process.env.MBFORGE_BACKEND_URL ??
   `http://${process.env.MBFORGE_BACKEND_HOST ?? '127.0.0.1'}:${process.env.MBFORGE_BACKEND_PORT ?? '18792'}`
@@ -32,7 +36,7 @@ export async function loadCapabilityTools(
   mode: AgentMode,
 ): Promise<CapabilityTool[]> {
   const response = await fetch(`${backendBaseUrl()}/api/v1/capabilities`, {
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS),
   })
   if (!response.ok) {
     throw new Error(`capability manifest failed (${response.status})`)

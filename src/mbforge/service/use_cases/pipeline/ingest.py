@@ -19,7 +19,7 @@ import json
 import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +81,8 @@ class BatchActionResult:
     updated: int = 0
     skipped: int = 0
     error: str | None = None
+    #: Runs created by an enqueue operation, in input order.
+    run_ids: list[str] = field(default_factory=list)
 
 
 async def enqueue(
@@ -198,6 +200,7 @@ async def enqueue_patent_analysis(
     store = LibraryStore.get(library_root)
     enqueued = 0
     skipped = 0
+    run_ids: list[str] = []
     for doc_id in ids:
         doc = await asyncio.to_thread(store.load_document, doc_id)
         if doc is None:
@@ -212,9 +215,9 @@ async def enqueue_patent_analysis(
             logger.info("Patent analysis deferred: run in flight for %s", doc_id)
             skipped += 1
             continue
-        await enqueue(library_root, doc_id, stages=PATENT_STAGES)
+        run_ids.append(await enqueue(library_root, doc_id, stages=PATENT_STAGES))
         enqueued += 1
-    return BatchActionResult(updated=enqueued, skipped=skipped)
+    return BatchActionResult(updated=enqueued, skipped=skipped, run_ids=run_ids)
 
 
 async def enqueue_all_unresolved(library_root: str) -> int:

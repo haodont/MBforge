@@ -121,7 +121,7 @@ jobs:
         run: npm run build
 
   agent:
-    name: Agent sidecar quality
+    name: Agent CLI quality
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:

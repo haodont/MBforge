@@ -80,7 +80,12 @@ def test_documents_patent_analysis_queues_patent_only_run(
         json={"doc_ids": ["missing-doc"]},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"success": True, "enqueued": 0, "skipped": 1}
+    assert resp.json() == {
+        "success": True,
+        "enqueued": 0,
+        "skipped": 1,
+        "run_ids": [],
+    }
 
     pdf_bytes = b"%PDF-1.4 fake pdf"
     resp = app_client.post(
@@ -118,6 +123,7 @@ def test_documents_patent_analysis_queues_patent_only_run(
     assert resp.status_code == 200
     assert resp.json()["enqueued"] == 1
     assert resp.json()["skipped"] == 0
+    assert len(resp.json()["run_ids"]) == 1
 
     # The document's queued run is Patent-only.
     stages = {

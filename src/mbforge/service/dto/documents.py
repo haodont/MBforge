@@ -87,3 +87,6 @@ class DocumentPatentAnalysisResponse(BaseModel):
         default=0,
         description="Documents skipped (missing, or not yet extracted).",
     )
+    run_ids: list[str] = Field(
+        default_factory=list, description="Patent runs created for eligible documents."
+    )

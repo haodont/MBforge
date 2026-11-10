@@ -19,19 +19,15 @@ labels. It is read-only and never persists anything.
 - Service: `service/use_cases/molecule/recognition.py` (`recognize_page_molecules`).
   It takes `(library_root, doc_id)` and an absolute PDF path, so path policy
   stays with the caller.
-- HTTP: **none.** The former chat-sidecar and research routes were removed with
-  the CLI-only cutover, and no capability exposes this service yet, so it has no
-  caller today.
-- Agent wiring: none. `agent/src/tool.ts` and the research prompt were deleted;
-  a CLI tool exists only for capabilities registered under
-  `service/capabilities/`.
+- Capability: `recognize_molecules` (read-only, `service/capabilities/read.py`)
+  resolves the stored PDF and returns the same result; it never persists.
+- Agent wiring: the pi CLI receives it from the capability manifest; no
+  sidecar-only tool remains.
 - Tests: `tests/unit/services/test_molecule_recognition.py` protects the PDF-point
-  box contract, the region filter and truncation visibility. The removed
-  `agent/src/research.test.ts` used to assert the research turn taught the tool.
+  box contract, the region filter and truncation visibility.
 
-Pending: register `recognize_molecules` as a capability (which would expose it
-to the pi CLI), then decide whether the model should be allowed to cite a
-label→SMILES match as evidence (currently it reports tool output, not a new fact).
+Pending: decide whether the model may cite a label→SMILES match as evidence
+(currently it reports tool output, not a new fact).
 
 ## Table-embedded molecules (2026-11-06)
 
@@ -424,8 +420,8 @@ the CLI-only cutover. `@tavily/pi-extension` is no longer a dependency, the
 web-search settings and keys are gone from `AppConfig`, and no research route,
 `research_sessions` table or `research_task_requests` queue hook remains. What
 replaces them is the pi CLI with the capability tools generated from
-`/api/v1/capabilities`; the `agent/skills/*` documents are inert reference files
-because the extension no longer loads skills and exposes no web tool.
+`/api/v1/capabilities`; `agent/skills/` and `agent/schemas/` were deleted with
+the cutover, so no skill or schema artifact remains.
 
 ## Layer boundaries
 

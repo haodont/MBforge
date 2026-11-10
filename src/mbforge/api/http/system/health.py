@@ -1,8 +1,8 @@
-"""Health check and sidecar status endpoints.
+"""Health check and local model-service status endpoints.
 
 Probes local model backends (MolDet, MolParser) and reports their readiness.
-Used by the frontend status bar and by external load balancers to decide
-whether the sidecar is ready to serve traffic.
+The legacy ``/sidecar`` path names are kept for the frontend model-service
+panel; they do not refer to the removed Node agent.
 """
 
 from __future__ import annotations
@@ -58,12 +58,6 @@ async def sidecar_status() -> dict:
             "molparser": _molparser_status(),
         },
     }
-
-
-@router.post("/sidecar/restart")
-async def sidecar_restart() -> dict:
-    """Sidecar restart stub (not needed in pure web mode)."""
-    return {"success": True}
 
 
 @router.get("/environment/check")

@@ -57,6 +57,17 @@ class SubmitExtractionOutput(BaseModel):
     doc_id: str
 
 
+class SubmitPatentAnalysisInput(BaseModel):
+    doc_id: str = Field(..., min_length=1, max_length=128)
+
+
+class SubmitPatentAnalysisOutput(BaseModel):
+    doc_id: str
+    run_ids: list[str] = Field(default_factory=list)
+    enqueued: int
+    skipped: int
+
+
 class ReingestDocumentInput(BaseModel):
     doc_id: str = Field(..., min_length=1, max_length=128)
 
@@ -132,6 +143,41 @@ async def submit_extraction(
     )
 
 
+async def submit_patent_analysis(
+    context: CapabilityContext, request: SubmitPatentAnalysisInput
+) -> CapabilityResult:
+    """Queue the Patent stage once Extract has produced source evidence."""
+    from mbforge.service.use_cases.documents.source_evidence import list_evidence
+
+    async with _document_lock(context.library_root, request.doc_id):
+        store = LibraryStore.get(context.library_root)
+        document = await asyncio.to_thread(store.load_document, request.doc_id)
+        if document is None:
+            raise NotFoundError("document not found", detail=request.doc_id)
+        evidence = await asyncio.to_thread(
+            list_evidence, context.library_root, request.doc_id
+        )
+        if not evidence:
+            raise ValidationError(
+                "document has no extracted source evidence; run submit_extraction first",
+                detail=request.doc_id,
+            )
+        active = await _active_run_id(context.library_root, request.doc_id)
+        if active:
+            raise ConflictError("document already has an active run", detail=active)
+        result = await ingest.enqueue_patent_analysis(
+            context.library_root, [request.doc_id]
+        )
+    return CapabilityResult(
+        data=SubmitPatentAnalysisOutput(
+            doc_id=request.doc_id,
+            run_ids=result.run_ids,
+            enqueued=result.updated,
+            skipped=result.skipped,
+        )
+    )
+
+
 async def reingest_document(
     context: CapabilityContext, request: ReingestDocumentInput
 ) -> CapabilityResult:
@@ -188,11 +234,21 @@ register(
 register(
     Capability(
         name="submit_extraction",
-        description="Submit a registered document to the Extract -> Markdown -> Patent pipeline.",
+        description="Submit a registered document to Extract -> Markdown; Patent is a separate opt-in run.",
         input_model=SubmitExtractionInput,
         output_model=SubmitExtractionOutput,
         mutating=True,
         handler=submit_extraction,
+    )
+)
+register(
+    Capability(
+        name="submit_patent_analysis",
+        description="Queue the Patent stage for a document whose Extract evidence exists; poll get_run, then read get_patent_result.",
+        input_model=SubmitPatentAnalysisInput,
+        output_model=SubmitPatentAnalysisOutput,
+        mutating=True,
+        handler=submit_patent_analysis,
     )
 )
 register(

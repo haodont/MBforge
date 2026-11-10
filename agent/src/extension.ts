@@ -16,8 +16,10 @@ import {
   type CapabilityTool,
 } from './capabilities.js'
 
-const MANIFEST_ATTEMPTS = 5
-const MANIFEST_RETRY_DELAY_MS = 500
+// Bound worst-case startup: a few short attempts tolerate a backend that is
+// still coming up, then degrade to zero tools so pi opens promptly.
+const MANIFEST_ATTEMPTS = 3
+const MANIFEST_RETRY_DELAY_MS = 400
 
 async function loadCapabilityToolsWithRetry(
   mode: AgentMode,

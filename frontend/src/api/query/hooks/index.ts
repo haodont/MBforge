@@ -33,7 +33,7 @@ export {
   useBuildInfo,
   useExportSettings,
 } from './useSettings'
-export { useSidecarStatus, useSidecarRestart } from './useSidecar'
+export { useSidecarStatus } from './useSidecar'
 export { useCommonDirs } from './useCommonDirs'
 export { useDocsIndex, useDocsPage } from './useDocs'
 export {

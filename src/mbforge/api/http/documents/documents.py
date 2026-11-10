@@ -81,5 +81,5 @@ async def doc_patent_analysis(
     root = resolve_library_root(body.library_root)
     result = await enqueue_patent_analysis(str(root), body.doc_ids)
     return DocumentPatentAnalysisResponse(
-        enqueued=result.updated, skipped=result.skipped
+        enqueued=result.updated, skipped=result.skipped, run_ids=result.run_ids
     )

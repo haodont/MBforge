@@ -18,7 +18,14 @@ def test_capability_names_are_unique_and_schemas_generate() -> None:
     capabilities = all_capabilities()
     names = [capability.name for capability in capabilities]
     assert len(names) == len(set(names))
-    assert {"resolve_document", "submit_extraction", "get_patent_result"} <= set(names)
+    assert {
+        "resolve_document",
+        "submit_extraction",
+        "submit_patent_analysis",
+        "search_evidence",
+        "recognize_molecules",
+        "get_patent_result",
+    } <= set(names)
     for capability in capabilities:
         assert capability.input_model.model_json_schema()
         assert capability.output_model.model_json_schema()

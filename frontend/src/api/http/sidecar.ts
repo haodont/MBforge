@@ -1,12 +1,11 @@
-/** Sidecar-dependent commands.
+/** Model-service status and environment commands.
  *
- * - `sidecarStatus` / `sidecarRestart`: sidecar process lifecycle.
- * - `environmentCheck`: probes Python via the sidecar HTTP API; lives here
- *   (not in `environment.ts`) because it requires the sidecar to be online.
- *   For a Rust-native env probe see `resourcesCheck` in `environment.ts`.
+ * - `sidecarStatus`: local model-service health; the legacy `/sidecar` path is
+ *   kept for the Settings model-service panel.
+ * - `environmentCheck`: probes Python via the model-service HTTP API.
  */
 
-import { httpGet, httpPost, invokeWithError } from './_utils'
+import { httpGet, invokeWithError } from './_utils'
 import { ErrorCode } from '@/utils/errors'
 
 export interface SidecarStatus {
@@ -23,14 +22,6 @@ export interface SidecarStatus {
 export async function sidecarStatus(): Promise<SidecarStatus> {
   return invokeWithError(
     () => httpGet<SidecarStatus>('/api/v1/sidecar/status'),
-    ErrorCode.ApiError,
-  )
-}
-
-/** Force-restart the Python sidecar (kills existing process + respawns). */
-export async function sidecarRestart(): Promise<void> {
-  await invokeWithError(
-    () => httpPost<{ success: boolean }>('/api/v1/sidecar/restart'),
     ErrorCode.ApiError,
   )
 }
