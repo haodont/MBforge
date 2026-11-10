@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from mbforge.contracts.review_proposal import ReviewProposal, ReviewProposalResult
 from mbforge.foundation.errors import (
     ConflictError,
     NotFoundError,
@@ -19,6 +20,7 @@ from mbforge.service.capabilities.registry import (
     CapabilityResult,
     register,
 )
+from mbforge.service.use_cases import review_proposals
 from mbforge.service.use_cases.documents.library import LibraryStore
 from mbforge.service.use_cases.pipeline import ingest
 
@@ -84,6 +86,14 @@ class RunActionInput(BaseModel):
 class RunActionOutput(BaseModel):
     run_id: str
     updated: int
+
+
+class ProposeReviewInput(BaseModel):
+    items: list[ReviewProposal] = Field(..., min_length=1, max_length=50)
+
+
+class ProposeReviewOutput(BaseModel):
+    items: list[ReviewProposalResult] = Field(default_factory=list)
 
 
 def _resolve_import_path(library_root: str, raw: str) -> Path:
@@ -221,6 +231,16 @@ async def retry_run(
     )
 
 
+async def propose_review(
+    context: CapabilityContext, request: ProposeReviewInput
+) -> CapabilityResult:
+    """Record agent proposals; a human still confirms or rejects every one."""
+    results = await asyncio.to_thread(
+        review_proposals.propose_items, context.library_root, request.items
+    )
+    return CapabilityResult(data=ProposeReviewOutput(items=results))
+
+
 register(
     Capability(
         name="import_pdf",
@@ -279,5 +299,18 @@ register(
         output_model=RunActionOutput,
         mutating=True,
         handler=retry_run,
+    )
+)
+register(
+    Capability(
+        name="propose_review",
+        description=(
+            "File review proposals for a human decision; never applies a value "
+            "and refuses targets a human already decided."
+        ),
+        input_model=ProposeReviewInput,
+        output_model=ProposeReviewOutput,
+        mutating=True,
+        handler=propose_review,
     )
 )

@@ -6,12 +6,6 @@ vi.mock('@/api/query/hooks', () => ({
   useIngestStats: vi.fn(),
   useIngestLogs: vi.fn(),
   useWorkerStatus: vi.fn(),
-  useCancelTask: vi.fn(),
-  useRetryTask: vi.fn(),
-  useDeleteTask: vi.fn(),
-  useCancelBatch: vi.fn(),
-  useRetryBatch: vi.fn(),
-  useSetTaskPriority: vi.fn(),
 }))
 
 vi.mock('@/api/query/useIngestSSE', () => ({
@@ -43,23 +37,8 @@ import {
   useIngestStats,
   useIngestLogs,
   useWorkerStatus,
-  useCancelTask,
-  useRetryTask,
-  useDeleteTask,
-  useCancelBatch,
-  useRetryBatch,
-  useSetTaskPriority,
 } from '@/api/query/hooks'
 import ProcessingQueue from '../ProcessingQueue'
-
-function mockMutationHooks() {
-  vi.mocked(useCancelTask).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useCancelTask>)
-  vi.mocked(useRetryTask).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useRetryTask>)
-  vi.mocked(useDeleteTask).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useDeleteTask>)
-  vi.mocked(useCancelBatch).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useCancelBatch>)
-  vi.mocked(useRetryBatch).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useRetryBatch>)
-  vi.mocked(useSetTaskPriority).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof useSetTaskPriority>)
-}
 
 function mockQueue(tasks: { id: string; status: string; doc_id: string; run_id?: string }[]) {
   const now = Date.now()
@@ -98,7 +77,6 @@ function mockQueue(tasks: { id: string; status: string; doc_id: string; run_id?:
 describe('ProcessingQueue', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockMutationHooks()
     vi.mocked(useIngestQueue).mockReturnValue({
       data: [],
       isLoading: true,

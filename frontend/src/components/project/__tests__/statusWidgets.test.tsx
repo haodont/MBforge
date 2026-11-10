@@ -3,7 +3,7 @@
  * StatPill, WorkerStatusBadge, IngestLogPanel, TaskRow.
  *
  * One test per component contract: stat rendering, status-label mapping,
- * log rows / empty state, and the TaskRow identity + action dispatch.
+ * log rows / empty state, and the TaskRow identity + status display.
  */
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
@@ -85,42 +85,26 @@ describe('TaskRow', () => {
     }
   }
 
-  it('renders task identity/error and dispatches retry, cancel and pin actions', () => {
-    const onRetry = vi.fn()
-    const onCancel = vi.fn()
-    const onTogglePin = vi.fn()
+  it('renders task identity, status and error details', () => {
     const baseProps = {
       now,
       isLogsExpanded: false,
       logs: [] as IngestLogEvent[],
-      isActioning: false,
       onToggleLogs: vi.fn(),
-      onDelete: vi.fn(),
-      onRetry,
-      onCancel,
-      onTogglePin,
     }
 
     const failed = render(<TaskRow {...baseProps} task={makeTask({ status: 'failed', error: 'OCR timeout' })} />)
     expect(screen.getByText('test.pdf')).toBeInTheDocument()
-    expect(screen.getAllByText('queue.retryTask').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('queue.failed')).toBeInTheDocument()
     fireEvent.click(screen.getByText('queue.showDetails'))
     expect(screen.getByText('OCR timeout')).toBeInTheDocument()
     failed.unmount()
 
     const done = render(<TaskRow {...baseProps} task={makeTask({ status: 'done' })} />)
-    fireEvent.click(screen.getByText('queue.retryTask'))
-    fireEvent.click(screen.getByText('queue.retryFromMarkdown'))
-    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }), 'markdown')
+    expect(screen.getByText('queue.done')).toBeInTheDocument()
     done.unmount()
 
-    const processing = render(<TaskRow {...baseProps} task={makeTask({ status: 'processing' })} />)
-    fireEvent.click(screen.getByText('queue.cancelTask'))
-    expect(onCancel).toHaveBeenCalledOnce()
-    processing.unmount()
-
-    render(<TaskRow {...baseProps} task={makeTask({ status: 'pending' })} />)
-    fireEvent.click(screen.getByText('queue.pinTask'))
-    expect(onTogglePin).toHaveBeenCalledOnce()
+    render(<TaskRow {...baseProps} task={makeTask({ status: 'processing' })} />)
+    expect(screen.getByText('queue.processing')).toBeInTheDocument()
   })
 })

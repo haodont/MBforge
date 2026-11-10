@@ -60,3 +60,8 @@ validates the edit-mode token, and serializes the registry response; it never
 reimplements handlers or mode checks. The pi CLI extension
 (`agent/src/extension.ts`) consumes the same manifest and is the only agent
 surface: no HTTP agent server or second agent transport exists.
+
+The React UI is read-mostly: it imports and deletes documents, records human
+review decisions, and manages settings/models. Pipeline execution controls
+(Extract, Patent, cancel, retry) live only in the CLI, and the queue page is a
+read-only view of the durable queue.

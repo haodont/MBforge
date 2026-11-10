@@ -14,12 +14,7 @@ export interface QueueTaskListProps {
   now: number
   expandedLogDocs: Set<string>
   logMap: Map<string, IngestLogEvent[]>
-  actionId: string | null
   onToggleLogs: (docId: string) => void
-  onCancel: (task: IngestTask) => void
-  onRetry: (task: IngestTask, resumeFromStage?: string) => void
-  onDelete: (task: IngestTask) => void
-  onTogglePin: (task: IngestTask) => void
 }
 
 /** Keep the common queue small and animated; virtualize only genuinely long queues. */
@@ -28,12 +23,7 @@ export function QueueTaskList({
   now,
   expandedLogDocs,
   logMap,
-  actionId,
   onToggleLogs,
-  onCancel,
-  onRetry,
-  onDelete,
-  onTogglePin,
 }: QueueTaskListProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const shouldVirtualize = tasks.length > 80
@@ -56,12 +46,7 @@ export function QueueTaskList({
       now={task.status === 'done' || task.status === 'cancelled' ? 0 : now}
       isLogsExpanded={expandedLogDocs.has(task.doc_id)}
       logs={logMap.get(task.doc_id) ?? EMPTY_LOGS}
-      isActioning={actionId === task.id}
       onToggleLogs={onToggleLogs}
-      onCancel={onCancel}
-      onRetry={onRetry}
-      onDelete={onDelete}
-      onTogglePin={onTogglePin}
     />
   )
 

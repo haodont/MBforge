@@ -9,10 +9,8 @@ import DocumentActionMenu from './DocumentActionMenu'
 export type DocumentItemProps = {
   doc: DocumentInfo
   deletePending: boolean
-  patentPending: boolean
   onOpen: (doc: DocumentInfo) => void
   onDelete: (doc: DocumentInfo) => void
-  onPatentAnalyze: (doc: DocumentInfo) => void
   selected: boolean
   onToggleSelect: (doc: DocumentInfo, selected: boolean) => void
   statusBadge: (doc: DocumentInfo) => ReactNode
@@ -21,10 +19,8 @@ export type DocumentItemProps = {
 export default function DocumentCard({
   doc,
   deletePending,
-  patentPending,
   onOpen,
   onDelete,
-  onPatentAnalyze,
   selected,
   onToggleSelect,
   statusBadge,
@@ -44,9 +40,7 @@ export default function DocumentCard({
         <DocumentActionMenu
           doc={doc}
           deletePending={deletePending}
-          patentPending={patentPending}
           onDelete={onDelete}
-          onPatentAnalyze={onPatentAnalyze}
         />
       </div>
       <button

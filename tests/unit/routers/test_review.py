@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.service.ports import get_repositories
 
 
+def _edit_headers(app_client: TestClient, tmp_library: Path) -> dict[str, str]:
+    app_client.get("/api/v1/capabilities/guide")
+    token = (
+        (tmp_library / ".mbforge" / "capability-token")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    return {"x-mbforge-token": token}
+
+
 def test_an_ai_proposal_enters_the_queue_and_freezes_after_a_decision(
-    app_client: TestClient, tmp_library
+    app_client: TestClient, tmp_library: Path
 ) -> None:
     """The assistant may propose, revise and then lose the target to a human."""
     from mbforge.db.source_evidence import persist_source_evidence
@@ -22,7 +34,6 @@ def test_an_ai_proposal_enters_the_queue_and_freezes_after_a_decision(
     )
     persist_source_evidence(tmp_library, [evidence])
     body = {
-        "library_root": root,
         "items": [
             {
                 "doc_id": "doc-1",
@@ -36,10 +47,13 @@ def test_an_ai_proposal_enters_the_queue_and_freezes_after_a_decision(
             }
         ],
     }
+    headers = _edit_headers(app_client, tmp_library)
 
-    created = app_client.post("/api/v1/review/propose", json=body)
+    created = app_client.post(
+        "/api/v1/capabilities/propose_review", json=body, headers=headers
+    )
     assert created.status_code == 200
-    item = created.json()["items"][0]
+    item = created.json()["data"]["items"][0]
     assert item["action"] == "created" and item["status"] == "pending"
 
     queue = app_client.get(
@@ -60,14 +74,16 @@ def test_an_ai_proposal_enters_the_queue_and_freezes_after_a_decision(
     )
     assert decision.status_code == 200 and decision.json()["updated"] == 1
 
-    again = app_client.post("/api/v1/review/propose", json=body)
+    again = app_client.post(
+        "/api/v1/capabilities/propose_review", json=body, headers=headers
+    )
     assert again.status_code == 200
-    assert again.json()["items"][0]["action"] == "refused"
-    assert "human already decided" in again.json()["items"][0]["error"]
+    assert again.json()["data"]["items"][0]["action"] == "refused"
+    assert "human already decided" in again.json()["data"]["items"][0]["error"]
 
 
 def test_a_filtered_batch_confirms_every_text_proposal_of_one_document(
-    app_client: TestClient, tmp_library
+    app_client: TestClient, tmp_library: Path
 ) -> None:
     """One click approves the whole patent (or all text) without a selection list."""
     from mbforge.db.source_evidence import persist_source_evidence
@@ -95,10 +111,12 @@ def test_a_filtered_batch_confirms_every_text_proposal_of_one_document(
         for index, item in enumerate(evidence)
     ]
     created = app_client.post(
-        "/api/v1/review/propose", json={"library_root": root, "items": proposals}
+        "/api/v1/capabilities/propose_review",
+        json={"items": proposals},
+        headers=_edit_headers(app_client, tmp_library),
     )
     assert created.status_code == 200
-    assert [entry["action"] for entry in created.json()["items"]] == [
+    assert [entry["action"] for entry in created.json()["data"]["items"]] == [
         "created",
         "created",
     ]

@@ -8,10 +8,8 @@ import type { DocumentItemProps } from './DocumentCard'
 export default function DocumentRow({
   doc,
   deletePending,
-  patentPending,
   onOpen,
   onDelete,
-  onPatentAnalyze,
   selected,
   onToggleSelect,
   statusBadge,
@@ -53,9 +51,7 @@ export default function DocumentRow({
         <DocumentActionMenu
           doc={doc}
           deletePending={deletePending}
-          patentPending={patentPending}
           onDelete={onDelete}
-          onPatentAnalyze={onPatentAnalyze}
         />
       </div>
     </div>

@@ -1,7 +1,7 @@
 /**
  * Covers `Workspace` (../Workspace): the document-query surface (loading /
  * empty / processing / error), the document list with summary metrics and
- * tab-opening, plus the destructive and analysis actions of the document menu.
+ * tab-opening, plus the destructive document action.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
@@ -11,9 +11,7 @@ vi.mock('@/api/query/hooks', () => ({
   useDocuments: vi.fn(),
   useImportDocument: vi.fn(),
   useDeleteDocuments: vi.fn(),
-  useEnqueueTask: vi.fn(),
   useIngestQueue: vi.fn(),
-  usePatentAnalysis: vi.fn(),
 }))
 
 vi.mock('@/context/AppContext', () => ({
@@ -37,7 +35,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 import { useDocuments, useImportDocument, useDeleteDocuments } from '@/api/query/hooks'
-import { useEnqueueTask, useIngestQueue, usePatentAnalysis } from '@/api/query/hooks'
+import { useIngestQueue } from '@/api/query/hooks'
 import { useAppContext } from '@/context/AppContext'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createQueryClient } from '@/api/query/client'
@@ -97,14 +95,7 @@ describe('Workspace', () => {
     vi.mocked(useImportDocument).mockReturnValue({
       mutateAsync: vi.fn(),
     } as unknown as ReturnType<typeof useImportDocument>)
-    vi.mocked(useEnqueueTask).mockReturnValue({
-      mutateAsync: vi.fn(),
-    } as unknown as ReturnType<typeof useEnqueueTask>)
     mockIngestQueue([])
-    vi.mocked(usePatentAnalysis).mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false,
-    } as unknown as ReturnType<typeof usePatentAnalysis>)
     mockDeleteDocuments()
   })
 
@@ -209,21 +200,5 @@ describe('Workspace', () => {
     confirm.click()
 
     expect(deleteDocuments).toHaveBeenCalledWith(['doc1'])
-  })
-
-  it('queues patent analysis from the document menu', async () => {
-    const patentAnalysis = vi.fn().mockResolvedValue({ success: true, enqueued: 1, skipped: 0 })
-    vi.mocked(usePatentAnalysis).mockReturnValue({
-      mutateAsync: patentAnalysis,
-      isPending: false,
-    } as unknown as ReturnType<typeof usePatentAnalysis>)
-    mockDocuments([{ doc_id: 'doc1', title: 'Analyze Me', status: 'extracted' }])
-    renderWorkspace()
-
-    screen.getByRole('button', { name: 'doc.actions' }).click()
-    const analyzeItem = await screen.findByRole('menuitem', { name: 'doc.patentAnalysis' })
-    analyzeItem.click()
-
-    expect(patentAnalysis).toHaveBeenCalledWith(['doc1'])
   })
 })

@@ -5,28 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import Badge from '../ui/Badge'
 import Button from '../ui/Button'
-import IconButton from '../ui/IconButton'
-import Menu, { type MenuItem } from '../ui/Menu'
 import PdfPipelineFlow from './pdf/PdfPipelineFlow'
 import IngestLogPanel from './IngestLogPanel'
-import {
-  ChevronDownIcon,
-  ChevronUpIcon,
-  XIcon,
-  PinIcon,
-  UnpinIcon,
-  TrashIcon,
-  RefreshCwIcon,
-} from '../icons'
-import { PIPELINE_STAGES, type PipelineStage } from '@/api/query/stages'
+import { ChevronDownIcon, ChevronUpIcon, XIcon } from '../icons'
 import type { IngestTask, IngestLogEvent } from '@/api/http/ingest_queue'
-
-/** i18n keys for the "retry from stage" menu, keyed by pipeline stage. */
-const RETRY_STAGE_LABEL_KEYS: Record<PipelineStage, string> = {
-  extract: 'queue.retryFromExtract',
-  markdown: 'queue.retryFromMarkdown',
-  patent: 'queue.retryFromPatent',
-}
 
 // ---------------------------------------------------------------------------
 // Formatting helpers (shared across the queue module)
@@ -96,12 +78,7 @@ interface TaskRowProps {
   now: number
   isLogsExpanded: boolean
   logs: IngestLogEvent[]
-  isActioning: boolean
   onToggleLogs: (docId: string) => void
-  onCancel: (task: IngestTask) => void
-  onRetry: (task: IngestTask, resumeFromStage?: string) => void
-  onDelete: (task: IngestTask) => void
-  onTogglePin: (task: IngestTask) => void
 }
 
 export const TaskRow = memo(function TaskRow({
@@ -109,27 +86,10 @@ export const TaskRow = memo(function TaskRow({
   now,
   isLogsExpanded,
   logs,
-  isActioning,
   onToggleLogs,
-  onCancel,
-  onRetry,
-  onDelete,
-  onTogglePin,
 }: TaskRowProps) {
   const { t } = useTranslation()
   const [showDetails, setShowDetails] = useState(false)
-  const canCancel = task.status === 'pending' || task.status === 'processing'
-  const canRetry = task.status === 'failed' || task.status === 'cancelled' || task.status === 'done'
-  const canDelete = task.status === 'cancelled' || task.status === 'done' || task.status === 'failed'
-  const canSetPriority = task.status === 'pending'
-
-  const STAGE_OPTIONS: { value: string | null; label: string }[] = [
-    { value: null, label: t('queue.retryFromCheckpoint') },
-    ...PIPELINE_STAGES.map((stage) => ({
-      value: stage,
-      label: t(RETRY_STAGE_LABEL_KEYS[stage]),
-    })),
-  ]
 
   const fileName = basename(task.file_path) || task.doc_id
   const startedAtMs = task.started_at ? task.started_at * 1000 : null
@@ -225,18 +185,6 @@ export const TaskRow = memo(function TaskRow({
             >
               {showDetails ? t('queue.hideDetails') : t('queue.showDetails')}
             </Button>
-            {canSetPriority && (
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={task.priority > 0 ? <UnpinIcon size={14} /> : <PinIcon size={14} />}
-                loading={isActioning}
-                onClick={() => onTogglePin(task)}
-                title={task.priority > 0 ? t('queue.unpinTask') : t('queue.pinTask')}
-              >
-                {task.priority > 0 ? t('queue.unpinTask') : t('queue.pinTask')}
-              </Button>
-            )}
             <Button
               variant="ghost"
               size="sm"
@@ -246,46 +194,6 @@ export const TaskRow = memo(function TaskRow({
             >
               {isLogsExpanded ? t('queue.hideLogs') : t('queue.showLogs')}
             </Button>
-            {canRetry && (
-              <Menu
-                align="right"
-                items={STAGE_OPTIONS.map((opt): MenuItem => ({
-                  key: opt.value ?? 'checkpoint',
-                  label: opt.label,
-                  onClick: () => onRetry(task, opt.value ?? undefined),
-                }))}
-                trigger={(toggle) => (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={<RefreshCwIcon size={14} />}
-                    loading={isActioning}
-                    onClick={() => toggle()}
-                  >
-                    {t('queue.retryTask')}
-                  </Button>
-                )}
-              />
-            )}
-            {canCancel && (
-              <Button
-                variant="secondary"
-                size="sm"
-                loading={isActioning}
-                onClick={() => onCancel(task)}
-              >
-                {t('queue.cancelTask')}
-              </Button>
-            )}
-            {canDelete && (
-              <IconButton
-                size={32}
-                title={t('queue.deleteTask')}
-                onClick={() => onDelete(task)}
-              >
-                <TrashIcon size={14} />
-              </IconButton>
-            )}
           </div>
         </div>
 

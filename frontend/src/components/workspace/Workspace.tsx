@@ -30,7 +30,6 @@ export default function Workspace() {
   const importer = useWorkspaceImport()
   const { processingCount, getDocStatus } = useWorkspaceQueueStatus(libraryRoot)
   const mutations = useWorkspaceMutations({
-    libraryRoot,
     removeFromSelection: selection.removeFromSelection,
   })
 
@@ -69,10 +68,8 @@ export default function Workspace() {
   const documentItemProps = (doc: DocumentInfo) => ({
     doc,
     deletePending: mutations.deletePending,
-    patentPending: mutations.patentPending,
     onOpen: handleOpenDocument,
     onDelete: mutations.requestDelete,
-    onPatentAnalyze: (document: DocumentInfo) => void mutations.handlePatentAnalysis([document]),
     selected: selection.selectedDocumentIds.has(doc.doc_id),
     onToggleSelect: selection.handleToggleSelect,
     statusBadge,
@@ -117,12 +114,8 @@ export default function Workspace() {
           allDocumentsSelected={selection.allDocumentsSelected}
           selectedDocuments={selection.selectedDocuments}
           onToggleSelectAll={selection.toggleSelectAll}
-          onEnqueueSelected={mutations.handleEnqueueSelected}
-          onPatentAnalysis={mutations.handlePatentAnalysis}
           onRequestDeleteSelected={mutations.requestDeleteSelected}
-          isEnqueueingSelected={mutations.isEnqueueingSelected}
           deletePending={mutations.deletePending}
-          patentPending={mutations.patentPending}
           libraryRoot={libraryRoot}
           onImport={importer.handleImport}
           importBusy={importer.busy}

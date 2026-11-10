@@ -1,8 +1,8 @@
-/** Workspace mutations — delete / bulk-enqueue / patent handlers + confirm state. */
+/** Workspace document deletion and its confirmation state. */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useDeleteDocuments, useEnqueueTask, usePatentAnalysis } from '@/api/query/hooks'
+import { useDeleteDocuments } from '@/api/query/hooks'
 import { showToast } from '@/hooks/useToast'
 import { getUserFacingError } from '@/utils/errors'
 import type { DocumentInfo } from '@/api/http/library'
@@ -12,15 +12,12 @@ export type DocConfirmAction =
   | { docs: DocumentInfo[]; action: 'delete-selected' }
 
 export interface UseWorkspaceMutationsArgs {
-  libraryRoot: string
-  /** Drop ids from the workspace selection once their documents are gone/queued. */
+  /** Drop ids from the workspace selection once their documents are gone. */
   removeFromSelection: (docIds: Iterable<string>) => void
 }
 
 export interface UseWorkspaceMutationsResult {
   deletePending: boolean
-  patentPending: boolean
-  isEnqueueingSelected: boolean
   pendingConfirm: DocConfirmAction | null
   /** Queue the delete confirmation for a single document. */
   requestDelete: (doc: DocumentInfo) => void
@@ -28,8 +25,6 @@ export interface UseWorkspaceMutationsResult {
   requestDeleteSelected: (docs: DocumentInfo[]) => void
   /** Dismiss the confirmation dialog. */
   cancelConfirm: () => void
-  handleEnqueueSelected: (docs: DocumentInfo[]) => Promise<void>
-  handlePatentAnalysis: (docs: DocumentInfo[]) => Promise<void>
   confirmDocAction: (target: DocConfirmAction) => Promise<void>
   confirmDialogTitle: string
   confirmDialogMessage: string
@@ -37,15 +32,10 @@ export interface UseWorkspaceMutationsResult {
 }
 
 export function useWorkspaceMutations({
-  libraryRoot,
   removeFromSelection,
 }: UseWorkspaceMutationsArgs): UseWorkspaceMutationsResult {
   const { t } = useTranslation()
   const deleteMutation = useDeleteDocuments()
-  const bulkEnqueueMutation = useEnqueueTask()
-  const patentMutation = usePatentAnalysis()
-  const [isEnqueueingSelected, setIsEnqueueingSelected] = useState(false)
-  const enqueueSelectedInProgressRef = useRef(false)
   const [pendingConfirm, setPendingConfirm] = useState<DocConfirmAction | null>(null)
 
   const handleDeleteDocument = useCallback(async (doc: DocumentInfo) => {
@@ -68,59 +58,6 @@ export function useWorkspaceMutations({
       showToast(t('workspace.bulkDeleteError', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
     }
   }, [deleteMutation, removeFromSelection, t])
-
-  const handleEnqueueSelected = useCallback(async (docs: DocumentInfo[]) => {
-    if (!libraryRoot || docs.length === 0 || enqueueSelectedInProgressRef.current) return
-    enqueueSelectedInProgressRef.current = true
-    setIsEnqueueingSelected(true)
-    const queuedIds = new Set<string>()
-    const failures: { doc: DocumentInfo; message: string }[] = []
-    try {
-      for (const doc of docs) {
-        try {
-          await bulkEnqueueMutation.mutateAsync({
-            libraryRoot,
-            filePath: '',
-            docId: doc.doc_id,
-          })
-          queuedIds.add(doc.doc_id)
-        } catch (error) {
-          failures.push({
-            doc,
-            message: getUserFacingError(error, t('common.unknownError')),
-          })
-        }
-      }
-    } finally {
-      enqueueSelectedInProgressRef.current = false
-      setIsEnqueueingSelected(false)
-    }
-    removeFromSelection(queuedIds)
-    if (failures.length > 0) {
-      const firstFailure = failures[0]
-      showToast(t('workspace.bulkEnqueuePartial', {
-        queued: queuedIds.size,
-        failed: failures.length,
-        filename: firstFailure.doc.file_name,
-        error: firstFailure.message,
-      }), 'error')
-    } else {
-      showToast(t('workspace.bulkEnqueueSuccess', { count: queuedIds.size }), 'success')
-    }
-  }, [libraryRoot, bulkEnqueueMutation, removeFromSelection, t])
-
-  // Patent analysis is decoupled from import: the document is extensible as
-  // soon as it is extracted, and this queues a Patent-only run for each target.
-  const handlePatentAnalysis = useCallback(async (docs: DocumentInfo[]) => {
-    const docIds = docs.map((doc) => doc.doc_id)
-    if (docIds.length === 0) return
-    try {
-      const result = await patentMutation.mutateAsync(docIds)
-      showToast(t('workspace.patentAnalysisSuccess', { count: result.enqueued }), 'success')
-    } catch (e) {
-      showToast(t('workspace.patentAnalysisError', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
-    }
-  }, [patentMutation, t])
 
   const requestDelete = useCallback((doc: DocumentInfo) => {
     setPendingConfirm({ doc, action: 'delete' })
@@ -150,14 +87,10 @@ export function useWorkspaceMutations({
 
   return {
     deletePending: deleteMutation.isPending,
-    patentPending: patentMutation.isPending,
-    isEnqueueingSelected,
     pendingConfirm,
     requestDelete,
     requestDeleteSelected,
     cancelConfirm,
-    handleEnqueueSelected,
-    handlePatentAnalysis,
     confirmDocAction,
     confirmDialogTitle,
     confirmDialogMessage,

@@ -1,8 +1,8 @@
-/** Workspace toolbar — summary, bulk actions, view toggle, import button. */
+/** Workspace toolbar — summary, bulk delete/export, view toggle, import button. */
 
 import { useTranslation } from 'react-i18next'
 import Button from '@/components/ui/Button'
-import { DownloadIcon, FlaskIcon, GridIcon, PlusIcon, QueueIcon, TableIcon, TrashIcon } from '@/components/icons'
+import { DownloadIcon, GridIcon, PlusIcon, TableIcon, TrashIcon } from '@/components/icons'
 import type { DocumentInfo } from '@/api/http/library'
 import { useActivityExport } from './useActivityExport'
 
@@ -15,12 +15,8 @@ export interface WorkspaceToolbarProps {
   allDocumentsSelected: boolean
   selectedDocuments: DocumentInfo[]
   onToggleSelectAll: () => void
-  onEnqueueSelected: (docs: DocumentInfo[]) => Promise<void>
-  onPatentAnalysis: (docs: DocumentInfo[]) => Promise<void>
   onRequestDeleteSelected: (docs: DocumentInfo[]) => void
-  isEnqueueingSelected: boolean
   deletePending: boolean
-  patentPending: boolean
   libraryRoot: string
   onImport: () => void
   /** An import is running — disables the import button. */
@@ -34,12 +30,8 @@ export default function WorkspaceToolbar({
   allDocumentsSelected,
   selectedDocuments,
   onToggleSelectAll,
-  onEnqueueSelected,
-  onPatentAnalysis,
   onRequestDeleteSelected,
-  isEnqueueingSelected,
   deletePending,
-  patentPending,
   libraryRoot,
   onImport,
   importBusy,
@@ -62,7 +54,7 @@ export default function WorkspaceToolbar({
               size="sm"
               ariaPressed={allDocumentsSelected}
               onClick={onToggleSelectAll}
-              disabled={deletePending || isEnqueueingSelected}
+              disabled={deletePending}
             >
               {allDocumentsSelected ? t('workspace.deselectAll') : t('workspace.selectAll')}
             </Button>
@@ -70,35 +62,9 @@ export default function WorkspaceToolbar({
               <Button
                 variant="secondary"
                 size="sm"
-                icon={<QueueIcon size={16} />}
-                onClick={() => void onEnqueueSelected(selectedDocuments)}
-                disabled={deletePending || isEnqueueingSelected || !libraryRoot}
-              >
-                {isEnqueueingSelected
-                  ? t('workspace.enqueueingSelected')
-                  : t('workspace.enqueueSelected', { count: selectedDocuments.length })}
-              </Button>
-            )}
-            {selectedDocuments.length > 0 && (
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<FlaskIcon size={16} />}
-                onClick={() => void onPatentAnalysis(selectedDocuments)}
-                disabled={deletePending || patentPending}
-              >
-                {patentPending
-                  ? t('workspace.patentAnalyzingSelected')
-                  : t('workspace.patentAnalysisSelected', { count: selectedDocuments.length })}
-              </Button>
-            )}
-            {selectedDocuments.length > 0 && (
-              <Button
-                variant="secondary"
-                size="sm"
                 icon={<DownloadIcon size={16} />}
                 onClick={() => void handleExport(selectedDocuments.map(doc => doc.doc_id))}
-                disabled={exportPending || deletePending || patentPending || !libraryRoot}
+                disabled={exportPending || deletePending || !libraryRoot}
               >
                 {exportPending
                   ? t('workspace.activityExportPending')
@@ -111,7 +77,7 @@ export default function WorkspaceToolbar({
                 size="sm"
                 icon={<TrashIcon size={16} />}
                 onClick={() => onRequestDeleteSelected(selectedDocuments)}
-                disabled={deletePending || isEnqueueingSelected}
+                disabled={deletePending}
               >
                 {t('workspace.deleteSelected', { count: selectedDocuments.length })}
               </Button>

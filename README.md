@@ -25,13 +25,16 @@ FastAPI backend.
 - Workspace document import accepts multiple PDFs at once, rejects duplicate
   filenames, and reports partial failures; each imported document is registered
   and listed right away as 待处理 and starts processing immediately (unless
-  auto-enqueue is disabled), settling at 已提取, 就绪 or 失败; documents can be
-  selected, queued, or deleted in bulk.
+  auto-enqueue is disabled), settling at 已提取, 就绪 or 失败. Documents can be
+  selected, exported, or deleted in bulk. Pipeline execution controls (Extract,
+  Patent, cancel, retry) live in the CLI; the queue page is read-only.
 - Removed with the CLI-only cutover: the web research/chat workspace, the
-  review center's AI-assist suggestions, the provider model-list and
-  connectivity-probe settings, and the optional LLM-led Patent analysis. The
-  deterministic Patent pipeline and its facts are unchanged; the research SQL
-  tables, `review_assists` storage and the research queue hook are gone.
+  review center's automatic AI-assist suggestion generation, the provider
+  model-list and connectivity-probe settings, and the optional LLM-led Patent
+  analysis. The deterministic Patent pipeline and its facts are unchanged; the
+  research SQL tables, `review_assists` storage and the research queue hook are
+  gone. The CLI may file review proposals through `propose_review`; a human
+  still confirms or rejects every proposal.
 
 The project is a research baseline. Recognition and extracted data require
 human review; model loading can take several seconds on the first request.
@@ -140,6 +143,8 @@ edit mode. Patent facts are produced by a separate opt-in run:
 `get_run`, then read `get_patent_result`. `submit_extraction` runs Extract +
 Markdown. `search_evidence` searches extracted text across documents, and
 `recognize_molecules` runs the local recognizers on one page without persisting.
+`propose_review` files an AI review proposal for a human decision; it never
+applies the proposed value and refuses a target a human already decided.
 
 ### Agent CLI
 

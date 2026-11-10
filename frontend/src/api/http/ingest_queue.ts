@@ -211,84 +211,6 @@ export async function ingestGetLogs(
   )
 }
 
-export async function ingestCancel(libraryRoot: string, runId: string): Promise<void> {
-  return invokeWithError(
-    async () => {
-      await httpPost(`/api/v1/pipeline/queue/${runId}/cancel`, { library_root: libraryRoot })
-    },
-    ErrorCode.ApiError,
-  )
-}
-
-export async function ingestRetry(
-  libraryRoot: string,
-  runId: string,
-  resumeFromStage?: string,
-): Promise<boolean> {
-  return invokeWithError(
-    () => httpPost<{ updated: number; error?: string | null }>(`/api/v1/pipeline/queue/${runId}/retry`, {
-      library_root: libraryRoot,
-      run_ids: [runId],
-      resume_from_stage: resumeFromStage ?? null,
-    })
-      .then((response) => response.updated > 0),
-    ErrorCode.ApiError,
-  )
-}
-
-export interface IngestBulkActionResult {
-  updated: number
-  skipped: number
-}
-
-export async function ingestCancelBatch(
-  libraryRoot: string,
-  runIds: string[],
-): Promise<IngestBulkActionResult> {
-  return invokeWithError(
-    () => httpPost<IngestBulkActionResult>('/api/v1/pipeline/queue/batch/cancel', {
-      library_root: libraryRoot,
-      run_ids: runIds,
-    }),
-    ErrorCode.ApiError,
-  )
-}
-
-export async function ingestRetryBatch(
-  libraryRoot: string,
-  runIds: string[],
-): Promise<IngestBulkActionResult> {
-  return invokeWithError(
-    () => httpPost<IngestBulkActionResult>('/api/v1/pipeline/queue/batch/retry', {
-      library_root: libraryRoot,
-      run_ids: runIds,
-    }),
-    ErrorCode.ApiError,
-  )
-}
-
-/** 手动将 PDF 加入处理队列。返回 run ID。
- *
- * `force=true` 跳过同 hash 幂等检查 — 用于对已处理文件强制重新入队，
- * 新建任务而不复用现有 done 任务（保留历史记录）。
- */
-export async function ingestEnqueue(
-  libraryRoot: string,
-  filePath: string,
-  docId: string,
-  force?: boolean,
-): Promise<string> {
-  return invokeWithError(
-    () => httpPost<{ run_id?: string | null }>('/api/v1/pipeline/enqueue', {
-      library_root: libraryRoot,
-      file_path: filePath,
-      doc_id: docId,
-      force: force ?? false,
-    }).then((r) => r.run_id ?? ''),
-    ErrorCode.ApiError,
-  )
-}
-
 /** 当前会话内用户主动触发的 doc_id 集合，用于跨页 toast 去噪。 */
 const selfTriggeredDocs = new Set<string>()
 
@@ -310,33 +232,4 @@ export function isSelfTriggeredDoc(docId: string): boolean {
 
 export function removeSelfTriggeredDoc(docId: string): void {
   selfTriggeredDocs.delete(docId)
-}
-
-export async function ingestSetPriority(
-  libraryRoot: string,
-  runId: string,
-  priority: number,
-): Promise<void> {
-  return invokeWithError(
-    async () => {
-      await httpPost(`/api/v1/pipeline/queue/${runId}/priority`, {
-        library_root: libraryRoot,
-        priority,
-      })
-    },
-    ErrorCode.ApiError,
-  )
-}
-
-export async function ingestDeleteTask(
-  libraryRoot: string,
-  runId: string,
-): Promise<boolean> {
-  const resp = await invokeWithError(
-    () => httpPost<{ updated: number }>(`/api/v1/pipeline/queue/${runId}/delete`, {
-      library_root: libraryRoot,
-    }),
-    ErrorCode.ApiError,
-  )
-  return resp.updated > 0
 }

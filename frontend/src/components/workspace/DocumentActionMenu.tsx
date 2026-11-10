@@ -1,72 +1,34 @@
-/** Per-document actions: enqueue, analyze, export and delete. */
+/** Per-document actions: export activity and delete. */
 
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppContext } from '@/context/AppContext'
-import { useEnqueueTask } from '@/api/query/hooks'
-import { showToast } from '@/hooks/useToast'
-import { DownloadIcon, FlaskIcon, FolderIcon, TrashIcon } from '@/components/icons'
+import { DownloadIcon, TrashIcon } from '@/components/icons'
 import Menu, { type MenuItem } from '@/components/ui/Menu'
 import IconButton from '@/components/ui/IconButton'
 import type { DocumentInfo } from '@/api/http/library'
-import { getUserFacingError } from '@/utils/errors'
 import { useActivityExport } from './useActivityExport'
 
 export interface DocumentActionMenuProps {
   doc: DocumentInfo
   deletePending: boolean
-  patentPending: boolean
   onDelete: (doc: DocumentInfo) => void
-  onPatentAnalyze: (doc: DocumentInfo) => void
 }
 
 export default function DocumentActionMenu({
   doc,
   deletePending,
-  patentPending,
   onDelete,
-  onPatentAnalyze,
 }: DocumentActionMenuProps) {
   const { t } = useTranslation()
   const { libraryRoot } = useAppContext()
   const { exportPending, handleExport } = useActivityExport(libraryRoot)
-  const enqueueMutation = useEnqueueTask()
-  const [enqueuePending, setEnqueuePending] = useState(false)
-
-  const handleEnqueue = async () => {
-    if (!libraryRoot) return
-    setEnqueuePending(true)
-    try {
-      // Backend resolves the file path from the document registry; only doc_id is needed.
-      await enqueueMutation.mutateAsync({ libraryRoot, filePath: '', docId: doc.doc_id })
-      showToast(t('doc.enqueueSuccess', { filename: doc.file_name }), 'success')
-    } catch (e) {
-      showToast(t('doc.enqueueFailed', { error: getUserFacingError(e, t('common.unknownError')) }), 'error')
-    } finally {
-      setEnqueuePending(false)
-    }
-  }
 
   const items: MenuItem[] = [
-    {
-      key: 'enqueue',
-      label: t('doc.enqueue'),
-      icon: <FolderIcon size={16} />,
-      disabled: enqueuePending,
-      onClick: handleEnqueue,
-    },
-    {
-      key: 'patent-analysis',
-      label: t('doc.patentAnalysis'),
-      icon: <FlaskIcon size={16} />,
-      disabled: patentPending,
-      onClick: () => onPatentAnalyze(doc),
-    },
     {
       key: 'activity-export',
       label: exportPending ? t('workspace.activityExportPending') : t('doc.activityExport'),
       icon: <DownloadIcon size={16} />,
-      disabled: exportPending || deletePending || patentPending || !libraryRoot,
+      disabled: exportPending || deletePending || !libraryRoot,
       onClick: () => handleExport([doc.doc_id]),
     },
     { type: 'separator', key: 'sep-delete' },

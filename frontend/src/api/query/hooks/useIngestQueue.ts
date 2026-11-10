@@ -1,18 +1,11 @@
 /** React Query hooks for the ingest queue (pipeline tasks). */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ingestList,
   ingestStats,
   ingestWorkerStatus,
-  ingestCancel,
-  ingestCancelBatch,
-  ingestDeleteTask,
-  ingestEnqueue,
   ingestGetLogs,
-  ingestRetry,
-  ingestRetryBatch,
-  ingestSetPriority,
 } from '../../http/ingest_queue'
 import type { IngestTask } from '../../http/ingest_queue'
 import { queryKeys } from '../keys'
@@ -53,146 +46,6 @@ export function useWorkerStatus() {
     queryKey: queryKeys.ingest.workerStatus(),
     queryFn: ingestWorkerStatus,
     refetchInterval: 30_000,
-  })
-}
-
-// ── Mutations ────────────────────────────────────────────────────────
-
-/** Cancel a running / pending pipeline task. */
-export function useCancelTask() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      libraryRoot,
-      runId,
-    }: {
-      libraryRoot: string
-      runId: string
-    }) => ingestCancel(libraryRoot, runId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
-  })
-}
-
-/** Retry a failed pipeline task, optionally resuming from a specific stage. */
-export function useRetryTask() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      libraryRoot,
-      runId,
-      resumeFromStage,
-    }: {
-      libraryRoot: string
-      runId: string
-      resumeFromStage?: string
-    }) => ingestRetry(libraryRoot, runId, resumeFromStage),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
-  })
-}
-
-/** Delete a pipeline task record. */
-export function useDeleteTask() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      libraryRoot,
-      runId,
-    }: {
-      libraryRoot: string
-      runId: string
-    }) => ingestDeleteTask(libraryRoot, runId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-      // Deleting a task also discards the document's pipeline outputs and
-      // returns it to `pending`, so the workspace listing/status changes too.
-      void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
-      void qc.invalidateQueries({ queryKey: queryKeys.review.all })
-    },
-  })
-}
-
-/** Enqueue a document into the ingest queue. */
-export function useEnqueueTask() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      libraryRoot,
-      filePath,
-      docId,
-      force,
-    }: {
-      libraryRoot: string
-      filePath: string
-      docId: string
-      force?: boolean
-    }) => ingestEnqueue(libraryRoot, filePath, docId, force),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
-  })
-}
-
-/** Batch-cancel multiple pending / running tasks. */
-export function useCancelBatch() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      libraryRoot,
-      runIds,
-    }: {
-      libraryRoot: string
-      runIds: string[]
-    }) => ingestCancelBatch(libraryRoot, runIds),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
-  })
-}
-
-/** Batch-retry multiple failed tasks. */
-export function useRetryBatch() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      libraryRoot,
-      runIds,
-    }: {
-      libraryRoot: string
-      runIds: string[]
-    }) => ingestRetryBatch(libraryRoot, runIds),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
-  })
-}
-
-/** Toggle a task's priority (pin / unpin). */
-export function useSetTaskPriority() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      libraryRoot,
-      runId,
-      priority,
-    }: {
-      libraryRoot: string
-      runId: string
-      priority: number
-    }) => ingestSetPriority(libraryRoot, runId, priority),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.ingest.all })
-    },
   })
 }
 

@@ -306,19 +306,6 @@ export async function deleteDocuments(
   )
 }
 
-export interface PatentAnalysisResult {
-  success: boolean
-  enqueued: number
-  skipped: number
-}
-
-/** Queue a Patent-only analysis run for each eligible document (batch). */
-export async function runPatentAnalysis(docIds: string[]): Promise<PatentAnalysisResult> {
-  return invokeWithError(() =>
-    httpPost('/api/v1/documents/patent-analysis', { doc_ids: docIds })
-  )
-}
-
 /** Download all readings and their source evidence for the selected documents. */
 export async function exportStructureActivity(docIds: string[], libraryRoot: string): Promise<void> {
   const blob = await httpPostBlob('/api/v1/activities/export', {

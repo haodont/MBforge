@@ -11,8 +11,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from mbforge.contracts.review_proposal import ReviewProposal, ReviewProposalResult
-
 ReviewKind = Literal[
     "low_conf_molecule",
     "review_required",
@@ -109,17 +107,6 @@ class ReviewFilterDecisionRequest(BaseModel):
     action: ReviewAction
     reason: str = Field(default="", max_length=500)
     limit: int = Field(default=200, ge=1, le=500)
-
-
-class ReviewProposeRequest(BaseModel):
-    """AI proposals for evidence the assistant found unaddressed."""
-
-    library_root: str | None = None
-    items: list[ReviewProposal] = Field(..., min_length=1, max_length=50)
-
-
-class ReviewProposeResponse(BaseModel):
-    items: list[ReviewProposalResult] = Field(default_factory=list)
 
 
 class ReviewHistoryResponse(BaseModel):

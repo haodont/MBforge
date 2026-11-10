@@ -20,13 +20,10 @@ from mbforge.service.dto.review import (
     ReviewDecisionResponse,
     ReviewFilterDecisionRequest,
     ReviewHistoryResponse,
-    ReviewProposeRequest,
-    ReviewProposeResponse,
     ReviewQueueItem,
     ReviewQueueResponse,
     ReviewStatsResponse,
 )
-from mbforge.service.use_cases import review_proposals
 from mbforge.service.use_cases.review_queue import (
     clear_all_review_queue,
     decide_filtered,
@@ -110,19 +107,6 @@ async def review_clear(body: ReviewClearRequest) -> ReviewClearResponse:
     """Empty the entire review center (queue rows + their audit trail)."""
     result = await asyncio.to_thread(clear_all_review_queue, body.library_root)
     return ReviewClearResponse(**result)
-
-
-@router.post("/propose", response_model=ReviewProposeResponse)
-async def review_propose(body: ReviewProposeRequest) -> ReviewProposeResponse:
-    """Record AI proposals for unreviewed evidence.
-
-    The proposal enters the review center as ``ai_review``; it writes no value
-    itself, and a target a human already decided is refused instead of
-    overwritten.
-    """
-    root = str(resolve_library_root(body.library_root))
-    results = await asyncio.to_thread(review_proposals.propose_items, root, body.items)
-    return ReviewProposeResponse(items=results)
 
 
 @router.get("/history", response_model=ReviewHistoryResponse)

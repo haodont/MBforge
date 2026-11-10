@@ -18,6 +18,7 @@ def test_manifest_lists_read_and_write_capabilities(app_client: TestClient) -> N
         "submit_patent_analysis",
         "search_evidence",
         "recognize_molecules",
+        "propose_review",
     } <= names
     assert Path(body["token_path"]).parts[-2:] == (".mbforge", "capability-token")
 
