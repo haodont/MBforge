@@ -297,20 +297,6 @@ CREATE TABLE IF NOT EXISTS molecule_corrections (
 );
 CREATE INDEX IF NOT EXISTS idx_mc_mol ON molecule_corrections(mol_id, created_at);
 
--- AI assistance for one review item: a suggestion a human accepts or rejects.
--- Kept in its own table because review rows are rebuilt on every publication,
--- and a paid model answer must survive that.
-CREATE TABLE IF NOT EXISTS review_assists (
-    kind TEXT NOT NULL,
-    item_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    model TEXT DEFAULT '',
-    vision INTEGER NOT NULL DEFAULT 0,
-    answer TEXT DEFAULT '',
-    error TEXT DEFAULT '',
-    created_at TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (kind, item_id)
-);
 CREATE TABLE IF NOT EXISTS review_items (
     item_id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -429,23 +415,6 @@ CREATE INDEX IF NOT EXISTS idx_mat_doc ON measurement_attribution(doc_id);
 # no longer matches) stale instead of silently current. Column set is fixed by
 # P0 of docs/plan-patent-agent-harness.md; document deletion clears the row,
 # clearing the review queue does not.
-_RESEARCH_SCHEMA = """
-CREATE TABLE IF NOT EXISTS research_sessions (
-    session_id TEXT PRIMARY KEY,
-    revision INTEGER NOT NULL CHECK (revision >= 1),
-    updated_at REAL NOT NULL,
-    payload TEXT NOT NULL CHECK (json_valid(payload))
-);
-CREATE INDEX IF NOT EXISTS idx_research_updated ON research_sessions(updated_at DESC);
-CREATE TABLE IF NOT EXISTS research_task_requests (
-    request_key TEXT NOT NULL,
-    doc_id TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    session_id TEXT NOT NULL REFERENCES research_sessions(session_id) ON DELETE CASCADE,
-    PRIMARY KEY (request_key, doc_id)
-);
-"""
-
 _PATENT_ANALYSIS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS patent_analysis_state (
     doc_id TEXT PRIMARY KEY,

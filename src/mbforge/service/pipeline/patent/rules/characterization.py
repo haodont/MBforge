@@ -13,7 +13,6 @@ from typing import Any
 
 from mbforge.domain.evidence import SourceEvidence
 from mbforge.foundation.ids import stable_id
-from mbforge.service.pipeline.patent.llm_gaps import FAMILY_ISSUE_CODES
 from mbforge.service.pipeline.patent.rules.entries import (
     _MASS_SUFFIX_RE,
     _designation_keys,
@@ -22,6 +21,13 @@ from mbforge.service.pipeline.patent.sections import (
     ParsedSection as DocumentSection,
 )
 from mbforge.service.pipeline.patent.sections import example_token
+
+#: Reports about a designation's family (name, route, characterization).
+FAMILY_ISSUE_CODES: tuple[str, ...] = (
+    "characterization_attribution",
+    "compound_name_unresolved",
+    "synthesis_route_unresolved",
+)
 
 #: A route is prose that prepares something: 制得/合成/収率/synthesized/prepared.
 _ROUTE_SIGNAL_RE = re.compile(

@@ -2,7 +2,7 @@
 
 Read and write the global settings.json configuration file. GET returns the
 current config with secret values redacted; PUT performs a deep merge and
-persists the new LLM settings so the Node agent sidecar (agent/) picks them up.
+persists the new LLM settings so the pi CLI agent (agent/) picks them up.
 """
 
 from __future__ import annotations

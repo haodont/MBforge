@@ -4,8 +4,7 @@ Ensures that when the application exits:
 1. Prewarm tasks are cancelled (if any)
 2. Queue workers are stopped and their rows released
 3. Managed task pools (pipeline / sync / ocr) are drained with a timeout
-4. Backend models are unloaded, then the agent sidecar is stopped when this
-   backend started it
+4. Backend models are unloaded
 5. Process registry is unregistered
 6. Loop exception handler is restored
 
@@ -75,15 +74,6 @@ async def orchestrate_shutdown(*, timeout: float = 30.0) -> None:
 
     # Step 4: unload backend models
     _unload_backends()
-
-    # Step 4b: stop the agent sidecar, but only when this backend started it
-    from mbforge.foundation.logger import get_logger
-    from mbforge.server.agent_process import stop_agent_sidecar
-
-    if stop_agent_sidecar():
-        get_logger("mbforge.shutdown").info(
-            "Stopped the agent sidecar this backend started"
-        )
 
     # Step 5: unregister from process registry
     from mbforge.foundation.config import load_global_config

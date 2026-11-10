@@ -7,15 +7,11 @@ FastAPI backend.
 
 ## Current scope
 
-- The default UI is a research conversation with a side-by-side resource and
-  evidence workspace. Documents can be selected as chat references, source
-  citations open the existing PDF viewer, and background tasks use the existing
-  queue. Visible research history is stored in per-library SQL, with durable Pi
-  conversation files and an automatic import of legacy browser history. Explicit
-  analysis actions create idempotent task references; result cards retain their
-  original revision while showing the current published facts. The evidence
-  workspace includes assay-aware measurements, source navigation and conflict
-  decisions. Evidence-tool coverage is a read record, not semantic verification.
+- The agent surface is the pi CLI: `npm --prefix agent run cli` opens pi's
+  interactive session with MBForge's capabilities registered as tools. The same
+  capabilities are exposed over HTTP at `/api/v1/capabilities`; read-only calls
+  need no credential and mutating calls require `X-MBForge-Token`. There is no
+  web chat surface and no Node agent server.
 - PDF pipeline: Extract → Markdown → Patent. Extract is the single producer: one render drives the local layout/text/table producer and a second drives the molecule pass (MolDet + MolParser), and it mints and persists the canonical SQL `SourceEvidence` rows itself. Markdown assembles the readable document from that evidence; Patent reads it, publishes one facts artifact, and performs deterministic document-local associations. SQL is the only evidence store — there is no branch artifact. Link and Persist have been removed from the active path.
 - Molecule detection and recognition with MolDetv2-YOLO26 and MolParser-Mobile
   (E-SMILES) plus RDKit; page layout, text and table-structure recognition run
@@ -31,6 +27,11 @@ FastAPI backend.
   and listed right away as 待处理 and starts processing immediately (unless
   auto-enqueue is disabled), settling at 已提取, 就绪 or 失败; documents can be
   selected, queued, or deleted in bulk.
+- Removed with the CLI-only cutover: the web research/chat workspace, the
+  review center's AI-assist suggestions, the provider model-list and
+  connectivity-probe settings, and the optional LLM-led Patent analysis. The
+  deterministic Patent pipeline and its facts are unchanged; the research SQL
+  tables, `review_assists` storage and the research queue hook are gone.
 
 The project is a research baseline. Recognition and extracted data require
 human review; model loading can take several seconds on the first request.
@@ -85,33 +86,23 @@ uv sync
 npm --prefix frontend install
 npm --prefix agent install
 
-# Development mode (backend reload + Vite HMR + frontend Pi Agent)
+# Development mode (backend reload + Vite HMR)
 npm --prefix frontend run dev:all
+
+# Agent CLI (separate terminal, backend must be running)
+npm --prefix agent run cli
 ```
 
 Open <http://127.0.0.1:5173>. `dev:all` starts the backend with source reload,
 starts Vite with HMR, waits in one terminal, and stops the paired process if
-either service exits with an error. Its default backend and frontend ports are
-`18792`, `5173`, and `18800`; all fail clearly if already in use. The LLM
-runtime is the separate Node process under `agent/`; Python only exposes the
-FastAPI tool endpoints it needs.
+either service exits with an error. Its default ports are `18792` (backend) and
+`5173` (frontend); both fail clearly if already in use. `dev:all` does not start
+the agent: the pi CLI is a separate foreground process under `agent/`, and
+quitting it leaves the dev stack running.
 
-The sidecar uses Pi `@earendil-works/pi-coding-agent@1.5.0` (the previous
-`@mariozechner` packages are deprecated). Research chat searches extracted SQL
-evidence across documents with `search_library`, then reads source evidence and
-accepted activities. When local information is insufficient, optional Tavily
-tools search the public web and fetch relevant pages through the official
-[`@tavily/pi-extension@0.1.2`](https://www.npmjs.com/package/@tavily/pi-extension).
-Enable **Settings → AI models → LLM → Web research**, enter a Tavily API key,
-and save; it applies to the next message. Web research is disabled by default.
-Search keywords and selected URLs are sent to Tavily and consume its credits.
-Each user turn allows up to four searches and three fetch calls (three URLs per
-fetch). Patent extraction continues to use only its document's evidence.
-
-`npm --prefix frontend run dev` starts Vite only. Run `dev:all` for a complete
-local stack, or start the backend and Node agent separately; Vite does not own
-or stop the agent process. Chat requests use the same-origin `/agent-api` proxy
-when Vite is running.
+`npm --prefix frontend run dev` starts Vite only. Run `dev:all` for backend plus
+Vite, or start the backend separately; Vite does not own or stop it. HTTP calls
+use the same-origin `/api` proxy when Vite is running.
 
 To use isolated ports (for example, a second worktree), set all values before
 starting. The launcher passes the backend address to the Vite proxy, direct
@@ -159,9 +150,9 @@ on port 18792.
 
 The CLI is a pi extension (`agent/src/extension.ts`), not a custom REPL:
 built-in coding tools are disabled with `--no-builtin-tools`, while pi's
-provider login, model switching, sessions, and themes remain available. The
-web research workspace keeps using the Node sidecar under `agent/`; the CLI and
-the sidecar share the same `settings.json` and capability API.
+provider login, model switching, sessions, and themes remain available. It is
+the only agent surface: the backend serves the capability API and never starts
+an agent process, and there is no HTTP agent server to configure.
 
 ## Verification
 

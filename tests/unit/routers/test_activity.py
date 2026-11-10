@@ -275,7 +275,6 @@ def test_readings_filter_by_value_and_say_why_they_have_no_structure(
     app_client: TestClient, tmp_library: Path
 ) -> None:
     """A dataset question filters by metric/value; each row explains its gap."""
-    from mbforge.service.use_cases.agent_queries import activity_stats
 
     replace_document_measurements(
         tmp_library,
@@ -322,7 +321,12 @@ def test_readings_filter_by_value_and_say_why_they_have_no_structure(
     assert [row["value"] for row in rows] == [12.0]
     # Nothing is bound, and the document drew nothing: that is a source fact.
     assert rows[0]["reasons"] == ["document_has_no_detections"]
-    assert activity_stats(str(tmp_library), doc_id="doc-1")["total"] == 2
+    stats = app_client.get(
+        "/api/v1/activities/documents/doc-1/stats",
+        params={"library_root": str(tmp_library)},
+    )
+    assert stats.status_code == 200
+    assert stats.json()["total"] == 2
 
 
 def test_an_unread_label_is_reported_as_recoverable_not_as_undrawn(

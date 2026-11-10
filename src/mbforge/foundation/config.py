@@ -2,8 +2,8 @@
 
 Loads, validates, and persists application settings from
 ``<GLOBAL_APP_DIR>/settings.json``. Python-owned runtime configuration flows
-through ``AppConfig``; the ``llm`` section is opaque JSON owned by the Node
-agent sidecar. Direct ``os.environ`` reads are limited to pure runtime toggles
+through ``AppConfig``; the ``llm`` section is opaque JSON owned by the pi CLI
+agent. Direct ``os.environ`` reads are limited to pure runtime toggles
 such as ``MBFORGE_FORCE_CPU``.
 """
 
@@ -172,82 +172,13 @@ class ProcessConfig(BaseModel):
     heartbeat_interval: float = 30.0
 
 
-class PatentAnalysisConfig(BaseModel):
-    """Evidence-constrained Patent analysis (LLM-led, deterministic fallback).
-
-    Disabled until the acceptance set passes; the budget values are engineering
-    limits, not scientific thresholds.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    enabled: bool = False
-    max_model_turns: int = Field(default=24, ge=1, le=200)
-    #: Per-run wall clock. Measured: a slow provider can spend ~2 minutes on a
-    #: single turn, so a multi-gap run needs room to finish rather than being
-    #: cut off mid-worklist (the earlier 600s default truncated two live runs).
-    wall_clock_seconds: int = Field(default=2400, ge=5, le=7200)
-    max_total_tokens: int = Field(default=80_000, ge=1000)
-    digest_char_budget: int = Field(default=60_000, ge=1000)
-    #: Per provider request timeout. The chat timeout (``llm.request_timeout``)
-    #: is tuned for short exchanges; a patent turn may stream a large
-    #: submission, so it gets its own budget instead of inheriting that one.
-    request_timeout_seconds: int = Field(default=600, ge=10, le=7200)
-    #: Patent analyses run one at a time; this is a provider limit, not the
-    #: ingest queue's concurrency.
-    max_concurrency: int = Field(default=1, ge=1, le=4)
-
-
-class WebSearchConfig(BaseModel):
-    """Opt-in Tavily research tools; provider calls belong to the Node sidecar."""
-
-    model_config = ConfigDict(extra="ignore")
-    enabled: bool = False
-    api_key: str = Field(default="", max_length=4096)
-
-
-class ReviewAssistConfig(BaseModel):
-    """AI assistance for the review center: suggestions only, never decisions.
-
-    A review item is exactly the place the rules refused to decide, so the model
-    gets the printed text and the original images and answers with a suggestion.
-    It can choose among the candidates it is shown and nothing else: it never
-    writes a structure, a value or a status.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    enabled: bool = False
-    #: Pull assistance for pending items when the queue is listed (bounded,
-    #: single-flight, and only for items without a stored suggestion yet).
-    auto: bool = False
-    #: One model call per item, so this is also the per-request model budget.
-    max_items: int = Field(default=2, ge=1, le=10)
-    #: Send the original images. The chat model may itself be multimodal
-    #: (LongCat accepts text+image); a dedicated ``vlm`` entry is optional and,
-    #: when present, the sidecar prefers it. A provider that refuses images is
-    #: retried text-only and the answer is recorded with ``vision = false``.
-    images: bool = True
-    #: Crop plus page render. Zero sends text only.
-    max_images: int = Field(default=2, ge=0, le=4)
-    image_max_px: int = Field(default=1100, ge=320, le=2000)
-    image_dpi: int = Field(default=150, ge=72, le=300)
-    #: Bounded base64 payload per image; a larger one is downscaled or dropped.
-    image_max_bytes: int = Field(default=1_200_000, ge=100_000, le=4_000_000)
-    text_char_budget: int = Field(default=6000, ge=500, le=20000)
-    timeout_seconds: float = Field(default=120.0, ge=5, le=600)
-    #: Structures the model may choose from; never a free-form answer.
-    max_candidates: int = Field(default=8, ge=1, le=24)
-
-
 class AppConfig(BaseModel):
     """全局应用配置 — 唯一 schema."""
 
     model_config = ConfigDict(extra="ignore")
 
-    # Opaque settings consumed and validated by the Node agent sidecar.
+    # Opaque settings consumed and validated by the Node agent CLI.
     llm: dict[str, Any] = Field(default_factory=dict)
-    web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     model_cache_dir: str = ""
     theme: str = "dark"
     language: str = "zh"
@@ -261,8 +192,6 @@ class AppConfig(BaseModel):
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     process: ProcessConfig = Field(default_factory=ProcessConfig)
-    patent_analysis: PatentAnalysisConfig = Field(default_factory=PatentAnalysisConfig)
-    review: ReviewAssistConfig = Field(default_factory=ReviewAssistConfig)
 
 
 # 历史文件名（用于一次性迁移）

@@ -1,16 +1,15 @@
-/** Readiness diagnostics tab — subsystem health cards, LLM probe, demo run.
+/** Readiness diagnostics tab — subsystem health cards and demo run.
  * Used by Settings > Diagnostics tab. */
 
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  type ProbeLlmResult,
   type ReadinessModel,
   type ReadinessSummary,
 } from '@/api/http/readiness'
 import { getUserFacingError } from '@/utils/errors'
 import { useReadinessSummary } from '@/api/query/hooks/useReadiness'
-import { useReadinessProbeLlm, useReadinessDemoRun } from '@/api/query/hooks/useReadinessActions'
+import { useReadinessDemoRun } from '@/api/query/hooks/useReadinessActions'
 import { useIngestQueue } from '@/api/query/hooks/useIngestQueue'
 import Button from '@/components/ui/Button'
 import Caption from '@/components/ui/Caption'
@@ -61,12 +60,9 @@ export default function ReadinessTab({ libraryRoot }: Props) {
     refetch: refresh,
   } = useReadinessSummary()
   const loadError = summaryError ? getUserFacingError(summaryError) : null
-  const [probing, setProbing] = useState(false)
-  const [probe, setProbe] = useState<ProbeLlmResult | null>(null)
   const [demo, setDemo] = useState<DemoState>({ running: false, tone: 'idle', message: null })
   const [demoRunId, setDemoRunId] = useState<string | null>(null)
 
-  const probeLlm = useReadinessProbeLlm()
   const demoRun = useReadinessDemoRun()
   // The demo task poller reads the shared ingest-queue query instead of
   // fetching `ingestList` itself, so only one client hits the endpoint.
@@ -107,20 +103,6 @@ export default function ReadinessTab({ libraryRoot }: Props) {
       message: t('settings.readiness.demoProgress', { stage: task.stage }),
     })
   }, [demoRunId, ingestTasks, t])
-
-  const handleProbe = async () => {
-    setProbing(true)
-    try {
-      if (mounted.current) setProbe(await probeLlm.mutateAsync())
-    } catch (e) {
-      if (import.meta.env.DEV) console.warn('[ReadinessTab] LLM probe failed:', e)
-      if (mounted.current) {
-        setProbe({ ok: false, latency_ms: null, error: getUserFacingError(e), provider: '', model: '' })
-      }
-    } finally {
-      if (mounted.current) setProbing(false)
-    }
-  }
 
   const handleDemoRun = async () => {
     setDemo({ running: true, tone: 'idle', message: t('settings.readiness.demoStarting') })
@@ -178,9 +160,6 @@ export default function ReadinessTab({ libraryRoot }: Props) {
         <Button variant="secondary" size="sm" onClick={() => void refresh()} loading={loading}>
           {t('settings.readiness.refresh')}
         </Button>
-        <Button variant="secondary" size="sm" onClick={() => void handleProbe()} loading={probing}>
-          {t('settings.readiness.probeLlm')}
-        </Button>
         <Button
           variant="secondary"
           size="sm"
@@ -191,13 +170,6 @@ export default function ReadinessTab({ libraryRoot }: Props) {
         </Button>
       </div>
 
-      {probe && (
-        <Caption style={{ color: probe.ok ? 'var(--success)' : 'var(--danger)' }}>
-          {probe.ok
-            ? t('settings.readiness.probeOk', { latency: probe.latency_ms ?? '—' })
-            : t('settings.readiness.probeFailed', { error: probe.error ?? 'unknown' })}
-        </Caption>
-      )}
       {demo.message && (
         <Caption
           style={{

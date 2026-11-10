@@ -371,14 +371,6 @@ def queue_page(
             )
         ):
             item["payload"] = {**payload, "revision": state["revision"]}
-    # A stored AI suggestion travels with its item; a poll may also pull one
-    # for the oldest unassisted items (bounded and single-flight inside).
-    from mbforge.foundation.layout import resolve_library_root
-    from mbforge.service.use_cases import review_assist
-
-    root = str(resolve_library_root(library_root))
-    review_assist.attach_suggestions(root, items)
-    review_assist.schedule_auto_assist(root)
     return ReviewQueueResponse(
         items=[ReviewQueueItem(**item) for item in items],
         total=total,

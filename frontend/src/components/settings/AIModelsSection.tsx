@@ -14,7 +14,6 @@ interface TabConfig {
   key: Tab
   titleKey: string
   descKey?: string
-  showTest?: boolean
 }
 
 interface Props {
@@ -23,7 +22,7 @@ interface Props {
 }
 
 const TABS: TabConfig[] = [
-  { key: 'llm', titleKey: 'settings.tabLlm', descKey: 'settings.tabLlmDesc', showTest: true },
+  { key: 'llm', titleKey: 'settings.tabLlm', descKey: 'settings.tabLlmDesc' },
   { key: 'vlm', titleKey: 'settings.tabVlm', descKey: 'settings.tabVlmDesc' },
   { key: 'ocr', titleKey: 'settings.tabOcr', descKey: 'settings.tabOcrDesc' },
 ]
@@ -48,7 +47,7 @@ export default function AIModelsSection({ settings, setSettings }: Props) {
         variant="segment"
         size="sm"
       />
-      {TABS.map(({ key, titleKey, descKey, showTest }) => (
+      {TABS.map(({ key, titleKey, descKey }) => (
         <TabPanel key={key} activeKey={tab} tabKey={key} tabsId="ai-models-tabs">
           <ModelConfigCard
             modelType={key}
@@ -56,7 +55,6 @@ export default function AIModelsSection({ settings, setSettings }: Props) {
             description={descKey ? t(descKey) : undefined}
             settings={settings}
             setSettings={setSettings}
-            showTest={showTest}
           />
         </TabPanel>
       ))}

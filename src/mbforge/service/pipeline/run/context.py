@@ -52,9 +52,8 @@ class PipelineContext:
     task_id: str | None = None
 
     # ---- Stage-facing progress (installed by the runner) ----
-    # Long stages (the LLM-led Patent analysis) report phase/turn/tool lines
-    # here; the runner routes them into the event sink, so a stage never
-    # imports the sink or the database.
+    # Long stages report phase/turn/tool lines here; the runner routes them
+    # into the event sink, so a stage never imports the sink or the database.
     progress: Callable[[str, dict[str, Any]], None] | None = field(
         default=None, repr=False
     )

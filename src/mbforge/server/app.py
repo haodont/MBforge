@@ -6,7 +6,6 @@ Replaces the Tauri/Rust shell with a standard web application.
 
 # Tests:
 #   tests/conftest.py
-#   tests/unit/routers/test_agent.py
 #   tests/unit/routers/test_markush_routers.py
 #   tests/unit/routers/test_pipeline.py
 #   tests/unit/test_app.py
@@ -321,15 +320,9 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     # implementations.  Application code consumes the repository port and
     # never constructs DatabaseManager itself.
     from mbforge.db.sqlite.repositories import create_repositories
-    from mbforge.server.patent_analysis import (
-        create_patent_analysis_runtime,
-        create_patent_task_registry,
-    )
     from mbforge.server.runtime_provider import create_runtime_provider
     from mbforge.service.pipeline.runtime import create_pipeline_runtime
     from mbforge.service.ports import (
-        configure_patent_analysis_runtime,
-        configure_patent_task_registry,
         configure_pipeline_runtime,
         configure_repository_factory,
         configure_runtime_provider,
@@ -338,16 +331,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     configure_repository_factory(create_repositories)
     configure_runtime_provider(create_runtime_provider())
     configure_pipeline_runtime(create_pipeline_runtime())
-    configure_patent_task_registry(create_patent_task_registry())
-    configure_patent_analysis_runtime(create_patent_analysis_runtime())
-    from mbforge.server.research import InMemoryResearchRegistry, SidecarResearchRuntime
-    from mbforge.service.ports.research import configure_research_runtime
-
-    configure_research_runtime(SidecarResearchRuntime(), InMemoryResearchRegistry())
-    from mbforge.server.review_assist import create_review_assist_runtime
-    from mbforge.service.ports.review_assist import configure_review_assist_runtime
-
-    configure_review_assist_runtime(create_review_assist_runtime())
     configure_uvicorn_access_logging()
     app = FastAPI(
         title="MBForge",
@@ -374,14 +357,7 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.middleware("http")(_request_path_middleware)
 
     # Register all routers
-    from mbforge.api.http import (
-        agent,
-        capabilities,
-        markush,
-        patent_analysis,
-        research,
-        review,
-    )
+    from mbforge.api.http import capabilities, markush, review
     from mbforge.api.http.documents import (
         activity,
         documents,
@@ -435,13 +411,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
     app.include_router(
         capabilities.router, prefix="/api/v1/capabilities", tags=["capabilities"]
-    )
-    app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent-tools"])
-    app.include_router(research.router, prefix="/api/v1/research", tags=["research"])
-    app.include_router(
-        patent_analysis.router,
-        prefix="/api/v1/patent-analysis",
-        tags=["patent-analysis"],
     )
     app.include_router(
         diagnostics.router, prefix="/api/v1/diagnostics", tags=["diagnostics"]

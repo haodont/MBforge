@@ -5,7 +5,7 @@ degrades independently: a single failing subsystem never affects the other
 sections of the summary. The HTTP router only maps these functions to
 endpoints (including the legacy /diagnostics compatibility surface).
 
-The Node agent sidecar owns LLM readiness and provider calls; this summary
+The pi CLI agent owns LLM readiness and provider calls; this summary
 reports only Python backend subsystems.
 """
 

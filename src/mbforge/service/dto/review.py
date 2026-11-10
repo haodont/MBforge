@@ -95,34 +95,6 @@ class ReviewClearResponse(BaseModel):
     deleted_candidates: int = 0
 
 
-class ReviewAssistItemRequest(BaseModel):
-    kind: str
-    id: str
-
-
-class ReviewAssistRequest(BaseModel):
-    library_root: str | None = None
-    #: Empty means "the oldest pending items without a suggestion".
-    items: list[ReviewAssistItemRequest] = Field(default_factory=list, max_length=20)
-    limit: int | None = Field(default=None, ge=1, le=10)
-    force: bool = False
-
-
-class ReviewAssistResult(BaseModel):
-    kind: str
-    item_id: str
-    status: str = "error"
-    model: str = ""
-    vision: bool = False
-    answer: str = ""
-    error: str = ""
-    created_at: str | None = None
-
-
-class ReviewAssistResponse(BaseModel):
-    items: list[ReviewAssistResult] = Field(default_factory=list)
-
-
 class ReviewFilterDecisionRequest(BaseModel):
     """Batch decision over the pending queue, filtered server-side.
 

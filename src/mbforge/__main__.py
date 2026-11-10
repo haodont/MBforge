@@ -203,7 +203,7 @@ def _pid_alive_simple(pid: int) -> bool:
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Start the MBForge web application or run a diagnostic command."""
-    from mbforge.foundation.paths import DEFAULT_SIDECAR_PORT
+    from mbforge.foundation.paths import DEFAULT_BACKEND_PORT
 
     parser = argparse.ArgumentParser(description="Start the MBForge web application.")
     subparsers = parser.add_subparsers(dest="command")
@@ -226,7 +226,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     doctor_parser.add_argument(
         "--port",
         type=int,
-        default=os.environ.get("MBFORGE_PORT", DEFAULT_SIDECAR_PORT),
+        default=os.environ.get("MBFORGE_PORT", DEFAULT_BACKEND_PORT),
         help="port to check for listeners",
     )
 
@@ -235,7 +235,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--port",
         type=int,
-        default=os.environ.get("MBFORGE_PORT", DEFAULT_SIDECAR_PORT),
+        default=os.environ.get("MBFORGE_PORT", DEFAULT_BACKEND_PORT),
     )
     parser.add_argument(
         "--dev", action="store_true", help="enable developer browser auto-open"

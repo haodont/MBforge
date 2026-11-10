@@ -71,13 +71,6 @@ def test_source_evidence_queries_resolve_text_and_bbox_intersection(
     assert [
         item.evidence_id for item in find_text(tmp_path, "doc-query", "IC50  10 nM")
     ] == [text.evidence_id]
-    from mbforge.service.use_cases.agent_queries import query_evidence
-
-    assert query_evidence(str(tmp_path), doc_id="doc-query", text="IC50", page=2) == []
-    assert (
-        query_evidence(str(tmp_path), doc_id="doc-query", text="IC50", kind="figcx")
-        == []
-    )
 
     # A bbox-less intersection probe is a caller error, not an empty result.
     with pytest.raises(ValueError, match="bbox"):

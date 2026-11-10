@@ -1,7 +1,6 @@
-/** Readiness diagnostics — subsystem health summary, LLM probe, demo run. */
+/** Readiness diagnostics — subsystem health summary and demo run. */
 
 import { httpGet, httpPost, invokeWithError } from './_utils'
-import { agentPost } from './agent'
 import { ErrorCode } from '@/utils/errors'
 
 export interface ReadinessLibrary {
@@ -59,14 +58,6 @@ export interface ReadinessSummary {
   model_gate: ReadinessModelGate
 }
 
-export interface ProbeLlmResult {
-  ok: boolean
-  latency_ms: number | null
-  error: string | null
-  provider: string
-  model: string
-}
-
 export interface DemoRunResult {
   ok: boolean
   run_id: string | null
@@ -78,19 +69,6 @@ export interface DemoRunResult {
 export async function readinessSummary(): Promise<ReadinessSummary> {
   return invokeWithError(
     () => httpGet<ReadinessSummary>('/api/v1/diagnostics/summary'),
-    ErrorCode.ApiError,
-  )
-}
-
-/**
- * Probe the configured LLM endpoint and measure latency.
- *
- * Goes to the agent sidecar, which owns provider calls. The Python settings
- * API persists configuration but does not probe the provider.
- */
-export async function readinessProbeLlm(): Promise<ProbeLlmResult> {
-  return invokeWithError(
-    () => agentPost<ProbeLlmResult>('/v1/probe', {}),
     ErrorCode.ApiError,
   )
 }

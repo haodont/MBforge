@@ -4,7 +4,7 @@ Wraps the local MolParser backend to accept base64-encoded molecule images
 and return predicted Layer-1 SMILES + Layer-2 E-SMILES.
 ``POST /recognize`` additionally preprocesses the crop and reads compound
 identifiers (``coref``) off the offcut fragments with local RapidOCR.
-Loaded on first request; the model status is surfaced through the sidecar
+Loaded on first request; the model status is surfaced through the model
 health endpoints.
 """
 

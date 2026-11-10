@@ -1,7 +1,6 @@
 /**
  * Covers the `App` shell bootstrap (`@/App`): the library-status gate between
- * the Welcome screen and the AppShell, and that switching resources keeps the
- * research conversation mounted with its draft intact.
+ * the Welcome screen and the AppShell, and the sidebar resource navigation.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
@@ -71,13 +70,12 @@ describe('App', () => {
     })
 
     renderApp()
-    expect(await screen.findByRole('button', { name: 'nav.workspace' })).toBeInTheDocument()
-    // Resource navigation must not unmount the research conversation/draft.
-    const input = await screen.findByRole('textbox', { name: 'research.placeholder' })
-    fireEvent.change(input, { target: { value: 'Investigate MRGPRX2' } })
-    fireEvent.click(screen.getByRole('button', { name: 'nav.workspace' }))
-    await screen.findByRole('button', { name: 'research.returnChat' })
-    expect(input).toBeInTheDocument()
-    expect(input).toHaveValue('Investigate MRGPRX2')
+    const workspaceNav = await screen.findByRole('button', { name: 'nav.workspace' })
+    expect(workspaceNav).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'nav.molecules' }))
+    expect(await screen.findByRole('button', { name: 'nav.molecules' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
   })
 })

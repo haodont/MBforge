@@ -7,9 +7,8 @@ import {
   getLlmEnvConfig,
   getSettings,
   saveSettings,
-  testLlmConnection,
 } from '../../http/settings'
-import type { BuildInfo, LlmProbeOverride } from '../../http/settings'
+import type { BuildInfo } from '../../http/settings'
 import { queryKeys } from '../keys'
 
 /** Load the backend settings snapshot (used to seed the Settings form). */
@@ -43,22 +42,6 @@ export function useLlmEnvConfig(enabled = true) {
     queryKey: queryKeys.settings.llmEnv(),
     queryFn: getLlmEnvConfig,
     enabled,
-  })
-}
-
-/**
- * Probe the configured (or supplied, unsaved) LLM endpoint through the
- * sidecar. The probe result is written into the env-config cache so the
- * status badge reflects it without a second round-trip.
- */
-export function useTestLlmConnection() {
-  const qc = useQueryClient()
-
-  return useMutation({
-    mutationFn: (override: LlmProbeOverride) => testLlmConnection(override),
-    onSuccess: (data) => {
-      qc.setQueryData(queryKeys.settings.llmEnv(), data)
-    },
   })
 }
 

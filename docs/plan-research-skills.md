@@ -1,5 +1,7 @@
 # MBForge 文献与专利检索 Skills 接入建议
 
+> **Status (2026-11-10): removed — the research workspace and its skills are gone.** The web research/chat workspace, the Node agent sidecar, the Tavily `web_search` / `web_fetch` tools and the product-scoped `literature-search` / `patent-search` skills under `agent/skills/` were deleted with the CLI-only cutover. `agent/skills/` and `agent/schemas/` no longer exist, `@tavily/pi-extension` is no longer a dependency, and `agent/` is a pi CLI extension (`agent/src/extension.ts` + `agent/src/capabilities.ts`) whose only tools come from `/api/v1/capabilities`. This document is a historical design record; nothing below describes a current feature.
+
 核查日期：2026-10-14。范围：候选发现、源码文档审查和项目接入设计。设计阶段未安装第三方 skill、执行上游脚本或修改凭据；S1 实施状态见文末记录。
 
 ## 1. 结论

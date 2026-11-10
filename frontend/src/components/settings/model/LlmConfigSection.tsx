@@ -1,18 +1,11 @@
-import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import Caption from '@/components/ui/Caption'
-import Button from '@/components/ui/Button'
 import SettingSection, { SettingGroup, SettingItem } from '@/components/ui/SettingSection'
-import { useLlmModels } from '@/api/query/hooks'
-import { getUserFacingError } from '@/utils/errors'
-import { NumberField, ProviderField, SelectField, ToggleField } from '../SettingRow'
-import ApiKeyInput from '../ApiKeyInput'
+import { NumberField, ProviderField, SelectField } from '../SettingRow'
 import { ModelSelector } from '../ModelComponents'
 import {
   LLM_MODELS,
   getProviderMeta,
   providerOptions,
-  type ModelOption,
 } from '../modelConfigs'
 import type { SettingsState } from '../types'
 
@@ -30,56 +23,8 @@ export default function LlmConfigSection({
   dirtyFields,
 }: Props) {
   const { t } = useTranslation()
-  const fetchModels = useLlmModels()
   const update = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {
     setSettings(s => ({ ...s, [key]: value }))
-  }
-
-  // Models fetched live from the provider (see fetchLlmModels). They are
-  // merged ahead of the preset suggestions so the dropdown reflects the real
-  // catalog, while presets remain as a fallback when the probe is unavailable.
-  const [fetchedModels, setFetchedModels] = useState<ModelOption[]>([])
-  const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
-  const [fetchError, setFetchError] = useState<string | null>(null)
-
-  const modelOptions = useMemo(() => {
-    const presets = LLM_MODELS[settings.llm_provider] ?? []
-    const seen = new Set<string>()
-    const merged: ModelOption[] = []
-    for (const m of [...fetchedModels, ...presets]) {
-      if (seen.has(m.value)) continue
-      seen.add(m.value)
-      merged.push(m)
-    }
-    return merged
-  }, [fetchedModels, settings.llm_provider])
-
-  const resetFetchedModels = () => {
-    setFetchedModels([])
-    setFetchState('idle')
-    setFetchError(null)
-  }
-
-  const runFetchModels = async () => {
-    setFetchState('loading')
-    setFetchError(null)
-    try {
-      const res = await fetchModels.mutateAsync({
-        provider: settings.llm_provider,
-        base_url: settings.llm_base_url,
-        api_key: settings.llm_api_key,
-      })
-      if (!res.success) {
-        setFetchError(res.error ?? t('settings.fetchModelsFailed'))
-        setFetchState('error')
-        return
-      }
-      setFetchedModels((res.models ?? []).map(m => ({ value: m.value, label: m.label })))
-      setFetchState('done')
-    } catch (e) {
-      setFetchError(getUserFacingError(e, t('settings.fetchModelsFailed')))
-      setFetchState('error')
-    }
   }
 
   return (
@@ -92,9 +37,6 @@ export default function LlmConfigSection({
           onProviderChange={v => {
             markDirty('llm_provider')
             update('llm_provider', v)
-            // A different provider has a different model catalog — drop stale
-            // fetched suggestions instead of mixing lists from two providers.
-            resetFetchedModels()
           }}
           baseUrl={settings.llm_base_url}
           onBaseUrlChange={v => { markDirty('llm_base_url'); update('llm_base_url', v) }}
@@ -110,50 +52,12 @@ export default function LlmConfigSection({
           apiKeyDirty={dirtyFields.llm_api_key}
         />
         <SettingItem title={t('settings.llmModel')} layout="stacked" dirty={dirtyFields.llm_model}>
-          <div className="settings-model-fetch">
-            <ModelSelector
-              provider={settings.llm_provider}
-              modelValue={settings.llm_model}
-              models={{ [settings.llm_provider]: modelOptions }}
-              onChange={v => { markDirty('llm_model'); update('llm_model', v) }}
-            />
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void runFetchModels()}
-              loading={fetchState === 'loading'}
-              disabled={fetchState === 'loading'}
-              title={t('settings.fetchModelsDesc')}
-              ariaLabel={t('settings.fetchModelsDesc')}
-            >
-              {fetchState === 'loading' ? t('settings.fetchModelsLoading') : t('settings.fetchModels')}
-            </Button>
-          </div>
-          {fetchState === 'error' && fetchError && (
-            <Caption color="var(--danger)" style={{ marginTop: 'var(--space-1)', display: 'block' }}>
-              {t('settings.fetchModelsError', { message: fetchError })}
-            </Caption>
-          )}
-          {fetchState === 'done' && fetchedModels.length === 0 && (
-            <Caption style={{ marginTop: 'var(--space-1)', display: 'block' }}>
-              {t('settings.fetchModelsEmpty')}
-            </Caption>
-          )}
-          {fetchState === 'done' && fetchedModels.length > 0 && (
-            <Caption style={{ marginTop: 'var(--space-1)', display: 'block' }}>
-              {t('settings.fetchModelsSuccess', { total: fetchedModels.length })}
-            </Caption>
-          )}
-        </SettingItem>
-      </SettingGroup>
-
-      <SettingGroup title={t('settings.webSearch')}>
-        <ToggleField label={t('settings.webSearchEnabled')} description={t('settings.webSearchDesc')}
-          value={settings.web_search_enabled} dirty={dirtyFields.web_search_enabled}
-          onChange={v => { markDirty('web_search_enabled'); update('web_search_enabled', v) }} />
-        <SettingItem title={t('settings.tavilyApiKey')} description={t('settings.tavilyApiKeyDesc')} layout="stacked" dirty={dirtyFields.web_search_api_key}>
-          <ApiKeyInput value={settings.web_search_api_key} placeholder="tvly-..." ariaLabel={t('settings.tavilyApiKey')}
-            onChange={v => { markDirty('web_search_api_key'); update('web_search_api_key', v) }} />
+          <ModelSelector
+            provider={settings.llm_provider}
+            modelValue={settings.llm_model}
+            models={{ [settings.llm_provider]: LLM_MODELS[settings.llm_provider] ?? [] }}
+            onChange={v => { markDirty('llm_model'); update('llm_model', v) }}
+          />
         </SettingItem>
       </SettingGroup>
 

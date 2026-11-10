@@ -24,8 +24,6 @@ export interface SettingsState {
   llm_request_timeout: number
   /** Advanced: language passed to provider (default 'en'). */
   llm_language: string
-  web_search_enabled: boolean
-  web_search_api_key: string
 
   // —— VLM ——
   vlm_provider: string
@@ -94,8 +92,6 @@ export const DEFAULT_SETTINGS: SettingsState = {
   llm_top_p: 1.0,
   llm_request_timeout: 60,
   llm_language: 'en',
-  web_search_enabled: false,
-  web_search_api_key: '',
 
   vlm_provider: 'none',
   vlm_base_url: '',
@@ -170,8 +166,6 @@ export function flattenSettings(raw: AppSettings | null | undefined): SettingsSt
     llm_top_p: typeof llm.top_p === 'number' ? llm.top_p : DEFAULT_SETTINGS.llm_top_p,
     llm_request_timeout: llm.request_timeout || DEFAULT_SETTINGS.llm_request_timeout,
     llm_language: llm.language || DEFAULT_SETTINGS.llm_language,
-    web_search_enabled: s.web_search?.enabled === true,
-    web_search_api_key: s.web_search?.api_key ?? '',
 
     vlm_provider: vlm.provider || DEFAULT_SETTINGS.vlm_provider,
     vlm_base_url: vlm.base_url || DEFAULT_SETTINGS.vlm_base_url,
@@ -242,7 +236,6 @@ export function toBackendPayload(s: SettingsState): Record<string, unknown> {
   return {
     theme: s.theme,
     language: s.language,
-    web_search: { enabled: s.web_search_enabled, api_key: s.web_search_api_key },
     llm: {
       provider: s.llm_provider,
       base_url: s.llm_base_url,

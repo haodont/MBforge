@@ -65,14 +65,6 @@ def _connect_readonly(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA query_only=ON")
-    # Research messages are private context, not searchable library evidence.
-    conn.set_authorizer(
-        lambda action, table, _column, _database, _source: (
-            sqlite3.SQLITE_DENY
-            if action == sqlite3.SQLITE_READ and (table or "").startswith("research_")
-            else sqlite3.SQLITE_OK
-        )
-    )
     return conn
 
 
@@ -93,9 +85,7 @@ def introspect_schema(db_path: str | Path) -> list[dict[str, Any]]:
         ).fetchall()
         for row in tables:
             name = row["name"]
-            if name.startswith("research_") or name.endswith(
-                ("_data", "_idx", "_content", "_docsize", "_config")
-            ):
+            if name.endswith(("_data", "_idx", "_content", "_docsize", "_config")):
                 continue
             columns = conn.execute(
                 "SELECT name, type FROM pragma_table_info(?)", (name,)

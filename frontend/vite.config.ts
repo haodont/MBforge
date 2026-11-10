@@ -36,13 +36,6 @@ export default defineConfig(({ mode }) => {
     5173,
     'MBFORGE_FRONTEND_PORT',
   )
-  const agentHost = environment.MBFORGE_AGENT_HOST ?? '127.0.0.1'
-  const agentPort = readPort(
-    environment.MBFORGE_AGENT_PORT ?? '18800',
-    18800,
-    'MBFORGE_AGENT_PORT',
-  )
-
   return {
     plugins: [
     react(),
@@ -118,14 +111,6 @@ export default defineConfig(({ mode }) => {
       '/api': {
         target: `http://${backendHost}:${backendPort}`,
         changeOrigin: true,
-      },
-      // Same-origin path to the LLM agent service (port 18800). The
-      // frontend's `agent.ts` calls `/agent-api/...` in dev.
-      '/agent-api': {
-        target: `http://${agentHost}:${agentPort}`,
-        changeOrigin: true,
-        // /agent-api/v1/chat -> /v1/chat
-        rewrite: (path) => path.replace(/^\/agent-api/, ''),
       },
     },
     },

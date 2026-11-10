@@ -17,24 +17,21 @@ document and returns, per structure: SMILES, E-SMILES, pixel box, PDF-point box
 labels. It is read-only and never persists anything.
 
 - Service: `service/use_cases/molecule/recognition.py` (`recognize_page_molecules`).
-  The router resolves `(library_root, doc_id)` and passes an absolute PDF path,
-  so path policy stays in the API layer.
-- HTTP: `POST /api/v1/agent/tools/recognize-molecules` (chat sidecar tools) and
-  `POST /api/v1/research/runtime/recognize-molecules` (research turns, credential-
-  scoped). Both accept `doc_id`, 1-based `page`, optional `region` in PDF points
-  and `max_molecules` (cap 20, truncation reported rather than silent).
-- Agent teaching: the tool description + `promptGuidelines` in `agent/src/tool.ts`
-  state the workflow (query_documents → find the page → recognize; pass `region`
-  for one table cell) and the hard rule — use returned SMILES verbatim, never
-  author one. The research system prompt names the tool in its local-retrieval
-  loop, and both chat surfaces register it.
+  It takes `(library_root, doc_id)` and an absolute PDF path, so path policy
+  stays with the caller.
+- HTTP: **none.** The former chat-sidecar and research routes were removed with
+  the CLI-only cutover, and no capability exposes this service yet, so it has no
+  caller today.
+- Agent wiring: none. `agent/src/tool.ts` and the research prompt were deleted;
+  a CLI tool exists only for capabilities registered under
+  `service/capabilities/`.
 - Tests: `tests/unit/services/test_molecule_recognition.py` protects the PDF-point
-  box contract, the region filter and truncation visibility; `agent/src/research.test.ts`
-  asserts the research turn exposes the tool and teaches it in the system prompt.
+  box contract, the region filter and truncation visibility. The removed
+  `agent/src/research.test.ts` used to assert the research turn taught the tool.
 
-Pending: exercise the tool from a live chat turn on a structure-heavy patent,
-then decide whether the model should be allowed to cite a label→SMILES match as
-evidence (currently it reports tool output, not a new fact).
+Pending: register `recognize_molecules` as a capability (which would expose it
+to the pi CLI), then decide whether the model should be allowed to cite a
+label→SMILES match as evidence (currently it reports tool output, not a new fact).
 
 ## Table-embedded molecules (2026-11-06)
 
@@ -116,8 +113,8 @@ Still open on the same document, measured: **24 of 450 recognised structures
 print a designation** (11%), so 11/14/17/23/32/33 stay unowned even though the
 document now declares an example for each of them; `assay_description` stays
 empty because no printed description reaches the method; `review_items = 0`
-because both mint inputs are empty (`review_candidates` needs an LLM merge, and
-every `smiles_mass_mismatch` issue carries `mol_id = ""`).
+because both mint inputs are empty (`review_candidates` needed the removed LLM
+merge, and every `smiles_mass_mismatch` issue carries `mol_id = ""`).
 
 ## Unbound readings, honest coverage, read surface (2026-11-07)
 
@@ -131,7 +128,7 @@ Three ordered follow-ups are implemented and measured on the live library
    question). Each item carries the page candidates; confirming it with
    `choice=<candidate mol_id>` writes `measurement_attribution` with
    `method="human"` and marks the reading accepted. A choice outside the
-   candidates is refused. AI assist knows the kind. Measured: **7 items** for the
+   candidates is refused. Measured: **7 items** for the
    seven unowned readings (1, 11, 14, 17, 23, 32, 33), 4-8 candidates each, and
    the live queue is 211 rows (204 Markush + 7 unbound).
 2. **Coverage no longer calls recoverable work undrawn.** `dataset_stats` now
@@ -142,9 +139,9 @@ Three ordered follow-ups are implemented and measured on the live library
    `unmatched` is compound 1, whose structure carries a disputed label.
 3. **The read surface answers dataset questions.** `query_activities` accepts an
    empty `doc_id` (library scope), `metric`, `min_value` and `max_value`, and each
-   row carries its `reasons` classification instead of `[]`. New
-   `activity_stats` tool/route reports printed vs attributed plus the reason
-   split, so the assistant can check coverage before claiming there is no data.
+   row carries its `reasons` classification instead of `[]`. The `activity_stats`
+   route reports printed vs attributed plus the reason split, so a caller can
+   check coverage before claiming there is no data.
    The activity HTTP route gained the same filters.
 
 Still open from this pass: the export CSV does not carry the attribution
@@ -162,11 +159,9 @@ reviewed yet. A proposal is not a decision: it enters the review center as
 store actually holds, the rationale and the evidence ids it read. A human
 confirms or rejects it, and only that decision writes a value.
 
-- Entry points: `POST /api/v1/review/propose` (any caller) and
-  `POST /api/v1/research/runtime/propose-review` (the credential-scoped route
-  behind the chat tool `propose_review`). The agent tool's description states the
-  rule it is held to: cite what was read, never invent a value, and expect a
-  decided target to be refused.
+- Entry points: `POST /api/v1/review/propose` (any caller). The removed
+  credential-scoped research route and its chat tool were the sidecar's delivery
+  path; the HTTP endpoint remains.
 - Idempotent and freeze-safe: one item per
   `(doc_id, target_kind, target_id, field)` (`stable_id`). A second proposal for
   the same field while it is pending **revises** that item (revision counter plus
@@ -192,71 +187,29 @@ evidence target); the same chain through `POST /api/v1/review/propose` →
 `/review/queue?kind=ai_review` → `/review/decide` (router test); the full unit
 suite (425 passed) and the frontend lint/type-check.
 
-### In-chat review and batch approval (2026-11-07)
+### In-chat review and batch approval (2026-11-07) — historical
 
-- The proposal tool emits a `review` SSE event with the recorded item; the reply
-  stores it in `review_refs`, so a reloaded conversation still shows the cards.
-  Each card shows the target field, `before_actual → after` and the rationale,
-  with **同意 / 驳回**: both call the same `POST /api/v1/review/decide` the review
-  center uses, so deciding in the chat and deciding in the center are one path.
-- Two batch paths sit on the card: **同意整篇** (`doc_id` = the proposal's
-  document) and **同意所有文本** (`target_kind=evidence`). They call
-  `POST /api/v1/review/decide-filtered`, which resolves the filter server-side and
-  runs every matching pending item through its own decision handler — the model
-  never chooses what gets approved. The review center keeps its selection-based
-  bulk action.
-- The filtered batch is bounded (`limit` default 200, max 500) and does one
-  decision per item, so a kind-specific side effect is not skipped; the response
-  reports `updated`/`skipped`/per-item results.
-- Contract coverage: `ResearchReviewEvent` is part of the discriminated
-  `ResearchEvent` union (a test validates the frame the sidecar emits).
+The chat-side version shipped with the removed research workspace and is gone.
+What survives is server-side and still current: `POST /api/v1/review/decide`
+for one item and `POST /api/v1/review/decide-filtered` for a bounded batch
+(`limit` default 200, max 500). The filtered path resolves the filter server-side
+and runs every matching pending item through its own decision handler, so the
+model never chose what got approved and a kind-specific side effect is not
+skipped; the response reports `updated`/`skipped`/per-item results. The review
+center keeps its selection-based bulk action. `ResearchReviewEvent`, the
+`ResearchEvent` union and the SSE card stream were deleted with the sidecar.
 
-## Review AI assist (2026-11-06)
+## Review AI assist (2026-11-06) — removed (2026-11-10)
 
-The review center is where the deterministic pipeline already refused to decide
-(an unread designation, a context-flagged structure, a reading no structure
-owns). It can now pull one bounded model answer per item and store it as a
-suggestion beside the item. The model receives the printed text of the page and
-the original images — the crop the detector cut out and the rendered page — never
-a filesystem path, and it may only answer by naming one of the candidates it was
-given or `cannot_decide`.
-
-- Packet and storage: `service/use_cases/review_assist.py` builds the packet
-  (`contracts/review_assist.py`), the crop is resolved only through
-  `LibraryLayout.crop` (a path outside the document crops dir is never read), and
-  the page image is rendered with PyMuPDF under the configured pixel/byte caps.
-  The answer lands in `review_assists` keyed by `(kind, item_id)`, so a re-run
-  replaces it instead of duplicating it and a republished review row keeps it.
-- Provider call: the Node sidecar owns it (`agent/src/review-assist.ts`,
-  `POST /v1/review-assist`), supporting the OpenAI-compatible, Anthropic and
-  Ollama image shapes. Python reaches it through the `ReviewAssistRuntime` port,
-  so a sidecar that is down comes back as `unavailable`, never as an exception.
-- Pulls are bounded twice: per request by `review.max_items` (one model call
-  each) and, for the automatic pull, single-flight with a 60 s cooldown. With
-  `review.auto` the review queue poll starts one background pull; without it the
-  reviewer pulls through `POST /api/v1/review/assist`.
-- A suggestion is **not** a decision: the item stays `pending`, no status, SMILES
-  or value is written, and the queue response carries the suggestion under
-  `payload.ai_assist` for the reviewer to accept or reject.
-- Images go to the chat model by default: LongCat-2.5 is multimodal, so a
-  separate `vlm` entry is optional (the sidecar prefers it when configured). A
-  provider that rejects the image is retried text-only and the answer is
-  recorded with `vision = false` instead of failing the item;
-  `review.images = false` turns the capture off entirely.
-
-Verified offline: packet text/images/caps and the path guard, stored-answer reuse,
-the disabled switch, the automatic switch, the route round trip, and the three
-provider payload shapes (`agent/src/review-assist.test.ts`, run in-process
-because the sandbox blocks the node test runner's child processes).
-
-Verified live (2026-11-07): one real call through the sidecar on the live
-library, markush candidate on p97 with a 20.5 kB crop and a 246 kB page JPEG;
-`LongCat-2.5`, `vision = true`, 46.8 s, answered `answer=2` (化合物23) and cited
-both the printed `23` in the page image and the paragraph `[p96 b812521f]`,
-rejecting 23-3 and 23-4 by their SMILES. This is one sample, not an accuracy
-measurement.
-Remaining: the review UI does not render `payload.ai_assist` yet; the 20-case
-human grading below (correct / unhelpful / misleading) is not done.
+The review center's model-suggested answers were removed with the CLI-only
+cutover: `service/use_cases/review_assist.py`, `contracts/review_assist.py`, the
+`ReviewAssistRuntime` port, the `review_assists` table and the sidecar's
+`POST /v1/review-assist` provider call no longer exist. Also gone with it:
+`review.max_items`, `review.auto`, `review.images`, the readiness probe for the
+assistant, and the `payload.ai_assist` field on queue rows. The review center
+remains a human-decision surface only — the deterministic pipeline mints the
+items and a person confirms or rejects them; no model answer is stored beside
+an item.
 
 ## Structure–activity export (2026-10-30)
 
@@ -267,8 +220,8 @@ The export uses the committed Patent snapshot, refuses stale sources, preserves
 all assays and stereochemistry, and keeps review candidates separate from facts.
 Original and canonical units/comparators are separate; known concentrations
 convert coherently to nM, unknown units remain unchanged, and missing units are
-never guessed. Missing-unit numeric disagreements remain conflicts in the LLM
-merge. Rejected or identity-changed catalog structures cannot enter matched CSV.
+never guessed. Missing-unit numeric disagreements were the LLM merge's job; that
+merge was removed on 2026-11-10, so no current path resolves them. Rejected or identity-changed catalog structures cannot enter matched CSV.
 
 A deterministic replay for 13 development PDFs, after refreshing two damaged
 CN121270515A table regions with the current local producer, now produces
@@ -284,11 +237,11 @@ These development counts are not precision/recall or scientific validation.
 Next: adjudicated structure–reading–assay–source tuples, evidence-backed product
 association, stereo review and missing assay context.
 
-## Current Patent harness (2026-10-30)
+## Current Patent harness (2026-10-30) — historical
 
 [Harness implementation and real-provider audit](../docs/qa/patent-harness-20261030.md)
-records citable work/context packets, the exported schema as the actual Pi tool
-contract, exact printed label/value-cell checks (`source_quote` + zero-based
+records citable work/context packets, the exported schema as the then-actual Pi
+tool contract, exact printed label/value-cell checks (`source_quote` + zero-based
 `source_column`), stable work anchors and example namespaces. Four v4.2
 real-provider work-chunk trials returned 6, 22, 0 and 1 text-supported readings;
 the actual publisher preserved their column provenance as review candidates in
@@ -296,9 +249,9 @@ isolated SQL backups, with no new LLM structure links. The zero-result trial
 correctly refused damaged OCR; these counts are not whole-page recall. The
 printed positive control in CN120943813A p95 now stays in the deterministic
 five-reading table, with IC50 preferred over generic activity wording.
-Historical provider failures are retained. These are development samples;
-LLM analysis remains opt-in pending held-out scientific evaluation. Cell
-ownership does not prove assay semantics. The v4.3 follow-up fixes the generic
+Historical provider failures are retained. These are development samples of the
+LLM gap path that was removed on 2026-11-10; the deterministic pipeline is the
+only Patent path. Cell ownership does not prove assay semantics. The v4.3 follow-up fixes the generic
 unit contract: dimensionless pIC50 no longer needs a missing-unit declaration,
 while concentration readings still do. Physical units on log endpoints are
 rejected; old drafts with a declared missing log unit remain readable.
@@ -335,8 +288,9 @@ has been made. See the report for the unresolved association/interval work.
 ## Focus (2026-11-02)
 
 The product scope is the patent reader: import → layout/OCR/table → source
-evidence → facts and measurements → review/export. The agent conversation and
-its research tools are retained. Removed from the active surface: the notes /
+evidence → facts and measurements → review/export. The agent surface is the pi
+CLI; the web conversation and its research tools were removed on 2026-11-10.
+Removed from the active surface: the notes /
 knowledge base, the fake molecule Analytics/Relations panel and its
 cluster/relation/analog/substructure stubs, the Markush attachment-site and
 enumeration API, and the chat landing page (`/` now opens `/workspace`).
@@ -444,63 +398,34 @@ gating on it would deadlock the queue.
 
 ## LLM ownership
 
-The chat LLM lives entirely in the `agent/` Node sidecar (port 18800): it owns
-chat streaming, the provider model-list probe (`POST /v1/models`) and the
-connectivity probe (`POST /v1/probe`). Python used to carry a LangChain client,
-a LiteLLM mapping module, a provider default-URL table and a model-list probe in
+The pi CLI (`agent/src/extension.ts` + `agent/src/capabilities.ts`) is the only
+thing that talks to an LLM provider. It reads the `llm` section of
+`settings.json`, and pi owns provider login, model switching and sessions. There
+is no Node HTTP server, no `POST /v1/models` model-list probe and no
+`POST /v1/probe` connectivity probe. Python used to carry a LangChain client, a
+LiteLLM mapping module, a provider default-URL table and a model-list probe in
 `server/llm/`; that package, its `LlmCapability` port and the readiness
-`probe-llm` endpoints are gone. Python now persists `AppConfig.llm` in
-`settings.json` and readiness reports only whether those settings are complete
-(config-derived, no network).
+`probe-llm` endpoints are gone. Python persists `AppConfig.llm` and readiness
+reports only whether those settings are complete (config-derived, no network);
+the frontend no longer fetches a provider model list or tests a connection.
 
 Both sides resolve `settings.json` the same way: `<source root>/library` when
 `pyproject.toml` is present, else `~/MBForge`, overridable with
-`MBFORGE_SETTINGS_PATH`. That single rule matters — the sidecar previously
-defaulted to `~/MBForge/settings.json`, which does not exist in a source
-checkout, so it read no settings at all and every saved key was silently lost.
+`MBFORGE_SETTINGS_PATH`. That single rule matters — when the agent defaulted to
+`~/MBForge/settings.json`, a source checkout read no settings at all and every
+saved key was silently lost.
 
-## Research tools and Pi upgrade (2026-10-14)
+## Research tools and Pi upgrade (2026-10-14) — removed (2026-11-10)
 
-- Migrated the Node SDK to pinned `@earendil-works/pi-coding-agent` / `pi-ai`
-  1.2.0, replacing the deprecated `@mariozechner` packages. Model credentials and
-  catalogs stay in memory; automatic project/user resources and native tools
-  remain disabled.
-- Added bounded SQL `search_library` with document/page/evidence provenance,
-  keyword AND matching, snippet truncation and pagination. The research route
-  resolves the turn credential's library even after the active library changes.
-- Reused the official `@tavily/pi-extension@0.1.2` for `web_search` / `web_fetch`.
-  MBForge supplies opt-in settings, per-turn limits, source URL restrictions,
-  output bounds, timestamps and key redaction. No general plugin marketplace or
-  second provider client was added. Patent sessions never load this extension.
-- Research prompts now guide local lookup, evidence reading, information-gap
-  identification, external source verification and assay-aware answers.
-- Research chat has opt-in RCSB PDB structure search and Europe PMC publication
-  search. Structure hits include organism, experimental method, resolution,
-  deposited non-polymer component IDs/InChIKeys, citation metadata and direct
-  PDB/mmCIF downloads. A component-name hit is not an exact compound match;
-  PDB-format files can be downloaded and manually uploaded as receptors. The
-  current receptor importer does not accept mmCIF or automatically fetch remote
-  files. Search results remain conversation evidence rather than imported
-  library records.
-- Added the product-scoped `literature-search` and `patent-search` skills under
-  `agent/skills/`. General and research chat expose only the fixed `load_skill`
-  reader; it returns a registered guide/reference with a version and SHA-256,
-  and does not accept file paths or change other tool permissions. The prompt
-  routes explicit external literature/patent discovery to the matching skill;
-  local Patent extraction stays document-only. Patent search remains Tavily
-  public-web discovery, not an official patent-office API search.
-- Prompt routing is layered: stable evidence policy and route selection are
-  always present, skill descriptions form a compact index, the matching guide
-  is loaded on demand, and references are loaded only for a specific unresolved
-  question. Retrieval proceeds from scope and query plan through candidate
-  checks, one purposeful refinement, source reading, stop conditions and cited
-  reporting.
-- The Agent skill contract is checked by `npm --prefix agent test`; no live
-  provider or Tavily-key search was performed as part of this integration.
-- Tavily cancellation stops waiting; the upstream SDK may continue its remote
-  request. Its extension can spill unusually large responses to an OS temporary
-  file before MBForge bounds the returned context. Live provider/key verification
-  and scientific answer-quality evaluation remain pending.
+The research workspace, its SQL `search_library` tool, the optional Tavily
+`web_search` / `web_fetch` extension, the RCSB PDB and Europe PMC searches, the
+skill-routing prompt stack and the research/review SSE streams were removed with
+the CLI-only cutover. `@tavily/pi-extension` is no longer a dependency, the
+web-search settings and keys are gone from `AppConfig`, and no research route,
+`research_sessions` table or `research_task_requests` queue hook remains. What
+replaces them is the pi CLI with the capability tools generated from
+`/api/v1/capabilities`; the `agent/skills/*` documents are inert reference files
+because the extension no longer loads skills and exposes no web tool.
 
 ## Layer boundaries
 
@@ -555,28 +480,28 @@ never import `server`.
   from the rule fact named by `rule_context.related_fact_id` (the value is copied,
   never retyped). One fact is bound per gap, so a refused 15-row table still binds
   its named reading only.
-- **The previous live LLM pass submitted nothing; live quality remains unverified.**
+- **(Historical) The live LLM gap pass submitted nothing; live quality was never
+  verified, and the path was removed on 2026-11-10.**
   A live run (`patent_analysis.enabled=true`, LongCat-2.5-Preview) on CN121270515A
   and CN120329282A shows 14–24 tool calls, all of them `get_gap`, and `answered=0`,
   ending `no_submission` / `budget_exceeded`. Ruled out by instrumentation, not
-  assumption: no sidecar HTTP failure (`postTool` now logs unreachable/failed), no
+  assumption: no agent HTTP failure (`postTool` now logs unreachable/failed), no
   backend refusal (`_failure` now logs every rejection), no contract rejection, and
   `get_gap` returns a gap every time. The runtime now refuses another gap while
   one is unanswered, and its four-turn per-gap budget resets only on an accepted
-  answer, never on another fetch. Offline sidecar tests cover both guards; a new
+  answer, never on another fetch. Offline agent tests cover both guards; a new
   live run on 2026-10-16 verified four CYP3A4 table cells and their candidate
   references, but completed only 2/3 gaps in CN120329282A and 0/3 in CN121270515A
   within 240 seconds each. See [live acceptance](../docs/qa/patent-live-llm-20261016.md).
-  A **full-stage** run on 2026-10-16 (same model and prompt version, its own sidecar
-  built from `agent/dist`, 600 s wall / 240 s per request) answered **1 of 40** gaps
+  A **full-stage** run on 2026-10-16 (same model and prompt version, its own agent
+  server built from `agent/dist`, 600 s wall / 240 s per request) answered **1 of 40** gaps
   in CN120329282A (7 turns, 602 s, ≈86 s per turn) and **0 of 28** in CN121270515A
   (3 turns — one per gap, none finishing inside its 240 s). The binding constraint is
   per-turn latency against the per-gap budget, not the tool surface: the accepted
   answer took 3 turns, one of them spent on a contract rejection it then fixed. See
   [the live association test](../docs/qa/patent-live-association-20261016.md).
   Scientific accuracy and complex-table stability remain unproven. The deterministic
-  artifact remains the fallback (`llm_analysis_fallback`); fallback does not prove
-  that structure recognition or scientific attribution is correct.
+  artifact is now the only Patent output, so there is no LLM fallback mode any more.
 - Label aliases stored as lists now reach the gap as individual designations, and a
   candidate's `name` is read as a designation too (a label that lived only there
   used to be invisible to every rule). Automatic activity-to-structure attachment
@@ -618,12 +543,13 @@ never import `server`.
   imported but unprocessed (`run_id` is `None`). Deleting a queue task clears
   that run's outputs (Markdown/report/crops/molecule data) and returns the
   document to `pending`; only deleting the document card removes the source PDF.
-- The `agent/` sidecar now has a Node test runner for Patent boundaries and
-  durable research-session restoration with a local simulated provider. Its
-  provider model-list and probe logic is still guarded by `tsc --noEmit` alone.
-  Those contracts used to live in
-  `tests/unit/test_llm_probe.py` and `tests/unit/routers/test_settings.py`,
-  which were deleted with the Python implementation they covered.
+- The `agent/` workspace is CLI-only and guards itself with `tsc`
+  (`npm --prefix agent run check`). No agent test files remain, so `npm test`
+  compiles and then finds nothing under `dist/*.test.js`; the simulated provider
+  and model-list/probe code are gone. Those contracts used to live
+  in `tests/unit/test_llm_probe.py` and `tests/unit/routers/test_settings.py`,
+  deleted with the Python implementation they covered; the later agent-side
+  tests were deleted with the sidecar.
 - The frontend locale files were pruned to keys the components reference;
   dynamic-key prefixes (`nav.*`, `mol.status.*`, `errors.*`, …) were preserved.
 - Markush classification and review remain; the unreachable frontend workspace,
@@ -650,8 +576,8 @@ never import `server`.
   CN120329282A's 24 measurements lacking an assay section form, and
   machine-translated filings whose heading labels were dropped in translation.
 
-- **The live gap path consumes the model's associations.** Every accepted
-  `PatentGapLink` (a printed designation + a recognized structure) is applied by
+- **(Historical) The live gap path consumed the model's associations.** Every accepted
+  `PatentGapLink` (a printed designation + a recognized structure) was applied by
   `association.apply_gap_links` before the artifact is built, and `associate_facts`
   runs a second time on the result: a designation a section prints is resolved in
   place, a designation **no** section declares is declared by the link itself
@@ -673,9 +599,9 @@ never import `server`.
   page and refused a second lookup. Both are unit-verified; in the live run itself the
   model answered a *table* gap (`llm_links_applied = 0`), so the link path was not
   reached — see [the live association test](../docs/qa/patent-live-association-20261016.md).
-  The sidecar wires only the gap tools
-  (`submit-facts` has no caller), so the v1 draft path is dormant rather than
-  half-wired.
+  The agent wiring that hosted only the gap tools was deleted with that path, as
+  were every `patent_analysis.*` setting and the `llm_analysis_fallback` mode, so
+  no LLM Patent stage exists to run this flow.
 - **Activity recall round (2026-10-16).** `uv run python .tmp/e2e/activity_recall.py`
   measures what the corpus prints against what the parser reads: **36 → 52
   measurements, 30 → 47 with a declared owner, parsable activity tables 3 → 6** of 31.
@@ -753,7 +679,6 @@ never import `server`.
   [patent layout rules](../docs/wiki/patent-layout-rules.md). Human adjudication
   and the held-out split are pending.
 - [Activity data extraction and persistence](../docs/plan-activity-extraction.md) — **Phase A implemented**: readings are first-class SQL rows independent of structure attribution. Phase B (compute layer: Boltz-2, reproducible `compute_runs`, `evidence_grade` for predictions) and Phase C (SAR, synthesis suggestions) are recorded with their preconditions and are not scheduled.
-- [Patent analysis and an LLM-first research workspace](../docs/plan-patent-agent-harness.md) — frontend U0/U1/P4 and necessary SQL/session/task integration completed; [acceptance evidence](../docs/qa/research-workbench-20261013.md). P5 real-patent scientific evaluation remains pending; LLM analysis is opt-in.
 - [Source layout reorganization](../docs/plan-source-layout-reorganization.md)
 - [Capability platform](../docs/plan-capability-platform.md)
 - [SLANet-1M as table parser on the Hiro-Layout path](../docs/plan-slanet-1m-table-parser.md)

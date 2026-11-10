@@ -37,8 +37,8 @@ class _DynamicModule:
 def create_runtime_provider() -> RuntimeProvider:
     """Build the lazily-used model, OCR reader and process capabilities.
 
-    There is no LLM capability: the chat agent runs in its own Node sidecar
-    (agent/) and owns every provider call.
+    There is no LLM capability in Python: the pi CLI agent (agent/) owns every
+    provider call and reads the same settings file.
     """
     # The inference backends live in ``foundation`` and must not import
     # ``server``; install the concrete resource manager into their seam here.

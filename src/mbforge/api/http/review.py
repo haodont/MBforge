@@ -13,11 +13,7 @@ import asyncio
 from fastapi import APIRouter, Query
 
 from mbforge.api.http._path_utils import resolve_library_root
-from mbforge.foundation.errors import NotFoundError
 from mbforge.service.dto.review import (
-    ReviewAssistRequest,
-    ReviewAssistResponse,
-    ReviewAssistResult,
     ReviewClearRequest,
     ReviewClearResponse,
     ReviewDecisionRequest,
@@ -30,7 +26,7 @@ from mbforge.service.dto.review import (
     ReviewQueueResponse,
     ReviewStatsResponse,
 )
-from mbforge.service.use_cases import review_assist, review_proposals
+from mbforge.service.use_cases import review_proposals
 from mbforge.service.use_cases.review_queue import (
     clear_all_review_queue,
     decide_filtered,
@@ -116,28 +112,6 @@ async def review_clear(body: ReviewClearRequest) -> ReviewClearResponse:
     return ReviewClearResponse(**result)
 
 
-@router.post("/assist", response_model=ReviewAssistResponse)
-async def review_assist_items(body: ReviewAssistRequest) -> ReviewAssistResponse:
-    """Ask the model about review items; the answer is a stored suggestion.
-
-    Bounded by ``review.max_items`` per call. An empty ``items`` list pulls the
-    oldest pending items that have no suggestion yet, which is what the
-    automatic pull uses.
-    """
-    root = str(resolve_library_root(body.library_root))
-    targets = [{"kind": item.kind, "item_id": item.id} for item in body.items]
-    results = await asyncio.to_thread(
-        review_assist.assist_items,
-        root,
-        targets,
-        limit=body.limit,
-        force=body.force,
-    )
-    return ReviewAssistResponse(
-        items=[ReviewAssistResult(**result) for result in results]
-    )
-
-
 @router.post("/propose", response_model=ReviewProposeResponse)
 async def review_propose(body: ReviewProposeRequest) -> ReviewProposeResponse:
     """Record AI proposals for unreviewed evidence.
@@ -149,18 +123,6 @@ async def review_propose(body: ReviewProposeRequest) -> ReviewProposeResponse:
     root = str(resolve_library_root(body.library_root))
     results = await asyncio.to_thread(review_proposals.propose_items, root, body.items)
     return ReviewProposeResponse(items=results)
-
-
-@router.get("/assist/{kind}/{item_id}", response_model=ReviewAssistResult)
-async def review_assist_one(
-    kind: str, item_id: str, library_root: str | None = Query(default=None)
-) -> ReviewAssistResult:
-    """Read the stored suggestion for one item (404 when none was requested)."""
-    root = str(resolve_library_root(library_root))
-    stored = await asyncio.to_thread(review_assist.assist_for, root, kind, item_id)
-    if stored is None:
-        raise NotFoundError("no AI suggestion for this item yet")
-    return ReviewAssistResult(**stored)
 
 
 @router.get("/history", response_model=ReviewHistoryResponse)

@@ -1,5 +1,7 @@
 # Patent 分析改造与领域 Agent Harness 修改计划
 
+> **Status (2026-11-10): removed — the LLM-led Patent analysis and the research workspace are gone.** The Node agent sidecar, the web research/chat workspace, the review-center AI assist, the provider model-list/probe UI and the optional LLM-led Patent analysis were deleted with the CLI-only cutover; `agent/` is now a pi CLI extension only, `agent/skills/` and `agent/schemas/` no longer exist, and there is no `patent_analysis.*` setting or gap path. The deterministic Extract → Markdown → Patent pipeline, its facts artifact and the `/api/v1/capabilities` registry remain current. Everything below is a historical design/implementation record.
+
 状态：本轮前端 U0/U1/P4 改造及必要接口联调已完成；P0–P3 已落地。2026-10-30 完成一个真实表格的 harness/provider/候选发布核对；P5 的多文档科学评估仍待执行，未默认启用 LLM 专利分析。
 日期：2026-10-13。  
 首版目标：以 LLM 交互为主入口重组研究工作台，复用现有 Pi 运行时完成证据约束的专利分析，使任务可继续、结果可核查、冲突可修正、重跑不丢失人工决定。

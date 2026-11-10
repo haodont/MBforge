@@ -1,20 +1,8 @@
-/** React Query hooks for the readiness probe / demo-run actions. */
+/** React Query hooks for the readiness demo-run action. */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  readinessDemoRun,
-  readinessProbeLlm,
-  type DemoRunResult,
-  type ProbeLlmResult,
-} from '@/api/http/readiness'
+import { readinessDemoRun, type DemoRunResult } from '@/api/http/readiness'
 import { queryKeys } from '../keys'
-
-/** Probe the configured LLM endpoint through the agent sidecar. */
-export function useReadinessProbeLlm() {
-  return useMutation<ProbeLlmResult>({
-    mutationFn: () => readinessProbeLlm(),
-  })
-}
 
 /** Enqueue the readiness smoke-test document through the pipeline. */
 export function useReadinessDemoRun() {

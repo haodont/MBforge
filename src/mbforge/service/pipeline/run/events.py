@@ -100,9 +100,9 @@ class PipelineEventSink:
     def progress(self, stage: str) -> Callable[[str, dict[str, Any]], None]:
         """Return a stage-facing progress callback routed through this sink.
 
-        Long stages (the LLM-led Patent analysis) report phase/turn/tool lines
-        without importing the sink or the database: ``phase`` lands in the
-        event data and the message stays readable in the queue log.
+        Long stages report phase/turn/tool lines without importing the sink or
+        the database: ``phase`` lands in the event data and the message stays
+        readable in the queue log.
         """
 
         def _emit(phase: str, data: dict[str, Any] | None = None) -> None:

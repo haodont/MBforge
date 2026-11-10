@@ -218,15 +218,7 @@ describe('SettingsPage', () => {
 })
 
 describe('settings payload contract', () => {
-  it('round-trips layout, web-search and model-cache settings through the backend payload', () => {
-    // A redacted web-search key survives a save and can still be cleared.
-    const withKey = flattenSettings({ web_search: { enabled: true, api_key: '***' } })
-    expect(toBackendPayload(withKey).web_search).toEqual({ enabled: true, api_key: '***' })
-    expect(
-      toBackendPayload({ ...withKey, web_search_api_key: '', web_search_enabled: false })
-        .web_search,
-    ).toEqual({ enabled: false, api_key: '' })
-
+  it('round-trips layout and model-cache settings through the backend payload', () => {
     // Saved layout parameters round-trip through the staged state.
     const layout = flattenSettings({
       layout: { conf_threshold: 0.55, cross_model: false },

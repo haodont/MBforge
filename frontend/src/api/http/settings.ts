@@ -1,7 +1,6 @@
 /** Settings HTTP API wrappers. */
 
 import { httpGet, httpPut, httpPost, invokeWithError } from './_utils'
-import { agentPost } from './agent'
 import { ErrorCode } from '@/utils/errors'
 
 export interface LlmConfig {
@@ -43,7 +42,6 @@ export interface AppSettings {
   theme?: string
   language?: string
   llm?: LlmConfig
-  web_search?: { enabled?: boolean; api_key?: string }
   vlm?: VlmConfig
   layout?: LayoutConfig
   model_server?: ModelServerConfig
@@ -80,46 +78,6 @@ export interface SettingsResponse {
   success: boolean
   settings?: AppSettings
   error?: string
-}
-
-/** One entry returned by the provider model-list probe. */
-export interface ProviderModelOption {
-  value: string
-  label: string
-}
-
-export interface FetchLlmModelsBody {
-  provider: string
-  base_url?: string
-  api_key?: string
-}
-
-export interface FetchLlmModelsResponse {
-  success: boolean
-  models?: ProviderModelOption[]
-  error?: string
-}
-
-/**
- * Ask the agent sidecar to query the provider's model-list API (OpenAI
- * /models, Anthropic /v1/models, Ollama /api/tags) so the dropdown shows the
- * real available models instead of hard-coded presets.
- *
- * A business failure keeps HTTP 200 and reports itself inside the envelope, so
- * the provider's own reason reaches the dropdown instead of a transport error.
- */
-export async function fetchLlmModels(body: FetchLlmModelsBody): Promise<FetchLlmModelsResponse> {
-  try {
-    const resp = await agentPost<{
-      success: boolean
-      models?: ProviderModelOption[]
-      error?: string
-    }>('/v1/models', body)
-    if (!resp.success) return { success: false, error: resp.error ?? 'unknown error' }
-    return { success: true, models: resp.models ?? [] }
-  } catch (e) {
-    return { success: false, error: String(e) }
-  }
 }
 
 export async function getSettings(): Promise<SettingsResponse> {
@@ -220,58 +178,5 @@ export async function getLlmEnvConfig(): Promise<LlmEnvStatus> {
     error: null,
     http_status: null,
     latency_ms: null,
-  }
-}
-
-/** Form values for a probe of edits that are not saved yet. */
-export interface LlmProbeOverride {
-  provider?: string
-  base_url?: string
-  api_key?: string
-  model?: string
-}
-
-interface AgentProbeResult {
-  ok: boolean
-  latency_ms: number | null
-  error: string | null
-  provider: string
-  model: string
-}
-
-function probeStatus(error: string | null): LlmLinkStatus {
-  if (!error || error === 'not_configured') return 'not_configured'
-  if (error.startsWith('HTTP 401') || error.startsWith('HTTP 403')) return 'auth_error'
-  if (/^HTTP \d/.test(error)) return 'http_error'
-  return 'unreachable'
-}
-
-/**
- * Probe the configured LLM endpoint through the agent sidecar with a one-token
- * request. The sidecar is the only component that reaches a provider, so this
- * reports the real link status rather than the health of the local backend.
- *
- * Unsaved form values may be passed so Test works before Save; a redacted
- * "***" placeholder is dropped and the persisted key is used instead.
- */
-export async function testLlmConnection(override: LlmProbeOverride = {}): Promise<LlmEnvStatus> {
-  const cfg = await getLlmEnvConfig()
-  const payload = {
-    provider: override.provider || cfg.provider,
-    base_url: override.base_url || cfg.base_url,
-    api_key: override.api_key || '',
-    model: override.model || cfg.model,
-  }
-  try {
-    const probe = await agentPost<AgentProbeResult>('/v1/probe', payload)
-    if (probe.ok) return { ...cfg, status: 'ok', latency_ms: probe.latency_ms }
-    return {
-      ...cfg,
-      status: probeStatus(probe.error),
-      error: probe.error,
-      latency_ms: probe.latency_ms,
-    }
-  } catch (err) {
-    return { ...cfg, status: 'unreachable', error: err instanceof Error ? err.message : String(err) }
   }
 }

@@ -188,23 +188,6 @@ class LibraryLayout:
         """Create the library root directory if missing and return it."""
         return self._ensure_dir(self._root)
 
-    @property
-    def research_sessions_dir(self) -> Path:
-        """Private Pi conversation files, independent from document runs."""
-        return self._root / "research" / "sessions"
-
-    def research_session_file(self, session_id: str) -> Path:
-        path = self._safe_child(
-            self.research_sessions_dir, f"{session_id}.jsonl", label="research session"
-        )
-        try:
-            path.relative_to(self._root)
-        except ValueError as exc:
-            raise PathTraversalError(
-                "Research session path escapes the library"
-            ) from exc
-        return path
-
     def resolve_relative_path(self, relative_path: str | Path) -> Path:
         """Resolve a relative library path and enforce root containment."""
         candidate = Path(relative_path)

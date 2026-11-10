@@ -156,8 +156,6 @@ def test_redacted_roundtrip_preserves_real_secret(monkeypatch, tmp_path) -> None
     # Seed with a real key on disk.
     initial = AppConfig()
     initial.library_root = str(tmp_path)
-    initial.web_search.enabled = True
-    initial.web_search.api_key = _DISK_VALUE
     initial = initial.model_copy(update={"llm": {"api_key": _DISK_VALUE}})
     config.save_global_config(initial)
 
@@ -167,7 +165,6 @@ def test_redacted_roundtrip_preserves_real_secret(monkeypatch, tmp_path) -> None
         {
             "llm": {"api_key": "***", "model": "gpt-4o"},
             "vlm": {"api_key": "***"},
-            "web_search": {"enabled": False, "api_key": "***"},
         }
     )
     assert new_cfg.llm["api_key"] == _DISK_VALUE, (
@@ -176,10 +173,7 @@ def test_redacted_roundtrip_preserves_real_secret(monkeypatch, tmp_path) -> None
     assert new_cfg.llm["model"] == "gpt-4o"
     # The VLM key was empty on disk → *** marker preserves that empty state
     assert new_cfg.vlm.api_key == ""
-    assert new_cfg.web_search.api_key == _DISK_VALUE
-    assert not new_cfg.web_search.enabled
-    assert _redact_secrets(new_cfg.model_dump())["web_search"]["api_key"] == "***"
-    # Real PUT (e.g. user typing a new key, or empty to clear) still works.
+    # Real PUT (e.g., user typing a new key, or empty to clear) still works.
     cleared = update_settings({"llm": {"api_key": ""}})
     assert cleared.llm["api_key"] == ""
 

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { FlaskIcon, SettingsIcon, FileTextIcon, QueueIcon, CheckIcon, ChatIcon, SparklesIcon } from './icons'
+import { FlaskIcon, SettingsIcon, FileTextIcon, QueueIcon, CheckIcon } from './icons'
 import { Button } from '@/components/ui'
 import { useAppContext } from '@/context/AppContext'
 
@@ -19,13 +19,9 @@ export default function Sidebar({ current }: { current: string }) {
   const libraryName = libraryRoot.split(/[\\/]/).filter(Boolean).pop() || t('research.library')
   return (
     <aside className="app-sidebar">
-      <Button variant="ghost" className="app-sidebar__brand" onClick={() => go('/agent')} ariaLabel={t('research.workspace')} icon={<SparklesIcon size={24} />}>
+      <Button variant="ghost" className="app-sidebar__brand" onClick={() => go('/workspace')} ariaLabel={t('research.workspace')} icon={<FlaskIcon size={24} />}>
         <span><strong>MBForge</strong><small>{t('research.brand')}</small></span>
       </Button>
-      <nav className="app-sidebar__nav" aria-label={t('research.workspace')}>
-        <Button variant="ghost" className={'app-sidebar__nav-button' + (current === 'agent' ? ' is-active' : '')}
-          ariaLabel={t('nav.agent')} ariaPressed={current === 'agent'} onClick={() => go('/agent')} icon={<ChatIcon size={18} />}><span>{t('nav.agent')}</span></Button>
-      </nav>
       <span className="app-sidebar__section-label">{t('research.resources')}</span>
       <nav className="app-sidebar__nav" aria-label={t('research.resources')}>
         {resources.map(({ id, path, icon: Icon }) => <Button key={id} variant="ghost"

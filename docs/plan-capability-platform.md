@@ -1,6 +1,8 @@
 # Capability 平台实施计划
 
-> **Status (2026-11-10):** the capability platform is implemented. The pi CLI is the primary agent surface (`agent/src/extension.ts` + `agent/src/capabilities.ts`); the Node HTTP sidecar (`agent/src/server.ts`) remains for the web research, review-assist and Patent-analysis workspace. `runtime.ts` is superseded by `server.ts`.
+> **Status (2026-11-10):** the capability platform is implemented and CLI-only. The pi CLI (`agent/src/extension.ts` + `agent/src/capabilities.ts`) is the only agent entry point; the Node HTTP sidecar (`agent/src/server.ts`) no longer exists, and neither do the web research workspace, review-center AI assistance, provider model-list/probe UI or optional LLM-led Patent analysis it served. `/api/v1/capabilities` (manifest, guide, invoke) with `X-MBForge-Token` for mutating calls is unchanged, and `agent/` is a pi CLI extension only.
+
+> **Historical body:** the tasks below record the plan as it was executed. They still mention `server.ts`, `tool.ts` and `runtime.ts`; those files were later deleted with the sidecar, so treat those steps as history, not runnable instructions.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

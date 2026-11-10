@@ -19,10 +19,8 @@ function readPort(name, fallback) {
 const host = process.env.MBFORGE_DEV_HOST ?? '127.0.0.1'
 const backendPort = readPort('MBFORGE_DEV_PORT', 18792)
 const frontendPort = readPort('MBFORGE_DEV_FRONTEND_PORT', 5173)
-const agentPort = readPort('MBFORGE_AGENT_PORT', 18800)
-
-if (new Set([backendPort, frontendPort, agentPort]).size !== 3) {
-  throw new Error('MBFORGE_DEV_PORT, MBFORGE_DEV_FRONTEND_PORT, and MBFORGE_AGENT_PORT must differ')
+if (new Set([backendPort, frontendPort]).size !== 2) {
+  throw new Error('MBFORGE_DEV_PORT and MBFORGE_DEV_FRONTEND_PORT must differ')
 }
 
 const developmentEnv = {
@@ -33,12 +31,6 @@ const developmentEnv = {
   MBFORGE_BACKEND_PORT: String(backendPort),
   MBFORGE_FRONTEND_HOST: host,
   MBFORGE_FRONTEND_PORT: String(frontendPort),
-  MBFORGE_AGENT_HOST: host,
-  MBFORGE_AGENT_PORT: String(agentPort),
-  // `dev:all` is the sole development process owner; the backend must not
-  // independently spawn another agent while this launcher manages one.
-  MBFORGE_AGENT_AUTOSTART: '0',
-  VITE_AGENT_URL: `http://${host}:${agentPort}`,
 }
 
 const { result } = concurrently(
@@ -56,13 +48,6 @@ const { result } = concurrently(
       env: developmentEnv,
       name: 'frontend',
       prefixColor: 'green',
-    },
-    {
-      command: 'npm --prefix agent run build && npm --prefix agent start',
-      cwd: repositoryRoot,
-      env: developmentEnv,
-      name: 'agent',
-      prefixColor: 'magenta',
     },
   ],
   {

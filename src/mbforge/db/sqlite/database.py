@@ -22,7 +22,6 @@ from mbforge.db.sqlite.schema import (
     _MOL_FTS,
     _MOL_SCHEMA,
     _PATENT_ANALYSIS_SCHEMA,
-    _RESEARCH_SCHEMA,
     _REVIEW_V12_SCHEMA,
     _SOURCE_EVIDENCE_SCHEMA,
 )
@@ -81,7 +80,6 @@ class DatabaseManager:
             + _REVIEW_V12_SCHEMA
             + _MEASUREMENTS_SCHEMA
             + _PATENT_ANALYSIS_SCHEMA
-            + _RESEARCH_SCHEMA
             + _MOL_FTS
         )
 

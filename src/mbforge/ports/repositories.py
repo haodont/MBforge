@@ -16,7 +16,6 @@ from mbforge.contracts.measurement import (
     MeasurementQuery,
 )
 from mbforge.contracts.molecule import MoleculeListRequest
-from mbforge.contracts.research import ResearchSession, ResearchSessionSummary
 from mbforge.domain.evidence import SourceEvidence
 
 
@@ -280,19 +279,6 @@ class ReviewRepository(Protocol):
 
     def get_item(self, kind: str, item_id: str) -> dict[str, Any]: ...
 
-    # --- AI assistance (suggestions beside a review item) ---
-    def get_assist(self, kind: str, item_id: str) -> dict[str, Any] | None: ...
-
-    def upsert_assist(self, suggestion: dict[str, Any]) -> None: ...
-
-    def assists_for(
-        self, keys: Sequence[tuple[str, str]]
-    ) -> dict[tuple[str, str], dict[str, Any]]: ...
-
-    def pending_without_assist(
-        self, kinds: Sequence[str], limit: int
-    ) -> list[dict[str, str]]: ...
-
     def stats(self) -> dict[str, Any]: ...
 
     def history(self, entity_id: str) -> tuple[str, list[dict[str, Any]]]: ...
@@ -395,18 +381,6 @@ class PatentAnalysisRepository(Protocol):
         ...
 
 
-class ResearchRepository(Protocol):
-    """Visible research history and object references, scoped to one library."""
-
-    def get(self, session_id: str) -> ResearchSession | None: ...
-
-    def list_sessions(self) -> list[ResearchSessionSummary]: ...
-
-    def save(self, session: ResearchSession, expected_revision: int | None) -> None: ...
-
-    def delete(self, session_id: str, expected_revision: int) -> bool: ...
-
-
 class LibraryRepositories(Protocol):
     """Aggregate repository collection for one library root."""
 
@@ -433,9 +407,6 @@ class LibraryRepositories(Protocol):
 
     @property
     def patent_analysis(self) -> PatentAnalysisRepository: ...
-
-    @property
-    def research(self) -> ResearchRepository: ...
 
     @property
     def artifacts(self) -> ArtifactStore: ...
@@ -485,7 +456,6 @@ __all__ = [
     "MoleculeRepository",
     "PatentAnalysisRepository",
     "ReviewRepository",
-    "ResearchRepository",
     "RepositoryFactory",
     "configure_repository_factory",
     "get_database",

@@ -17,7 +17,6 @@ from mbforge.contracts.measurement import (
     MeasurementDatasetStats,
     MeasurementQuery,
 )
-from mbforge.contracts.research import ResearchSession, ResearchSessionSummary
 from mbforge.db import (
     detection_store,
     document_backup,
@@ -27,8 +26,6 @@ from mbforge.db import (
     molecule_candidates,
     molecule_store,
     patent_analysis_store,
-    research_store,
-    review_assist_store,
     review_store,
     source_evidence,
 )
@@ -441,24 +438,6 @@ class SqliteReviewRepository:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
             return review_store.get_item(conn, kind, item_id)
 
-    def get_assist(self, kind: str, item_id: str) -> dict[str, Any] | None:
-        return review_assist_store.get(self.library_root, kind, item_id)
-
-    def upsert_assist(self, suggestion: dict[str, Any]) -> None:
-        review_assist_store.upsert(self.library_root, suggestion)
-
-    def assists_for(
-        self, keys: Sequence[tuple[str, str]]
-    ) -> dict[tuple[str, str], dict[str, Any]]:
-        return review_assist_store.for_items(self.library_root, keys)
-
-    def pending_without_assist(
-        self, kinds: Sequence[str], limit: int
-    ) -> list[dict[str, str]]:
-        return review_assist_store.pending_without_suggestion(
-            self.library_root, kinds=kinds, limit=limit
-        )
-
     def stats(self) -> dict[str, Any]:
         with DatabaseManager.get(str(self.library_root)).mol_conn() as conn:
             return review_store.stats(conn)
@@ -612,23 +591,6 @@ class SqlitePatentAnalysisRepository:
 
 
 @dataclass
-class SqliteResearchRepository:
-    library_root: Path
-
-    def get(self, session_id: str) -> ResearchSession | None:
-        return research_store.load(self.library_root, session_id)
-
-    def list_sessions(self) -> list[ResearchSessionSummary]:
-        return research_store.list_sessions(self.library_root)
-
-    def save(self, session: ResearchSession, expected_revision: int | None) -> None:
-        research_store.save(self.library_root, session, expected_revision)
-
-    def delete(self, session_id: str, expected_revision: int) -> bool:
-        return research_store.delete(self.library_root, session_id, expected_revision)
-
-
-@dataclass
 class SqliteRepositories(LibraryRepositories):
     """Repositories for one library root."""
 
@@ -670,10 +632,6 @@ class SqliteRepositories(LibraryRepositories):
     @property
     def patent_analysis(self) -> SqlitePatentAnalysisRepository:
         return self._patent_analysis
-
-    @property
-    def research(self) -> SqliteResearchRepository:
-        return SqliteResearchRepository(self.library_root)
 
     @property
     def artifacts(self) -> FilesystemArtifactStore:

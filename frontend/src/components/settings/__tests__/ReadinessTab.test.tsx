@@ -1,6 +1,6 @@
 // ReadinessTab usage tests: subsystem cards built from the readiness summary,
 // the degraded states an unconfigured library produces, and the re-check /
-// LLM-probe / demo-run actions.
+// demo-run actions.
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -15,7 +15,6 @@ vi.mock('@/hooks/useToast', () => ({ showToast: vi.fn() }))
 
 vi.mock('@/api/http/readiness', () => ({
   readinessSummary: vi.fn(),
-  readinessProbeLlm: vi.fn(),
   readinessDemoRun: vi.fn(),
 }))
 
@@ -25,7 +24,6 @@ vi.mock('@/api/http/ingest_queue', () => ({
 
 import {
   readinessSummary,
-  readinessProbeLlm,
   readinessDemoRun,
   type ReadinessSummary,
 } from '@/api/http/readiness'
@@ -139,38 +137,4 @@ describe('ReadinessTab', () => {
     expect(readinessDemoRun).toHaveBeenCalledTimes(1)
   })
 
-  it('re-checks the summary and reports the LLM probe outcome', async () => {
-    vi.mocked(readinessSummary).mockResolvedValue(makeSummary())
-    vi.mocked(readinessProbeLlm).mockResolvedValue({
-      ok: true,
-      latency_ms: 123,
-      error: null,
-      provider: 'openai',
-      model: 'gpt-4o',
-    })
-
-    const probed = renderTab('C:/lib')
-    await waitFor(() => screen.getByText('settings.readiness.library'))
-    expect(readinessSummary).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.refresh' }))
-    await waitFor(() => expect(readinessSummary).toHaveBeenCalledTimes(2))
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.probeLlm' }))
-    await waitFor(() => screen.getByText('settings.readiness.probeOk'))
-    probed.unmount()
-
-    vi.mocked(readinessProbeLlm).mockResolvedValue({
-      ok: false,
-      latency_ms: null,
-      error: 'connection refused',
-      provider: 'openai',
-      model: 'gpt-4o',
-    })
-    renderTab('C:/lib')
-    await waitFor(() => screen.getByText('settings.readiness.library'))
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.readiness.probeLlm' }))
-    await waitFor(() => screen.getByText('settings.readiness.probeFailed'))
-  })
 })
