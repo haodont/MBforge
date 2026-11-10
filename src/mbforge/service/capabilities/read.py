@@ -182,6 +182,47 @@ class RecognizeMoleculesOutput(BaseModel):
     molecules: list[dict[str, Any]]
 
 
+class PageTextBlock(BaseModel):
+    region_id: str
+    kind: str
+    type: str
+    bbox_pdf: list[float]
+    reading_order: int
+    text: str
+
+
+class OcrPageRegionInput(BaseModel):
+    doc_id: str = Field(..., min_length=1, max_length=128)
+    page: int = Field(1, ge=1)
+    region: list[float] | None = Field(None, min_length=4, max_length=4)
+    max_blocks: int = Field(50, ge=1, le=100)
+
+
+class OcrPageRegionOutput(BaseModel):
+    doc_id: str
+    page: int
+    page_width_pts: float
+    page_height_pts: float
+    dpi: float
+    region: list[float] | None = None
+    count: int
+    truncated: bool
+    text: str
+    blocks: list[PageTextBlock]
+
+
+class RecognizeStructureImageInput(BaseModel):
+    image_base64: str = Field(..., min_length=1, max_length=12_000_000)
+
+
+class RecognizeStructureImageOutput(BaseModel):
+    smiles: str
+    esmiles: str
+    coref: list[str] = Field(default_factory=list)
+    coref_primary: str
+    recognized: bool
+
+
 async def resolve_document(
     context: CapabilityContext, request: ResolveDocumentInput
 ) -> CapabilityResult:
@@ -393,6 +434,74 @@ async def recognize_molecules_capability(
     return CapabilityResult(data=RecognizeMoleculesOutput(**result))
 
 
+def _decode_structure_image(payload: str) -> Any:
+    """Decode one base64 image without touching the library or filesystem."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    from mbforge.foundation.errors import ValidationError
+
+    encoded = payload.strip()
+    if encoded.startswith("data:"):
+        _, _, encoded = encoded.partition(",")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except Exception as exc:  # noqa: BLE001 - malformed client input
+        raise ValidationError("image_base64 is not valid base64") from exc
+    if len(raw) > 8 * 1024 * 1024:
+        raise ValidationError("image_base64 decodes to more than 8 MiB")
+    try:
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+    except Exception as exc:  # noqa: BLE001 - malformed client input
+        raise ValidationError("image_base64 is not a readable image") from exc
+    if image.width > 4096 or image.height > 4096:
+        raise ValidationError("image dimensions must not exceed 4096x4096")
+    return image.convert("RGB")
+
+
+async def recognize_structure_image_capability(
+    context: CapabilityContext, request: RecognizeStructureImageInput
+) -> CapabilityResult:
+    """Recognize one cropped structure image supplied by the caller."""
+    from mbforge.service.pipeline.detection.recognition import recognize_molecule
+
+    image = await asyncio.to_thread(_decode_structure_image, request.image_base64)
+    result = await asyncio.to_thread(recognize_molecule, image)
+    return CapabilityResult(
+        data=RecognizeStructureImageOutput(
+            smiles=result.smiles,
+            esmiles=result.esmiles,
+            coref=result.coref,
+            coref_primary=result.coref_primary,
+            recognized=bool(result.smiles or result.esmiles),
+        )
+    )
+
+
+async def ocr_page_region_capability(
+    context: CapabilityContext, request: OcrPageRegionInput
+) -> CapabilityResult:
+    """Read layout text from one stored page, optionally one PDF region."""
+    from mbforge.service.use_cases.documents.page_text import ocr_page_region
+
+    store = LibraryStore.get(context.library_root)
+    pdf_path = await asyncio.to_thread(store.resolve_file, request.doc_id)
+    if pdf_path is None:
+        raise NotFoundError("document source file not found", detail=request.doc_id)
+    result = await asyncio.to_thread(
+        ocr_page_region,
+        pdf_path,
+        doc_id=request.doc_id,
+        page=request.page,
+        region=request.region,
+        max_blocks=request.max_blocks,
+    )
+    return CapabilityResult(data=OcrPageRegionOutput(**result))
+
+
 register(
     Capability(
         name="resolve_document",
@@ -471,6 +580,26 @@ register(
         output_model=RecognizeMoleculesOutput,
         mutating=False,
         handler=recognize_molecules_capability,
+    )
+)
+register(
+    Capability(
+        name="ocr_page_region",
+        description="Read layout-guided local text from one page of a stored document, optionally one PDF-point region; returns text blocks and bboxes without persisting.",
+        input_model=OcrPageRegionInput,
+        output_model=OcrPageRegionOutput,
+        mutating=False,
+        handler=ocr_page_region_capability,
+    )
+)
+register(
+    Capability(
+        name="recognize_structure_image",
+        description="Recognize one base64-encoded structure image with MolParser and read its printed labels; nothing is persisted.",
+        input_model=RecognizeStructureImageInput,
+        output_model=RecognizeStructureImageOutput,
+        mutating=False,
+        handler=recognize_structure_image_capability,
     )
 )
 register(

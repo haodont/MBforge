@@ -141,8 +141,10 @@ Mutating calls require `X-MBForge-Token`; the token is created at
 edit mode. Patent facts are produced by a separate opt-in run:
 `submit_patent_analysis` queues the Patent stage and returns `run_ids`; poll
 `get_run`, then read `get_patent_result`. `submit_extraction` runs Extract +
-Markdown. `search_evidence` searches extracted text across documents, and
-`recognize_molecules` runs the local recognizers on one page without persisting.
+Markdown. `search_evidence` searches extracted text across documents,
+`recognize_molecules` runs the local recognizers on one page without persisting,
+`ocr_page_region` reads layout-guided text from one page or PDF region, and
+`recognize_structure_image` recognizes one caller-supplied base64 crop.
 `propose_review` files an AI review proposal for a human decision; it never
 applies the proposed value and refuses a target a human already decided.
 

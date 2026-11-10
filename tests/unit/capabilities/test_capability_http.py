@@ -18,6 +18,8 @@ def test_manifest_lists_read_and_write_capabilities(app_client: TestClient) -> N
         "submit_patent_analysis",
         "search_evidence",
         "recognize_molecules",
+        "ocr_page_region",
+        "recognize_structure_image",
         "propose_review",
     } <= names
     assert Path(body["token_path"]).parts[-2:] == (".mbforge", "capability-token")
@@ -83,6 +85,58 @@ def test_recognize_molecules_reports_a_missing_document(
     )
     assert response.status_code == 404
     assert response.json()["error_code"] == "not_found"
+
+
+def test_ocr_page_region_reports_a_missing_document(app_client: TestClient) -> None:
+    response = app_client.post(
+        "/api/v1/capabilities/ocr_page_region",
+        json={"doc_id": "missing", "page": 1},
+    )
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "not_found"
+
+
+def test_recognize_structure_image_rejects_invalid_base64(
+    app_client: TestClient,
+) -> None:
+    response = app_client.post(
+        "/api/v1/capabilities/recognize_structure_image",
+        json={"image_base64": "not base64"},
+    )
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "validation_error"
+
+
+def test_recognize_structure_image_maps_recognizer_output(
+    app_client: TestClient, monkeypatch
+) -> None:
+    import base64
+    import io
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    from mbforge.service.pipeline.detection import recognition
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), "white").save(buffer, format="PNG")
+    payload = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+    def fake_recognize(_image):
+        return SimpleNamespace(
+            smiles="CCO", esmiles="CCO<sep>", coref=["7"], coref_primary="7"
+        )
+
+    monkeypatch.setattr(recognition, "recognize_molecule", fake_recognize)
+    response = app_client.post(
+        "/api/v1/capabilities/recognize_structure_image",
+        json={"image_base64": payload},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["smiles"] == "CCO"
+    assert data["esmiles"] == "CCO<sep>"
+    assert data["coref"] == ["7"] and data["recognized"] is True
 
 
 def test_submit_patent_analysis_requires_edit_token(
