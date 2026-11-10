@@ -453,6 +453,14 @@ def active_run_id(library_root: str, doc_id: str) -> str | None:
     return row["run_id"] if row is not None else None
 
 
+def _task_dict(row: Any) -> dict:
+    return {
+        key: value
+        for key, value in dict(row).items()
+        if key not in {"progress_pct", "pages_total", "pages_done"}
+    }
+
+
 def list_tasks(library_root: str) -> list[dict]:
     """Return all ``ingest_queue`` rows, newest first (blocking)."""
     db = DatabaseManager.get(library_root)
@@ -460,14 +468,18 @@ def list_tasks(library_root: str) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM ingest_queue ORDER BY created_at DESC"
         ).fetchall()
-        return [
-            {
-                key: value
-                for key, value in dict(row).items()
-                if key not in {"progress_pct", "pages_total", "pages_done"}
-            }
-            for row in rows
-        ]
+    return [_task_dict(row) for row in rows]
+
+
+def list_run_tasks(library_root: str, run_id: str) -> list[dict]:
+    """Return the queue rows belonging to one run, newest first (blocking)."""
+    db = DatabaseManager.get(library_root)
+    with db.kb_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM ingest_queue WHERE run_id = ? ORDER BY created_at DESC",
+            (run_id,),
+        ).fetchall()
+    return [_task_dict(row) for row in rows]
 
 
 def queue_snapshot(library_root: str) -> dict:

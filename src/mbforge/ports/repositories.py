@@ -79,6 +79,8 @@ class EvidenceRepository(Protocol):
         *,
         page: int | None = None,
         kind: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SourceEvidence]: ...
 
     def at(

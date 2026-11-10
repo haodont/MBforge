@@ -1,4 +1,4 @@
-import { Type } from '@earendil-works/pi-ai'
+import { Type } from 'typebox'
 import { defineTool } from '@earendil-works/pi-coding-agent'
 
 const RCSB_SEARCH = 'https://search.rcsb.org/rcsbsearch/v2/query'

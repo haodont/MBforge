@@ -2,7 +2,7 @@
 import { existsSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { SessionManager, defineTool } from '@earendil-works/pi-coding-agent'
-import { Type } from '@earendil-works/pi-ai'
+import { Type } from 'typebox'
 import { startSse, writeSse, sendJson } from './http.js'
 import { asRecord, loadPersistedLlmConfig, readConfig, sanitizeError, stringValue, type AgentLlmConfig } from './llm.js'
 import { createSessionForSpec } from './session.js'

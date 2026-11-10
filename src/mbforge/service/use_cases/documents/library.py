@@ -209,14 +209,15 @@ class LibraryStore:
         )
         return [Document.from_dict(row, self._root) for row in rows]
 
-    def search_documents(self, query: str) -> list[Document]:
+    def search_documents(self, query: str, limit: int | None = None) -> list[Document]:
         """Case-insensitive substring search over title and file_name."""
         q = query.lower()
-        return [
+        matches = [
             d
             for d in self.list_documents()
             if q in d.title.lower() or q in d.file_name.lower()
         ]
+        return matches[:limit] if limit is not None else matches
 
     def clear_pipeline_data(self, doc_id: str, *, backup: bool = True) -> None:
         """Remove pipeline outputs for ``doc_id``, restoring the pre-pipeline state.

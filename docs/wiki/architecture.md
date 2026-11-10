@@ -69,3 +69,10 @@ see the [acceptance record](../qa/research-workbench-20261013.md).
 Paths have one authority: `LibraryLayout` for library and document paths, plus
 the artifact store for document records and cached PDF text. The database remains
 a single SQLite file at the library root.
+
+`service/capabilities/` is the single registry of agent-callable tasks. The HTTP
+adapter under `api/http/capabilities.py` only resolves the active library,
+validates the edit-mode token, and serializes the registry response; it never
+reimplements handlers or mode checks. The pi CLI extension consumes the same
+manifest, while the web research workspace keeps the Node sidecar for its
+credential-scoped turns.

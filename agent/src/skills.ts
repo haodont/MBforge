@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Type } from '@earendil-works/pi-ai'
+import { Type } from 'typebox'
 import { defineTool, loadSkills, type Skill } from '@earendil-works/pi-coding-agent'
 
 const skillsDirectory = fileURLToPath(new URL('../skills/', import.meta.url))

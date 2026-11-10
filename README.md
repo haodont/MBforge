@@ -96,7 +96,7 @@ either service exits with an error. Its default backend and frontend ports are
 runtime is the separate Node process under `agent/`; Python only exposes the
 FastAPI tool endpoints it needs.
 
-The sidecar uses Pi `@earendil-works/pi-coding-agent@1.2.0` (the previous
+The sidecar uses Pi `@earendil-works/pi-coding-agent@1.5.0` (the previous
 `@mariozechner` packages are deprecated). Research chat searches extracted SQL
 evidence across documents with `search_library`, then reads source evidence and
 accepted activities. When local information is insufficient, optional Tavily
@@ -136,6 +136,32 @@ persists them directly into SQLite (`{library_root}/library.db`) — SQL
 is the only runtime evidence store and there is no intermediate branch artifact.
 Text spans and downstream artifacts carry the resulting `evidence_id` rather
 than duplicating the evidence payload.
+
+## Capability API
+
+MBForge exposes agent-callable capabilities under `/api/v1/capabilities`.
+`GET /api/v1/capabilities` returns the manifest; `GET /api/v1/capabilities/guide`
+returns a Markdown guide with input schemas. Read-only calls need no credential.
+Mutating calls require `X-MBForge-Token`; the token is created at
+`{library_root}/.mbforge/capability-token` and is read by the harness only in
+edit mode. Patent extraction is asynchronous: `submit_extraction` returns a
+`run_id`, then poll `get_run` and read `get_patent_result`.
+
+### Agent CLI
+
+`npm --prefix agent run cli` opens pi's normal interactive CLI with the MBForge
+capability tools registered. Use `/login` to choose a provider (OAuth or API
+key), `/model` to pick a model, `/mbforge` to inspect the active capability
+mode, and then ask in natural language. Read-only is the default; set
+`MBFORGE_AGENT_MODE=edit` (PowerShell: `$env:MBFORGE_AGENT_MODE='edit'`) before
+launching to expose mutating capabilities. The FastAPI backend must be running
+on port 18792.
+
+The CLI is a pi extension (`agent/src/extension.ts`), not a custom REPL:
+built-in coding tools are disabled with `--no-builtin-tools`, while pi's
+provider login, model switching, sessions, and themes remain available. The
+web research workspace keeps using the Node sidecar under `agent/`; the CLI and
+the sidecar share the same `settings.json` and capability API.
 
 ## Verification
 

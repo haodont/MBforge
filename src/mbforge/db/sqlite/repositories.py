@@ -172,9 +172,16 @@ class SqliteEvidenceRepository:
         *,
         page: int | None = None,
         kind: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SourceEvidence]:
         return source_evidence.list_source_evidence(
-            self.library_root, doc_id, page=page, kind=kind
+            self.library_root,
+            doc_id,
+            page=page,
+            kind=kind,
+            limit=limit,
+            offset=offset,
         )
 
     def at(

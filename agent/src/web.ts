@@ -1,6 +1,6 @@
 /** Fixed official Pi extension, with MBForge settings and per-turn boundaries. */
 import { DefaultResourceLoader, SettingsManager, type LoadExtensionsResult } from '@earendil-works/pi-coding-agent'
-import { Type } from '@earendil-works/pi-ai'
+import { Type } from 'typebox'
 import { isIP } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'

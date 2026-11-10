@@ -755,6 +755,7 @@ never import `server`.
 - [Activity data extraction and persistence](../docs/plan-activity-extraction.md) — **Phase A implemented**: readings are first-class SQL rows independent of structure attribution. Phase B (compute layer: Boltz-2, reproducible `compute_runs`, `evidence_grade` for predictions) and Phase C (SAR, synthesis suggestions) are recorded with their preconditions and are not scheduled.
 - [Patent analysis and an LLM-first research workspace](../docs/plan-patent-agent-harness.md) — frontend U0/U1/P4 and necessary SQL/session/task integration completed; [acceptance evidence](../docs/qa/research-workbench-20261013.md). P5 real-patent scientific evaluation remains pending; LLM analysis is opt-in.
 - [Source layout reorganization](../docs/plan-source-layout-reorganization.md)
+- [Capability platform](../docs/plan-capability-platform.md)
 - [SLANet-1M as table parser on the Hiro-Layout path](../docs/plan-slanet-1m-table-parser.md)
 - [Backend architecture](../docs/wiki/architecture.md)
 - [Pipeline contract](../docs/wiki/pipeline.md)

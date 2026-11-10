@@ -62,6 +62,13 @@ class NotFoundError(MBForgeError):
     error_code = "not_found"
 
 
+class CapabilityForbiddenError(MBForgeError):
+    """Raised when a mutating capability is invoked without edit mode."""
+
+    status_code = 403
+    error_code = "capability_forbidden"
+
+
 class PathTraversalError(MBForgeError):
     status_code = 403
     error_code = "path_traversal"

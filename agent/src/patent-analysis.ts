@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { defineTool } from '@earendil-works/pi-coding-agent'
-import { Type } from '@earendil-works/pi-ai'
+import { Type } from 'typebox'
 
 import { sendJson, startSse, writeSse } from './http.js'
 import {
