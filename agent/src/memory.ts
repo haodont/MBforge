@@ -13,6 +13,10 @@ import { Type } from 'typebox'
 const MEMORY_FILE_NAME = 'MEMORY.md'
 const MAX_MEMORY_BYTES = 16 * 1024
 const MAX_ENTRY_CHARS = 2_000
+const MEMORY_ARCHIVE_SUFFIX = '.archive.md'
+const MEMORY_ARCHIVE_HEADER =
+  '# MBForge memory archive\n\n' +
+  'Entries compacted out of MEMORY.md to keep the active memory under its byte limit.\n'
 const MEMORY_HEADER =
   '# MBForge memory\n\n' +
   'Local notes injected into each turn. Keep entries short; this file is not evidence.\n\n' +
@@ -47,7 +51,7 @@ const ENTRY_ID_PATTERN = /^[ufpr]-[0-9a-f]{8}$/
 export const MEMORY_TOOL_NAME = 'memory'
 export const MEMORY_TOOL_NAMES = [MEMORY_TOOL_NAME] as const
 
-export const MEMORY_ACTIONS = ['add', 'delete', 'list'] as const
+export const MEMORY_ACTIONS = ['add', 'update', 'delete', 'list'] as const
 export type MemoryAction = (typeof MEMORY_ACTIONS)[number]
 
 export interface AppendMemoryResult {
@@ -62,6 +66,15 @@ export interface ForgetMemoryResult {
   path: string
   id: string
   removed: boolean
+  bytes: number
+}
+
+export interface UpdateMemoryResult {
+  path: string
+  id: string
+  previous_id: string
+  type: MemoryType
+  entry: string
   bytes: number
 }
 
@@ -83,6 +96,13 @@ export interface ListMemoryResult {
 export function memoryFilePath(): string {
   const override = process.env.MBFORGE_MEMORY_FILE?.trim()
   return override ? resolve(override) : join(getAgentDir(), MEMORY_FILE_NAME)
+}
+
+/** Companion file for entries compacted out of the active memory. */
+export function memoryArchivePath(path = memoryFilePath()): string {
+  return path.toLowerCase().endsWith('.md')
+    ? `${path.slice(0, -3)}${MEMORY_ARCHIVE_SUFFIX}`
+    : `${path}${MEMORY_ARCHIVE_SUFFIX}`
 }
 
 async function writeMemory(path: string, text: string): Promise<void> {
@@ -117,7 +137,9 @@ export async function readMemory(): Promise<string> {
   const text = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '')
   const bytes = Buffer.from(text, 'utf8')
   if (bytes.length <= MAX_MEMORY_BYTES) return text
-  return `${bytes.subarray(0, MAX_MEMORY_BYTES).toString('utf8')}\n\n[memory truncated; edit ${path}]\n`
+  let end = MAX_MEMORY_BYTES
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1
+  return `${bytes.subarray(0, end).toString('utf8')}\n\n[memory truncated; edit ${path}]\n`
 }
 
 /** Prompt section for the current memory, or an empty string for a fresh file. */
@@ -145,7 +167,7 @@ function normalizeEntry(raw: string): string {
 }
 
 function normalizeType(raw: string | undefined): MemoryType {
-  if (!raw) return 'project'
+  if (raw === undefined) return 'project'
   if ((MEMORY_TYPES as readonly string[]).includes(raw)) {
     return raw as MemoryType
   }
@@ -184,6 +206,81 @@ function insertEntry(text: string, type: MemoryType, line: string): string {
   return `${lines.join('\n')}\n`
 }
 
+interface CompactedMemory {
+  text: string
+  archived: string[]
+}
+
+/**
+ * Keep the newest/important entries in the active file and archive the rest.
+ *
+ * Compaction is deterministic rather than model-summarized so a write never
+ * silently loses a note. Reference/project entries are evicted before
+ * feedback/user preferences, and the entry being written is always kept.
+ */
+function compactMemory(text: string, keepId: string): CompactedMemory {
+  const lines = text.split('\n')
+  const entries: Array<{
+    index: number
+    id: string
+    type: MemoryType
+    date: string
+  }> = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = ENTRY_PATTERN.exec(lines[index])
+    if (!match) continue
+    entries.push({
+      index,
+      id: match[1],
+      type: TYPE_BY_PREFIX[match[1].charAt(0)] ?? 'project',
+      date: match[2],
+    })
+  }
+
+  const priority: Record<MemoryType, number> = {
+    reference: 0,
+    project: 1,
+    feedback: 2,
+    user: 3,
+  }
+  const archived: string[] = []
+  while (Buffer.byteLength(lines.join('\n')) > MAX_MEMORY_BYTES) {
+    let candidate: (typeof entries)[number] | undefined
+    for (const entry of entries) {
+      if (entry.id === keepId) continue
+      if (
+        candidate === undefined ||
+        priority[entry.type] < priority[candidate.type] ||
+        (priority[entry.type] === priority[candidate.type] &&
+          (entry.date < candidate.date ||
+            (entry.date === candidate.date && entry.index < candidate.index)))
+      ) {
+        candidate = entry
+      }
+    }
+    if (candidate === undefined) break
+    archived.push(lines[candidate.index])
+    lines.splice(candidate.index, 1)
+    entries.splice(entries.indexOf(candidate), 1)
+    for (const entry of entries) {
+      if (entry.index > candidate.index) entry.index -= 1
+    }
+  }
+  return { text: lines.join('\n'), archived }
+}
+
+/** Append compacted entries to the companion archive before touching active memory. */
+async function archiveEntries(path: string, lines: string[]): Promise<void> {
+  if (lines.length === 0) return
+  const archive = memoryArchivePath(path)
+  let text = MEMORY_ARCHIVE_HEADER
+  if (existsSync(archive)) {
+    text = await readFile(archive, 'utf8')
+  }
+  text = `${text.trimEnd()}\n\n## ${new Date().toISOString()}\n\n${lines.join('\n')}\n`
+  await writeMemory(archive, text)
+}
+
 let writeChain: Promise<unknown> = Promise.resolve()
 
 async function appendMemoryNow(
@@ -205,12 +302,19 @@ async function appendMemoryNow(
     }
   }
   const line = `- [${id}] ${new Date().toISOString().slice(0, 10)}: ${content}`
-  const next = insertEntry(current, type, line)
+  let next = insertEntry(current, type, line)
+  let archived: string[] = []
+  if (Buffer.byteLength(next) > MAX_MEMORY_BYTES) {
+    const compacted = compactMemory(next, id)
+    next = compacted.text
+    archived = compacted.archived
+  }
   if (Buffer.byteLength(next) > MAX_MEMORY_BYTES) {
     throw new Error(
-      `Memory file is full (${MAX_MEMORY_BYTES} bytes); edit ${path} and remove stale entries`,
+      `Memory file is full (${MAX_MEMORY_BYTES} bytes) even after compaction; edit ${path} and remove stale entries`,
     )
   }
+  await archiveEntries(path, archived)
   await writeMemory(path, next)
   return { path, id, type, entry: line, bytes: Buffer.byteLength(next) }
 }
@@ -260,6 +364,75 @@ export function forgetMemory(id: string): Promise<ForgetMemoryResult> {
   return run
 }
 
+async function updateMemoryNow(
+  rawId: string,
+  rawContent: string | undefined,
+  rawType: string | undefined,
+): Promise<UpdateMemoryResult> {
+  const id = rawId.trim()
+  if (!ENTRY_ID_PATTERN.test(id)) {
+    throw new Error('Memory id must look like u-1234abcd')
+  }
+  if (rawContent === undefined && rawType === undefined) {
+    throw new Error('Memory update requires content or type')
+  }
+  const path = await ensureMemoryFile()
+  const current = await readFile(path, 'utf8')
+  const lines = current.split('\n')
+  const index = lines.findIndex((line) => ENTRY_PATTERN.exec(line)?.[1] === id)
+  if (index === -1) throw new Error(`Memory entry not found: ${id}`)
+  const match = ENTRY_PATTERN.exec(lines[index])
+  if (!match) throw new Error(`Memory entry is malformed: ${id}`)
+  const previousType = TYPE_BY_PREFIX[match[1].charAt(0)] ?? 'project'
+  const type = rawType === undefined ? previousType : normalizeType(rawType)
+  const content = rawContent === undefined ? match[3] : normalizeEntry(rawContent)
+  const newId = entryId(type, content)
+  const date = match[2]
+  const newLine = `- [${newId}] ${date}: ${content}`
+  const base = lines
+    .filter(
+      (line, lineIndex) =>
+        lineIndex !== index && ENTRY_PATTERN.exec(line)?.[1] !== newId,
+    )
+    .join('\n')
+  let next = insertEntry(base, type, newLine)
+  let archived: string[] = []
+  if (Buffer.byteLength(next) > MAX_MEMORY_BYTES) {
+    const compacted = compactMemory(next, newId)
+    next = compacted.text
+    archived = compacted.archived
+  }
+  if (Buffer.byteLength(next) > MAX_MEMORY_BYTES) {
+    throw new Error(
+      `Memory file is full (${MAX_MEMORY_BYTES} bytes) even after compaction; edit ${path} and remove stale entries`,
+    )
+  }
+  await archiveEntries(path, archived)
+  await writeMemory(path, next)
+  return {
+    path,
+    id: newId,
+    previous_id: id,
+    type,
+    entry: newLine,
+    bytes: Buffer.byteLength(next),
+  }
+}
+
+/** Directly replace one entry's content and/or type, preserving its date. */
+export function updateMemory(
+  id: string,
+  content?: string,
+  type?: string,
+): Promise<UpdateMemoryResult> {
+  const run = writeChain.then(() => updateMemoryNow(id, content, type))
+  writeChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
 /** Parse every stored note with its id, type and date. */
 export async function listMemory(): Promise<ListMemoryResult> {
   const path = await ensureMemoryFile()
@@ -279,10 +452,12 @@ export interface MemoryToolDetails {
   action: MemoryAction
   path: string
   id?: string
+  previous_id?: string
   type?: MemoryType
   entry?: string
   entries?: MemoryEntry[]
   removed?: boolean
+  updated?: boolean
 }
 
 const memoryParameters = Type.Union([
@@ -297,6 +472,26 @@ const memoryParameters = Type.Union([
       Type.Union(
         MEMORY_TYPES.map((type) => Type.Literal(type)),
         { description: 'Category of the stored note. Defaults to project.' },
+      ),
+    ),
+  }),
+  Type.Object({
+    action: Type.Literal('update'),
+    id: Type.String({
+      description: 'Entry id to update, such as u-1234abcd.',
+      pattern: '^[ufpr]-[0-9a-f]{8}$',
+    }),
+    content: Type.Optional(
+      Type.String({
+        description: 'Replacement note content. Omit to keep the current content.',
+        minLength: 1,
+        maxLength: MAX_ENTRY_CHARS,
+      }),
+    ),
+    type: Type.Optional(
+      Type.Union(
+        MEMORY_TYPES.map((type) => Type.Literal(type)),
+        { description: 'Replacement category. Omit to keep the current category.' },
       ),
     ),
   }),
@@ -347,6 +542,25 @@ export function memoryTool() {
           details,
         }
       }
+      if (params.action === 'update') {
+        if (params.content === undefined && params.type === undefined) {
+          throw new Error('memory action "update" requires content or type')
+        }
+        const result = await updateMemory(params.id, params.content, params.type)
+        const details: MemoryToolDetails = {
+          action: 'update',
+          path: result.path,
+          id: result.id,
+          previous_id: result.previous_id,
+          type: result.type,
+          entry: result.entry,
+          updated: true,
+        }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(details) }],
+          details,
+        }
+      }
       if (params.action === 'delete') {
         const id = params.id?.trim()
         if (!id) throw new Error('memory action "delete" requires id')
@@ -358,7 +572,7 @@ export function memoryTool() {
           removed: result.removed,
         }
         return {
-          content: [{ type: 'text', text: JSON.stringify({ ...details, removed: true }) }],
+          content: [{ type: 'text', text: JSON.stringify(details) }],
           details,
         }
       }
@@ -417,6 +631,19 @@ export function registerMemoryCommand(pi: ExtensionAPI): void {
           )
           return
         }
+        if (input.startsWith('edit ')) {
+          const rest = input.slice(5).trim()
+          const [id, ...parts] = rest.split(/\s+/)
+          if (!id || parts.length === 0) {
+            throw new Error('Usage: /memory edit <id> <text>')
+          }
+          const result = await updateMemory(id, parts.join(' '))
+          ctx.ui.notify(
+            `Updated ${result.previous_id} -> ${result.id} in ${result.path}`,
+            'info',
+          )
+          return
+        }
         if (input.startsWith('remove ') || input.startsWith('delete ')) {
           const id = input.slice(input.indexOf(' ') + 1).trim()
           const result = await forgetMemory(id)
@@ -424,7 +651,7 @@ export function registerMemoryCommand(pi: ExtensionAPI): void {
           return
         }
         ctx.ui.notify(
-          'Usage: /memory | /memory list | /memory add [user|feedback|project|reference] <text> | /memory delete <id>',
+          'Usage: /memory | /memory list | /memory add [user|feedback|project|reference] <text> | /memory edit <id> <text> | /memory delete <id>',
           'info',
         )
       } catch (error) {
