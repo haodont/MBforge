@@ -101,7 +101,8 @@ def _is_placeholder_name(name: str) -> bool:
     )
 
 
-def _largest_fragment_mol(smiles: str) -> Any | None:
+def largest_fragment_mol(smiles: str) -> Any | None:
+    """The heaviest fragment of a SMILES — the salt-stripped parent structure."""
     from rdkit import Chem
 
     try:
@@ -116,11 +117,11 @@ def _largest_fragment_mol(smiles: str) -> Any | None:
     return max(frags, key=lambda frag: frag.GetNumHeavyAtoms())
 
 
-def _exact_mass(smiles: str) -> float | None:
+def exact_mass(smiles: str) -> float | None:
     """Monoisotopic mass of the largest fragment (salt-stripped)."""
     from rdkit.Chem import rdMolDescriptors
 
-    main = _largest_fragment_mol(smiles)
+    main = largest_fragment_mol(smiles)
     if main is None:
         return None
     try:
@@ -212,10 +213,10 @@ def recover_labels_from_ms(
         if smiles in seen_keys:
             continue
         seen_keys.add(smiles)
-        main = _largest_fragment_mol(smiles)
+        main = largest_fragment_mol(smiles)
         if main is None or not main.HasSubstructMatch(core):
             continue
-        mass = _exact_mass(smiles)
+        mass = exact_mass(smiles)
         if mass is None:
             continue
         candidate_key = smiles

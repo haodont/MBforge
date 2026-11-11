@@ -164,3 +164,36 @@ def test_normalized_intermediate_label_is_used_when_name_is_missing() -> None:
     )
 
     assert classify_structure_role(molecule) == "review_required"
+
+
+def test_a_designation_the_page_prints_keeps_the_structure_concrete() -> None:
+    """A compound list prints the number beside the drawing.
+
+    The prose next to such a crop is the document's own — often the generic
+    formula's R-group list — and it says nothing about this drawing, so a
+    structure the page names by its compound number stays concrete.
+    """
+    named = _molecule(
+        "Cc1cc(=O)n2cc[nH]c2n1",
+        properties={
+            "context_texts": ["R1 means -H, -CH3, -CH2CH3; R5, R6 and R7"],
+            "name_candidates": [
+                {"name": "A-1", "confidence": 0.94, "source": "page_text"}
+            ],
+        },
+    )
+
+    assert classify_structure_role(named) == "complete"
+    assert named.properties["structure_role"] == "complete"
+
+    # The same context without the page's own designation still requires review.
+    unnamed = _molecule(
+        "Cc1cc(=O)n2cc[nH]c2n1",
+        properties={
+            "context_texts": ["R1 means -H, -CH3, -CH2CH3; R5, R6 and R7"],
+            "name_candidates": [{"name": "A-1", "confidence": 0.94, "source": "crop"}],
+        },
+    )
+
+    assert classify_structure_role(unnamed) == "review_required"
+    assert unnamed.properties["structure_role_reasons"]

@@ -46,6 +46,18 @@ _KIND_TO_ROLE = {
 }
 _CANDIDATE_HEADER_RE = re.compile(r"^%%\s*candidate=(\S+)\s*$", re.MULTILINE)
 
+#: Every section kind the deterministic pass can mint, via :func:`section_role`.
+#: ``PatentSectionModel.kind`` stays an open ``str`` on purpose (a stored
+#: artifact must still load after this set changes), so this tuple — not the
+#: field type — is the published vocabulary.
+SECTION_KINDS: tuple[str, ...] = (
+    "example",
+    "preparation",
+    "comparison",
+    "reference",
+    "bioassay",
+)
+
 # Bioassay sections are numbered or bracketed, never bare prose. Published
 # forms: ``(一)本发明化合物对MRGPRX2的抑制活性``, ``3. 检测结果``,
 # ``[0144]生物活性研究(一)本发明化合物对MRGPRX2的抑制活性``.
@@ -312,6 +324,7 @@ def parse_source_evidence_sections(
 
 __all__ = [
     "ParsedSection",
+    "SECTION_KINDS",
     "_HEADING_RE",
     "example_token",
     "match_assay_heading",

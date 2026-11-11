@@ -93,7 +93,7 @@ _MS_MZ_RE = re.compile(
     re.IGNORECASE,
 )
 #: Proton/electron-accurate adduct corrections (monoisotopic masses + electron).
-_ADDUCT_DELTA = {
+ADDUCT_DELTA = {
     "+H": 1.00728,
     "+Na": 22.98922,
     "+K": 38.96316,
@@ -366,6 +366,24 @@ def extract_characterization(
     return items
 
 
+def printed_ms_mz(raw_text: str) -> tuple[float, str] | None:
+    """The printed m/z and the adduct it names, or ``None`` for a line with neither.
+
+    One parser for the whole codebase: the mass check and the read surface
+    must read a printed mass the same way, or they disagree about the same line.
+    """
+    match = _MS_MZ_RE.search(raw_text or "")
+    if match is None:
+        return None
+    adduct = f"{match.group('sign') or '+'}{match.group('adduct') or 'H'}"
+    return float(match.group("mz")), adduct
+
+
+def adduct_mass_delta(adduct: str) -> float | None:
+    """The monoisotopic mass a printed adduct adds to the neutral structure."""
+    return ADDUCT_DELTA.get(adduct)
+
+
 def find_mass_mismatches(
     characterizations: Sequence[dict],
     candidates: Sequence[Any],
@@ -379,7 +397,7 @@ def find_mass_mismatches(
     designation disagree, which is worth a human's attention — and nothing here
     writes a SMILES or picks a replacement.
     """
-    from mbforge.service.pipeline.detection.label_recovery import _exact_mass
+    from mbforge.service.pipeline.detection.label_recovery import exact_mass
     from mbforge.service.pipeline.patent.candidate_labels import candidate_label_keys
 
     by_key: dict[str, Any] = {}
@@ -394,15 +412,14 @@ def find_mass_mismatches(
         candidate = by_key.get(str(item["label_key"]))
         if candidate is None:
             continue
-        match = _MS_MZ_RE.search(str(item.get("raw_text") or ""))
-        if match is None:
+        parsed = printed_ms_mz(str(item.get("raw_text") or ""))
+        if parsed is None:
             continue
-        printed = float(match.group("mz"))
-        adduct = f"{match.group('sign') or '+'}{match.group('adduct') or 'H'}"
-        delta_mass = _ADDUCT_DELTA.get(adduct)
+        printed, adduct = parsed
+        delta_mass = adduct_mass_delta(adduct)
         if delta_mass is None:
             continue
-        structure_mass = _exact_mass(
+        structure_mass = exact_mass(
             str(getattr(candidate, "canonical_smiles", "") or "")
         )
         if structure_mass is None:

@@ -14,7 +14,10 @@ from mbforge.domain.patent import (
     designation_key,
     entry_id,
 )
-from mbforge.service.pipeline.patent.candidate_labels import candidate_label_keys
+from mbforge.service.pipeline.patent.candidate_labels import (
+    candidate_label_keys,
+    candidate_owns_designation,
+)
 from mbforge.service.pipeline.patent.sections import (
     ParsedSection as DocumentSection,
 )
@@ -554,7 +557,17 @@ def associate_facts(
                     severity="info",
                 )
             continue
-        if len(matches) > 1 or any(len(keys) != 1 for _, keys, _ in matches):
+        # A patent prints a compound more than once, and the printings are not
+        # always recognized the same way. A candidate answers only to the
+        # designation its drawings agree on most; the minority designation of a
+        # structure belongs to the compound its other drawings name. So the
+        # candidates that do not own the designation are not in the running.
+        owned = [
+            (candidate, keys, evidence_ids)
+            for candidate, keys, evidence_ids in matches
+            if candidate_owns_designation(candidate, label_key)
+        ]
+        if len(owned) != 1:
             _append_issue(
                 issues,
                 "molecule_candidate_ambiguous",
@@ -564,7 +577,7 @@ def associate_facts(
                 label_key=label_key,
             )
             continue
-        candidate, _, candidate_evidence_ids = matches[0]
+        candidate, _, candidate_evidence_ids = owned[0]
         if not candidate_evidence_ids:
             _append_issue(
                 issues,

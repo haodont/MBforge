@@ -321,8 +321,11 @@ def _declared_structure_activity(
         if key not in disputed
     }
     examples = extract_declared_examples(evidence, doc_id)
-    if not examples:
-        return []
+    # A document without example headings still declares its compounds: the
+    # activity table prints the compound number beside the reading. The
+    # declaration is needed only to map an *example* reference and to check a
+    # printed product mass; a reading that names a compound is joined by that
+    # name, so a document that declares nothing by heading still pairs.
     pairs = (
         pair_structure_activity(examples, measurements, structures)
         if structures

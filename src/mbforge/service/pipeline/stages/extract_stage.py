@@ -32,6 +32,74 @@ from mbforge.service.pipeline.stage import PipelineErrorCode, StageResult, regis
 logger = get_logger("mbforge.service.pipeline.stages.extract")
 
 
+def _name_drawings_from_page_text(
+    results: list[Any],
+    pages: list[Any],
+    page_heights: dict[int, float],
+) -> int:
+    """Give every drawing the number the page prints beside it.
+
+    The molecule pass reads a compound number off the crop around a drawing, and
+    a number printed in the margin never reaches that crop: a US application
+    prints its compound list as ``[drawing][A-5]``. The page's own text has the
+    number, with its position, so the drawing is named from there.
+
+    Only drawings the crop pass left unnamed are considered, and only a number
+    that names no drawing already is used.
+    """
+    from mbforge.domain.patent import designation_key
+    from mbforge.service.pipeline.detection.text_label_assignment import (
+        assign_text_labels,
+        page_designations,
+        to_top_down,
+    )
+
+    by_page: dict[int, list[Any]] = {}
+    for result in results:
+        if result.page_idx is None or result.bbox_pdf is None:
+            continue
+        by_page.setdefault(result.page_idx + 1, []).append(result)
+
+    named = 0
+    for page in pages:
+        page_results = by_page.get(page.page_num, [])
+        height = page_heights.get(page.page_num)
+        if not page_results or not height:
+            continue
+        free = [result for result in page_results if not str(result.name).strip()]
+        if not free:
+            continue
+        taken = {
+            designation_key(str(result.name))
+            for result in page_results
+            if str(result.name).strip()
+        }
+        designations = [
+            designation
+            for designation in page_designations(page.regions, height)
+            if designation_key(designation.text) not in taken
+        ]
+        if not designations:
+            continue
+        structures = [
+            (str(index), to_top_down(result.bbox_pdf, height))
+            for index, result in enumerate(free)
+        ]
+        assignment = assign_text_labels(structures, designations)
+        for token, structure_id in assignment.assignments.items():
+            key = designation_key(token)
+            if not key or key in taken:
+                continue
+            taken.add(key)
+            result = free[int(structure_id)]
+            result.name = key
+            result.properties["ocr_labels"] = [key]
+            result.properties["ocr_labels_primary"] = key
+            result.properties["label_source"] = "page_text"
+            named += 1
+    return named
+
+
 def _detect_molecules(ctx: PipelineContext) -> dict[str, Any]:
     """Run the molecule pass and return its raw results plus stats.
 
@@ -137,9 +205,20 @@ class ExtractStage:
             ctx.molecule_stats = molecule_stats
             ctx.candidates = []
 
+            frames = page_frames_from_pdf(ctx.pdf_path)
+            named_from_text = _name_drawings_from_page_text(
+                list(molecule_stats.get("results", [])),
+                list(ctx.extracted.pages),
+                {frame.page: frame.height for frame in frames},
+            )
+            if named_from_text:
+                logger.info(
+                    "Named %d drawings from the page's own text", named_from_text
+                )
+
             evidence = mint_evidence(
                 ctx.extracted,
-                page_frames_from_pdf(ctx.pdf_path),
+                frames,
                 list(molecule_stats.get("results", [])),
                 doc_id=ctx.doc_id,
                 library_root=ctx.library_root,

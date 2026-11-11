@@ -56,4 +56,58 @@ def candidate_label_keys(candidate: Any) -> set[str]:
     return keys
 
 
-__all__ = ["candidate_label_keys"]
+def candidate_designation_counts(candidate: Any) -> dict[str, int]:
+    """Return how many of *candidate*'s drawings carry each designation.
+
+    A patent prints a compound more than once, and the printings are not
+    always recognized the same way. The designation the most drawings agree on
+    is the compound; the others are misreadings of it, and the candidate does
+    not answer to them.
+    """
+    from mbforge.service.pipeline.detection.label_normalization import (
+        LabelKind,
+        normalize_coref_label,
+    )
+
+    properties = getattr(candidate, "properties", {})
+    properties = properties if isinstance(properties, dict) else {}
+    claims = properties.get("detection_designations")
+    if not isinstance(claims, list):
+        return {}
+    counts: dict[str, int] = {}
+    for claim in claims:
+        name = claim.get("name") if isinstance(claim, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            continue
+        normalized = normalize_coref_label(name)
+        if normalized is None or normalized.kind is not LabelKind.COMPOUND:
+            continue
+        counts[normalized.normalized] = counts.get(normalized.normalized, 0) + 1
+    return counts
+
+
+def candidate_owns_designation(candidate: Any, label_key: str) -> bool:
+    """Return whether *candidate* answers to *label_key*.
+
+    A candidate owns the designation its drawings agree on most: when the
+    drawings of one structure carry several designations, the one the minority
+    of them carry is a misreading — the drawing belongs to the compound the
+    other drawings name. A candidate whose designations tie owns none of them,
+    because none of them is established.
+    """
+    counts = candidate_designation_counts(candidate)
+    if not counts:
+        # No per-drawing record (a candidate from another producer): the
+        # merged label set decides, as it always did.
+        return label_key in candidate_label_keys(candidate)
+    own = counts.get(label_key, 0)
+    if own <= 0:
+        return False
+    return all(own > count for key, count in counts.items() if key != label_key)
+
+
+__all__ = [
+    "candidate_designation_counts",
+    "candidate_label_keys",
+    "candidate_owns_designation",
+]

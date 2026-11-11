@@ -34,7 +34,11 @@ STATUS_PENDING = "pending"
 STATUS_RESOLVED = "resolved"
 STATUS_FAILED = "failed"
 
-_COMPOUND_TOKEN = r"(?:E\d+|\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
+_COMPOUND_TOKEN = (
+    # A series-letter prefix is how a US application numbers its compounds
+    # (``A-1``, ``B-40``, ``C-67``); the bare number space stays as it was.
+    r"(?:E\d+|[A-Z]{1,2}-\d+[A-Za-z]?|\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
+)
 _COMPOUND_PREFIX_RE = re.compile(
     rf"^(?:化合物|compound|cmpd|cpd)\s*#?\s*(?P<token>{_COMPOUND_TOKEN})$",
     re.IGNORECASE,

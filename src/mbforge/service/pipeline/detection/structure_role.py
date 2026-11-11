@@ -173,6 +173,40 @@ def _collect_values(
     return [value[:limit] for value in values if value.strip()]
 
 
+def _named_by_page_text(molecule: Molecule) -> bool:
+    """Return whether the page's own text prints this drawing's designation.
+
+    A compound list prints the number beside the drawing (``[drawing][A-5]``),
+    and the layout producer reads that number as a text region of its own. Such
+    a designation is the document's own statement about the drawing, and the
+    prose *next to* the crop on such a page is often the generic formula's
+    R-group definitions — which say nothing about this drawing.
+    """
+    properties = getattr(molecule, "properties", {})
+    if not isinstance(properties, dict):
+        return False
+    candidates = properties.get("name_candidates")
+    if not isinstance(candidates, list):
+        return False
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        if candidate.get("source") != "page_text":
+            continue
+        name = candidate.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        from mbforge.service.pipeline.detection.label_normalization import (
+            LabelKind,
+            normalize_coref_label,
+        )
+
+        normalized = normalize_coref_label(name)
+        if normalized is not None and normalized.kind is LabelKind.COMPOUND:
+            return True
+    return False
+
+
 def _context_values(molecule: Molecule) -> list[str]:
     """Collect bounded, human-readable context used for role classification."""
     # Keep classification bounded even when a document contributes many
@@ -297,21 +331,28 @@ def classify_structure_role(molecule: Molecule) -> str:
             role = REVIEW_REQUIRED
             reasons.append("markush_without_dummy")
         elif not has_dummy:
-            context_values = _context_values(molecule)
-            context_signals = _markush_context_signals(context_values)
-            context_signals.extend(_ambiguity_context_signals(context_values))
-            label_signals = _intermediate_label_signals(
-                _label_values(molecule), context_values
-            )
-            if context_signals or label_signals:
-                # A closed SMILES plus Formula I/R-group context is precisely
-                # the failure mode we must not silently import as a concrete
-                # molecule.  Preserve it for review instead.
-                role = REVIEW_REQUIRED
-                reasons.extend(context_signals)
-                reasons.extend(label_signals)
-            else:
+            if _named_by_page_text(molecule):
+                # The document prints this drawing's compound number in its own
+                # text. The prose next to the crop on such a page is the
+                # document's (often the generic formula's R-group list), and it
+                # is not evidence about this drawing.
                 role = "complete"
+            else:
+                context_values = _context_values(molecule)
+                context_signals = _markush_context_signals(context_values)
+                context_signals.extend(_ambiguity_context_signals(context_values))
+                label_signals = _intermediate_label_signals(
+                    _label_values(molecule), context_values
+                )
+                if context_signals or label_signals:
+                    # A closed SMILES plus Formula I/R-group context is precisely
+                    # the failure mode we must not silently import as a concrete
+                    # molecule.  Preserve it for review instead.
+                    role = REVIEW_REQUIRED
+                    reasons.extend(context_signals)
+                    reasons.extend(label_signals)
+                else:
+                    role = "complete"
         elif heavy_atoms <= FRAGMENT_MAX_HEAVY or (
             attachment_count == 1 and heavy_atoms <= EXTENDED_FRAGMENT_MAX_HEAVY
         ):

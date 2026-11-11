@@ -21,6 +21,7 @@ ReviewKind = Literal[
     "patent_fact_review",
     "smiles_correction",
     "ai_review",
+    "designation_unbound",
 ]
 ReviewAction = Literal["confirm", "reject", "reopen"]
 

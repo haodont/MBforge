@@ -1285,3 +1285,105 @@ def test_a_step_heading_gives_its_characterization_an_owner() -> None:
     assert items[0]["technique"] == "ms"
     assert items[0]["label_key"] == "8"
     assert items[0]["attribution"] == "resolved"
+
+
+def test_a_structure_answers_only_to_the_designation_its_drawings_agree_on() -> None:
+    """A patent prints a compound more than once, and one printing may be
+    recognized differently.
+
+    The structure answers to the designation most of its drawings carry, so the
+    entry binds to it; the minority designation belongs to the compound the
+    other drawings name and stays unowned. A structure whose designations tie
+    owns neither: none of them is established.
+    """
+    section = _example_section("sec-1", "实施例1：化合物40的制备")
+    entries = [
+        _entry("entry-40", "化合物40", "sec-1"),
+        _entry("entry-47", "化合物47", "sec-1"),
+    ]
+
+    def _candidate(smiles: str, names: list[str]) -> Molecule:
+        return Molecule(
+            canonical_smiles=smiles,
+            esmiles=smiles,
+            name="",
+            sources=["image"],
+            detections=[DetectionSource(source="image", page=0, evidence_id="ev-1")],
+            properties={
+                "ocr_labels": sorted(set(names)),
+                "detection_designations": [{"name": name} for name in names],
+            },
+        )
+
+    # One structure drawn three times: two printings say 47, one says 40 — the
+    # misreading of a printing of the other compound. The other structure is
+    # drawn three times and says 40 every time.
+    candidates = [
+        _candidate("CCO", ["化合物47", "化合物47", "化合物40"]),
+        _candidate("CCN", ["化合物40", "化合物40", "化合物40"]),
+    ]
+    issues: list[dict] = []
+
+    associate_facts([section], entries, [], [], candidates, {"ev-1"}, issues)
+
+    assert entries[0]["entity_id"] == "CCN"
+    assert entries[0]["linking_status"] == "linked"
+    assert entries[1]["entity_id"] == "CCO"
+    assert entries[1]["linking_status"] == "linked"
+    assert [issue["code"] for issue in issues] == []
+
+    # A structure whose two designations tie owns neither of them.
+    tied = _candidate("CCO", ["化合物40", "化合物47"])
+    tied_entries = [_entry("entry-40", "化合物40", "sec-1")]
+    tied_issues: list[dict] = []
+
+    associate_facts([section], tied_entries, [], [], [tied], {"ev-1"}, tied_issues)
+
+    assert tied_entries[0]["entity_id"] is None
+    assert [issue["code"] for issue in tied_issues] == ["molecule_candidate_ambiguous"]
+
+
+def test_a_reading_pairs_with_the_structure_its_compound_number_names(
+    tmp_path: Path,
+) -> None:
+    """A document without example headings still declares its compounds.
+
+    A US application prints the compound number in the activity table instead
+    of in an example heading, so the reading names the compound directly and
+    the pair is made by that name. A compound the document drew no structure
+    for produces no pair.
+    """
+    from mbforge.service.pipeline.persist.molecules import (
+        persist_molecule_candidates,
+    )
+
+    molecule = Molecule(
+        mol_id="CCO",
+        canonical_smiles="CCO",
+        esmiles="CCO",
+        name="A-1",
+        sources=["image"],
+        detections=[
+            DetectionSource(source="image", page=0, bbox=(10.0, 10.0, 50.0, 50.0))
+        ],
+    )
+    persist_molecule_candidates(tmp_path, "doc1", [molecule])
+    measurement = {
+        "measurement_id": "m-1",
+        "provenance": {
+            "reference_raw": "A-1",
+            "reference_key": "A-1",
+            "reference_type": "compound",
+        },
+        "metric": "IC50",
+        "value": {"original_value": 64.6, "original_unit": "nM"},
+        "evidence_ids": ["ev-table"],
+    }
+
+    pairs = _declared_structure_activity([], [measurement], "doc1", str(tmp_path), [])
+
+    assert len(pairs) == 1
+    assert pairs[0]["declared_key"] == "A-1"
+    assert pairs[0]["smiles"] == "CCO"
+    # The document prints no mass for the compound, so the pair says so.
+    assert pairs[0]["verified_by_mass"] is False

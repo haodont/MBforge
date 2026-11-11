@@ -22,7 +22,7 @@ class PatentSectionModel(BaseModel):
 
     section_id: str
     title: str
-    kind: str  # example / preparation / comparison / reference
+    kind: str  # one of patent.sections.SECTION_KINDS
     page_start: int
     page_end: int
     evidence_ids: list[str] = Field(default_factory=list)

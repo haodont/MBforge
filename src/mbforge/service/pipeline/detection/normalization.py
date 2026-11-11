@@ -91,6 +91,18 @@ def _identity_key(
     return ("normal", canonical_smiles)
 
 
+def _name_source(result: ExtractionResult) -> str:
+    """Return where a designation came from: the page's own text or a crop.
+
+    A designation the *page's text* prints beside a drawing is the document's
+    own statement about that drawing; a designation read off the crop window is
+    a guess about the neighbourhood. The difference decides which evidence
+    outweighs which.
+    """
+    metadata = result.properties if isinstance(result.properties, dict) else {}
+    return "page_text" if metadata.get("label_source") == "page_text" else "crop"
+
+
 def _append_detection_metadata(
     properties: dict[str, Any], result: ExtractionResult
 ) -> None:
@@ -111,6 +123,21 @@ def _append_detection_metadata(
         names: list[str] = properties.setdefault("detection_names", [])
         if result.name not in names:
             names.append(result.name)
+        # The designation each *drawing* carries. A patent prints a compound
+        # more than once, and one of those printings may be recognized
+        # differently, so the association has to count the printings that agree
+        # rather than read one merged label set.
+        claims: list[dict[str, Any]] = properties.setdefault(
+            "detection_designations", []
+        )
+        claims.append(
+            {
+                "name": result.name,
+                "page": result.page_idx,
+                "confidence": result.moldet_conf,
+                "source": _name_source(result),
+            }
+        )
         # Track each distinct name with the highest detection confidence it
         # was seen at, so :func:`select_molecule_name` can rank candidates
         # deterministically instead of letting input order decide.
@@ -120,9 +147,19 @@ def _append_detection_metadata(
                 candidate["confidence"] = max(
                     candidate["confidence"], result.moldet_conf
                 )
+                # A name the page's own text printed outranks the same name
+                # read off a crop window.
+                if candidate.get("source") != "page_text":
+                    candidate["source"] = _name_source(result)
                 break
         else:
-            candidates.append({"name": result.name, "confidence": result.moldet_conf})
+            candidates.append(
+                {
+                    "name": result.name,
+                    "confidence": result.moldet_conf,
+                    "source": _name_source(result),
+                }
+            )
     metadata = result.properties
     if not isinstance(metadata, dict):
         return
@@ -192,12 +229,15 @@ def select_molecule_name(
 ) -> dict[str, Any] | None:
     """Deterministically pick the best name from merged candidates.
 
-    Candidates are ``{"name": str, "confidence": float}`` dicts in the order
-    they were first detected. Ranking rules, highest priority first:
+    Candidates are ``{"name": str, "confidence": float, "source": str}`` dicts
+    in the order they were first detected. Ranking rules, highest priority
+    first:
 
-    1. Names that normalize to a compound/example label.
-    2. Non-empty names that pass label normalization (any other kind).
-    3. Any other non-empty name.
+    1. A compound/example label the **page's own text** printed beside the
+       drawing — the document's own statement about it.
+    2. Any other compound/example label.
+    3. Non-empty names that pass label normalization (any other kind).
+    4. Any other non-empty name.
 
     Within a tier the higher detection confidence wins; remaining ties are
     broken by the original candidate order, so the result never depends on
@@ -223,16 +263,21 @@ def select_molecule_name(
             LabelKind.COMPOUND,
             LabelKind.EXAMPLE,
         ):
-            tier = 0
+            # A designation the page itself printed outranks the same
+            # designation read off a crop window, whatever its confidence: the
+            # first is the document's statement, the second a guess about the
+            # neighbourhood.
+            tier = 0 if candidate.get("source") == "page_text" else 1
         elif normalized is not None:
-            tier = 1
-        else:
             tier = 2
+        else:
+            tier = 3
         return (tier, -float(candidate.get("confidence", 0.0)), index)
 
     best = min(enumerate(candidates), key=_rank)
     tier = _rank(best)[0]
     rule = (
+        "page_text_compound_label",
         "normalized_compound_label",
         "normalized_label",
         "non_empty_name",
