@@ -5,6 +5,7 @@ import type { MoleculeRecord } from '@/types'
 import { Card, CardGrid, Skeleton, EmptyState, Badge } from '@/components/ui'
 import type { BadgeVariant } from '@/components/ui/Badge'
 import MoleculeDisplay from './MoleculeDisplay'
+import { shortDocId } from '@/utils/documentId'
 import './MoleculeCardGrid.css'
 
 export interface MoleculeCardGridProps {
@@ -130,7 +131,7 @@ const MoleculeCard = memo(function MoleculeCard({
           className="molecule-card__meta"
           title={molecule.source_doc || undefined}
         >
-          {molecule.source_doc || '-'}
+          {molecule.source_doc ? shortDocId(molecule.source_doc) : '-'}
         </div>
         <div className="molecule-card__activity">
           <span>

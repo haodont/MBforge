@@ -8,6 +8,7 @@ import {
   reviewDecideFiltered,
   reviewClear,
   reviewHistory,
+  reviewItem,
   type ReviewAction,
   type ReviewKind,
   type ReviewDecisionItem,
@@ -39,6 +40,20 @@ export function useReviewStats(libraryRoot: string) {
     queryKey: queryKeys.review.stats(libraryRoot),
     queryFn: () => reviewStats(libraryRoot),
     enabled: Boolean(libraryRoot),
+  })
+}
+
+/** One queue item by id, for a link that names it directly.
+ *
+ * A link may point at an item that is not on the first page of the current
+ * filter set; the queue query alone cannot open it. The kind is the item's own
+ * and defaults to ``designation_unbound``, the kind a shared link usually names.
+ */
+export function useReviewItem(libraryRoot: string, kind: ReviewKind | null, id: string | null) {
+  return useQuery({
+    queryKey: [...queryKeys.review.all, 'item', libraryRoot, kind ?? '', id ?? ''],
+    queryFn: () => reviewItem(libraryRoot, kind ?? 'designation_unbound', id as string),
+    enabled: Boolean(libraryRoot) && Boolean(id),
   })
 }
 

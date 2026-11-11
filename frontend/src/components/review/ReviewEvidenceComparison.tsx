@@ -1,6 +1,7 @@
 import type { ReviewQueueItem } from '@/api/http/review'
 import { useSmilesToRdkitSvg } from '@/api/query/hooks'
 import Button from '@/components/ui/Button'
+import { shortDocId } from '@/utils/documentId'
 
 interface ReviewEvidenceComparisonProps {
   item: ReviewQueueItem
@@ -46,7 +47,7 @@ export default function ReviewEvidenceComparison({
     : null
 
   const sourceLabel = item.doc_id
-    ? `来源：${item.doc_id}${item.page != null ? ` · 第 ${item.page} 页` : ''}`
+    ? `来源：${shortDocId(item.doc_id)}${item.page != null ? ` · 第 ${item.page} 页` : ''}`
     : '来源：无来源文档'
   const canOpenSource = Boolean(libraryRoot && item.doc_id)
 

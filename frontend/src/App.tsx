@@ -13,6 +13,7 @@ import DocumentViewer from './components/project/DocumentViewer'
 import MarkdownViewer from './components/MarkdownViewer'
 import { registerGlobalErrorHandlers } from './api/http/_utils'
 import { useIngestNotifications } from './hooks/useIngestNotifications'
+import { useEvidenceDeepLink } from './hooks/useEvidenceDeepLink'
 import { getLibraryStatus } from './api/http/library'
 import { clearViewerSnapshot } from './components/project/pdf/usePdfViewer'
 import type { Tab } from './context/AppContext'
@@ -71,6 +72,7 @@ function AppShellOrBootstrap() {
   const [libraryStatusRetry, setLibraryStatusRetry] = useState(0)
 
   useIngestNotifications(libraryRoot)
+  useEvidenceDeepLink()
 
   // Register global error handlers once on mount.
   useEffect(() => {

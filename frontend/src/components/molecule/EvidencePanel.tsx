@@ -4,6 +4,7 @@ import Button from '@/components/ui/Button'
 import type { EvidenceItem } from '@/types'
 import { useMoleculeCorrections, useSmilesToRdkitSvg } from '@/api/query/hooks/useMolecules'
 import type { MoleculeCorrection } from '@/api/http/molecule_store'
+import { shortDocId } from '@/utils/documentId'
 import SmilesDiff from './SmilesDiff'
 
 interface EvidencePanelProps {
@@ -174,7 +175,7 @@ function StructureComparison({ evidence, esmiles }: { evidence: EvidenceItem; es
       <StructurePane label={t('evidence.originalEvidence')}>
         <img
           src={evidence.crop_url}
-          alt={t('evidence.originalEvidenceAlt', { docId: evidence.doc_id })}
+          alt={t('evidence.originalEvidenceAlt', { docId: shortDocId(evidence.doc_id) })}
           style={structureImageStyle}
           loading="lazy"
         />
@@ -255,7 +256,7 @@ function EvidenceRow({ ev, libraryRoot, onOpenPdf }: RowProps) {
       {ev.kind === 'figure' && ev.crop_url ? (
         <img
           src={ev.crop_url}
-          alt={`${ev.doc_id} crop`}
+          alt={`${shortDocId(ev.doc_id)} crop`}
           style={{
             width: 48,
             height: 48,
@@ -298,7 +299,7 @@ function EvidenceRow({ ev, libraryRoot, onOpenPdf }: RowProps) {
           }}
           title={ev.doc_id}
         >
-          {ev.doc_id}
+          {shortDocId(ev.doc_id)}
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {ev.page != null ? t('evidence.pageNumber', { page: ev.page }) : null}

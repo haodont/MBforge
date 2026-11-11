@@ -9,6 +9,7 @@ import PdfPipelineFlow from './pdf/PdfPipelineFlow'
 import IngestLogPanel from './IngestLogPanel'
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from '../icons'
 import type { IngestTask, IngestLogEvent } from '@/api/http/ingest_queue'
+import { shortDocId } from '@/utils/documentId'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers (shared across the queue module)
@@ -91,7 +92,7 @@ export const TaskRow = memo(function TaskRow({
   const { t } = useTranslation()
   const [showDetails, setShowDetails] = useState(false)
 
-  const fileName = basename(task.file_path) || task.doc_id
+  const fileName = basename(task.file_path) || shortDocId(task.doc_id)
   const startedAtMs = task.started_at ? task.started_at * 1000 : null
   const createdAtMs = task.created_at * 1000
   const startTimeMs = startedAtMs ?? createdAtMs
@@ -129,7 +130,9 @@ export const TaskRow = memo(function TaskRow({
               )}
             </div>
             {showDetails && <div className="queue-task-subtitle">
-              <span className="queue-task-doc-id">{task.doc_id}</span>
+              <span className="queue-task-doc-id" title={task.doc_id}>
+                {shortDocId(task.doc_id)}
+              </span>
               {task.file_size_bytes != null && (
                 <>
                   <span className="queue-task-sep">·</span>

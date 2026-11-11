@@ -11,6 +11,7 @@ import Button from '@/components/ui/Button'
 import Badge, { type BadgeTone } from '@/components/ui/Badge'
 import { useOptionalAppContext } from '@/context/AppContext'
 import { documentEntry } from '@/utils/documentEntry'
+import { shortDocId } from '@/utils/documentId'
 import './MoleculeTable.css'
 
 interface MoleculeTableProps {
@@ -258,9 +259,10 @@ const MoleculeTableRow = memo(function MoleculeTableRow({
             variant="ghost"
             size="sm"
             className="molecule-table-source-link"
+            title={molecule.source_doc}
             onClick={(event) => onOpenSource(event, molecule)}
           >
-            {molecule.source_doc}
+            {shortDocId(molecule.source_doc)}
           </Button>
         ) : '-'}
       </td>

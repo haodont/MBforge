@@ -10,6 +10,7 @@ import Caption from '@/components/ui/Caption'
 import { ArrowLeftIcon, HashIcon, NoteIcon } from './icons'
 import { useAppContext } from '@/context/AppContext'
 import { getUserFacingError } from '@/utils/errors'
+import { documentLabel, shortDocId } from '@/utils/documentId'
 import type { DocumentEntry } from '@/types'
 import './MarkdownViewer.css'
 
@@ -70,7 +71,7 @@ export default function MarkdownViewer({ libraryRoot, doc, onClose }: Props) {
     // Check if it's a "not found" error — pipeline may not have completed yet
     const isNotFound = result.error.includes('not found') || result.error.includes('404')
     if (isNotFound) {
-      error = `文档 "${doc.doc_id}" 的 Markdown 尚未生成，请等待 pipeline 处理完成后再查看`
+      error = `文档 "${documentLabel(doc)}" 的 Markdown 尚未生成，请等待 pipeline 处理完成后再查看`
     } else {
       error = getUserFacingError(result.error, '加载文档内容失败')
     }
@@ -142,7 +143,7 @@ export default function MarkdownViewer({ libraryRoot, doc, onClose }: Props) {
           <ArrowLeftIcon size={18} />
         </IconButton>
         <Caption truncate className="markdown-viewer__title">
-          {doc.title || doc.doc_id}
+          {doc.title || shortDocId(doc.doc_id)}
         </Caption>
 
         <div className="markdown-viewer__mode">

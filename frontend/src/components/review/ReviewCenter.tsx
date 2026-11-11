@@ -11,17 +11,37 @@ import Pagination from '@/components/ui/Pagination'
 import Select from '@/components/ui/Select'
 import { cropImageUrl } from '@/api/http/library'
 import { type ReviewAction, type ReviewDecisionItem, type ReviewKind, type ReviewQueueItem, type ReviewStatus } from '@/api/http/review'
-import { useReviewClearAll, useReviewDecide, useReviewHistory, useReviewQueue, useReviewStats, toQueueItems } from '@/api/query/hooks/useReview'
+import { useReviewClearAll, useReviewDecide, useReviewHistory, useReviewItem, useReviewQueue, useReviewStats, toQueueItems } from '@/api/query/hooks/useReview'
 import PatentFactReview from './PatentFactReview'
 import { useAppContext } from '@/context/AppContext'
 import { useReviewHotkeys } from '@/hooks/useReviewHotkeys'
 import { showToast } from '@/hooks/useToast'
 import { getUserFacingError } from '@/utils/errors'
+import { shortDocId } from '@/utils/documentId'
 import ReviewEvidenceComparison from './ReviewEvidenceComparison'
 import './ReviewCenter.css'
 
 const KINDS: Array<'all' | ReviewKind> = ['all', 'low_conf_molecule', 'review_required', 'unparsable_smiles', 'missing_evidence', 'ambiguous_coref', 'markush_link', 'patent_fact_review', 'smiles_correction', 'ai_review', 'designation_unbound']
 const PAGE_SIZE = 25
+
+/** Read the queue location a link asked for: ``/review?kind=&status=&id=``.
+ *
+ * A shared link has to land on the item it names, so the filters and the
+ * selection are seeded from the URL once. An ``id`` is resolved separately (see
+ * ``useReviewItem``) because it is not necessarily on the first page.
+ */
+function locationSeed(): { kind: 'all' | ReviewKind; status: ReviewStatus | ''; id: string | null } {
+  const params = new URLSearchParams(window.location.search)
+  const rawKind = params.get('kind') ?? ''
+  const kind: 'all' | ReviewKind = (KINDS as string[]).includes(rawKind)
+    ? (rawKind as 'all' | ReviewKind)
+    : 'all'
+  const rawStatus = params.get('status') ?? ''
+  const status: ReviewStatus | '' = ['pending', 'confirmed', 'rejected', ''].includes(rawStatus)
+    ? (rawStatus as ReviewStatus | '')
+    : ''
+  return { kind, status, id: params.get('id') }
+}
 
 function labelForKind(kind: string, t: (key: string) => string): string {
   return t(`review.kind.${kind}`)
@@ -30,10 +50,11 @@ function labelForKind(kind: string, t: (key: string) => string): string {
 export default function ReviewCenter() {
   const { t } = useTranslation()
   const { libraryRoot, openTab } = useAppContext()
-  const [kind, setKind] = useState<'all' | ReviewKind>('all')
-  const [status, setStatus] = useState<ReviewStatus | ''>('pending')
+  const [seed] = useState(locationSeed)
+  const [kind, setKind] = useState<'all' | ReviewKind>(seed.kind)
+  const [status, setStatus] = useState<ReviewStatus | ''>(seed.status || 'pending')
   const [page, setPage] = useState(1)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(seed.id)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
 
@@ -46,10 +67,13 @@ export default function ReviewCenter() {
 
   const queueQuery = useReviewQueue(libraryRoot, filters)
   const statsQuery = useReviewStats(libraryRoot)
+  const linkedKind: ReviewKind | null = kind === 'all' ? 'designation_unbound' : kind
+  const linkedQuery = useReviewItem(libraryRoot, linkedKind, seed.id)
   const decideMutation = useReviewDecide()
   const clearAllMutation = useReviewClearAll()
 
   const items = toQueueItems(queueQuery.data?.items)
+  const linkedItem = linkedQuery.data ?? null
   const total = queueQuery.data?.total ?? 0
   const pending = statsQuery.data?.pending ?? 0
   const loading = queueQuery.isFetching || decideMutation.isPending || clearAllMutation.isPending
@@ -71,11 +95,15 @@ export default function ReviewCenter() {
 
   // Keep the selection valid as the queue changes (filter/page switch).
   useEffect(() => {
+    if (seed.id && linkedItem) {
+      setSelectedId(linkedItem.id)
+      return
+    }
     setSelectedId(current => items.some(item => item.id === current) ? current : items[0]?.id ?? null)
     setSelected(new Set())
-  }, [items])
+  }, [items, linkedItem, seed.id])
 
-  const selectedItem = items.find(item => item.id === selectedId) ?? null
+  const selectedItem = items.find(item => item.id === selectedId) ?? linkedItem
   const selectedItems = useMemo(
     () => items.filter(item => selected.has(item.id)).map(item => ({ kind: item.kind, id: item.id })),
     [items, selected],
@@ -107,9 +135,9 @@ export default function ReviewCenter() {
     const bbox = item.bbox
     openTab({
       type: 'document',
-      title: item.doc_id,
+      title: shortDocId(item.doc_id),
       libraryRoot,
-      doc: { doc_id: item.doc_id, title: item.doc_id, path: `storage/${item.doc_id}/source.pdf`, doc_type: 'pdf', added_at: '', hash: '' },
+      doc: { doc_id: item.doc_id, title: shortDocId(item.doc_id), path: `storage/${item.doc_id}/source.pdf`, doc_type: 'pdf', added_at: '', hash: '' },
       initialPage: item.page,
       initialBbox: bbox && bbox.every(value => value !== null) ? bbox as [number, number, number, number] : undefined,
       initialEvidenceId: evidenceId,
@@ -156,7 +184,7 @@ export default function ReviewCenter() {
           {items.map(item => (
             <button type="button" key={`${item.kind}:${item.id}`} className={`review-center__row${item.id === selectedId ? ' is-selected' : ''}`} onClick={() => setSelectedId(item.id)}>
               <input type="checkbox" aria-label={t('review.selectItem', { name: item.name ?? item.id })} checked={selected.has(item.id)} onChange={event => { event.stopPropagation(); setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(item.id); else next.delete(item.id); return next }) }} onClick={event => event.stopPropagation()} />
-              <span className="review-center__row-main"><span className="review-center__row-title">{item.name || item.smiles || item.id}</span><span className="review-center__row-meta">{labelForKind(item.kind, t)}{item.doc_id ? ` · ${item.doc_id}` : ''}{item.page ? ` · p.${item.page}` : ''}</span></span>
+              <span className="review-center__row-main"><span className="review-center__row-title">{item.name || item.smiles || item.id}</span><span className="review-center__row-meta">{labelForKind(item.kind, t)}{item.doc_id ? ` · ${shortDocId(item.doc_id)}` : ''}{item.page ? ` · p.${item.page}` : ''}</span></span>
               <span className="review-center__status">{t(`review.status.${item.status}`)}</span>
             </button>
           ))}
