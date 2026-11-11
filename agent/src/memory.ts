@@ -285,34 +285,32 @@ export interface MemoryToolDetails {
   removed?: boolean
 }
 
-const memoryParameters = Type.Object({
-  action: Type.Union(
-    MEMORY_ACTIONS.map((action) => Type.Literal(action)),
-    {
-      description:
-        'add stores one note, delete removes one note by id, list reports the stored notes.',
-    },
-  ),
-  content: Type.Optional(
-    Type.String({
-      description: 'Short fact or preference to store. Required for action "add".',
+const memoryParameters = Type.Union([
+  Type.Object({
+    action: Type.Literal('add'),
+    content: Type.String({
+      description: 'Short fact or preference to store.',
+      minLength: 1,
       maxLength: MAX_ENTRY_CHARS,
     }),
-  ),
-  type: Type.Optional(
-    Type.Union(
-      MEMORY_TYPES.map((type) => Type.Literal(type)),
-      { description: 'Category of the stored note. Defaults to project.' },
+    type: Type.Optional(
+      Type.Union(
+        MEMORY_TYPES.map((type) => Type.Literal(type)),
+        { description: 'Category of the stored note. Defaults to project.' },
+      ),
     ),
-  ),
-  id: Type.Optional(
-    Type.String({
-      description:
-        'Entry id to remove, such as u-1234abcd. Required for action "delete".',
+  }),
+  Type.Object({
+    action: Type.Literal('delete'),
+    id: Type.String({
+      description: 'Entry id to remove, such as u-1234abcd.',
       pattern: '^[ufpr]-[0-9a-f]{8}$',
     }),
-  ),
-})
+  }),
+  Type.Object({
+    action: Type.Literal('list'),
+  }),
+])
 
 /**
  * The single model-facing memory tool.

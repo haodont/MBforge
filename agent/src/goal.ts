@@ -189,75 +189,95 @@ export function goalTranscript(
     .join('\n\n')
 }
 
-const goalParameters = Type.Object({
-  action: Type.Union(
-    ['begin', 'update', 'complete', 'cancel'].map((action) => Type.Literal(action)),
-    {
-      description:
-        'begin starts a goal before non-trivial work; update amends it; complete closes it and queues background review; cancel stops it.',
-    },
-  ),
-  id: Type.Optional(
-    Type.String({
-      description: 'Goal id for update/complete/cancel. Defaults to the active goal.',
-      maxLength: 64,
-    }),
-  ),
-  title: Type.Optional(
-    Type.String({ description: 'Short goal title. Required for begin.', maxLength: 160 }),
-  ),
-  objective: Type.Optional(
-    Type.String({
-      description: 'One-sentence outcome the user asked for. Required for begin.',
-      maxLength: 2_000,
-    }),
-  ),
-  requirements: Type.Optional(
-    Type.Array(Type.String({ maxLength: 2_000 }), {
-      description: 'Verifiable requirements; keep to 1-5.',
-      maxItems: 5,
-    }),
-  ),
-  acceptance: Type.Optional(
-    Type.Array(Type.String({ maxLength: 2_000 }), {
-      description: 'Evidence that proves each requirement is complete.',
-      maxItems: 10,
-    }),
-  ),
-  constraints: Type.Optional(
-    Type.Array(Type.String({ maxLength: 2_000 }), {
-      description: 'Things that must not change or must be preserved.',
-      maxItems: 10,
-    }),
-  ),
-  non_goals: Type.Optional(
-    Type.Array(Type.String({ maxLength: 2_000 }), {
-      description: 'Explicitly excluded work.',
-      maxItems: 10,
-    }),
-  ),
-  summary: Type.Optional(
-    Type.String({
+const goalIdSchema = Type.Optional(
+  Type.String({
+    description: 'Goal id for update/complete/cancel. Defaults to the active goal.',
+    maxLength: 64,
+  }),
+)
+
+const goalTitleSchema = Type.String({
+  description: 'Short goal title.',
+  minLength: 1,
+  maxLength: 160,
+})
+
+const goalObjectiveSchema = Type.String({
+  description: 'One-sentence outcome the user asked for.',
+  minLength: 1,
+  maxLength: 2_000,
+})
+
+const goalRequirementsSchema = Type.Array(Type.String({ maxLength: 2_000 }), {
+  description: 'Verifiable requirements; keep to 1-5.',
+  minItems: 1,
+  maxItems: 5,
+})
+
+const goalAcceptanceSchema = Type.Array(Type.String({ maxLength: 2_000 }), {
+  description: 'Evidence that proves each requirement is complete.',
+  maxItems: 10,
+})
+
+const goalConstraintsSchema = Type.Array(Type.String({ maxLength: 2_000 }), {
+  description: 'Things that must not change or must be preserved.',
+  maxItems: 10,
+})
+
+const goalNonGoalsSchema = Type.Array(Type.String({ maxLength: 2_000 }), {
+  description: 'Explicitly excluded work.',
+  maxItems: 10,
+})
+
+const goalParameters = Type.Union([
+  Type.Object({
+    action: Type.Literal('begin'),
+    title: goalTitleSchema,
+    objective: goalObjectiveSchema,
+    requirements: goalRequirementsSchema,
+    acceptance: Type.Optional(goalAcceptanceSchema),
+    constraints: Type.Optional(goalConstraintsSchema),
+    non_goals: Type.Optional(goalNonGoalsSchema),
+  }),
+  Type.Object({
+    action: Type.Literal('update'),
+    id: goalIdSchema,
+    title: Type.Optional(goalTitleSchema),
+    objective: Type.Optional(goalObjectiveSchema),
+    requirements: Type.Optional(goalRequirementsSchema),
+    acceptance: Type.Optional(goalAcceptanceSchema),
+    constraints: Type.Optional(goalConstraintsSchema),
+    non_goals: Type.Optional(goalNonGoalsSchema),
+  }),
+  Type.Object({
+    action: Type.Literal('complete'),
+    id: goalIdSchema,
+    summary: Type.String({
       description: 'Completion summary for complete.',
+      minLength: 1,
       maxLength: 4_000,
     }),
-  ),
-  verification: Type.Optional(
-    Type.Array(Type.String({ maxLength: 1_000 }), {
-      description: 'Commands/tests and their results for complete.',
-      maxItems: 20,
-    }),
-  ),
-  risks: Type.Optional(
-    Type.Array(Type.String({ maxLength: 1_000 }), {
-      description: 'Residual risks or unfinished work for complete.',
-      maxItems: 10,
-    }),
-  ),
-  reason: Type.Optional(
-    Type.String({ description: 'Why the goal is cancelled.', maxLength: 1_000 }),
-  ),
-})
+    verification: Type.Optional(
+      Type.Array(Type.String({ maxLength: 1_000 }), {
+        description: 'Commands/tests and their results for complete.',
+        maxItems: 20,
+      }),
+    ),
+    risks: Type.Optional(
+      Type.Array(Type.String({ maxLength: 1_000 }), {
+        description: 'Residual risks or unfinished work for complete.',
+        maxItems: 10,
+      }),
+    ),
+  }),
+  Type.Object({
+    action: Type.Literal('cancel'),
+    id: goalIdSchema,
+    reason: Type.Optional(
+      Type.String({ description: 'Why the goal is cancelled.', maxLength: 1_000 }),
+    ),
+  }),
+])
 
 function normalizeGoal(
   params: {

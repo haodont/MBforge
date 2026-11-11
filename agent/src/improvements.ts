@@ -332,72 +332,67 @@ export async function completeImprovement(
   })
 }
 
-const improvementParameters = Type.Object({
-  action: Type.Union(
-    IMPROVEMENT_ACTIONS.map((action) => Type.Literal(action)),
-    {
-      description:
-        'propose asks the user to approve one scoped update, list reads the local suggestion log, complete marks an approved suggestion as implemented.',
-    },
-  ),
-  title: Type.Optional(
-    Type.String({
-      description: 'Short name of the proposed improvement. Required for action "propose".',
+const improvementParameters = Type.Union([
+  Type.Object({
+    action: Type.Literal('propose'),
+    title: Type.String({
+      description: 'Short name of the proposed improvement.',
+      minLength: 1,
       maxLength: MAX_TITLE_CHARS,
     }),
-  ),
-  area: Type.Optional(
-    Type.Union(
+    area: Type.Union(
       IMPROVEMENT_AREAS.map((area) => Type.Literal(area)),
       {
         description:
-          'pipeline, capability, agent, ui, docs, or other. Required for action "propose".',
+          'pipeline, capability, agent, ui, docs, or other.',
       },
     ),
-  ),
-  problem: Type.Optional(
-    Type.String({
-      description: 'Concrete observed problem or gap. Required for action "propose".',
+    problem: Type.String({
+      description: 'Concrete observed problem or gap.',
+      minLength: 1,
       maxLength: MAX_TEXT_CHARS,
     }),
-  ),
-  change: Type.Optional(
-    Type.String({
-      description: 'Exact proposed change, scoped to the observed problem. Required for action "propose".',
+    change: Type.String({
+      description: 'Exact proposed change, scoped to the observed problem.',
+      minLength: 1,
       maxLength: MAX_TEXT_CHARS,
     }),
-  ),
-  rationale: Type.Optional(
-    Type.String({
-      description: 'Why this change is worthwhile.',
-      maxLength: MAX_TEXT_CHARS,
-    }),
-  ),
-  risk: Type.Optional(
-    Type.String({
-      description: 'Known risk, compatibility cost, or rollback concern.',
-      maxLength: MAX_RISK_CHARS,
-    }),
-  ),
-  files: Type.Optional(
-    Type.Array(Type.String({ maxLength: 300 }), {
-      description: 'Files or modules expected to change.',
-      maxItems: MAX_FILES,
-    }),
-  ),
-  id: Type.Optional(
-    Type.String({
-      description: 'Improvement id to complete, such as imp-12ab34cd. Required for action "complete".',
+    rationale: Type.Optional(
+      Type.String({
+        description: 'Why this change is worthwhile.',
+        maxLength: MAX_TEXT_CHARS,
+      }),
+    ),
+    risk: Type.Optional(
+      Type.String({
+        description: 'Known risk, compatibility cost, or rollback concern.',
+        maxLength: MAX_RISK_CHARS,
+      }),
+    ),
+    files: Type.Optional(
+      Type.Array(Type.String({ maxLength: 300 }), {
+        description: 'Files or modules expected to change.',
+        maxItems: MAX_FILES,
+      }),
+    ),
+  }),
+  Type.Object({
+    action: Type.Literal('list'),
+  }),
+  Type.Object({
+    action: Type.Literal('complete'),
+    id: Type.String({
+      description: 'Improvement id to complete, such as imp-12ab34cd.',
       pattern: '^imp-[0-9a-f]{8}$',
     }),
-  ),
-  note: Type.Optional(
-    Type.String({
-      description: 'Short implementation or verification note for action "complete".',
-      maxLength: 500,
-    }),
-  ),
-})
+    note: Type.Optional(
+      Type.String({
+        description: 'Short implementation or verification note.',
+        maxLength: 500,
+      }),
+    ),
+  }),
+])
 
 /** The single model-facing improvement tool. */
 export function improvementTool() {
