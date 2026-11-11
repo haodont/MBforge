@@ -38,6 +38,64 @@ interface ImagePayload {
   metadata: Record<string, unknown>
 }
 
+interface CapabilityErrorBody {
+  error: string
+  detail: string | null
+  errorCode: string | null
+  validation: string[]
+}
+
+/** Pull Pydantic validation messages out of an MBForge error context. */
+function validationMessages(context: unknown): string[] {
+  if (typeof context !== 'object' || context === null) return []
+  if (!('validation_errors' in context) || !Array.isArray(context.validation_errors)) {
+    return []
+  }
+  const messages: string[] = []
+  for (const item of context.validation_errors.slice(0, 3)) {
+    if (typeof item !== 'object' || item === null) continue
+    const loc =
+      'loc' in item && Array.isArray(item.loc) ? item.loc.map(String).join('.') : ''
+    const msg = 'msg' in item && typeof item.msg === 'string' ? item.msg : ''
+    if (msg) messages.push(loc ? `${loc}: ${msg}` : msg)
+  }
+  return messages
+}
+
+/** Parse the server's structured error body; undefined means non-JSON output. */
+function parseCapabilityError(body: string): CapabilityErrorBody | undefined {
+  let value: unknown
+  try {
+    value = JSON.parse(body)
+  } catch {
+    return undefined
+  }
+  if (typeof value !== 'object' || value === null) return undefined
+  if (!('error' in value) || typeof value.error !== 'string') return undefined
+  return {
+    error: value.error,
+    detail: 'detail' in value && typeof value.detail === 'string' ? value.detail : null,
+    errorCode:
+      'error_code' in value && typeof value.error_code === 'string'
+        ? value.error_code
+        : null,
+    validation: validationMessages('context' in value ? value.context : undefined),
+  }
+}
+
+function capabilityFailure(name: string, status: number, body: string): Error {
+  const parsed = parseCapabilityError(body)
+  if (parsed === undefined) {
+    return new Error(`capability ${name} failed (${status}): ${body.slice(0, 400)}`)
+  }
+  const parts = [
+    parsed.errorCode ? `${parsed.errorCode}: ${parsed.error}` : parsed.error,
+    parsed.detail,
+    ...parsed.validation,
+  ].filter((part): part is string => Boolean(part))
+  return new Error(`capability ${name} failed (${status}): ${parts.join('; ')}`)
+}
+
 /** Detect a capability result that carries an inspectable image. */
 function imagePayload(data: unknown): ImagePayload | undefined {
   if (typeof data !== 'object' || data === null) return undefined
@@ -150,8 +208,8 @@ export async function loadCapabilityToolset(
           },
         )
         if (!result.ok) {
-          const detail = (await result.text()).slice(0, 400)
-          throw new Error(`capability ${capability.name} failed (${result.status}): ${detail}`)
+          const detail = await result.text()
+          throw capabilityFailure(capability.name, result.status, detail)
         }
         const payload = (await result.json()) as {
           success?: boolean
@@ -194,7 +252,7 @@ export async function loadCapabilityToolset(
         }
 
         const textPayload =
-          payload.truncated || payload.next_offset !== null
+          payload.truncated || payload.next_offset != null
             ? {
                 data: payload.data ?? null,
                 truncated: Boolean(payload.truncated),
