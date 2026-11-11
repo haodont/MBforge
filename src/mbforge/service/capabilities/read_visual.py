@@ -22,6 +22,22 @@ from mbforge.service.capabilities.registry import (
 from mbforge.service.use_cases.documents.library import LibraryStore
 
 
+class RecognizedMolecule(BaseModel):
+    """One detected structure on a rendered page."""
+
+    index: int
+    bbox_px: list[float] = Field(
+        ..., description="Detector box in rendered pixels, top-left origin."
+    )
+    bbox_pdf: list[float] = Field(
+        ..., description="Same box in PDF points, bottom-left origin."
+    )
+    score: float
+    smiles: str
+    esmiles: str
+    labels: list[str] = Field(default_factory=list)
+
+
 class RecognizeMoleculesInput(BaseModel):
     doc_id: str = doc_id_field()
     page: int = Field(..., ge=1)
@@ -37,7 +53,7 @@ class RecognizeMoleculesOutput(BaseModel):
     region: list[float] | None = None
     count: int
     truncated: bool
-    molecules: list[dict[str, Any]]
+    molecules: list[RecognizedMolecule]
 
 
 class PageTextBlock(BaseModel):
@@ -173,7 +189,7 @@ class VisualOutput(BaseModel):
     height: int | None = None
     count: int | None = None
     truncated: bool | None = None
-    molecules: list[dict[str, Any]] = Field(default_factory=list)
+    molecules: list[RecognizedMolecule] = Field(default_factory=list)
     smiles: str | None = None
     esmiles: str | None = None
     coref: list[str] = Field(default_factory=list)
