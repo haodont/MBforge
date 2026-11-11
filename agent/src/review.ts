@@ -8,6 +8,7 @@ import { Type } from 'typebox'
 import {
   appendHotMemory,
   MEMORY_TYPES,
+  setMemoryRuntime,
   type MemoryType,
 } from './memory.js'
 import {
@@ -461,6 +462,7 @@ export function reviewTaskTool() {
     ],
     parameters: reviewParameters,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      setMemoryRuntime(ctx.model, ctx.modelRegistry)
       const transcript = collectTranscript(ctx.sessionManager.getBranch())
       const focus = params.instruction?.trim()
       const result = await runReview(

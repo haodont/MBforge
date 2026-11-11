@@ -36,6 +36,7 @@ import {
   memorySystemPrompt,
   registerMemoryCommand,
   registerMemoryTools,
+  setMemoryRuntime,
 } from './memory.js'
 import {
   IMPROVEMENT_TOOL_NAMES,
@@ -287,6 +288,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         const job = await claimNextReview()
         if (!job) break
         try {
+          setMemoryRuntime(ctx.model, ctx.modelRegistry)
           const result = await runReview({
             cwd: job.cwd,
             transcript: job.transcript,

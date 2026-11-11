@@ -7,6 +7,7 @@ import {
   defineTool,
   getAgentDir,
   type ExtensionAPI,
+  type ExtensionContext,
 } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 
@@ -134,6 +135,22 @@ interface StoredMemoryEntry extends MemoryEntry {
 
 interface MemoryState {
   hot_updates: number
+  pending: boolean
+}
+
+type MemoryModel = NonNullable<ExtensionContext['model']>
+type MemoryRegistry = ExtensionContext['modelRegistry']
+
+let compressionRuntime:
+  | { model: MemoryModel; registry: MemoryRegistry }
+  | undefined
+
+/** Capture the active model from a tool context for background compression. */
+export function setMemoryRuntime(
+  model: MemoryModel | undefined,
+  registry: MemoryRegistry,
+): void {
+  compressionRuntime = model ? { model, registry } : undefined
 }
 
 function layerPathFrom(base: string, suffix: string): string {
@@ -241,6 +258,7 @@ function hasLayerContent(text: string, header: string): boolean {
 
 /** Prompt section for the active layers; ephemeral notes are deliberately excluded. */
 export async function memorySystemPrompt(): Promise<string> {
+  await waitForMemoryMaintenance(2_000)
   const [hot, cold, persona] = await Promise.all([
     readMemory(),
     readColdMemory(),
@@ -385,24 +403,43 @@ async function archiveEntries(basePath: string, lines: string[]): Promise<void> 
 
 async function readState(): Promise<MemoryState> {
   const path = memoryStatePath()
-  if (!existsSync(path)) return { hot_updates: 0 }
+  const empty: MemoryState = { hot_updates: 0, pending: false }
+  if (!existsSync(path)) return empty
   try {
     const value: unknown = JSON.parse(await readFile(path, 'utf8'))
-    if (typeof value !== 'object' || value === null) return { hot_updates: 0 }
+    if (typeof value !== 'object' || value === null) return empty
     if (!('hot_updates' in value) || typeof value.hot_updates !== 'number') {
-      return { hot_updates: 0 }
+      return empty
     }
-    return { hot_updates: Math.max(0, Math.trunc(value.hot_updates)) }
+    const pending =
+      'pending' in value && typeof value.pending === 'boolean'
+        ? value.pending
+        : false
+    return {
+      hot_updates: Math.max(0, Math.trunc(value.hot_updates)),
+      pending,
+    }
   } catch {
-    return { hot_updates: 0 }
+    return empty
   }
 }
 
 async function writeState(state: MemoryState): Promise<void> {
   await writeMemory(
     memoryStatePath(),
-    `${JSON.stringify({ hot_updates: state.hot_updates }, null, 2)}\n`,
+    `${JSON.stringify(
+      { hot_updates: state.hot_updates, pending: state.pending },
+      null,
+      2,
+    )}\n`,
   )
+}
+
+async function markPending(): Promise<void> {
+  const state = await readState()
+  if (state.pending) return
+  state.pending = true
+  await writeState(state)
 }
 
 /** Move a full ephemeral batch into hot memory and update the derived layers. */
@@ -452,7 +489,197 @@ async function compactEphemeralNow(): Promise<boolean> {
   return true
 }
 
+async function completeText(prompt: string): Promise<string> {
+  const runtime = compressionRuntime
+  if (!runtime) throw new Error('memory compression model is unavailable')
+  const message = await runtime.registry.complete(runtime.model, {
+    messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
+  })
+  let text = ''
+  for (const block of message.content) {
+    if (block.type === 'text') text += block.text
+  }
+  return text
+}
+
+function parseJsonValue(text: string): unknown {
+  const trimmed = text.trim()
+  const arrayStart = trimmed.indexOf('[')
+  const objectStart = trimmed.indexOf('{')
+  let start = -1
+  if (arrayStart === -1) start = objectStart
+  else if (objectStart === -1) start = arrayStart
+  else start = Math.min(arrayStart, objectStart)
+  if (start < 0) throw new Error('memory compactor returned no JSON')
+  const close = trimmed[start] === '[' ? ']' : '}'
+  const end = trimmed.lastIndexOf(close)
+  if (end <= start) throw new Error('memory compactor returned malformed JSON')
+  return JSON.parse(trimmed.slice(start, end + 1)) as unknown
+}
+
+function compressedType(value: unknown): MemoryType | undefined {
+  return typeof value === 'string' &&
+    (MEMORY_TYPES as readonly string[]).includes(value)
+    ? (value as MemoryType)
+    : undefined
+}
+
+function compressedEntries(value: unknown): Array<{
+  type: MemoryType
+  content: string
+}> {
+  if (!Array.isArray(value)) throw new Error('memory compactor returned no entries')
+  const result: Array<{ type: MemoryType; content: string }> = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue
+    if (!('type' in item) || !('content' in item)) continue
+    const type = compressedType(item.type)
+    if (!type || typeof item.content !== 'string') continue
+    result.push({ type, content: normalizeEntry(item.content) })
+  }
+  if (result.length === 0) throw new Error('memory compactor returned no valid entries')
+  return result.slice(0, 8)
+}
+
+async function compressEphemeralWithModel(
+  entries: StoredMemoryEntry[],
+): Promise<Array<{ type: MemoryType; content: string }>> {
+  const prompt = [
+    "Compress these transient agent-memory notes into at most 8 durable hot-memory entries.",
+    'Preserve user preferences, feedback corrections, project facts, and references; merge duplicates.',
+    'Return ONLY a JSON array: [{"type":"user|feedback|project|reference","content":"..."}].',
+    '',
+    ...entries.map((entry) => `[${entry.type}] ${entry.content}`),
+  ].join('\n')
+  const text = await completeText(prompt)
+  return compressedEntries(parseJsonValue(text))
+}
+
+async function compressHotWithModel(hot: string): Promise<{
+  hot: Array<{ type: MemoryType; content: string }>
+  coldRule: string
+}> {
+  const entries = parseEntries(hot)
+  const prompt = [
+    'Compress this hot agent-memory layer and extract exactly one stable rule for cold memory.',
+    'Return ONLY a JSON object: {"hot":[{"type":"user|feedback|project|reference","content":"..."}],"cold_rule":"..."}.',
+    'Keep the hot list to at most 8 entries; the cold rule is one durable rule, not a list.',
+    '',
+    ...entries.map((entry) => `[${entry.type}] ${entry.content}`),
+  ].join('\n')
+  const value = parseJsonValue(await completeText(prompt))
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('memory compactor returned a non-object hot result')
+  }
+  if (!('hot' in value) || !('cold_rule' in value)) {
+    throw new Error('memory compactor omitted hot or cold_rule')
+  }
+  const hotEntries = compressedEntries(value.hot)
+  if (typeof value.cold_rule !== 'string') {
+    throw new Error('memory compactor returned no cold rule')
+  }
+  return { hot: hotEntries, coldRule: normalizeEntry(value.cold_rule) }
+}
+
+function entriesToText(
+  header: string,
+  entries: Array<{ type: MemoryType; content: string }>,
+): string {
+  let text = header
+  const date = new Date().toISOString().slice(0, 10)
+  for (const entry of entries) {
+    const line = `- [${entryId(entry.type, entry.content)}] ${date}: ${entry.content}`
+    text = insertEntry(text, entry.type, line)
+  }
+  return text
+}
+
+async function maintainNow(): Promise<boolean> {
+  if (!compressionRuntime) return false
+  await ensureMemoryFile()
+  const state = await readState()
+  let hot = await readFile(memoryFilePath(), 'utf8')
+  let cold = await readFile(memoryColdPath(), 'utf8')
+  let persona = await readFile(memoryPersonaPath(), 'utf8')
+  let changed = false
+
+  const ephemeralText = await readFile(memoryEphemeralPath(), 'utf8')
+  const ephemeralEntries = parseEntries(ephemeralText)
+  if (ephemeralEntries.length > MAX_EPHEMERAL_ENTRIES) {
+    const compressed = await compressEphemeralWithModel(ephemeralEntries)
+    await archiveEntries(
+      memoryFilePath(),
+      ephemeralEntries.map((entry) => entry.line),
+    )
+    await writeMemory(memoryEphemeralPath(), EPHEMERAL_HEADER)
+    const date = new Date().toISOString().slice(0, 10)
+    for (const entry of compressed) {
+      const line = `- [${entryId(entry.type, entry.content)}] ${date}: ${entry.content}`
+      hot = insertEntry(hot, entry.type, line)
+    }
+    state.hot_updates += 1
+    changed = true
+    await writeMemory(memoryFilePath(), hot)
+    await writeState(state)
+  }
+
+  if (state.hot_updates > 0 && state.hot_updates % HOT_UPDATE_INTERVAL === 0) {
+    const compressed = await compressHotWithModel(hot)
+    const previous = parseEntries(hot)
+    await archiveEntries(
+      memoryFilePath(),
+      previous.map((entry) => entry.line),
+    )
+    hot = entriesToText(MEMORY_HEADER, compressed.hot)
+    cold = appendColdRule(cold, compressed.coldRule)
+    state.hot_updates = 0
+    changed = true
+  }
+
+  if (changed) {
+    persona = renderPersona(hot, persona)
+    await writeMemory(memoryFilePath(), hot)
+    await writeMemory(memoryColdPath(), cold)
+    await writeMemory(memoryPersonaPath(), persona)
+  }
+  state.pending = false
+  await writeState(state)
+  return changed
+}
+
 let writeChain: Promise<unknown> = Promise.resolve()
+let maintenanceRunning = false
+let maintenanceWaiter: Promise<void> | null = null
+
+function scheduleMemoryMaintenance(): void {
+  if (!compressionRuntime || maintenanceRunning) return
+  maintenanceRunning = true
+  const run = writeChain.then(async () => {
+    try {
+      await maintainNow()
+    } catch {
+      await markPending()
+    } finally {
+      maintenanceRunning = false
+    }
+  })
+  maintenanceWaiter = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  writeChain = maintenanceWaiter
+}
+
+/** Wait briefly for a scheduled compression before building the next prompt. */
+export async function waitForMemoryMaintenance(
+  timeoutMs = 2_000,
+): Promise<void> {
+  if (!maintenanceWaiter) return
+  await Promise.race([
+    maintenanceWaiter,
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ])
+}
 
 async function appendMemoryNow(
   raw: string,
@@ -476,7 +703,11 @@ async function appendMemoryNow(
   const line = `- [${id}] ${new Date().toISOString().slice(0, 10)}: ${content}`
   const next = insertEntry(current, type, line)
   await writeMemory(path, next)
-  await compactEphemeralNow()
+  if (compressionRuntime) {
+    await markPending()
+  } else {
+    await compactEphemeralNow()
+  }
   return { path, id, type, entry: line, bytes: Buffer.byteLength(next) }
 }
 
@@ -490,6 +721,10 @@ export function appendMemory(
   writeChain = run.then(
     () => undefined,
     () => undefined,
+  )
+  run.then(
+    () => scheduleMemoryMaintenance(),
+    () => scheduleMemoryMaintenance(),
   )
   return run
 }
@@ -514,7 +749,9 @@ async function appendHotMemoryNow(
   const state = await readState()
   state.hot_updates += 1
   let cold = await readFile(memoryColdPath(), 'utf8')
-  if (state.hot_updates % HOT_UPDATE_INTERVAL === 0) {
+  if (compressionRuntime) {
+    state.pending = true
+  } else if (state.hot_updates % HOT_UPDATE_INTERVAL === 0) {
     const promoted = promoteHotRule(hot)
     if (promoted) {
       hot = promoted.hot
@@ -549,6 +786,10 @@ export function appendHotMemory(
     () => undefined,
     () => undefined,
   )
+  run.then(
+    () => scheduleMemoryMaintenance(),
+    () => scheduleMemoryMaintenance(),
+  )
   return run
 }
 
@@ -580,6 +821,10 @@ export function forgetMemory(id: string): Promise<ForgetMemoryResult> {
   writeChain = run.then(
     () => undefined,
     () => undefined,
+  )
+  run.then(
+    () => scheduleMemoryMaintenance(),
+    () => scheduleMemoryMaintenance(),
   )
   return run
 }
@@ -639,6 +884,10 @@ export function updateMemory(
   writeChain = run.then(
     () => undefined,
     () => undefined,
+  )
+  run.then(
+    () => scheduleMemoryMaintenance(),
+    () => scheduleMemoryMaintenance(),
   )
   return run
 }
@@ -754,13 +1003,15 @@ export function memoryTool() {
     description:
       'Manage local memory. add/update/delete operate on ephemeral notes; list returns the active cold, hot and persona layers, which are the ones injected into context. Use memory_ephemeral to inspect transient notes. Never store secrets, credentials, evidence text, or transient tool output.',
     promptGuidelines: [
-      'Use memory action "add" for durable user preferences, corrections, or workspace facts. Notes go to ephemeral memory first; when it exceeds 16 entries the oldest batch is compressed into hot memory.',
+      'Use memory action "add" for durable user preferences, corrections, or workspace facts. Notes go to ephemeral memory first; when it exceeds 16 entries, background maintenance asks the current model to compress it into hot memory.',
       'Use memory action "list" to read the active cold/hot/persona layers. Use the separate memory_ephemeral tool when you need to inspect the transient layer; it is not injected into the prompt.',
       'To correct a note, prefer action "update" with its id. If the id is no longer ephemeral, edit hot memory from a list result or use the user-facing /memory command.',
       'Do not store passwords, tokens, document text, or temporary results.',
     ],
     parameters: memoryParameters,
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      setMemoryRuntime(ctx.model, ctx.modelRegistry)
+      scheduleMemoryMaintenance()
       if (params.action === 'add') {
         const content = params.content?.trim()
         if (!content) throw new Error('memory action "add" requires content')
@@ -814,6 +1065,7 @@ export function memoryTool() {
         }
       }
       if (params.action === 'list') {
+        await waitForMemoryMaintenance()
         const { hot, cold, persona, ephemeral } = await readActiveMemory()
         const details: MemoryToolDetails = {
           action: 'list',
@@ -848,7 +1100,9 @@ export function memoryEphemeralTool() {
       'Call memory_ephemeral only when the user asks what transient memory contains or when diagnosing whether a note has been compressed into hot memory.',
     ],
     parameters: ephemeralParameters,
-    async execute() {
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      setMemoryRuntime(ctx.model, ctx.modelRegistry)
+      scheduleMemoryMaintenance()
       const result = await listEphemeralMemory()
       const details = {
         path: result.path,

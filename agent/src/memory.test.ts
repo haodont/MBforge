@@ -20,7 +20,9 @@ import {
   readColdMemory,
   readMemory,
   readPersona,
+  setMemoryRuntime,
   updateMemory,
+  waitForMemoryMaintenance,
 } from './memory.js'
 
 function useTempMemory(t: test.TestContext): string {
@@ -209,4 +211,59 @@ test('memory tools list active layers and inspect ephemeral notes separately', a
       tool.execute('call-7', { action: 'delete' }, undefined, undefined, {} as never),
     /requires id/,
   )
+})
+
+test('background maintenance compresses ephemeral and hot memory with the model', async (t) => {
+  const path = useTempMemory(t)
+  const fakeModel = { id: 'fake', provider: 'fake' } as never
+  const fakeRegistry = {
+    complete: async (
+      _model: unknown,
+      context: { messages: Array<{ content: string }> },
+    ) => {
+      const prompt = context.messages[0]?.content ?? ''
+      const text = prompt.includes('"cold_rule"')
+        ? JSON.stringify({
+            hot: [{ type: 'user', content: 'model hot preference' }],
+            cold_rule: 'model cold rule',
+          })
+        : JSON.stringify([
+            { type: 'project', content: 'model ephemeral compression' },
+          ])
+      return { content: [{ type: 'text', text }] }
+    },
+  }
+  setMemoryRuntime(fakeModel, fakeRegistry as never)
+  t.after(() => setMemoryRuntime(undefined, fakeRegistry as never))
+
+  for (let batch = 0; batch < 3; batch += 1) {
+    for (let index = 0; index < 17; index += 1) {
+      await appendMemory(`project ${batch}-${index}`, 'project')
+    }
+    await new Promise((resolve) => setImmediate(resolve))
+    await waitForMemoryMaintenance()
+  }
+
+  assert.equal((await listEphemeralMemory()).entries.length, 0)
+  const hot = await readMemory()
+  assert.match(hot, /model hot preference/)
+  assert.doesNotMatch(hot, /project 0-0/)
+  assert.match(await readColdMemory(), /model cold rule/)
+  assert.match(await readPersona(), /model hot preference/)
+  assert.match(
+    readFileSync(memoryArchivePath(path), 'utf8'),
+    /project 0-0/,
+  )
+
+  const state = JSON.parse(readFileSync(memoryStatePath(), 'utf8')) as {
+    hot_updates: number
+    pending: boolean
+  }
+  assert.equal(state.hot_updates, 0)
+  assert.equal(state.pending, false)
+
+  const prompt = await memorySystemPrompt()
+  assert.match(prompt, /model cold rule/)
+  assert.match(prompt, /model hot preference/)
+  assert.doesNotMatch(prompt, /project 3-16/)
 })
