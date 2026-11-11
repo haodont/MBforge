@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 
 import type { Theme } from '@earendil-works/pi-coding-agent'
 
+import type { SessionMode } from './modes.js'
+
 /**
  * MBForge visual identity for the pi agent CLI.
  *
@@ -19,7 +21,7 @@ const GLYPH = '⬡'
 const INDENT = '       '
 
 export interface BrandState {
-  mode: 'readonly' | 'edit'
+  mode: SessionMode
   backend: string
   online: boolean
   toolCount: number
@@ -86,13 +88,12 @@ export function brandHeader(theme: Theme, state: BrandState) {
         },
       ]
 
+      const modeLabel = state.mode === 'auto' ? '● auto' : '● dev'
+      const modeStyle = (text: string) =>
+        theme.fg(state.mode === 'auto' ? 'accent' : 'warning', text)
       const facts: Segment[] = [
         { text: INDENT, style: (text) => text },
-        {
-          text: state.mode === 'edit' ? '● edit' : '● readonly',
-          style: (text) =>
-            theme.fg(state.mode === 'edit' ? 'warning' : 'success', text),
-        },
+        { text: modeLabel, style: modeStyle },
         { text: ' · ', style: (text) => text },
         {
           text: `${state.toolCount} capabilities`,
@@ -133,7 +134,7 @@ export function brandHeader(theme: Theme, state: BrandState) {
 /** Footer status text: mode + capability count, or offline state. */
 export function brandStatus(state: BrandState): string {
   if (!state.online) return `${GLYPH} MBForge · offline`
-  return `${GLYPH} MBForge · ${state.mode} · ${state.toolCount} tools`
+  return `${GLYPH} MBForge · ${state.mode} · ${state.toolCount}`
 }
 
 /** Molecule-pulse working indicator frames, colored from the active theme. */

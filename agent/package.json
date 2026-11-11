@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
+  "bin": {
+    "mbforge": "scripts/cli.mjs"
+  },
   "engines": {
     "node": ">=24.14.1"
   },
@@ -12,7 +15,9 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test \"dist/*.test.js\"",
     "precli": "npm run build",
-    "cli": "pi --offline --no-builtin-tools --theme ./themes --use-theme mbforge-light/mbforge-dark -e ./dist/extension.js",
+    "cli": "node scripts/cli.mjs",
+    "link": "npm link",
+    "prefetch:bin": "node scripts/prefetch-bin.mjs",
     "dev:cli": "npm run cli"
   },
   "dependencies": {

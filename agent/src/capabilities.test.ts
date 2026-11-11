@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { loadCapabilityTools } from './capabilities.js'
+import { loadCapabilityToolset } from './capabilities.js'
 
 const manifest = {
   success: true,
@@ -40,24 +40,14 @@ function stubFetch(t: test.TestContext): void {
     })) as typeof fetch
 }
 
-test('readonly mode registers only non-mutating capabilities', async (t) => {
+test('manifest loads every capability and records mutating names', async (t) => {
   stubFetch(t)
 
-  const tools = await loadCapabilityTools('readonly')
-
-  assert.deepEqual(
-    tools.map((tool) => tool.name),
-    ['search_library'],
-  )
-})
-
-test('edit mode registers every capability', async (t) => {
-  stubFetch(t)
-
-  const tools = await loadCapabilityTools('edit')
+  const { tools, mutatingNames } = await loadCapabilityToolset()
 
   assert.deepEqual(
     tools.map((tool) => tool.name),
     ['search_library', 'update_record'],
   )
+  assert.deepEqual(mutatingNames, ['update_record'])
 })

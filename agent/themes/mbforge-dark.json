@@ -43,7 +43,7 @@
     "customMessageText": "#d9d5ea",
     "customMessageLabel": "violet",
     "toolPendingBg": "panel",
-    "toolSuccessBg": "#173a2e",
+    "toolSuccessBg": "#1c2321",
     "toolErrorBg": "#3a2126",
     "toolTitle": "text",
     "toolOutput": "muted",
