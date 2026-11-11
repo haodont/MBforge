@@ -71,9 +71,18 @@ class GetDocumentInput(BaseModel):
 
 class GetDocumentOutput(BaseModel):
     doc_id: str
-    short_id: str
+    short_id: str = Field(
+        ...,
+        description="12-character display id; use it in prose, not for links.",
+    )
     title: str
-    file_name: str
+    file_name: str = Field(
+        ...,
+        description=(
+            "Stored PDF filename under storage/{doc_id}/; use this exact name, "
+            "never assume source.pdf."
+        ),
+    )
     page_count: int
     status: str
     created_at: str
@@ -112,6 +121,14 @@ class EvidenceItem(BaseModel):
 
 
 class ListEvidenceOutput(BaseModel):
+    doc_id: str = Field(
+        ...,
+        description="Canonical document id these evidence rows belong to.",
+    )
+    short_id: str = Field(
+        ...,
+        description="12-character display id for the same document.",
+    )
     items: list[EvidenceItem]
 
 
@@ -288,7 +305,9 @@ async def list_evidence(
     next_offset = request.offset + request.limit if truncated else None
     return CapabilityResult(
         data=ListEvidenceOutput(
-            items=[EvidenceItem(**record.to_dict()) for record in page]
+            doc_id=request.doc_id,
+            short_id=short_doc_id(request.doc_id),
+            items=[EvidenceItem(**record.to_dict()) for record in page],
         ),
         truncated=next_offset is not None,
         next_offset=next_offset,

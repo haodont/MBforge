@@ -264,6 +264,10 @@ def test_document_reference_resolves_to_the_canonical_doc_id(tmp_library: Path) 
         result = asyncio.run(invoke("get_document", context, {"doc_id": reference}))
         assert result.data.doc_id == doc_id
 
+    evidence = asyncio.run(invoke("list_evidence", context, {"doc_id": match.short_id}))
+    assert evidence.data.doc_id == doc_id
+    assert evidence.data.short_id == match.short_id
+
 
 def test_ambiguous_document_reference_is_rejected(tmp_library: Path) -> None:
     """Two documents share a title: the reference must not pick one."""

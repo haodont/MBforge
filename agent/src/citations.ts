@@ -84,6 +84,8 @@ export function harvestEvidence(
   if (!Array.isArray(items)) return []
 
   const locations: EvidenceLocation[] = []
+  const resultDocId =
+    'doc_id' in data && typeof data.doc_id === 'string' ? data.doc_id : undefined
   for (const item of items) {
     if (typeof item !== 'object' || item === null) continue
     const record = item as {
@@ -95,15 +97,18 @@ export function harvestEvidence(
     const id = typeof record.evidence_id === 'string' ? record.evidence_id : undefined
     const page = typeof record.page === 'number' ? record.page : undefined
     if (!id || page === undefined) continue
-    // Document-scoped tools: doc_id comes from the call, not from the row.
+    // Prefer the canonical document id echoed by the result. Document-scoped
+    // tools can be called with a title or short id; params.doc_id is then not
+    // safe to put in a deep link.
     const docId =
-      DOCUMENT_SCOPED_TOOLS.has(toolName)
+      resultDocId ??
+      (DOCUMENT_SCOPED_TOOLS.has(toolName)
         ? typeof params.doc_id === 'string'
           ? params.doc_id
           : undefined
         : typeof record.doc_id === 'string'
           ? record.doc_id
-          : undefined
+          : undefined)
     if (!docId) continue
     const bbox =
       Array.isArray(record.bbox) &&
