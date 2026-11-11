@@ -42,6 +42,10 @@ Thumbs.db
 .codegraph/
 .commandcode/
 
+# Per-project pi agent state (credentials, sessions, local settings)
+agent/.pi-agent/
+agent/.pi-subagents/
+
 # Test-run captures and scratch probes (pasted output, not repo content)
 /*_test.txt
 /*_check.txt
