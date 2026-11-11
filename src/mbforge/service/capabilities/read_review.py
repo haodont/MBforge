@@ -56,8 +56,8 @@ class ListReviewQueueInput(BaseModel):
         max_length=128,
         description=DOC_ID_DESCRIPTION,
     )
-    offset: int = Field(0, ge=0)
-    limit: int = Field(25, ge=1, le=200)
+    offset: int = Field(0, ge=0, description="Number of matching items to skip.")
+    limit: int = Field(25, ge=1, le=200, description="Maximum review items to return.")
 
 
 class ReviewStatsRow(BaseModel):

@@ -57,8 +57,13 @@ class DocumentMatch(BaseModel):
 
 
 class ResolveDocumentInput(BaseModel):
-    query: str = Field(..., min_length=1, max_length=512)
-    limit: int = Field(5, ge=1, le=20)
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=512,
+        description="Title, file name, full doc_id, or a unique doc_id prefix.",
+    )
+    limit: int = Field(5, ge=1, le=20, description="Maximum matches to return.")
 
 
 class ResolveDocumentOutput(BaseModel):
@@ -92,8 +97,13 @@ class GetDocumentOutput(BaseModel):
 
 class GetDocumentMarkdownInput(BaseModel):
     doc_id: str = doc_id_field()
-    offset: int = Field(0, ge=0)
-    max_chars: int = Field(20000, ge=1000, le=200000)
+    offset: int = Field(0, ge=0, description="Character offset into document.md.")
+    max_chars: int = Field(
+        20000,
+        ge=1000,
+        le=200000,
+        description="Maximum characters to return in this page.",
+    )
 
 
 class GetDocumentMarkdownOutput(BaseModel):
@@ -106,10 +116,19 @@ class GetDocumentMarkdownOutput(BaseModel):
 
 class ListEvidenceInput(BaseModel):
     doc_id: str = doc_id_field()
-    page: int | None = Field(None, ge=1)
-    kind: str | None = Field(None, max_length=32)
-    offset: int = Field(0, ge=0)
-    limit: int = Field(50, ge=1, le=200)
+    page: int | None = Field(
+        None, ge=1, description="Restrict to one 1-based PDF page."
+    )
+    kind: str | None = Field(
+        None,
+        max_length=32,
+        description=(
+            "Producer label to filter; call get_vocabulary for the closed set. "
+            "An unknown kind is rejected."
+        ),
+    )
+    offset: int = Field(0, ge=0, description="Number of matching rows to skip.")
+    limit: int = Field(50, ge=1, le=200, description="Maximum evidence rows to return.")
 
 
 class EvidenceItem(BaseModel):
@@ -133,7 +152,9 @@ class ListEvidenceOutput(BaseModel):
 
 
 class GetRunInput(BaseModel):
-    run_id: str = Field(..., min_length=1, max_length=128)
+    run_id: str = Field(
+        ..., min_length=1, max_length=128, description="Pipeline run id."
+    )
 
 
 class RunNode(BaseModel):

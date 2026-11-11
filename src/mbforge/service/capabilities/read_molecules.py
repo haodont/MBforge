@@ -25,12 +25,34 @@ from mbforge.service.use_cases.molecule.queries import (
 
 
 class SearchMoleculesInput(BaseModel):
-    query: str = Field(..., min_length=1, max_length=512)
-    mode: Literal["auto", "text", "substructure", "similarity"] = "auto"
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=512,
+        description=(
+            "Text, SMILES, or SMARTS depending on mode; mode=auto detects a "
+            "parseable structure query."
+        ),
+    )
+    mode: Literal["auto", "text", "substructure", "similarity"] = Field(
+        "auto",
+        description=(
+            "auto chooses text for words and substructure for SMILES/SMARTS; "
+            "the other values force one search path."
+        ),
+    )
     doc_id: str = Field("", max_length=128, description=DOC_ID_DESCRIPTION)
-    offset: int = Field(0, ge=0)
-    limit: int = Field(10, ge=1, le=50)
-    similarity_threshold: float = Field(0.5, ge=0.0, le=1.0)
+    offset: int = Field(0, ge=0, description="Number of matches to skip.")
+    limit: int = Field(10, ge=1, le=50, description="Maximum molecule hits to return.")
+    similarity_threshold: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum similarity when the resolved mode is similarity; set 0 to "
+            "list every scored candidate."
+        ),
+    )
 
 
 class MoleculeHit(BaseModel):

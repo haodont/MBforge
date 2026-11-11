@@ -50,10 +50,20 @@ PatentCollection = Literal[
 
 class GetPatentResultInput(BaseModel):
     doc_id: str = doc_id_field()
-    collection: PatentCollection = "summary"
-    offset: int = Field(0, ge=0)
-    limit: int = Field(20, ge=1, le=100)
-    include_evidence_ids: bool = False
+    collection: PatentCollection = Field(
+        "summary",
+        description=(
+            "Facts collection to return; summary carries counts/stats and no items."
+        ),
+    )
+    offset: int = Field(0, ge=0, description="Number of collection rows to skip.")
+    limit: int = Field(
+        20, ge=1, le=100, description="Maximum collection rows to return."
+    )
+    include_evidence_ids: bool = Field(
+        False,
+        description="Include evidence_ids on returned fact rows when available.",
+    )
 
 
 class PatentFactCounts(BaseModel):
@@ -93,13 +103,25 @@ class GetPatentResultOutput(BaseModel):
 
 class QueryActivitiesInput(BaseModel):
     doc_id: str = doc_id_field()
-    metric: str = Field("", max_length=64)
-    target: str = Field("", max_length=128)
-    assay_description: str = Field("", max_length=256)
-    min_value: float | None = None
-    max_value: float | None = None
-    offset: int = Field(0, ge=0)
-    limit: int = Field(200, ge=1, le=500)
+    metric: str = Field(
+        "", max_length=64, description="Activity metric, for example IC50."
+    )
+    target: str = Field(
+        "", max_length=128, description="Biological target or cell line."
+    )
+    assay_description: str = Field(
+        "", max_length=256, description="Assay description substring."
+    )
+    min_value: float | None = Field(
+        None, description="Minimum canonical value included in the result."
+    )
+    max_value: float | None = Field(
+        None, description="Maximum canonical value included in the result."
+    )
+    offset: int = Field(0, ge=0, description="Number of readings to skip.")
+    limit: int = Field(
+        200, ge=1, le=500, description="Maximum activity readings to return."
+    )
 
 
 class QueryActivitiesOutput(BaseModel):

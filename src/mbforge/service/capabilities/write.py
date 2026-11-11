@@ -41,8 +41,16 @@ def _document_lock(library_root: str, doc_id: str) -> asyncio.Lock:
 
 
 class ImportPdfInput(BaseModel):
-    path: str = Field(..., min_length=1, max_length=4096)
-    title: str = Field("", max_length=512)
+    path: str = Field(
+        ...,
+        min_length=1,
+        max_length=4096,
+        description=(
+            "PDF path inside the active library; relative paths resolve against "
+            "the library root."
+        ),
+    )
+    title: str = Field("", max_length=512, description="Optional document title.")
 
 
 class ImportPdfOutput(BaseModel):
@@ -87,7 +95,9 @@ class ReingestDocumentOutput(BaseModel):
 
 
 class RunActionInput(BaseModel):
-    run_id: str = Field(..., min_length=1, max_length=128)
+    run_id: str = Field(
+        ..., min_length=1, max_length=128, description="Pipeline run id."
+    )
 
 
 class RunActionOutput(BaseModel):
@@ -96,7 +106,12 @@ class RunActionOutput(BaseModel):
 
 
 class ProposeReviewInput(BaseModel):
-    items: list[ReviewProposal] = Field(..., min_length=1, max_length=50)
+    items: list[ReviewProposal] = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="Proposals a human will confirm or reject; nothing is applied.",
+    )
 
 
 class ProposeReviewOutput(BaseModel):

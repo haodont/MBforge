@@ -30,10 +30,14 @@ from mbforge.service.use_cases.documents.structure_verification import (
 
 class VerifyStructuresInput(BaseModel):
     doc_id: str = doc_id_field()
-    page: int | None = Field(None, ge=1)
-    label: str | None = Field(None, max_length=64)
-    offset: int = Field(0, ge=0)
-    limit: int = Field(25, ge=1, le=100)
+    page: int | None = Field(
+        None, ge=1, description="Restrict verification to one 1-based PDF page."
+    )
+    label: str | None = Field(
+        None, max_length=64, description="Restrict to one printed designation."
+    )
+    offset: int = Field(0, ge=0, description="Number of structures to skip.")
+    limit: int = Field(25, ge=1, le=100, description="Maximum structures to return.")
 
 
 class PrintedMassCheck(BaseModel):
