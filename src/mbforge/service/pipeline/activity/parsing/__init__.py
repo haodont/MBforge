@@ -17,6 +17,7 @@ from mbforge.service.pipeline.activity.parsing.tables import (
     _parse_simple_activity_table,
     _simple_activity_table_is_complete,
     _split_pipe_row,
+    _table_cell_gaps,
     looks_like_activity_table,
 )
 from mbforge.service.pipeline.layout.table_html import (
@@ -33,5 +34,6 @@ __all__ = [
     "_parse_simple_activity_table",
     "_simple_activity_table_is_complete",
     "_split_pipe_row",
+    "_table_cell_gaps",
     "looks_like_activity_table",
 ]

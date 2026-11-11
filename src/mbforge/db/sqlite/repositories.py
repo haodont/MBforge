@@ -241,21 +241,25 @@ class SqliteMoleculeRepository:
     def stats(self) -> dict[str, Any]:
         return molecule_store.stats(self.library_root)
 
-    def search_text(self, query: str, top_k: int) -> list[dict[str, Any]]:
-        return molecule_store.search_text(self.library_root, query, top_k)
+    def search_text(
+        self, query: str, top_k: int, *, doc_id: str = ""
+    ) -> list[dict[str, Any]]:
+        return molecule_store.search_text(
+            self.library_root, query, top_k, doc_id=doc_id
+        )
 
     def search_substructure(
-        self, query_smiles: str, top_k: int
+        self, query_smiles: str, top_k: int, *, doc_id: str = ""
     ) -> list[dict[str, Any]]:
         return molecule_store.search_substructure(
-            self.library_root, query_smiles, top_k
+            self.library_root, query_smiles, top_k, doc_id=doc_id
         )
 
     def search_similarity(
-        self, query_smiles: str, top_k: int, threshold: float
+        self, query_smiles: str, top_k: int, threshold: float, *, doc_id: str = ""
     ) -> list[dict[str, Any]]:
         return molecule_store.search_similarity(
-            self.library_root, query_smiles, top_k, threshold
+            self.library_root, query_smiles, top_k, threshold, doc_id=doc_id
         )
 
     def detection_cache_matches(

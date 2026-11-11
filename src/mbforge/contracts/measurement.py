@@ -124,6 +124,7 @@ class MeasurementQuery(BaseModel):
     #: Canonical-value window: a dataset question such as "IC50 < 40 nM".
     min_value: float | None = None
     max_value: float | None = None
+    offset: int = Field(0, ge=0)
     limit: int = Field(200, ge=1, le=1000)
 
 

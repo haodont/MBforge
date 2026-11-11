@@ -12,6 +12,16 @@ class ActivityExportRequest(BaseModel):
     library_root: str | None = None
 
 
+class ActivityMolecule(BaseModel):
+    """Identity of one structure attributed to a reading."""
+
+    model_config = ConfigDict(frozen=True)
+
+    mol_id: str
+    smiles: str | None = None
+    name: str | None = None
+
+
 class ActivityRecordResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -49,8 +59,10 @@ class ActivityRecordResponse(BaseModel):
     col_idx: int | None = None
     row_label: str | None = None
     row_smiles: str | None = None
+    molecules: list[ActivityMolecule] = Field(default_factory=list)
     raw_text: str | None = None
     created_at: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
     evidence_grade: Literal["measured", "predicted", "derived", "suggested"] = (
         "measured"

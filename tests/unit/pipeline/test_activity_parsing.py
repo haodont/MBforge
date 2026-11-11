@@ -212,7 +212,7 @@ def test_prose_measurement_needs_a_compound_reference_to_be_kept() -> None:
 
 
 # (case, table) — a table whose activity cell cannot be read as published.
-_COMPLEX_ACTIVITY_TABLES: list[tuple[str, str]] = [
+_REFUSED_ACTIVITY_TABLES: list[tuple[str, str]] = [
     (
         "CN121270515A lost rowspan shifts receptor headers into designation column",
         "| 化合物编号 | IC50(nM) | IC50(nM) | IC50(nM) | IC50(nM) |\n"
@@ -231,13 +231,20 @@ _COMPLEX_ACTIVITY_TABLES: list[tuple[str, str]] = [
         "|---|---|\n"
         "| 化合物1-P4 | unreadable |",
     ),
+]
+
+# (case, table, readable values) — a table whose cells that name no compound
+# are left out, while the rows that do name one are published.
+_PARTIAL_ACTIVITY_TABLES: list[tuple[str, str, list[float]]] = [
     (
         "value without designation",
         "| Compound | IC50 (nM) |\n| --- | --- |\n| 1 | 10 |\n| | 20 |",
+        [10.0],
     ),
     (
         "OCR'd structure fragment as designation",
         "| Compound | pIC50 |\n| --- | --- |\n| E020 | 6.9 |\n| H3C | 6.6 |",
+        [6.9],
     ),
 ]
 
@@ -262,13 +269,30 @@ def test_table_measurements_share_evidence_id_and_complex_cells_skip_the_table()
     assert all(item["evidence_ids"] == [block.evidence_id] for item in measurements)
     assert len({item["measurement_id"] for item in measurements}) == 4
 
-    for case, table in _COMPLEX_ACTIVITY_TABLES:
+    for case, table in _REFUSED_ACTIVITY_TABLES:
         block = _evidence(table, kind="tab")
 
         measurements, issues = extract_activity_measurements_from_evidence([block], DOC)
 
         assert measurements == [], case
         assert [issue["code"] for issue in issues] == ["complex_activity_table"], case
+        assert issues[0]["evidence_ids"] == [block.evidence_id], case
+
+
+def test_cells_that_name_no_compound_are_reported_not_published() -> None:
+    """A cell beside no compound, or beside an OCR fragment, is left out of the
+    dataset and reported; the rows that do name a compound are published."""
+    for case, table, values in _PARTIAL_ACTIVITY_TABLES:
+        block = _evidence(table, kind="tab")
+
+        measurements, issues = extract_activity_measurements_from_evidence([block], DOC)
+
+        assert [item["value"]["original_value"] for item in measurements] == values, (
+            case
+        )
+        assert [issue["code"] for issue in issues] == ["activity_cells_unattributed"], (
+            case
+        )
         assert issues[0]["evidence_ids"] == [block.evidence_id], case
 
 
@@ -645,7 +669,7 @@ def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
     ]
 
     # CN121270515A p20 prints 6 in the blank OCR cell. Never assign it to 5:
-    # without image/span evidence the whole table needs review.
+    # the value that lost its label is reported, not read as 5's second reading.
     merged = _evidence(
         "| 实施例编号 | MRGPRX2 抑制 | 实施例编号 | MRGPRX2 抑制 |\n"
         "| --- | --- | --- | --- |\n"
@@ -657,8 +681,10 @@ def test_published_table_shapes_parse_spanning_and_repeated_headers() -> None:
         [merged], DOC
     )
 
-    assert merged_measurements == []
-    assert [issue["code"] for issue in merged_issues] == ["complex_activity_table"]
+    assert [item["value"]["qualitative_value"] for item in merged_measurements] == [
+        "++++"
+    ]
+    assert [issue["code"] for issue in merged_issues] == ["activity_cells_unattributed"]
 
     # The rejected neighbours. A structure fragment is not a designation, so the
     # value beside it stays unread and the table is reported instead of guessed.
@@ -706,3 +732,67 @@ def test_document_legend_resolves_letter_bins_outside_the_table() -> None:
         "legend",
     ]
     assert with_legend[0]["value"]["qualitative_label"] == "IC50>1μM"
+
+
+#: US20210128561A1 p51 prints its SAR table the way a US application does: the
+#: assay name in a spanning title row, the metric in the row below it, values
+#: with an error term (``11.6 ± 3.7``), censored readings (``>100 (4%)``), and
+#: compound numbers from a letter series (``A-1``, ``B-40``).
+_US_SAR_TABLE = "\n".join(
+    [
+        "|  | β-arrestin assay (CHO β-arrestin human MrgX4 "
+        "| calcium assay (LN229 cells recombinantly expressing human wildtype |",
+        "| --- | --- | --- |",
+        "|  | L83S) IC50 ± [μM]a (% inhibition ± SEM)c | IC50 ± SEM [μM]a |",
+        "|  |  | (% inhibition ± SEM)d |",
+        "| A-1 | >100 (4%) |  |",
+        "| A-8 | 11.6 ± 3.7 | 2.89 ± 0.24 |",
+        "|  | 2.42 ± 0.22 | 0.683 ± 0.174 |",
+        "| B-32 | >100 (40%) >100 (45%) |  |",
+        "| B-40 | 0.0225 ± 0.0024 | 0.000420 ± 0.000054 |",
+    ]
+)
+
+
+def test_us_published_sar_table_yields_one_reading_per_printed_value() -> None:
+    """A US SAR table is read: the metric row under the assay title, ``± SEM``
+    values, censored readings, and letter-series compound numbers.
+
+    The cells that named no compound and the cell that held two readings merged
+    into one are left out and reported; every printed value beside a compound
+    becomes one reading.
+    """
+    block = _evidence(_US_SAR_TABLE, kind="tab")
+
+    measurements, issues = extract_activity_measurements_from_evidence([block], DOC)
+
+    assert [item["provenance"]["reference_key"] for item in measurements] == [
+        "A-1",
+        "A-8",
+        "A-8",
+        "B-40",
+        "B-40",
+    ]
+    assert {item["metric"] for item in measurements} == {"IC50"}
+    assert [item["value"]["original_value"] for item in measurements] == [
+        100.0,
+        11.6,
+        2.89,
+        0.0225,
+        0.00042,
+    ]
+    assert {item["value"]["original_unit"] for item in measurements} == {"μM"}
+    # The censored reading keeps its comparator; the error term is not a value.
+    assert [item["value"]["operator_original"] for item in measurements] == [
+        ">",
+        "=",
+        "=",
+        "=",
+        "=",
+    ]
+    assert {item["provenance"]["column_target"] for item in measurements} == {
+        "β-arrestin CHO β-arrestin human MrgX4 L83S",
+        "calcium LN229 cells recombinantly expressing human wildtype",
+    }
+    assert [issue["code"] for issue in issues] == ["activity_cells_unattributed"]
+    assert "no_designation" in issues[0]["message"]

@@ -48,6 +48,15 @@ _QUALITATIVE_CELL_RE = re.compile(
 #: A published "no data" marker. It is a missing value, not an inactivity grade
 #: and not a zero; the cell is counted as handled but produces no measurement.
 _MISSING_VALUE_RE = re.compile(r"^(?:ND|NA|NT)$", re.IGNORECASE)
+#: One printed value expression: a comparator, a number, an optional error term
+#: (``± SEM``) and an optional parenthetical percentage. A cell that prints two
+#: of them holds two readings the layout merged into one cell, so neither can
+#: be attributed to the row without guessing.
+_VALUE_EXPRESSION_RE = re.compile(
+    r"(?:<=|>=|<|>|=|~|≤|≥|≈)?\s*\d+(?:\.\d+)?"
+    r"(?:\s*±\s*\d+(?:\.\d+)?)?"
+    r"(?:\s*\(\s*[+-]?\d+(?:\.\d+)?\s*%\s*\))?"
+)
 # A data row starts with a compound designation. Chemical fragments OCR'd out of
 # a structure column (``H3C``, ``N.``), prose, and qualitative symbols are not
 # designations, so a value beside them stays unattributed instead of being
@@ -292,6 +301,11 @@ def _clean_target(text: str) -> str | None:
         " ",
         target,
     )
+    # A footnote marker and the error-term label are not part of the assay name:
+    # ``IC50 ± [μM]a (% inhibition ± SEM)c`` names the assay in the rest.
+    target = re.sub(r"(?i)\b(?:SEM|SD)\b", " ", target)
+    target = target.replace("±", " ")
+    target = re.sub(r"(?<![A-Za-z0-9])[a-d](?![A-Za-z0-9])", " ", target)
     cleaned = " ".join(target.split())
     # ``抑制% (300 nM)`` leaves the concentration behind, and a bare number states a
     # condition rather than an assay target.
@@ -329,6 +343,20 @@ def _activity_header_columns(
             )
         )
     return columns
+
+
+def _metric_of_cell(cell: str) -> tuple[str, str, str | None] | None:
+    """Return ``(metric, unit, target)`` for one header cell, or ``None``.
+
+    A published table may print the metric in a row other than the one the
+    layout treats as the header: a US application prints the assay name in a
+    spanning title row and ``IC50 ± [μM]`` in the row below it.
+    """
+    columns = _activity_header_columns([cell])
+    if not columns:
+        return None
+    _index, metric, unit, target = columns[0]
+    return metric, unit, target
 
 
 def _is_header_band_row(row: Sequence[str]) -> bool:
@@ -383,22 +411,50 @@ def _read_table_layout(table_md: str) -> _TableLayout | None:
     ):
         return None
 
-    metrics = {
-        column: (metric, unit, target)
-        for column, metric, unit, target in _activity_header_columns(head_rows[-1])
-    }
-    sub_text = ["" for _ in head_rows[-1]]
-    for row in rest[:band]:
-        for index, cell in enumerate(row):
-            if index < len(sub_text) and cell.strip():
-                sub_text[index] = f"{sub_text[index]} {cell.strip()}".strip()
+    primary = head_rows[-1]
+    #: A metric printed in one header cell spans the empty siblings to its right
+    #: (``化合物编号 | IC50(nM) |  |  |``), so the metric is looked up in the
+    #: filled header row.
+    filled_primary = _fill_spanned_cells(primary)
+    band_rows = rest[:band]
+    #: Rows printed above the header row: a US table names the assay there and
+    #: states the metric in the row below.
+    title_rows = head_rows[:-1]
 
     columns: list[_HeaderColumn] = []
-    for index in range(len(head_rows[-1])):
-        metric, unit, header_target = metrics.get(index, (None, "", None))
-        sub = sub_text[index] if index < len(sub_text) else ""
-        text = " ".join(part for part in (head_rows[-1][index], sub) if part).strip()
-        target = _clean_target(sub) or header_target
+    for index in range(len(primary)):
+        band_cells = [row[index] for row in band_rows if index < len(row)]
+        title_cells = [row[index] for row in title_rows if index < len(row)]
+        metric: str | None = None
+        unit = ""
+        header_target: str | None = None
+        metric_source = "primary"
+        for source, cell in (
+            ("primary", filled_primary[index] if index < len(filled_primary) else ""),
+            *(("band", cell) for cell in band_cells),
+            *(("title", cell) for cell in title_cells),
+        ):
+            found = _metric_of_cell(cell)
+            if found is not None:
+                metric, unit, header_target = found
+                metric_source = source
+                break
+        label_text = " ".join(
+            part.strip() for part in [primary[index], *band_cells] if part.strip()
+        )
+        text = " ".join(
+            part.strip()
+            for part in [primary[index], *band_cells, *title_cells]
+            if part.strip()
+        )
+        # The assay name is printed in the spanning title above the metric row;
+        # the metric row carries only the endpoint, its unit and its footnotes.
+        if metric_source == "primary":
+            target = _clean_target(" ".join(band_cells)) or header_target
+        else:
+            target = (
+                _clean_target(" ".join([primary[index], *band_cells])) or header_target
+            )
         columns.append(
             _HeaderColumn(
                 index=index,
@@ -406,7 +462,7 @@ def _read_table_layout(table_md: str) -> _TableLayout | None:
                 metric=metric,
                 unit=unit,
                 target=_clean_target(target) if (metric and target) else None,
-                is_label=bool(_LABEL_HEADER_RE.search(text)) and metric is None,
+                is_label=bool(_LABEL_HEADER_RE.search(label_text)) and metric is None,
             )
         )
 
@@ -453,6 +509,22 @@ def _is_row_label(value: str) -> bool:
     return bool(_DESIGNATION_CJK_RE.match(stripped) and _CJK_RE.search(stripped))
 
 
+def _cell_value_count(cell: str) -> int:
+    """Return how many independent value expressions a cell prints.
+
+    ``11.6 ± 3.7`` is one reading with its error term; ``>100 (4%)`` is one
+    censored reading with its inhibition; ``>100 (40%) >100 (45%)`` is two
+    readings the layout merged into one cell, and neither of them can be
+    attributed to the row without guessing.
+    """
+    text = _normalize_table_markup(cell).strip()
+    if not text or _MISSING_VALUE_RE.fullmatch(text):
+        return 0
+    if _QUALITATIVE_CELL_RE.fullmatch(text):
+        return 1
+    return len(_VALUE_EXPRESSION_RE.findall(text))
+
+
 def _normalize_bin_symbol(value: str) -> str:
     """Map the OCR substitution ``十`` back to the ``+`` bin symbol."""
     stripped = value.strip()
@@ -466,6 +538,55 @@ def _cell_has_activity_value(cell: str) -> bool:
         return False
     return bool(
         _NUMERIC_RE.search(stripped) or _QUALITATIVE_CELL_RE.fullmatch(stripped)
+    )
+
+
+@dataclass(frozen=True)
+class _CellCoverage:
+    """How one table's value cells divide up.
+
+    ``expected`` counts the cells that name a compound and print exactly one
+    value: those are the readings a reader can attribute. The other three
+    counts are the cells that cannot become one, each for its own reason, so a
+    table that publishes part of itself says which part it left out.
+    """
+
+    expected: int
+    no_designation: int
+    ambiguous_value: int
+    unreadable: int
+
+
+def _classify_cells(table_md: str) -> _CellCoverage:
+    """Sort one table's value cells into the readings it can and cannot yield."""
+    layout = _read_table_layout(table_md)
+    if layout is None:
+        return _CellCoverage(0, 0, 0, 0)
+    expected = no_designation = ambiguous_value = unreadable = 0
+    for row in layout.data_rows:
+        for label_column, value_column in layout.pairs:
+            if value_column >= len(row):
+                continue
+            cell = _normalize_table_markup(row[value_column]).strip()
+            if not cell or _MISSING_VALUE_RE.fullmatch(cell):
+                continue
+            label = row[label_column].strip() if label_column < len(row) else ""
+            if not _is_row_label(label):
+                # The value names no compound, so it is not a reading yet.
+                no_designation += 1
+                continue
+            if _cell_value_count(cell) > 1:
+                ambiguous_value += 1
+                continue
+            if not _cell_has_activity_value(cell):
+                unreadable += 1
+                continue
+            expected += 1
+    return _CellCoverage(
+        expected=expected,
+        no_designation=no_designation,
+        ambiguous_value=ambiguous_value,
+        unreadable=unreadable,
     )
 
 
@@ -506,6 +627,10 @@ def _parse_simple_activity_table(
                 continue
             value_text = _normalize_bin_symbol(row[value_column])
             if not _cell_has_activity_value(value_text):
+                continue
+            if _cell_value_count(value_text) > 1:
+                # Two readings merged into one cell: which of them belongs to
+                # this row is not printed, so the cell stays unread.
                 continue
             # A blank Markdown cell cannot prove a span; OCR may have lost a label.
             label = row[label_column].strip() if label_column < len(row) else ""
@@ -559,20 +684,26 @@ def _simple_activity_table_is_complete(
 ) -> bool:
     """Return whether every declared activity cell was parsed deterministically.
 
-    Every non-empty cell under a metric column is expected to become one
-    record: a cell that holds something the parser cannot read, or a value with
-    no compound designation beside it, leaves ``expected`` above ``records`` so
-    the caller skips the table instead of publishing part of it.
+    A cell that names a compound and prints one value is expected to become a
+    record: a cell that holds something the parser cannot read leaves
+    ``expected`` above ``records`` so the caller skips the table instead of
+    publishing part of it. A cell that names no compound, or that holds two
+    readings merged into one, is not expected to become anything: it is counted
+    and reported by :func:`_table_cell_gaps` instead of withholding the rows
+    that were read.
     """
-    layout = _read_table_layout(table_md)
-    if layout is None:
-        return False
-    expected = 0
-    for row in layout.data_rows:
-        for _label_column, value_column in layout.pairs:
-            if value_column >= len(row):
-                continue
-            cell = _normalize_table_markup(row[value_column]).strip()
-            if cell and not _MISSING_VALUE_RE.fullmatch(cell):
-                expected += 1
-    return expected > 0 and expected == len(records)
+    coverage = _classify_cells(table_md)
+    return (
+        coverage.expected > 0
+        and coverage.expected == len(records)
+        and coverage.unreadable == 0
+    )
+
+
+def _table_cell_gaps(table_md: str) -> dict[str, int]:
+    """Return the cells a table leaves out, by the reason they were left out."""
+    coverage = _classify_cells(table_md)
+    return {
+        "no_designation": coverage.no_designation,
+        "ambiguous_value": coverage.ambiguous_value,
+    }

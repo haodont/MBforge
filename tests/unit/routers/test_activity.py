@@ -595,3 +595,43 @@ def test_export_preserves_readings_stereochemistry_and_citations_and_refuses_sta
         json={"doc_ids": ["doc-export"], "library_root": str(tmp_library)},
     )
     assert stale.status_code == 409
+
+
+def test_capability_returns_every_reading_with_identity_and_pagination(
+    app_client: TestClient, tmp_library: Path
+) -> None:
+    """The agent dataset keeps orphan readings and can page through all rows."""
+    _seed(tmp_library)
+
+    first = app_client.post(
+        "/api/v1/capabilities/query_activities",
+        json={"doc_id": "doc-1", "limit": 1},
+    )
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["truncated"] is True
+    assert body["next_offset"] == 1
+    assert body["data"]["stats"]["total"] == 2
+    assert body["data"]["stats"]["attributed"] == 1
+    attached = body["data"]["items"][0]
+    assert attached["activity_id"] == "meas-attached"
+    assert attached["mol_ids"] == ["CCO"]
+    assert attached["molecules"] == [
+        {"mol_id": "CCO", "smiles": "CCO", "name": "compound-1"}
+    ]
+    assert attached["evidence_ids"] == ["ev-1"]
+    assert attached["page_num"] == 2
+
+    second = app_client.post(
+        "/api/v1/capabilities/query_activities",
+        json={"doc_id": "doc-1", "offset": 1, "limit": 1},
+    )
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["truncated"] is False
+    assert body["next_offset"] is None
+    orphan = body["data"]["items"][0]
+    assert orphan["activity_id"] == "meas-orphan"
+    assert orphan["attributed"] is False
+    assert orphan["molecules"] == []
+    assert orphan["evidence_ids"] == ["ev-2"]

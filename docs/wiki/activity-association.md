@@ -134,6 +134,18 @@ and the unused `match_activities()` matcher no longer exist.
   (`_is_activity_table`).
 - A table with an **unparsable activity cell** is discarded whole with
   `complex_activity_table`.
+- A cell that names **no compound** (an empty label cell, an OCR'd structure
+  fragment) or that holds **two readings merged into one cell** is not a reading
+  and no longer withholds the rows that are: the table is published with the
+  issue `activity_cells_unattributed`, which names the counts per reason. A cell
+  that *does* name a compound but whose value cannot be read still discards the
+  whole table, because that reading exists and is unknown.
+- A **US-style table** is read: the metric may be printed in the row *below* a
+  spanning title row that names the assay (``β-arrestin assay (CHO …`` over
+  ``L83S) IC50 ± [μM]a``), a value may carry an error term (``11.6 ± 3.7``, read
+  as the mean), a censored reading keeps its comparator (``>100 (4%)``), and a
+  compound number may come from a letter series (``A-1``, ``B-40`` — a compound
+  key of its own, `compound_label_key`).
 - An activity signal in an unsupported table layout → `unsupported_table_format`.
 - A prose metric with no deterministically parsable value →
   `activity_value_unparsed`.
@@ -180,7 +192,7 @@ the label. Failure modes and their codes:
 
 | Condition | Code | Reported as |
 |---|---|---|
-| Multiple candidates (or a multi-label candidate) share the key | `molecule_candidate_ambiguous` | gap (ambiguity, the model may settle it) |
+| Several candidates share the key, and more than one of them *owns* it | `molecule_candidate_ambiguous` | gap (ambiguity, the model may settle it) |
 | Candidate is rejected or Markush | `molecule_candidate_rejected` | issue |
 | Candidate has no valid SQL evidence id | `molecule_evidence_unresolved` | issue |
 | Candidate carries no verifiable label | `molecule_label_unresolved` | gap |
@@ -210,6 +222,35 @@ the pair anyway from `molecules.name`, which is whichever label read arrived fir
 `structure_activity` then contradicted the reading's own attribution and reached the
 export. The issue now carries its `label_key` and the join withholds the
 designation, so a disputed label produces no pair anywhere.
+
+**A structure owns the designation its drawings agree on.** A patent prints a
+compound more than once, and the printings are not always recognized the same
+way, so one structure can arrive carrying several designations. The
+per-drawing record (`properties.detection_designations`) lets the association
+count them: a structure answers to the designation *most* of its drawings carry,
+and the minority designation belongs to the compound the other drawings name —
+so the minority candidate is out of the running instead of making the
+designation ambiguous. A structure whose designations tie owns neither of them:
+none of them is established, and the designation stays a gap.
+
+Measured on `US20210128561A1` (88 compounds printed twice): the entries that
+carry a structure went 36 → 42, the ambiguous designations 9 → 3, and the
+readings that own a structure 47 → 54 of 64. `CN119504738A` is unchanged —
+14 readings, 7 attributed, compound 1 still unbound (its candidates tie).
+
+**A structure the page names stays concrete.** `classify_structure_role` sends
+a closed SMILES to `review_required` when the text around the crop reads like
+Markush wording ("R1 means -H, -CH3 …"). On a page that also carries the
+generic formula, that text sits next to the *compound list*, so the compounds
+were dropped at persist (`A-1` and `A-4` had no row in `molecules` at all).
+A designation the **page's own text** prints beside the drawing — recorded per
+detection in `properties.name_candidates` with `source = "page_text"` — is the
+document's own statement about that drawing, so such a structure is
+`complete`, and the prose next to the crop is not evidence against it. A
+crop-window designation (a scheme label) still triggers the review. Measured on
+`US20210128561A1`: readings that own a structure 54 → **60 of 64**;
+`CN119504738A` unchanged (its numbers are printed inside phrases, so no
+designation comes from the page text and the rule cannot fire).
 
 
 ### 3.6 The molecule is found but the persist gate drops it
@@ -278,7 +319,7 @@ use one `SourceEvidence` block each.
 | A1 | `\| Compound \| IC50 (nM) \| EC50 (nM) \|\n\|---\|---\|---\|\n\| 1 \| 10 \| 20 \|\n\| 2 \| 5 \| 15 \|` | 4 measurements, 0 issues |
 | A2 | `\| Compound \| IC50 (nM) \|\n\|---\|---\|\n\| 1 \| 10 \|\n\| 2 \| unreadable \|` | **0 measurements**, issue `complex_activity_table` — the whole table (including row 1) is discarded |
 | A3 | `\| Compound \| Yield (%) \|\n\|---\|---\|\n\| 1a \| 82 \|` | 0 measurements, 0 issues (not an activity table) |
-| A4 | `\| Compound \| IC50 (nM) \|\n\|---\|---\|\n\|  \| 10 \|\n\| 2 \| 5 \|` | 1 measurement (row 2 only); the empty-label row is silently skipped |
+| A4 | `\| Compound \| IC50 (nM) \|\n\|---\|---\|\n\|  \| 10 \|\n\| 2 \| 5 \|` | 1 measurement (row 2 only) + issue `activity_cells_unattributed`: the empty-label cell names no compound, so it is left out and reported |
 | A5 | `\| Compound \| IC50 (nM) \| EC50 (nM) \|\n\|---\|---\|---\|\n\| 1 \| 10 \|` | 1 measurement (IC50); the missing EC50 cell is silently dropped, no issue |
 | A6 | `Compound 21 showed an IC50 of < 0.1 μM.` | 1 measurement, provenance `{reference_raw: "Compound 21", reference_key: "21", reference_type: "compound"}` |
 | A7 | `The IC50 was determined to be 12 nM.` | 1 measurement with **`provenance = {}`** → 3.2 |
@@ -293,6 +334,7 @@ Reference normalization (`normalize_reference_label`), real strings:
 | `化合物20` | `20` | `compound` | False |
 | `compound 20` | `20` | `compound` | False |
 | `20A` | `20A` | `compound` | False |
+| `A-1` | `A-1` | `compound` | False |
 | `Example 20` | `20` | `example` | False |
 | `E001` | `E001` | `e_series` | False |
 | `## Compound E001` | `E001` | `compound` | False |

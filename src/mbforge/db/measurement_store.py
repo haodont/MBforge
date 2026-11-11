@@ -191,9 +191,9 @@ def list_measurements(
     sql = (
         f"SELECT * FROM measurements {where} "
         "ORDER BY page_num, table_idx, row_idx, col_idx, measurement_id "
-        "LIMIT ?"
+        "LIMIT ? OFFSET ?"
     )
-    params.append(query.limit)
+    params.extend((query.limit, query.offset))
     with db.mol_conn() as conn:
         rows = conn.execute(sql, params).fetchall()
     return [_row_to_measurement(row) for row in rows]

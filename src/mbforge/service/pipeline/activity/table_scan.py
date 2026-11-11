@@ -22,6 +22,7 @@ from mbforge.service.pipeline.activity.parsing.tables import (
     _parse_simple_activity_table,
     _simple_activity_table_is_complete,
     _split_pipe_row,
+    _table_cell_gaps,
     looks_like_activity_table,
 )
 from mbforge.service.pipeline.layout.table_html import (
@@ -43,6 +44,8 @@ class TableScan:
     A scan can carry readings *and* an informational issue: readings inherited
     across a page break are published, with the inheritance itself reported.
     ``refusal_code`` asks the caller to append one issue and nothing else.
+    ``gap_counts`` names the cells the table could not turn into readings, so a
+    table that publishes part of itself says which part it left out.
     """
 
     records: list[ActivityRecord] = field(default_factory=list)
@@ -51,6 +54,7 @@ class TableScan:
     refusal_message: str = ""
     refusal_ids: tuple[str, ...] = ()
     refusal_severity: str = "warning"
+    gap_counts: dict[str, int] = field(default_factory=dict)
 
 
 def table_markdown(raw_text: str) -> str | None:
@@ -118,6 +122,7 @@ def scan_table_evidence(
         return TableScan(
             records=records,
             last_activity=(item.page, item.evidence_id, table_text),
+            gap_counts=_table_cell_gaps(table_text),
         )
 
     if _may_inherit(item.page, previous) and previous is not None:

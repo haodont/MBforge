@@ -652,6 +652,18 @@ def extract_activity_measurements_from_evidence(
                     severity=scan.refusal_severity,
                 )
             )
+        if scan.gap_counts and any(scan.gap_counts.values()):
+            # The rows that were read are published; the cells that named no
+            # compound, or held two readings merged into one cell, are reported
+            # so a partial table never reads as a complete one.
+            issues.append(
+                _issue(
+                    "activity_cells_unattributed",
+                    (f"activity table cells that became no reading: {scan.gap_counts}"),
+                    [item.evidence_id],
+                    severity="info",
+                )
+            )
         if not records:
             continue
         for record in records:

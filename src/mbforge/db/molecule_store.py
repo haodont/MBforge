@@ -308,24 +308,29 @@ def stats(library_root: str | Path) -> dict[str, Any]:
 
 
 def search_text(
-    library_root: str | Path, query: str, top_k: int
+    library_root: str | Path, query: str, top_k: int, *, doc_id: str = ""
 ) -> list[dict[str, Any]]:
     """FTS5 text search over molecule names/notes (literal, not query syntax)."""
     # FTS5 parses punctuation such as ``=`` as query syntax. User-entered
     # molecule names and notes must instead be searched as literal text.
     literal_query = f'"{query.replace('"', '""')}"'
     db = DatabaseManager.get(str(library_root))
+    scope = "AND m.source_doc = ? " if doc_id else ""
+    params: list[Any] = [literal_query]
+    if doc_id:
+        params.append(doc_id)
+    params.append(top_k)
     with db.mol_conn() as conn:
         rows = conn.execute(
             "SELECT m.* FROM mol_search ms JOIN molecules m ON ms.rowid = m.rowid "
-            "WHERE mol_search MATCH ? LIMIT ?",
-            (literal_query, top_k),
+            f"WHERE mol_search MATCH ? {scope}LIMIT ?",
+            tuple(params),
         ).fetchall()
     return [dict(row) for row in rows]
 
 
 def search_substructure(
-    library_root: str | Path, query_smiles: str, top_k: int
+    library_root: str | Path, query_smiles: str, top_k: int, *, doc_id: str = ""
 ) -> list[dict[str, Any]]:
     """Substructure search against the library database (blocking)."""
     query_mol = Chem.MolFromSmiles(query_smiles)
@@ -339,6 +344,8 @@ def search_substructure(
         ).fetchall()
     results: list[dict[str, Any]] = []
     for row in rows:
+        if doc_id and row["source_doc"] != doc_id:
+            continue
         smiles = row["canonical_smiles"] or row["smiles"]
         if not smiles:
             continue
@@ -353,7 +360,12 @@ def search_substructure(
 
 
 def search_similarity(
-    library_root: str | Path, query_smiles: str, top_k: int, threshold: float
+    library_root: str | Path,
+    query_smiles: str,
+    top_k: int,
+    threshold: float,
+    *,
+    doc_id: str = "",
 ) -> list[dict[str, Any]]:
     """Similarity search against the library database (blocking)."""
     query_mol = Molecule(mol_id="", canonical_smiles=query_smiles)
@@ -366,6 +378,8 @@ def search_similarity(
         ).fetchall()
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in rows:
+        if doc_id and row["source_doc"] != doc_id:
+            continue
         candidate_mol = Molecule.from_row(row)
         if candidate_mol.fingerprint is None:
             continue

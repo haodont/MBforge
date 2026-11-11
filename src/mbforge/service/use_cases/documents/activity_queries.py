@@ -29,6 +29,9 @@ def list_measurements(
     evidence_grade: str = "",
     review_status: str = "",
     metric: str = "",
+    min_value: float | None = None,
+    max_value: float | None = None,
+    offset: int = 0,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     """List printed readings, each with the structures attributed to it."""
@@ -41,6 +44,9 @@ def list_measurements(
             evidence_grade=evidence_grade,
             review_status=review_status,
             metric=metric,
+            min_value=min_value,
+            max_value=max_value,
+            offset=offset,
             limit=limit,
         )
     )
@@ -105,11 +111,14 @@ def list_activity_records(
     metric: str = "",
     min_value: float | None = None,
     max_value: float | None = None,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """Activity records for a document, shaped for the HTTP/agent response.
 
     A reading is a stored measurement; there is no pending-review fallback, so
-    a consumer never sees a candidate mixed into the settled readings.
+    a consumer never sees a candidate mixed into the settled readings. Every
+    reading is returned, including ones no structure owns; ``attributed`` and
+    ``mol_ids`` say whether a molecule can be named.
     """
     if not doc_id:
         return []
@@ -119,23 +128,15 @@ def list_activity_records(
         target=target,
         assay_description=assay_description,
         metric=metric,
+        min_value=min_value,
+        max_value=max_value,
+        offset=offset,
         limit=limit,
     )
-    if min_value is not None:
-        readings = [
-            row
-            for row in readings
-            if row.get("canonical_value") is not None
-            and row["canonical_value"] >= min_value
-        ]
-    if max_value is not None:
-        readings = [
-            row
-            for row in readings
-            if row.get("canonical_value") is not None
-            and row["canonical_value"] <= max_value
-        ]
     context = _document_context(library_root, doc_id)
+    identities = get_repositories(library_root).molecules.identity_fields(
+        [mol_id for row in readings for mol_id in row["mol_ids"]]
+    )
     records: list[dict[str, Any]] = [
         {
             "activity_id": row["measurement_id"],
@@ -173,10 +174,23 @@ def list_activity_records(
             "row_idx": row["row_idx"],
             "col_idx": row["col_idx"],
             "row_label": row["row_label"],
-            "row_smiles": None,
+            "row_smiles": (
+                identities.get(row["mol_ids"][0], {}).get("canonical_smiles")
+                if len(row["mol_ids"]) == 1
+                else None
+            ),
+            "molecules": [
+                {
+                    "mol_id": mol_id,
+                    "smiles": identities.get(mol_id, {}).get("canonical_smiles"),
+                    "name": identities.get(mol_id, {}).get("name"),
+                }
+                for mol_id in row["mol_ids"]
+            ],
             "raw_text": row["raw_text"],
             "created_at": row["created_at"],
             "evidence_grade": row["evidence_grade"],
+            "evidence_ids": row["evidence_ids"],
             "review_status": row["review_status"],
             "attributed": row["attributed"],
             "mol_ids": row["mol_ids"],

@@ -146,12 +146,29 @@ def list_molecules_sync(
     )
 
 
+def resolve_search_mode(query: str, mode: str) -> str:
+    """Return the concrete mode a search runs in.
+
+    ``auto`` takes the substructure path only when RDKit parses ``query`` as a
+    molecule; anything else is a text search. It never runs similarity, which
+    is why ``similarity_threshold`` has no effect there.
+    """
+    if mode != "auto":
+        return mode
+    return (
+        "substructure"
+        if Molecule(mol_id="", canonical_smiles=query).is_valid()
+        else "text"
+    )
+
+
 def search_molecules(
     library_root: str | None,
     query: str,
     top_k: int = 10,
     mode: str = "auto",
     similarity_threshold: float = 0.5,
+    doc_id: str = "",
 ) -> list[dict[str, Any]]:
     """Search molecules using text, substructure, or similarity mode.
 
@@ -160,26 +177,22 @@ def search_molecules(
         query: Search query; treated as SMILES in structure modes or as text.
         top_k: Maximum number of results.
         mode: One of ``auto``, ``text``, ``substructure``, ``similarity``.
-            In ``auto`` mode, valid SMILES strings use substructure search;
-            everything else uses FTS5 text search.
+            Use :func:`resolve_search_mode` to learn what ``auto`` selected.
         similarity_threshold: Minimum Tanimoto similarity for similarity mode.
+        doc_id: Restrict hits to molecules extracted from one document.
     """
     if library_root is None:
         return []
     molecules = get_repositories(library_root).molecules
-    if mode == "text":
-        rows = molecules.search_text(query, top_k)
-    elif mode == "substructure":
-        rows = molecules.search_substructure(query, top_k)
-    elif mode == "similarity":
-        rows = molecules.search_similarity(query, top_k, similarity_threshold)
+    resolved = resolve_search_mode(query, mode)
+    if resolved == "text":
+        rows = molecules.search_text(query, top_k, doc_id=doc_id)
+    elif resolved == "substructure":
+        rows = molecules.search_substructure(query, top_k, doc_id=doc_id)
     else:
-        # auto: valid SMILES uses substructure search, otherwise text search.
-        query_mol = Molecule(mol_id="", canonical_smiles=query)
-        if query_mol.is_valid():
-            rows = molecules.search_substructure(query, top_k)
-        else:
-            rows = molecules.search_text(query, top_k)
+        rows = molecules.search_similarity(
+            query, top_k, similarity_threshold, doc_id=doc_id
+        )
     return [normalize_molecule_row(row) for row in rows]
 
 

@@ -8,6 +8,7 @@ lookup/save API lives in ``detection_store``.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,28 @@ def _candidate_context_text(candidate: Any) -> str:
     return (_DOCUMENT_CONTEXT_MARKER + "\n" + "\n".join(contexts))[:_CONTEXT_TOTAL_CAP]
 
 
+def _candidate_labels(candidate: Any) -> str:
+    """Return the JSON list of designations the molecule's drawings carry.
+
+    One structure is drawn more than once in a patent — as a compound in the
+    list and as an intermediate in the scheme — and the designations of those
+    drawings differ. The ``labels`` column keeps all of them, so a read that
+    asks "does this document draw compound X?" sees every name the molecule
+    answers to, not only the first one written.
+    """
+    properties = getattr(candidate, "properties", {})
+    names: list[str] = []
+    if isinstance(properties, dict):
+        for key in ("detection_names", "name_candidates"):
+            value = properties.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    name = item.get("name") if isinstance(item, dict) else item
+                    if isinstance(name, str) and name.strip() and name not in names:
+                        names.append(name)
+    return json.dumps(names, ensure_ascii=False)
+
+
 def _persist_loop(
     active_conn: Any, db: Any, doc_id: str, candidates: Sequence[Any]
 ) -> int:
@@ -69,22 +92,24 @@ def _persist_loop(
         active_conn.execute(
             """
             INSERT INTO molecules
-                (mol_id, smiles, esmiles, name, source_doc, source_type,
+                (mol_id, smiles, esmiles, name, labels, source_doc, source_type,
                  status, canonical_smiles)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
             ON CONFLICT(mol_id) DO UPDATE SET
                 canonical_smiles = COALESCE(molecules.canonical_smiles, excluded.canonical_smiles),
                 source_doc = COALESCE(NULLIF(molecules.source_doc, ''), excluded.source_doc),
                 name = CASE
                     WHEN TRIM(COALESCE(molecules.name, '')) = '' THEN excluded.name
                     ELSE molecules.name
-                END
+                END,
+                labels = excluded.labels
             """,
             (
                 canonical_smiles,
                 canonical_smiles,
                 c.esmiles,
                 c.name or "",
+                _candidate_labels(c),
                 doc_id,
                 evidence_source,
                 canonical_smiles,
