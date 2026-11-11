@@ -18,7 +18,7 @@ from mbforge.service.capabilities.registry import (
     CapabilityResult,
     register,
 )
-from mbforge.service.ports.api_surface import ApiRoute
+from mbforge.service.ports.api_surface import ApiField, ApiRoute
 
 
 class GetApiSurfaceInput(BaseModel):
@@ -46,6 +46,8 @@ class ApiRouteInfo(BaseModel):
     methods: list[str]
     request_model: str | None = None
     fields: list[ApiFieldInfo] = Field(default_factory=list)
+    query_params: list[ApiFieldInfo] = Field(default_factory=list)
+    path_params: list[ApiFieldInfo] = Field(default_factory=list)
 
 
 class GetApiSurfaceOutput(BaseModel):
@@ -56,23 +58,26 @@ class GetApiSurfaceOutput(BaseModel):
     total: int
 
 
+def _field_info(field: ApiField) -> ApiFieldInfo:
+    return ApiFieldInfo(
+        name=field.name,
+        type=field.type,
+        required=field.required,
+        default=field.default,
+        description=field.description,
+        aliases=list(field.aliases),
+        constraints=field.constraints,
+    )
+
+
 def _route_info(route: ApiRoute) -> ApiRouteInfo:
     return ApiRouteInfo(
         path=route.path,
         methods=list(route.methods),
         request_model=route.request_model,
-        fields=[
-            ApiFieldInfo(
-                name=field.name,
-                type=field.type,
-                required=field.required,
-                default=field.default,
-                description=field.description,
-                aliases=list(field.aliases),
-                constraints=field.constraints,
-            )
-            for field in route.fields
-        ],
+        fields=[_field_info(field) for field in route.fields],
+        query_params=[_field_info(field) for field in route.query_params],
+        path_params=[_field_info(field) for field in route.path_params],
     )
 
 

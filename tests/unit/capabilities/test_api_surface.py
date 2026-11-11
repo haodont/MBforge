@@ -50,3 +50,26 @@ def test_api_surface_reports_render_contract_and_paginates(
         field["name"]: field for field in constrained["data"]["routes"][0]["fields"]
     }
     assert fields["limit"]["constraints"] == {"ge": 1, "le": 5000}
+
+    queue = app_client.post(
+        "/api/v1/capabilities/get_api_surface",
+        json={"path_contains": "/api/v1/review/queue"},
+    ).json()
+    queue_route = queue["data"]["routes"][0]
+    assert queue_route["request_model"] is None
+    query = {field["name"]: field for field in queue_route["query_params"]}
+    assert query["library_root"]["required"] is False
+    assert query["item_status"]["aliases"] == ["status"]
+    assert query["page_size"]["default"] == 50
+    assert query["page_size"]["constraints"] == {"ge": 1, "le": 200}
+
+    item = app_client.post(
+        "/api/v1/capabilities/get_api_surface",
+        json={"path_contains": "/api/v1/review/items/"},
+    ).json()
+    item_route = item["data"]["routes"][0]
+    assert {field["name"] for field in item_route["path_params"]} == {
+        "kind",
+        "item_id",
+    }
+    assert all(field["required"] for field in item_route["path_params"])

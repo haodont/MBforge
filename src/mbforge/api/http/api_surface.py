@@ -20,8 +20,8 @@ from mbforge.service.ports.api_surface import ApiField, ApiRoute
 
 def _effective_api_routes(
     routes: Iterable[Any],
-) -> Iterator[tuple[str, set[str], Any]]:
-    """Yield ``(path, methods, body_field)`` for real API routes only.
+) -> Iterator[tuple[str, set[str], Any, Any]]:
+    """Yield ``(path, methods, body_field, dependant)`` for real API routes.
 
     FastAPI 0.141 wraps included routers in lazy ``_IncludedRouter`` objects,
     so ``app.routes`` is not a flat ``APIRoute`` list.  ``effective_route_contexts``
@@ -29,7 +29,12 @@ def _effective_api_routes(
     """
     for route in routes:
         if isinstance(route, APIRoute):
-            yield route.path, set(route.methods or ()), route.body_field
+            yield (
+                route.path,
+                set(route.methods or ()),
+                route.body_field,
+                route.dependant,
+            )
             continue
         flatten = getattr(route, "effective_route_contexts", None)
         if not callable(flatten):
@@ -37,7 +42,12 @@ def _effective_api_routes(
         for context in flatten():
             if not isinstance(getattr(context, "original_route", None), APIRoute):
                 continue
-            yield context.path, set(context.methods or ()), context.body_field
+            yield (
+                context.path,
+                set(context.methods or ()),
+                context.body_field,
+                context.dependant,
+            )
 
 
 def _request_model(body_field: Any) -> type[BaseModel] | None:
@@ -94,19 +104,25 @@ def _constraints(info: Any) -> dict[str, Any]:
     return constraints
 
 
-def _fields(model: type[BaseModel]) -> tuple[ApiField, ...]:
-    return tuple(
-        ApiField(
-            name=name,
-            type=_type_name(info.annotation),
-            required=info.is_required(),
-            default=_default(info),
-            description=info.description,
-            aliases=_aliases(info),
-            constraints=_constraints(info),
-        )
-        for name, info in model.model_fields.items()
+def _field(name: str, info: Any) -> ApiField:
+    return ApiField(
+        name=name,
+        type=_type_name(info.annotation),
+        required=info.is_required(),
+        default=_default(info),
+        description=info.description,
+        aliases=_aliases(info),
+        constraints=_constraints(info),
     )
+
+
+def _fields(model: type[BaseModel]) -> tuple[ApiField, ...]:
+    return tuple(_field(name, info) for name, info in model.model_fields.items())
+
+
+def _param_fields(dependant: Any, attribute: str) -> tuple[ApiField, ...]:
+    params = getattr(dependant, attribute, None) if dependant is not None else None
+    return tuple(_field(str(param.name), param.field_info) for param in params or ())
 
 
 class FastApiSurfaceProvider:
@@ -119,8 +135,12 @@ class FastApiSurfaceProvider:
                 methods=tuple(sorted(methods)),
                 request_model=model.__name__ if model is not None else None,
                 fields=_fields(model) if model is not None else (),
+                query_params=_param_fields(dependant, "query_params"),
+                path_params=_param_fields(dependant, "path_params"),
             )
-            for path, methods, body_field in _effective_api_routes(app.routes)
+            for path, methods, body_field, dependant in _effective_api_routes(
+                app.routes
+            )
             for model in (_request_model(body_field),)
         ]
         routes.sort(key=lambda route: (route.path, route.methods))

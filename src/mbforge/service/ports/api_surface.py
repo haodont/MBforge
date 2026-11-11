@@ -27,6 +27,8 @@ class ApiRoute:
     methods: tuple[str, ...]
     request_model: str | None
     fields: tuple[ApiField, ...]
+    query_params: tuple[ApiField, ...] = ()
+    path_params: tuple[ApiField, ...] = ()
 
 
 class ApiSurfaceProvider(Protocol):
