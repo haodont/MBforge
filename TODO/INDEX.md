@@ -2,6 +2,343 @@
 
 This directory records active architecture and implementation plans.
 
+## Agent links into the workbench (2026-11-11)
+
+The CLI answers in the terminal, but a citation is only checkable where the
+page is drawn and a review item is only decidable in the review center. The
+agent therefore never writes a URL: it writes an opaque marker and the CLI
+renders a markdown link to the workbench route, which pi draws as a clickable
+OSC 8 hyperlink. `agent/src/uiLinks.ts` owns the routes and encoding;
+`[[ui:review]]`, `[[ui:review:<kind>:<item_id>]]`,
+`[[ui:doc:<doc_id>[:<page>]]]`, `[[ui:queue]]`, `[[ui:molecules]]` and
+`[[ui:workspace]]` are the whole vocabulary. ``[[ui:doc:…]]`` requires the full
+64-hex doc id, because the document view resolves the stored PDF from it; an
+unknown surface, an unknown review kind, a missing item id or page 0 stays
+literal instead of linking a route that would land on a different item.
+
+- The review item route already existed (`/review?kind=&id=` seeds the filter
+  and selection) but the agent had no way to learn an item's identity. The new
+  read capability `list_review_queue`
+  (`service/capabilities/read_review.py`) publishes the unified queue: pending
+  by default, with `kind`, `item_id`, document/short id, page, bbox, name,
+  SMILES, confidence, reasons and per-kind counts. The kind vocabulary is
+  `ReviewKind` in `service/dto/review.py`, which now also declares
+  `designation_unbound` — the queue already produced that kind and the review
+  center already listed it, so the DTO was the stale copy.
+- Evidence citations keep the separate `[[ev:<evidence_id>]]` marker: the
+  citation cache knows the doc/page/bbox and links `/open?doc=&page=&evidence=`,
+  while `[[ui:doc:…]]` opens the document without an evidence highlight.
+- Frontend base URL: `MBFORGE_FRONTEND_URL` wins (single-port deployments that
+  serve the SPA from the API); otherwise `MBFORGE_DEV_HOST` /
+  `MBFORGE_DEV_FRONTEND_PORT` follow the same variables `dev:all` binds Vite to.
+- Prompt wiring: `APPEND_SYSTEM.md` states when to offer a link and forbids
+  model-authored URLs; `uiGuidelines` adds per-tool markers for
+  `list_review_queue`, document reads, run producers and molecule search.
+- Tests: `agent/src/uiLinks.test.ts` protects marker → route rendering and the
+  literal fallbacks; `test_capability_http.py` protects the queue row identity,
+  counts and unknown-kind rejection.
+
+Open: the review center has no route for "all items of one document"; a link
+that filters by `doc_id` would need a `doc` query parameter on `/review`.
+
+## Dev-mode HTTP bypass is a trust boundary, not a sandbox (2026-11-11)
+
+Only `/api/v1/capabilities/*` derives a mode from the capability token
+(`api/http/capabilities.py::_context`). The frontend routes are unauthenticated:
+review decisions, document delete, library configure, settings and resource
+installs all accept a plain `POST`, and any local process can call them. That is
+not an oversight to patch with a token on those routes — the Vite UI runs as the
+same OS user and a browser cannot hold a secret the agent cannot read, so a
+second credential would be readable by the same process that is supposed to lack
+it. `foundation/capability_token.py` already says as much: the token is a local
+intent guard, not a security boundary.
+
+What is enforceable is the tool surface:
+
+- `auto` registers only capability tools plus local-state tools (`memory`,
+  `goal`, `review_task`, `suggest_improvement`, `request_dev_mode`). The
+  reviewer subagent is spawned with `--tools read,grep,find,ls`, so no
+  registered path reaches HTTP or SQLite.
+- `dev` adds `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`. Those can
+  call every route listed above and open `library.db` directly, bypassing
+  capability validation and the token. Shell pattern matching is not a fix:
+  PowerShell, `node -e`, `python -c` or a small script reach the same data, and
+  the model may call none of them.
+
+Decision: the capability contract is the only *sanctioned* path, and the prompt
+states it (`dev` built-in tools never call `/api/v1` or the database); no
+command filter is added, because it would be theater. Real prevention needs OS
+isolation — the CLI as a separate account/container with the repository mounted
+and no route to the backend or library. If visibility is wanted instead, log
+mutating requests that are not capability invocations; that detects, it does not
+prevent.
+
+The boundary also assumes the default `127.0.0.1` bind: setting
+`MBFORGE_HOST=0.0.0.0` publishes those unauthenticated mutations to the
+network, and nothing currently warns about that.
+
+## One-call agent import and run-completion wake (2026-11-10)
+
+`import_pdf` is now the agent's one import call: it registers the file and,
+unless `ingest.auto_enqueue_on_import` is off, enqueues Extract -> Markdown and
+returns `run_id`. The browser upload route and the capability share
+`ingest.auto_enqueue_on_import`, so both surfaces behave alike; a disabled or
+failing enqueue still leaves the stored document `pending` instead of failing
+the import.
+
+The pi extension watches every run id a capability result carries
+(`submit_extraction`, `reingest_document`, `submit_patent_analysis` and
+`import_pdf`) by polling the read-only `get_run` capability, and reports each
+run once. Delivery never uses pi's `deliverAs` queues, whose queued follow-up
+messages were re-delivered when a session was resumed: a completion that
+arrives while the session is busy is held in process memory and flushed as one
+message at `agent_settled`, and an idle delivery uses `triggerTurn` alone.
+Held completions die with the process, so a resumed session cannot wake for
+work it already missed. Timers are unref'd and stopped on `session_shutdown`;
+a closed CLI has no watcher.
+
+## Naming a drawing from the page's own text (2026-11-10)
+
+The molecule pass reads a compound number off the crop around a drawing (a
+15%-expanded window). That window misses a number printed in the margin, and a
+US application prints exactly that: `US20210128561A1` lists its compounds as
+`[drawing][A-5]`, the number in the gutter beside the drawing. The layout
+producer has already read that number — it is a text region of its own, with a
+position — so the number that names a drawing can come from the page's text.
+
+`service/pipeline/detection/text_label_assignment.py` does that, and the
+Extract stage runs it before the evidence is minted
+(`_name_drawings_from_page_text`):
+
+- **Only a bare token is a read.** A phrase that merely mentions a compound
+  (`目标化合物11的制备`) names no drawing; a token without a letter in it
+  (`[0331]`, `1`) is a paragraph marker or a step, not a compound. So the CN
+  corpus, whose numbers are printed inside phrases, is untouched.
+- **The page is matched as a whole.** The gutter is narrow: on p7 a number sits
+  54 pt from its own drawing and 58 pt from the next column's, so number by
+  number the wrong column wins. Matching one number to one drawing and one
+  drawing to one number keeps every number with the drawing of its own column.
+- **A number keeps its own column.** The drawings of a list are printed in
+  columns and the numbers in the gutter *after* their own column's drawings,
+  so the candidate drawings of a number are the ones of that column. Without
+  it a number can reach across a narrow gutter to the next column's drawing
+  (p63: 33 pt away against its own column's 102 pt).
+
+Measured on `US20210128561A1` (67 pages): the compound list prints **88
+compounds twice** (pp.6–19 and pp.54–67), **290 printed numbers**, and the
+assignment names **285 of them** — the five it cannot settle are reported, not
+guessed. The document's activity table now reads **47 of 64** readings with a
+structure, against **0** before. `CN119504738A` is unchanged: 14 readings, 7
+attributed, the same issue counts.
+
+Still open on that document: a molecule row keeps the first name written for its
+SMILES, so a drawing the crop pass mis-read steals the name of the compound
+that shares its structure (10 readings); and the first four compounds of the
+list were recognized as fragments of their drawings, so no candidate survives
+for them at all. Both are recognition questions, not table questions.
+
+The last four readings (A-26, B-49 ×2, B-50) need a *human* — they are
+printed more than once and the printings disagree — so they went to the review
+queue as `propose_review` proposals against the measurement ids, each naming
+the structure the printings agree on, with the drawing evidence ids attached.
+A proposal never applies a value; it hands the decision over.
+
+### Still open on this path
+
+1. **The PK table.** `Cmax (ng/mL)` and `AUC0-t (h*ng/mL)` are printed on p125
+   of the same document (compounds 13 and 25) and no metric family accepts
+   them, so the two rows are not readings.
+2. **`patent_stage.py:150` writes `review_candidates=[]`** — a vestige of the
+   removed LLM-gap path. The AI proposals live in `review_items` (the review
+   queue the UI reads); the artifact field is simply never filled.
+
+### The pair path does not need an example heading
+
+The published pair path joined a reading to the structure its *example
+heading* declares (`entries._declared_structure_activity`), so a US
+application — which prints the compound number in the activity table instead —
+published **0 pairs** although 60 of its 64 readings own a structure. The
+declaration is needed only to map an *example* reference and to check a
+printed product mass; a reading that names a compound is joined by that name,
+so the early "no examples, no pairs" return is gone. Measured on
+`US20210128561A1`: **0 → 59 pairs** (the four disputed designations stay
+unpaired), and the pairs say `verified_by_mass: false` because the document
+prints no product mass for those compounds — the flag reports mass
+consistency, it is not identity verification. `CN119504738A` is unchanged:
+7 pairs, all seven mass-verified, 7 of 14 readings attributed.
+
+**The molecule keeps every designation it answers to.** One structure is drawn
+more than once in a patent — as a compound in the list and as an intermediate
+in the scheme — so the `molecules` row must keep all the names, not the first
+one written. Two changes: `molecules.labels` (the column the schema already had
+and `document_label_numbers` already read) is written with every designation
+the molecule's drawings carry; and the molecule's primary name is chosen by
+`select_molecule_name` with a **source tier** — a designation the page's own
+text printed outranks the same designation read off a crop window, whatever its
+detection confidence. Without the tier, `A-2` lost to the scheme label `2`
+because the scheme drawing scored higher (0.951 vs 0.943). The read surface now
+reports the gap it actually sees: the four unbound US readings are
+`structure_detected_unmatched` (the structure *is* drawn) instead of
+`label_not_read`.
+
+**A structure the page names stays concrete.** A compound list prints the
+number beside the drawing, and the crop's OCR context on such a page is the
+document's own prose — often the generic formula's R-group list ("R1 means
+-H, -CH3 …"). The context signals (`context_numbered_r_group`,
+`context_optional_substitution`) read that text as Markush wording, so the
+compound was classified `review_required` and dropped at persist: `A-1` and
+`A-4` had no row in `molecules` at all. A designation the **page's own text**
+prints (`label_source = "page_text"`, recorded per detection in
+`name_candidates`) is the document's own statement about that drawing, so such a
+structure is classified `complete` and the neighbouring prose is not evidence
+against it. A crop-window designation (a scheme label) still triggers the
+review, unchanged. Measured on `US20210128561A1`: readings that own a
+structure 54 → **60 of 64**; `CN119504738A` unchanged (14 readings, 7
+attributed) — its numbers are printed inside phrases, so no designation comes
+from the page text and the rule cannot fire.
+
+**A structure answers to the designation its drawings agree on.** The same
+compound is printed twice, and the two printings are not always recognized the
+same way, so one structure can arrive carrying two designations (the minority
+one being a misreading of a neighbouring compound's drawing). The per-drawing
+record (`properties.detection_designations`) lets the association count them: a
+structure owns the designation most of its drawings carry, and the minority
+candidate drops out of the competition instead of making the designation
+ambiguous; a structure whose designations tie owns neither. Measured on
+`US20210128561A1`: entries carrying a structure 36 → 42, ambiguous designations
+9 → 3, readings that own a structure 47 → **54 of 64**. `CN119504738A` is
+unchanged (14 readings, 7 attributed, compound 1 still unbound — its candidates
+tie), which is the case the rule must not break.
+
+## Run-completion notifications repeat (2026-11-10)
+
+A finished run wakes the agent again and again: the same `run_id` was
+delivered three times in one session (`20261110142332`, `...42523`,
+`...42931`), every one of them a run that had been done for hours. The
+mechanism is **not** the watcher's seeding — the watcher only watches the runs
+a capability returned in this session (`agent/src/capabilities.ts:152`
+`onRunEnqueued?.(runId)` → `extension.ts:191-194`), and the per-instance
+`active`/`forget` sets dedupe *within* one watcher. The repeated delivery
+comes from the **follow-up delivery** itself: `agent/src/runs.ts:143` sends the
+finished run as `pi.sendMessage({customType: 'mbforge.run'}, {triggerTurn:
+true, deliverAs: 'followUp'})`, and a queued follow-up is replayed when the
+session resumes — so one finished run wakes the agent once per resume.
+
+Two ways out: deliver the notice without the follow-up queue (`triggerTurn`
+alone, so it is not replayed), or mark the run as already-notified where the
+session can see it (session dir / a small state file) so a resumed session
+stays quiet. Either way the notification must not wake the agent for work
+that finished before it looked.
+
+## US-style activity tables (2026-11-10)
+
+`US20210128561A1` printed its SAR table the way a US application does, and the
+pipeline read **zero** of its ~87 printed activity rows: the table was refused
+as `complex_activity_table`. Four separate gaps added up:
+
+1. **The metric was printed under a spanning title row.** The header printed
+   ``β-arrestin assay (CHO β-arrestin human MrgX4`` on one line and
+   ``L83S) IC50 ± [μM]a (% inhibition ± SEM)c`` on the next; the layout looked
+   for the metric in the first row only. The metric is now looked up in the
+   header row, in the rows under it, and in the rows above it, and the assay
+   name is assembled from the spanning title (the same header cells still span
+   their empty siblings, so a CN table with ``化合物编号 | IC50(nM) | | |`` keeps
+   its four columns).
+2. **The compound numbers came from a letter series.** ``A-1``, ``B-40``,
+   ``C-67`` are compound keys of their own now (`compound_label_key`), not
+   unreadable cells.
+3. **The values carried three shapes.** ``11.6 ± 3.7`` is one reading with its
+   error term, ``>100 (4%)`` is one censored reading, and ``>100 (40%) >100
+   (45%)`` is two readings the layout merged into one cell — the last one names
+   no single compound, so it is left out and reported.
+4. **A cell that names no compound no longer withholds the whole table.** The
+   completeness contract now means "every cell that names a compound and
+   prints one value was read"; cells that name no compound and cells that hold
+   two merged readings are counted and published as the issue
+   `activity_cells_unattributed`. A cell that *does* name a compound but whose
+   value cannot be read still discards the table, because that reading exists
+   and is unknown.
+
+Measured on `US20210128561A1` (67 pages): **0 → 64 readings**, 51 distinct
+compound labels, and 51 compound entries that the Patent stage now mints from
+the document's own prose (they were missing before, because nothing in the
+document had been read). `CN119504738A` is unchanged: 14 readings, 7 attributed,
+the same issue counts. The structures are still unbound on both documents — the
+printed numbers are not attached to the drawings (see the structure verification
+section below), which is a separate problem from reading the table.
+
+## Document references in capabilities (2026-11-10)
+
+`doc_id` is the SHA-256 of the stored bytes, so it is a 64-character hex string
+nobody can hold in their head. Every document-scoped capability therefore
+accepts a document *reference* and resolves it once, in the registry
+(`service/capabilities/registry.py`), before the handler runs
+(`service/use_cases/documents/document_refs.py`):
+
+- the full 64-hex `doc_id`;
+- a unique `doc_id` prefix of 8 hex characters or more;
+- the exact file name;
+- the exact title.
+
+Matching is exact — no substring or fuzzy guessing — and an ambiguous
+reference is rejected (`ValidationError` with the candidate list) instead of
+picking one. A reference that matches nothing is passed through unchanged, so
+the handler still reports the document as missing. `resolve_document` returns
+the quotable `short_id` (first 8 hex characters) next to the full id, and the
+input schemas publish the accepted forms so the agent does not have to guess.
+
+The HTTP document endpoints are unchanged: the alias is an agent-facing
+convenience, and the frontend keeps using full ids.
+
+## Structure verification surface (2026-11-10)
+
+The recognizer cannot be trusted by its detection score: `moldet_conf` is
+MolDet's confidence that a structure was *found*, not that the SMILES is right,
+and MolParser's own confidence is not exposed. Checking a structure therefore
+needs signals that are independent of the model — the drawn structure, the
+printed name, and the printed mass.
+
+`verify_structures` (read-only capability) closes the automatable part of that
+loop on the canonical SQL evidence and the committed Patent snapshot. It
+returns one row per recognized structure: `formula`, `molar_mass`,
+`exact_mass` (monoisotopic, salt-stripped parent), `main_formula`,
+`structure_kind` (`concrete`/`markush`), the printed designation the structure
+carries, the compound entry that owns it, and the printed MS line that
+designation owns with `printed_mz`/`expected_mz`/`delta` and a verdict at the
+patent's own 0.6 Da tolerance (`match` / `mismatch` / `not_comparable`). The
+summary counts the coverage: structures, matches, mismatches, structures with
+no printed mass, printed MS lines, and lines no structure claims.
+
+- Service: `service/use_cases/documents/structure_verification.py`
+  (`verify_structures`). Capability: `verify_structures`
+  (`service/capabilities/read_structures.py`). Nothing is written; a delta is evidence for
+  a human, never a correction.
+- The chemistry rules are the pipeline's own, not a second copy: the mass
+  helpers `exact_mass` / `largest_fragment_mol`
+  (`pipeline/detection/label_recovery.py`) and the printed-mass parser
+  `printed_ms_mz` / `adduct_mass_delta`
+  (`pipeline/patent/rules/characterization.py`) were promoted from private to
+  shared so the read surface and the Patent stage cannot disagree about one
+  printed line.
+- Two findings from the first run on `CN119504738A` (447 structures):
+  1. **A printed mass scraped out of a structure row is not a printed mass.**
+     The crop's OCR context quotes the neighbouring prose, so 17 of 47 MS
+     lines in the snapshot came from molecule rows and carried another
+     compound's mass. The capability excludes them and counts them
+     (`printed_ms_from_structure_rows`); the Patent stage still pairs them, so
+     its own `smiles_mass_mismatch` set is polluted the same way.
+  2. **A Markush scaffold has no compound mass.** Its dummy atoms carry no
+     weight, so a delta against a printed m/z means nothing: those rows are
+     `not_comparable`, not `mismatch`.
+  Measured: 4 concrete structures match their printed mass (|delta| ≤ 0.5 Da),
+  2 concrete mismatches, 3 Markush rows not comparable, 438 of 447 structures
+  have no printed mass at all (the document prints MS for few compounds), and
+  22 printed lines no structure claims.
+
+Open: the two mismatches that remain are printed *intermediate* masses bound
+to the product's designation (pp.67, 75) — separating an intermediate's mass
+from its product is an attribution rule, not a read-side fix.
+
 ## Agent molecule-recognition tool (2026-11-09)
 
 A whole-document comparison on `CN120118069A` measured what the chat model can
@@ -11,7 +348,7 @@ structure (one structure page burned its full 24k-token budget on reasoning and
 returned empty content). Structure reading therefore belongs to the local
 detectors, exposed to the model as a tool instead of an expectation.
 
-`recognize_molecules` now runs MolDetv2 + MolParser over one page of a stored
+`inspect_visual` action `page_molecules` now runs MolDetv2 + MolParser over one page of a stored
 document and returns, per structure: SMILES, E-SMILES, pixel box, PDF-point box
 (bottom-left origin, the overlay contract), detection score and OCR-read printed
 labels. It is read-only and never persists anything.
@@ -19,7 +356,7 @@ labels. It is read-only and never persists anything.
 - Service: `service/use_cases/molecule/recognition.py` (`recognize_page_molecules`).
   It takes `(library_root, doc_id)` and an absolute PDF path, so path policy
   stays with the caller.
-- Capability: `recognize_molecules` (read-only, `service/capabilities/read.py`)
+- Capability: `inspect_visual` action `page_molecules` (read-only, `service/capabilities/read_visual.py`)
   resolves the stored PDF and returns the same result; it never persists.
 - Agent wiring: the pi CLI receives it from the capability manifest; no
   sidecar-only tool remains.
@@ -395,8 +732,10 @@ gating on it would deadlock the queue.
 ## LLM ownership
 
 The pi CLI (`agent/src/extension.ts` + `agent/src/capabilities.ts`) is the only
-thing that talks to an LLM provider. It reads the `llm` section of
-`settings.json`, and pi owns provider login, model switching and sessions. There
+thing that talks to an LLM provider. It keeps provider login, model switching
+and sessions in its own agent directory — `agent/.pi-agent/` via
+`PI_CODING_AGENT_DIR`, launched by `agent/scripts/cli.mjs` — and never merges
+`~/.pi/agent` config or reads the Python `settings.json`. There
 is no Node HTTP server, no `POST /v1/models` model-list probe and no
 `POST /v1/probe` connectivity probe. Python used to carry a LangChain client, a
 LiteLLM mapping module, a provider default-URL table and a model-list probe in
@@ -405,11 +744,12 @@ LiteLLM mapping module, a provider default-URL table and a model-list probe in
 reports only whether those settings are complete (config-derived, no network);
 the frontend no longer fetches a provider model list or tests a connection.
 
-Both sides resolve `settings.json` the same way: `<source root>/library` when
+Python resolves `settings.json` at `<source root>/library` when
 `pyproject.toml` is present, else `~/MBForge`, overridable with
-`MBFORGE_SETTINGS_PATH`. That single rule matters — when the agent defaulted to
+`MBFORGE_SETTINGS_PATH`. That single rule matters — when Python defaulted to
 `~/MBForge/settings.json`, a source checkout read no settings at all and every
-saved key was silently lost.
+saved key was silently lost. The CLI does not consume this file; its own
+credentials, models and settings live under `agent/.pi-agent/`.
 
 ## Research tools and Pi upgrade (2026-10-14) — removed (2026-11-10)
 

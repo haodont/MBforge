@@ -61,6 +61,14 @@ reimplements handlers or mode checks. The pi CLI extension
 (`agent/src/extension.ts`) consumes the same manifest and is the only agent
 surface: no HTTP agent server or second agent transport exists.
 
+Document-scoped capabilities take a document *reference*, not only the raw
+`doc_id`: the registry resolves a full 64-hex `doc_id`, a unique hash prefix
+(8 hex characters or more), the exact file name, or the exact title into the
+canonical `doc_id` before the handler runs (`service/use_cases/documents/
+document_refs.py`). Matching is exact; an ambiguous reference is rejected
+instead of guessed. `resolve_document` returns the quotable `short_id` (the
+first 8 hex characters) alongside the full id.
+
 The React UI is read-mostly: it imports and deletes documents, records human
 review decisions, and manages settings/models. Pipeline execution controls
 (Extract, Patent, cancel, retry) live only in the CLI, and the queue page is a
