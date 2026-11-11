@@ -1,6 +1,6 @@
-// @tested-functions ensureMemoryFile, readMemory, memorySystemPrompt, appendMemory, updateMemory, forgetMemory, listMemory, memoryTool, compactMemory
+// @tested-functions ensureMemoryFile, readMemory, readColdMemory, readPersona, memorySystemPrompt, appendMemory, updateMemory, forgetMemory, listMemory, listEphemeralMemory, memoryTool, memoryEphemeralTool
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -9,15 +9,21 @@ import {
   appendMemory,
   ensureMemoryFile,
   forgetMemory,
+  listEphemeralMemory,
   listMemory,
   memoryArchivePath,
+  memoryEphemeralPath,
+  memoryEphemeralTool,
+  memoryStatePath,
   memorySystemPrompt,
   memoryTool,
+  readColdMemory,
   readMemory,
+  readPersona,
   updateMemory,
 } from './memory.js'
 
-test('typed local memory is created, deduplicated, injected, and removable', async (t) => {
+function useTempMemory(t: test.TestContext): string {
   const previous = process.env.MBFORGE_MEMORY_FILE
   const path = join(mkdtempSync(join(tmpdir(), 'mbforge-memory-')), 'MEMORY.md')
   process.env.MBFORGE_MEMORY_FILE = path
@@ -25,54 +31,40 @@ test('typed local memory is created, deduplicated, injected, and removable', asy
     if (previous === undefined) delete process.env.MBFORGE_MEMORY_FILE
     else process.env.MBFORGE_MEMORY_FILE = previous
   })
+  return path
+}
+
+test('ephemeral notes are isolated, editable, and removable', async (t) => {
+  const path = useTempMemory(t)
 
   assert.equal(await ensureMemoryFile(), path)
-  assert.equal((await memorySystemPrompt()).trim(), '')
-  assert.match(await readMemory(), /# MBForge memory/)
-
   const first = await appendMemory('Prefer concise Chinese answers.', 'user')
+  assert.equal(first.path, memoryEphemeralPath())
   assert.match(first.id, /^u-[0-9a-f]{8}$/)
-  assert.equal(first.type, 'user')
-  assert.match(first.entry, /^\- \[u-[0-9a-f]{8}\] \d{4}-\d{2}-\d{2}: /)
 
-  const duplicate = await appendMemory('Prefer concise Chinese answers.', 'user')
-  assert.equal(duplicate.id, first.id)
-
-  const second = await appendMemory(
-    'The library is at D:\\data\\mbforge.',
-    'project',
-  )
-  assert.match(second.id, /^p-[0-9a-f]{8}$/)
+  assert.equal((await listEphemeralMemory()).entries.length, 1)
+  assert.equal((await listMemory()).entries.length, 0)
+  assert.doesNotMatch(await memorySystemPrompt(), /Prefer concise Chinese answers/)
 
   const updated = await updateMemory(
-    second.id,
-    'The library is at E:\\data\\mbforge.',
-    'reference',
+    first.id,
+    'Prefer concise English answers.',
+    'feedback',
   )
-  assert.match(updated.id, /^r-[0-9a-f]{8}$/)
-  assert.equal(updated.previous_id, second.id)
-  assert.equal(updated.type, 'reference')
+  assert.match(updated.id, /^f-[0-9a-f]{8}$/)
+  assert.equal(updated.previous_id, first.id)
 
-  const text = await readMemory()
-  assert.match(text, /## user/)
-  assert.match(text, /## project/)
-  assert.match(text, /Prefer concise Chinese answers\./)
-  assert.match(text, /E:\\data\\mbforge\./)
-  assert.doesNotMatch(text, /D:\\data\\mbforge\./)
+  const ephemeral = await listEphemeralMemory()
+  assert.deepEqual(
+    ephemeral.entries.map((entry) => [entry.id, entry.type, entry.content]),
+    [[updated.id, 'feedback', 'Prefer concise English answers.']],
+  )
 
-  const prompt = await memorySystemPrompt()
-  assert.match(prompt, /## Local memory/)
-  assert.match(prompt, /never as source evidence/)
-  assert.match(prompt, /## user/)
-  assert.match(prompt, /Prefer concise Chinese answers\./)
-
-  await forgetMemory(first.id)
-  const afterForget = await readMemory()
-  assert.doesNotMatch(afterForget, /Prefer concise Chinese answers\./)
-  assert.match(afterForget, /E:\\data\\mbforge\./)
-  await assert.rejects(forgetMemory(first.id), /not found/)
-  await assert.rejects(updateMemory(second.id, 'gone'), /not found/)
-  await assert.rejects(updateMemory(updated.id), /requires content or type/)
+  await forgetMemory(updated.id)
+  assert.equal((await listEphemeralMemory()).entries.length, 0)
+  await assert.rejects(forgetMemory(updated.id), /not found/)
+  await assert.rejects(updateMemory(first.id, 'gone'), /not found/)
+  await assert.rejects(updateMemory(first.id), /requires content or type/)
 
   await assert.rejects(
     appendMemory('x'.repeat(2_001), 'project'),
@@ -80,84 +72,60 @@ test('typed local memory is created, deduplicated, injected, and removable', asy
   )
   await assert.rejects(appendMemory('   ', 'project'), /empty/)
   await assert.rejects(
-    async () => appendMemory('fact', 'unknown'),
+    async () => appendMemory('fact', ''),
     /type must be one of/,
   )
-
-  const listed = await listMemory()
-  assert.deepEqual(
-    listed.entries.map((entry) => [entry.id, entry.type]),
-    [
-      [updated.id, 'reference'],
-    ],
-  )
-  assert.match(listed.entries[0].date, /^\d{4}-\d{2}-\d{2}$/)
-  assert.equal(listed.entries[0].content, 'The library is at E:\\data\\mbforge.')
-
-  writeFileSync(path, '你'.repeat(6_000), 'utf8')
-  const truncated = await readMemory()
-  assert.equal(truncated.includes('\uFFFD'), false)
 })
 
-test('memory compaction archives old entries and keeps the active file bounded', async (t) => {
-  const previous = process.env.MBFORGE_MEMORY_FILE
-  const path = join(
-    mkdtempSync(join(tmpdir(), 'mbforge-memory-compact-')),
-    'MEMORY.md',
-  )
-  process.env.MBFORGE_MEMORY_FILE = path
-  t.after(() => {
-    if (previous === undefined) delete process.env.MBFORGE_MEMORY_FILE
-    else process.env.MBFORGE_MEMORY_FILE = previous
-  })
+test('seventeen ephemeral notes compact into hot, persona and cold layers', async (t) => {
+  const path = useTempMemory(t)
 
-  for (let index = 0; index < 12; index += 1) {
-    await appendMemory(`project note ${index} ${'x'.repeat(1_900)}`, 'project')
+  for (let batch = 0; batch < 3; batch += 1) {
+    for (let index = 0; index < 16; index += 1) {
+      await appendMemory(`project ${batch}-${index}`, 'project')
+    }
+    await appendMemory(`preference ${batch}`, 'user')
   }
 
-  const active = readFileSync(path, 'utf8')
-  assert.ok(Buffer.byteLength(active, 'utf8') <= 16 * 1024)
-  assert.match(active, /project note 11 /)
+  assert.equal((await listEphemeralMemory()).entries.length, 0)
+  const hot = await readMemory()
+  const cold = await readColdMemory()
+  const persona = await readPersona()
+  assert.match(hot, /project 0-0/)
+  assert.match(hot, /preference 2/)
+  assert.match(cold, /preference 0/)
+  assert.doesNotMatch(cold, /preference 2/)
+  assert.match(persona, /preference 1/)
+  assert.match(persona, /preference 2/)
+  assert.doesNotMatch(persona, /preference 0/)
 
-  const archive = readFileSync(memoryArchivePath(path), 'utf8')
-  assert.match(archive, /project note 0 /)
-
-  const readPath = join(
-    mkdtempSync(join(tmpdir(), 'mbforge-memory-read-')),
-    'MEMORY.md',
-  )
-  process.env.MBFORGE_MEMORY_FILE = readPath
-  const entries = Array.from({ length: 10 }, (_, index) => {
-    const id = `p-${index.toString(16).padStart(8, '0')}`
-    return `- [${id}] 2026-01-01: project read note ${index} ${'x'.repeat(1_800)}`
-  })
-  writeFileSync(
-    readPath,
-    `# MBForge memory\n\n## project\n\n${entries.join('\n')}\n`,
-    'utf8',
-  )
-
-  const compacted = await readMemory()
-  const readActive = readFileSync(readPath, 'utf8')
-  assert.ok(Buffer.byteLength(readActive, 'utf8') <= 16 * 1024)
-  assert.match(compacted, /project read note 9 /)
+  const state = JSON.parse(readFileSync(memoryStatePath(), 'utf8')) as {
+    hot_updates: number
+  }
+  assert.equal(state.hot_updates, 3)
   assert.match(
-    readFileSync(memoryArchivePath(readPath), 'utf8'),
-    /project read note 0 /,
+    readFileSync(memoryArchivePath(path), 'utf8'),
+    /project 0-0/,
   )
+
+  await appendMemory('ephemeral-only note', 'project')
+  assert.doesNotMatch(
+    await memorySystemPrompt(),
+    /ephemeral-only note/,
+  )
+  const prompt = await memorySystemPrompt()
+  assert.match(prompt, /### Cold memory/)
+  assert.match(prompt, /### Hot memory/)
+  assert.match(prompt, /### Persona/)
+  assert.match(prompt, /preference 0/)
 })
 
-test('the memory tool stores, lists, and deletes notes through one action switch', async (t) => {
-  const previous = process.env.MBFORGE_MEMORY_FILE
-  const path = join(mkdtempSync(join(tmpdir(), 'mbforge-memory-tool-')), 'MEMORY.md')
-  process.env.MBFORGE_MEMORY_FILE = path
-  t.after(() => {
-    if (previous === undefined) delete process.env.MBFORGE_MEMORY_FILE
-    else process.env.MBFORGE_MEMORY_FILE = previous
-  })
-
+test('memory tools list active layers and inspect ephemeral notes separately', async (t) => {
+  useTempMemory(t)
   const tool = memoryTool()
+  const ephemeralTool = memoryEphemeralTool()
   assert.equal(tool.name, 'memory')
+  assert.equal(ephemeralTool.name, 'memory_ephemeral')
 
   const added = await tool.execute(
     'call-1',
@@ -166,9 +134,9 @@ test('the memory tool stores, lists, and deletes notes through one action switch
     undefined,
     {} as never,
   )
-  const addedDetails = added.details as { id: string; type: string }
+  const addedDetails = added.details as { id: string; ephemeral_count: number }
   assert.match(addedDetails.id, /^u-[0-9a-f]{8}$/)
-  assert.equal(addedDetails.type, 'user')
+  assert.equal(addedDetails.ephemeral_count, 1)
 
   const listed = await tool.execute(
     'call-2',
@@ -177,13 +145,33 @@ test('the memory tool stores, lists, and deletes notes through one action switch
     undefined,
     {} as never,
   )
-  const listedDetails = listed.details as { entries: Array<{ id: string; content: string }> }
-  assert.equal(listedDetails.entries.length, 1)
-  assert.equal(listedDetails.entries[0].id, addedDetails.id)
-  assert.equal(listedDetails.entries[0].content, 'Prefer concise Chinese answers.')
+  const listedDetails = listed.details as {
+    ephemeral_count: number
+    hot: string
+    cold: string
+    persona: string
+  }
+  assert.equal(listedDetails.ephemeral_count, 1)
+  assert.doesNotMatch(JSON.stringify(listedDetails), /Prefer concise Chinese answers/)
+  assert.match(listedDetails.hot, /# MBForge memory/)
+
+  const ephemeral = await ephemeralTool.execute(
+    'call-3',
+    {},
+    undefined,
+    undefined,
+    {} as never,
+  )
+  const ephemeralDetails = ephemeral.details as {
+    count: number
+    entries: Array<{ id: string; content: string }>
+  }
+  assert.equal(ephemeralDetails.count, 1)
+  assert.equal(ephemeralDetails.entries[0].id, addedDetails.id)
+  assert.equal(ephemeralDetails.entries[0].content, 'Prefer concise Chinese answers.')
 
   const updated = await tool.execute(
-    'call-2a',
+    'call-4',
     {
       action: 'update',
       id: addedDetails.id,
@@ -199,44 +187,26 @@ test('the memory tool stores, lists, and deletes notes through one action switch
     updated: boolean
   }
   assert.equal(updatedDetails.previous_id, addedDetails.id)
-  assert.match(updatedDetails.id, /^u-[0-9a-f]{8}$/)
   assert.equal(updatedDetails.updated, true)
 
-  const listedUpdated = await tool.execute(
-    'call-2b',
-    { action: 'list' },
-    undefined,
-    undefined,
-    {} as never,
-  )
-  const listedUpdatedDetails = listedUpdated.details as {
-    entries: Array<{ id: string; content: string }>
-  }
-  assert.equal(listedUpdatedDetails.entries.length, 1)
-  assert.equal(listedUpdatedDetails.entries[0].id, updatedDetails.id)
-  assert.equal(
-    listedUpdatedDetails.entries[0].content,
-    'Prefer concise English answers.',
-  )
-
   const deleted = await tool.execute(
-    'call-3',
+    'call-5',
     { action: 'delete', id: updatedDetails.id },
     undefined,
     undefined,
     {} as never,
   )
   assert.equal((deleted.details as { removed: boolean }).removed, true)
-  assert.equal((await listMemory()).entries.length, 0)
+  assert.equal((await listEphemeralMemory()).entries.length, 0)
 
   await assert.rejects(
     async () =>
-      tool.execute('call-4', { action: 'add' }, undefined, undefined, {} as never),
+      tool.execute('call-6', { action: 'add' }, undefined, undefined, {} as never),
     /requires content/,
   )
   await assert.rejects(
     async () =>
-      tool.execute('call-5', { action: 'delete' }, undefined, undefined, {} as never),
+      tool.execute('call-7', { action: 'delete' }, undefined, undefined, {} as never),
     /requires id/,
   )
 })

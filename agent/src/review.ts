@@ -6,7 +6,7 @@ import { defineTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 
 import {
-  appendMemory,
+  appendHotMemory,
   MEMORY_TYPES,
   type MemoryType,
 } from './memory.js'
@@ -426,7 +426,7 @@ export async function runReview(
   const warnings = [...report.warnings]
   for (const lesson of report.lessons) {
     try {
-      const result = await appendMemory(lesson.content, lesson.type)
+      const result = await appendHotMemory(lesson.content, lesson.type)
       memories.push({ id: result.id, type: result.type, content: lesson.content })
     } catch (error) {
       warnings.push(

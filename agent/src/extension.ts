@@ -372,6 +372,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     GOAL_TOOL_NAME,
     REVIEW_TOOL_NAME,
     'memory',
+    'memory_ephemeral',
     'suggest_improvement',
   ])
 
@@ -534,7 +535,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
           `read     ${readNames.length}: ${readNames.join(', ')}`,
           `mutating ${writeNames.length}: ${writeNames.join(', ')} (token-gated)`,
           `backend  ${state.backend}`,
-          `local    ${[...MEMORY_TOOL_NAMES, ...IMPROVEMENT_TOOL_NAMES, ...REVIEW_TOOL_NAMES, ...GOAL_TOOL_NAMES].join(', ')} (${memoryError ? 'memory unavailable' : 'MEMORY.md + IMPROVEMENTS.json'})`,
+          `local    ${[...MEMORY_TOOL_NAMES, ...IMPROVEMENT_TOOL_NAMES, ...REVIEW_TOOL_NAMES, ...GOAL_TOOL_NAMES].join(', ')} (${memoryError ? 'memory unavailable' : 'memory layers + IMPROVEMENTS.json'})`,
         ].join('\n'),
         'info',
       )
