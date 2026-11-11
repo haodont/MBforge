@@ -27,7 +27,6 @@ from mbforge.foundation.errors import (
     NotFoundError,
     ValidationError,
 )
-from mbforge.foundation.logger import get_logger
 from mbforge.service.dto.library import (
     MAX_EVIDENCE_RESOLVE_IDS,
     LibraryConfigureRequest,
@@ -45,8 +44,7 @@ from mbforge.service.dto.library import (
 )
 from mbforge.service.use_cases.documents import library as library_service
 from mbforge.service.use_cases.documents import source_evidence
-
-logger = get_logger("mbforge.library_router")
+from mbforge.service.use_cases.pipeline import ingest
 
 router = APIRouter()
 
@@ -145,33 +143,8 @@ async def library_import(
         if tmp_path is not None:
             await asyncio.to_thread(tmp_path.unlink, missing_ok=True)
 
-    run_id = await _auto_enqueue(root, doc.doc_id)
+    run_id = await ingest.auto_enqueue_on_import(root, doc.doc_id)
     return LibraryImportResponse(document=doc.to_dict(), run_id=run_id)
-
-
-async def _auto_enqueue(root: str, doc_id: str) -> str | None:
-    """Enqueue a freshly imported document, honoring the import setting.
-
-    Returns the new ``run_id``, or ``None`` when auto-enqueue is disabled or
-    the enqueue itself failed. A failed enqueue must not fail the import: the
-    bytes are already stored and registered, so the document stays visible as
-    ``pending`` and can be queued later.
-    """
-    from mbforge.foundation import config as app_config
-    from mbforge.service.use_cases.pipeline import ingest
-
-    try:
-        enabled = app_config.load_global_config().ingest.auto_enqueue_on_import
-    except Exception as exc:  # noqa: BLE001 — unreadable settings must not block import
-        logger.warning("Could not read auto_enqueue_on_import: %s", exc)
-        enabled = True
-    if not enabled:
-        return None
-    try:
-        return await ingest.enqueue(root, doc_id)
-    except Exception as exc:  # noqa: BLE001 — bytes are stored; import still succeeded
-        logger.warning("Auto-enqueue failed for %s: %s", doc_id, exc)
-        return None
 
 
 @router.post("/documents")

@@ -58,6 +58,7 @@ __all__ = [
     "INGEST_TERMINAL_STATUSES",
     "PATENT_STAGES",
     "BatchActionResult",
+    "auto_enqueue_on_import",
     "cancel_batch",
     "delete_task",
     "enqueue",
@@ -174,6 +175,34 @@ async def enqueue(
     ensure_worker(library_root)
     logger.info("Enqueued doc %s as run %s (stages=%s)", doc_id, run_id, selected)
     return run_id
+
+
+def _auto_enqueue_enabled() -> bool:
+    """Read the import setting; unreadable settings must not block an import."""
+    from mbforge.foundation import config as app_config
+
+    try:
+        return bool(app_config.load_global_config().ingest.auto_enqueue_on_import)
+    except Exception as exc:  # noqa: BLE001 — unreadable settings must not block import
+        logger.warning("Could not read auto_enqueue_on_import: %s", exc)
+        return True
+
+
+async def auto_enqueue_on_import(library_root: str, doc_id: str) -> str | None:
+    """Queue a freshly imported document, honoring the import setting.
+
+    Returns the new ``run_id``, or ``None`` when auto-enqueue is disabled or
+    the enqueue itself failed. A failed enqueue never fails the import: the
+    bytes are already stored and registered, so the document stays ``pending``
+    and can be queued later.
+    """
+    if not _auto_enqueue_enabled():
+        return None
+    try:
+        return await enqueue(library_root, doc_id)
+    except Exception as exc:  # noqa: BLE001 — bytes are stored; import still succeeded
+        logger.warning("Auto-enqueue failed for %s: %s", doc_id, exc)
+        return None
 
 
 async def enqueue_patent_analysis(
