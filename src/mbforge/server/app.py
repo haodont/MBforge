@@ -358,6 +358,7 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
 
     # Register all routers
     from mbforge.api.http import capabilities, markush, review
+    from mbforge.api.http.api_surface import FastApiSurfaceProvider
     from mbforge.api.http.documents import (
         activity,
         documents,
@@ -425,6 +426,10 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     # pdf_render adds /render-pages only; /figure-bboxes lives on pdf.router
     # (registered above) with the hardened library_root/doc_id contract.
     app.include_router(pdf_render.router, prefix="/api/v1/pdf", tags=["pdf-render"])
+
+    # Snapshot the live route/request contract once, after every router is
+    # mounted, for the read-only get_api_surface capability.
+    app.state.api_surface = FastApiSurfaceProvider(app)
 
     # Serve React frontend in production
     # Priority: FRONTEND_DIST env > dev path

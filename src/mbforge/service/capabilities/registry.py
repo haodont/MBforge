@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from mbforge.foundation.errors import (
@@ -19,8 +20,31 @@ from mbforge.foundation.errors import (
     NotFoundError,
     ValidationError,
 )
+from mbforge.service.use_cases.documents.document_refs import is_full_doc_id
+from mbforge.service.use_cases.documents.library import LibraryStore
+
+if TYPE_CHECKING:
+    from mbforge.service.ports.api_surface import ApiSurfaceProvider
 
 CapabilityMode = Literal["readonly", "edit"]
+
+#: Shown to agents in the published input schema: what a ``doc_id`` may be.
+DOC_ID_DESCRIPTION = (
+    "Document reference: the full 64-character doc_id, a unique doc_id "
+    "prefix (8 hex characters or more), the exact file name, the exact "
+    "document title, or the 12-character short_id returned by resolve_document."
+)
+
+
+def doc_id_field(**overrides: Any) -> Any:
+    """Return the shared ``doc_id`` field with its agent-facing description."""
+    params: dict[str, Any] = {
+        "min_length": 1,
+        "max_length": 128,
+        "description": DOC_ID_DESCRIPTION,
+    }
+    params.update(overrides)
+    return Field(..., **params)
 
 
 @dataclass(frozen=True)
@@ -29,6 +53,7 @@ class CapabilityContext:
 
     library_root: str
     mode: CapabilityMode
+    api_surface: ApiSurfaceProvider | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +105,32 @@ def get_capability(name: str) -> Capability:
     return capability
 
 
+def _resolve_document_reference(
+    context: CapabilityContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Map a human document reference in *payload* to its canonical doc_id.
+
+    Agents and users hold a title, a file name, or a hash prefix — not the
+    64-character SHA-256 id. Resolution happens once, here, so every
+    document-scoped capability accepts the same references. A reference that
+    matches nothing is left untouched: the handler then reports the document
+    as missing, exactly as it did before.
+    """
+    reference = payload.get("doc_id")
+    if not isinstance(reference, str):
+        return payload
+    ref = reference.strip()
+    if not ref or is_full_doc_id(ref):
+        return payload
+    if not Path(context.library_root).is_dir():
+        return payload
+
+    resolved = LibraryStore.get(context.library_root).resolve_reference(ref)
+    if resolved is None:
+        return payload
+    return {**payload, "doc_id": resolved}
+
+
 async def invoke(
     name: str,
     context: CapabilityContext,
@@ -93,7 +144,9 @@ async def invoke(
             detail=capability.name,
         )
     try:
-        request = capability.input_model.model_validate(payload)
+        request = capability.input_model.model_validate(
+            _resolve_document_reference(context, payload)
+        )
     except PydanticValidationError as exc:
         errors = exc.errors(include_input=False, include_url=False)
         fields = "; ".join(

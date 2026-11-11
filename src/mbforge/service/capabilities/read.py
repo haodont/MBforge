@@ -1,30 +1,55 @@
-"""Read-only capabilities exposed to agents."""
+"""Read-only document and evidence capabilities exposed to agents.
+
+Patent facts, molecule search, and page/structure visual actions live in the
+sibling ``read_patent``, ``read_molecules`` and ``read_visual`` modules.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Literal
+from typing import Any, get_args
 
 from pydantic import BaseModel, Field
 
-from mbforge.foundation.errors import NotFoundError
+from mbforge.contracts.measurement import ReviewStatus as MeasurementReviewStatus
+from mbforge.domain.evidence_kind import CATEGORIES
+from mbforge.domain.patent import (
+    ROLE_COMPOUND,
+    ROLE_EXAMPLE,
+    ROLE_INTERMEDIATE,
+    ROLE_PREPARATION,
+    ROLE_REAGENT,
+    STATUS_FAILED,
+    STATUS_PENDING,
+    STATUS_RESOLVED,
+    STRUCTURE_MISSING,
+    STRUCTURE_PENDING,
+    STRUCTURE_RESOLVED,
+)
+from mbforge.domain.review import APPROVED, PENDING, REJECTED
+from mbforge.foundation.errors import NotFoundError, ValidationError
 from mbforge.foundation.layout import LibraryLayout
 from mbforge.service.capabilities.registry import (
+    DOC_ID_DESCRIPTION,
     Capability,
     CapabilityContext,
     CapabilityResult,
+    doc_id_field,
     register,
 )
+from mbforge.service.dto.review import ReviewKind
+from mbforge.service.pipeline.layout.labels import kind_vocab
+from mbforge.service.pipeline.patent.sections import SECTION_KINDS
 from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.documents import source_evidence
+from mbforge.service.use_cases.documents.document_refs import short_doc_id
 from mbforge.service.use_cases.documents.library import LibraryStore
-from mbforge.service.use_cases.documents.patent_facts import load_patent_facts
-from mbforge.service.use_cases.molecule.queries import search_molecules
 from mbforge.service.use_cases.pipeline import ingest
 
 
 class DocumentMatch(BaseModel):
     doc_id: str
+    short_id: str
     title: str
     file_name: str
     page_count: int
@@ -41,11 +66,12 @@ class ResolveDocumentOutput(BaseModel):
 
 
 class GetDocumentInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
+    doc_id: str = doc_id_field()
 
 
 class GetDocumentOutput(BaseModel):
     doc_id: str
+    short_id: str
     title: str
     file_name: str
     page_count: int
@@ -56,20 +82,21 @@ class GetDocumentOutput(BaseModel):
 
 
 class GetDocumentMarkdownInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
+    doc_id: str = doc_id_field()
     offset: int = Field(0, ge=0)
     max_chars: int = Field(20000, ge=1000, le=200000)
 
 
 class GetDocumentMarkdownOutput(BaseModel):
     doc_id: str
+    short_id: str
     content: str
     offset: int
     next_offset: int | None
 
 
 class ListEvidenceInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
+    doc_id: str = doc_id_field()
     page: int | None = Field(None, ge=1)
     kind: str | None = Field(None, max_length=32)
     offset: int = Field(0, ge=0)
@@ -88,42 +115,6 @@ class ListEvidenceOutput(BaseModel):
     items: list[EvidenceItem]
 
 
-class GetPatentResultInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
-    offset: int = Field(0, ge=0)
-    limit: int = Field(20, ge=1, le=100)
-
-
-class PatentFactCounts(BaseModel):
-    sections: int
-    entries: int
-    synthesis_steps: int
-    assay_methods: int
-    examples: int
-    measurements: int
-    issues: int
-
-
-class GetPatentResultOutput(BaseModel):
-    doc_id: str
-    run_id: str
-    stats: dict[str, Any]
-    counts: PatentFactCounts
-    sections: list[dict[str, Any]]
-    entries: list[dict[str, Any]]
-
-
-class SearchMoleculesInput(BaseModel):
-    query: str = Field(..., min_length=1, max_length=512)
-    mode: Literal["auto", "text", "substructure", "similarity"] = "auto"
-    top_k: int = Field(10, ge=1, le=50)
-    similarity_threshold: float = Field(0.5, ge=0.0, le=1.0)
-
-
-class SearchMoleculesOutput(BaseModel):
-    items: list[dict[str, Any]]
-
-
 class GetRunInput(BaseModel):
     run_id: str = Field(..., min_length=1, max_length=128)
 
@@ -136,6 +127,7 @@ class RunNode(BaseModel):
 class GetRunOutput(BaseModel):
     run_id: str
     doc_id: str | None
+    short_id: str | None = None
     status: str
     nodes: list[RunNode]
 
@@ -144,7 +136,7 @@ class SearchEvidenceInput(BaseModel):
     """Literal keyword search over canonical source evidence across documents."""
 
     query: str = Field(..., min_length=1, max_length=400)
-    doc_id: str = Field("", max_length=128)
+    doc_id: str = Field("", max_length=128, description=DOC_ID_DESCRIPTION)
     offset: int = Field(0, ge=0)
     limit: int = Field(20, ge=1, le=50)
 
@@ -152,6 +144,7 @@ class SearchEvidenceInput(BaseModel):
 class EvidenceMatch(BaseModel):
     evidence_id: str
     doc_id: str
+    short_id: str
     page: int
     kind: str
     title: str
@@ -164,63 +157,28 @@ class SearchEvidenceOutput(BaseModel):
     items: list[EvidenceMatch]
 
 
-class RecognizeMoleculesInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
-    page: int = Field(..., ge=1)
-    region: list[float] | None = Field(None, min_length=4, max_length=4)
-    max_molecules: int = Field(10, ge=1, le=20)
+class GetVocabularyInput(BaseModel):
+    """No parameters: the vocabularies are library-independent."""
 
 
-class RecognizeMoleculesOutput(BaseModel):
-    page: int
-    page_width_pts: float
-    page_height_pts: float
-    dpi: float
-    region: list[float] | None = None
-    count: int
-    truncated: bool
-    molecules: list[dict[str, Any]]
+class GetVocabularyOutput(BaseModel):
+    """Every closed label set an agent may pass or receive.
 
+    These are the vocabularies the pipeline mints; nothing here is a guess from
+    observed rows. ``evidence_kinds`` maps each producer label to its category,
+    and an unknown ``kind`` filter is rejected rather than answered with an
+    empty page. The two review vocabularies differ by store on purpose.
+    """
 
-class PageTextBlock(BaseModel):
-    region_id: str
-    kind: str
-    type: str
-    bbox_pdf: list[float]
-    reading_order: int
-    text: str
-
-
-class OcrPageRegionInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
-    page: int = Field(1, ge=1)
-    region: list[float] | None = Field(None, min_length=4, max_length=4)
-    max_blocks: int = Field(50, ge=1, le=100)
-
-
-class OcrPageRegionOutput(BaseModel):
-    doc_id: str
-    page: int
-    page_width_pts: float
-    page_height_pts: float
-    dpi: float
-    region: list[float] | None = None
-    count: int
-    truncated: bool
-    text: str
-    blocks: list[PageTextBlock]
-
-
-class RecognizeStructureImageInput(BaseModel):
-    image_base64: str = Field(..., min_length=1, max_length=12_000_000)
-
-
-class RecognizeStructureImageOutput(BaseModel):
-    smiles: str
-    esmiles: str
-    coref: list[str] = Field(default_factory=list)
-    coref_primary: str
-    recognized: bool
+    evidence_kinds: dict[str, str]
+    evidence_categories: list[str]
+    section_kinds: list[str]
+    entry_roles: list[str]
+    structure_statuses: list[str]
+    fact_statuses: list[str]
+    molecule_review_statuses: list[str]
+    measurement_review_statuses: list[str]
+    review_kinds: list[str]
 
 
 async def resolve_document(
@@ -240,7 +198,13 @@ async def resolve_document(
     truncated = len(rows) > request.limit
     return CapabilityResult(
         data=ResolveDocumentOutput(
-            matches=[DocumentMatch(**row) for row in rows[: request.limit]]
+            matches=[
+                DocumentMatch(
+                    **row,
+                    short_id=short_doc_id(str(row["doc_id"])),
+                )
+                for row in rows[: request.limit]
+            ]
         ),
         truncated=truncated,
     )
@@ -256,6 +220,7 @@ async def get_document(
 
     layout = LibraryLayout(context.library_root)
     payload = document.to_dict()
+    payload["short_id"] = short_doc_id(document.doc_id)
     payload["has_markdown"] = layout.document_md(request.doc_id).is_file()
     payload["has_patent_facts"] = (
         layout.storage_dir(request.doc_id) / "patent_facts.json"
@@ -279,6 +244,7 @@ async def get_document_markdown(
     return CapabilityResult(
         data=GetDocumentMarkdownOutput(
             doc_id=request.doc_id,
+            short_id=short_doc_id(request.doc_id),
             content=chunk,
             offset=request.offset,
             next_offset=next_offset,
@@ -288,9 +254,22 @@ async def get_document_markdown(
     )
 
 
+def _require_known_kind(kind: str) -> None:
+    """Reject a ``kind`` no producer mints instead of answering with an empty page."""
+    vocabulary = kind_vocab()
+    if kind not in vocabulary:
+        raise ValidationError(
+            "unknown evidence kind",
+            detail=kind,
+            context={"valid_kinds": sorted(vocabulary)},
+        )
+
+
 async def list_evidence(
     context: CapabilityContext, request: ListEvidenceInput
 ) -> CapabilityResult:
+    if request.kind is not None:
+        _require_known_kind(request.kind)
     store = LibraryStore.get(context.library_root)
     document = await asyncio.to_thread(store.load_document, request.doc_id)
     if document is None:
@@ -316,58 +295,6 @@ async def list_evidence(
     )
 
 
-async def get_patent_result(
-    context: CapabilityContext, request: GetPatentResultInput
-) -> CapabilityResult:
-    facts = await asyncio.to_thread(
-        load_patent_facts, context.library_root, request.doc_id
-    )
-    if facts is None:
-        raise NotFoundError("patent facts not available", detail=request.doc_id)
-
-    entries = facts.entries[request.offset : request.offset + request.limit]
-    next_offset = (
-        request.offset + request.limit
-        if request.offset + request.limit < len(facts.entries)
-        else None
-    )
-    counts = PatentFactCounts(
-        sections=len(facts.sections),
-        entries=len(facts.entries),
-        synthesis_steps=len(facts.synthesis_steps),
-        assay_methods=len(facts.assay_methods),
-        examples=len(facts.examples),
-        measurements=len(facts.measurements),
-        issues=len(facts.issues),
-    )
-    return CapabilityResult(
-        data=GetPatentResultOutput(
-            doc_id=facts.doc_id,
-            run_id=facts.run_id,
-            stats=facts.stats,
-            counts=counts,
-            sections=[section.model_dump() for section in facts.sections],
-            entries=entries,
-        ),
-        truncated=next_offset is not None,
-        next_offset=next_offset,
-    )
-
-
-async def search_molecules_capability(
-    context: CapabilityContext, request: SearchMoleculesInput
-) -> CapabilityResult:
-    items = await asyncio.to_thread(
-        search_molecules,
-        context.library_root,
-        request.query,
-        request.top_k,
-        request.mode,
-        request.similarity_threshold,
-    )
-    return CapabilityResult(data=SearchMoleculesOutput(items=items))
-
-
 async def get_run(context: CapabilityContext, request: GetRunInput) -> CapabilityResult:
     rows = await ingest.list_run_tasks(context.library_root, request.run_id)
     if not rows:
@@ -376,10 +303,12 @@ async def get_run(context: CapabilityContext, request: GetRunInput) -> Capabilit
     status = await asyncio.to_thread(
         ingest.fetch_run_status, context.library_root, request.run_id
     )
+    doc_id = rows[0].get("doc_id")
     return CapabilityResult(
         data=GetRunOutput(
             run_id=request.run_id,
-            doc_id=rows[0].get("doc_id"),
+            doc_id=doc_id,
+            short_id=short_doc_id(str(doc_id)) if doc_id else None,
             status=status or "unknown",
             nodes=[
                 RunNode(
@@ -406,112 +335,63 @@ async def search_evidence(
     truncated = len(rows) > request.limit
     page = rows[: request.limit]
     return CapabilityResult(
-        data=SearchEvidenceOutput(items=[EvidenceMatch(**row) for row in page]),
+        data=SearchEvidenceOutput(
+            items=[
+                EvidenceMatch(**row, short_id=short_doc_id(str(row["doc_id"])))
+                for row in page
+            ]
+        ),
         truncated=truncated,
         next_offset=request.offset + request.limit if truncated else None,
     )
 
 
-async def recognize_molecules_capability(
-    context: CapabilityContext, request: RecognizeMoleculesInput
+async def get_vocabulary(
+    context: CapabilityContext, request: GetVocabularyInput
 ) -> CapabilityResult:
-    """Run the local MolDet + MolParser pass over one page or region."""
-    from mbforge.service.use_cases.molecule.recognition import (
-        recognize_page_molecules,
-    )
-
-    store = LibraryStore.get(context.library_root)
-    pdf_path = await asyncio.to_thread(store.resolve_file, request.doc_id)
-    if pdf_path is None:
-        raise NotFoundError("document source file not found", detail=request.doc_id)
-    result = await asyncio.to_thread(
-        recognize_page_molecules,
-        pdf_path,
-        page=request.page,
-        region=request.region,
-        max_molecules=request.max_molecules,
-    )
-    return CapabilityResult(data=RecognizeMoleculesOutput(**result))
-
-
-def _decode_structure_image(payload: str) -> Any:
-    """Decode one base64 image without touching the library or filesystem."""
-    import base64
-    import io
-
-    from PIL import Image
-
-    from mbforge.foundation.errors import ValidationError
-
-    encoded = payload.strip()
-    if encoded.startswith("data:"):
-        _, _, encoded = encoded.partition(",")
-    try:
-        raw = base64.b64decode(encoded, validate=True)
-    except Exception as exc:  # noqa: BLE001 - malformed client input
-        raise ValidationError("image_base64 is not valid base64") from exc
-    if len(raw) > 8 * 1024 * 1024:
-        raise ValidationError("image_base64 decodes to more than 8 MiB")
-    try:
-        image = Image.open(io.BytesIO(raw))
-        image.load()
-    except Exception as exc:  # noqa: BLE001 - malformed client input
-        raise ValidationError("image_base64 is not a readable image") from exc
-    if image.width > 4096 or image.height > 4096:
-        raise ValidationError("image dimensions must not exceed 4096x4096")
-    return image.convert("RGB")
-
-
-async def recognize_structure_image_capability(
-    context: CapabilityContext, request: RecognizeStructureImageInput
-) -> CapabilityResult:
-    """Recognize one cropped structure image supplied by the caller."""
-    from mbforge.service.pipeline.detection.recognition import recognize_molecule
-
-    image = await asyncio.to_thread(_decode_structure_image, request.image_base64)
-    result = await asyncio.to_thread(recognize_molecule, image)
+    """Report the closed label sets the pipeline mints."""
     return CapabilityResult(
-        data=RecognizeStructureImageOutput(
-            smiles=result.smiles,
-            esmiles=result.esmiles,
-            coref=result.coref,
-            coref_primary=result.coref_primary,
-            recognized=bool(result.smiles or result.esmiles),
+        data=GetVocabularyOutput(
+            evidence_kinds=dict(sorted(kind_vocab().items())),
+            evidence_categories=sorted(CATEGORIES),
+            section_kinds=list(SECTION_KINDS),
+            entry_roles=[
+                ROLE_EXAMPLE,
+                ROLE_PREPARATION,
+                ROLE_COMPOUND,
+                ROLE_INTERMEDIATE,
+                ROLE_REAGENT,
+            ],
+            structure_statuses=[
+                STRUCTURE_MISSING,
+                STRUCTURE_PENDING,
+                STRUCTURE_RESOLVED,
+            ],
+            fact_statuses=[STATUS_PENDING, STATUS_RESOLVED, STATUS_FAILED],
+            molecule_review_statuses=[PENDING, APPROVED, REJECTED],
+            measurement_review_statuses=list(get_args(MeasurementReviewStatus)),
+            review_kinds=list(get_args(ReviewKind)),
         )
     )
-
-
-async def ocr_page_region_capability(
-    context: CapabilityContext, request: OcrPageRegionInput
-) -> CapabilityResult:
-    """Read layout text from one stored page, optionally one PDF region."""
-    from mbforge.service.use_cases.documents.page_text import ocr_page_region
-
-    store = LibraryStore.get(context.library_root)
-    pdf_path = await asyncio.to_thread(store.resolve_file, request.doc_id)
-    if pdf_path is None:
-        raise NotFoundError("document source file not found", detail=request.doc_id)
-    result = await asyncio.to_thread(
-        ocr_page_region,
-        pdf_path,
-        doc_id=request.doc_id,
-        page=request.page,
-        region=request.region,
-        max_blocks=request.max_blocks,
-    )
-    return CapabilityResult(data=OcrPageRegionOutput(**result))
 
 
 register(
     Capability(
         name="resolve_document",
-        description="Find library documents by exact doc_id or by title/file-name substring.",
+        description=(
+            "Find library documents by exact doc_id or by title/file-name "
+            "substring. Each match carries a short_id — the first 12 hex "
+            "characters of its doc_id — which every other capability accepts "
+            "in place of the full doc_id, as do the exact title and file name."
+        ),
         input_model=ResolveDocumentInput,
         output_model=ResolveDocumentOutput,
         mutating=False,
         handler=resolve_document,
     )
 )
+
+
 register(
     Capability(
         name="get_document",
@@ -522,86 +402,63 @@ register(
         handler=get_document,
     )
 )
+
+
 register(
     Capability(
         name="get_document_markdown",
-        description="Read a chunk of the assembled document Markdown.",
+        description="Read a chunk of the assembled document Markdown. Narrative text only; use query_activities for structured activity readings.",
         input_model=GetDocumentMarkdownInput,
         output_model=GetDocumentMarkdownOutput,
         mutating=False,
         handler=get_document_markdown,
     )
 )
+
+
 register(
     Capability(
         name="list_evidence",
-        description="List canonical source evidence for one document page or kind.",
+        description="List canonical source evidence for one document page or kind. kind must be a label the producers mint — call get_vocabulary for that set; an unregistered kind is rejected instead of answered with an empty page. For kind=molecule the raw_text is a JSON envelope, not printed text.",
         input_model=ListEvidenceInput,
         output_model=ListEvidenceOutput,
         mutating=False,
         handler=list_evidence,
     )
 )
+
+
 register(
     Capability(
-        name="get_patent_result",
-        description="Return Patent facts summary plus a page of compound entries.",
-        input_model=GetPatentResultInput,
-        output_model=GetPatentResultOutput,
+        name="get_vocabulary",
+        description=(
+            "Return every closed label set an agent may pass or receive: "
+            "evidence kind → category, Patent section kinds, compound entry "
+            "roles, structure/fact lifecycle values and the two review "
+            "vocabularies. Call this before filtering by kind or reading a "
+            "status instead of guessing; a wrong guess returns an empty page, "
+            "not an error."
+        ),
+        input_model=GetVocabularyInput,
+        output_model=GetVocabularyOutput,
         mutating=False,
-        handler=get_patent_result,
+        handler=get_vocabulary,
     )
 )
-register(
-    Capability(
-        name="search_molecules",
-        description="Search the active molecule library by text, substructure, or similarity.",
-        input_model=SearchMoleculesInput,
-        output_model=SearchMoleculesOutput,
-        mutating=False,
-        handler=search_molecules_capability,
-    )
-)
+
+
 register(
     Capability(
         name="search_evidence",
-        description="Search extracted SQL source text across documents; returns bounded snippets with document, page, kind and pagination. An empty result does not prove absence.",
+        description="Search extracted SQL source text across documents; returns bounded snippets with document, page, kind and pagination. An empty result does not prove absence. Use query_activities for structured activity values.",
         input_model=SearchEvidenceInput,
         output_model=SearchEvidenceOutput,
         mutating=False,
         handler=search_evidence,
     )
 )
-register(
-    Capability(
-        name="recognize_molecules",
-        description="Run the local MolDet + MolParser recognizers over one page (optionally one PDF-point region) of a stored document; returns SMILES/E-SMILES, bboxes and printed labels without persisting.",
-        input_model=RecognizeMoleculesInput,
-        output_model=RecognizeMoleculesOutput,
-        mutating=False,
-        handler=recognize_molecules_capability,
-    )
-)
-register(
-    Capability(
-        name="ocr_page_region",
-        description="Read layout-guided local text from one page of a stored document, optionally one PDF-point region; returns text blocks and bboxes without persisting.",
-        input_model=OcrPageRegionInput,
-        output_model=OcrPageRegionOutput,
-        mutating=False,
-        handler=ocr_page_region_capability,
-    )
-)
-register(
-    Capability(
-        name="recognize_structure_image",
-        description="Recognize one base64-encoded structure image with MolParser and read its printed labels; nothing is persisted.",
-        input_model=RecognizeStructureImageInput,
-        output_model=RecognizeStructureImageOutput,
-        mutating=False,
-        handler=recognize_structure_image_capability,
-    )
-)
+
+
 register(
     Capability(
         name="get_run",

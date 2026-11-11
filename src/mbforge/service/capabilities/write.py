@@ -18,9 +18,11 @@ from mbforge.service.capabilities.registry import (
     Capability,
     CapabilityContext,
     CapabilityResult,
+    doc_id_field,
     register,
 )
 from mbforge.service.use_cases import review_proposals
+from mbforge.service.use_cases.documents.document_refs import short_doc_id
 from mbforge.service.use_cases.documents.library import LibraryStore
 from mbforge.service.use_cases.pipeline import ingest
 
@@ -45,38 +47,43 @@ class ImportPdfInput(BaseModel):
 
 class ImportPdfOutput(BaseModel):
     doc_id: str
+    short_id: str
     title: str
     file_name: str
     status: str
+    run_id: str | None = None
 
 
 class SubmitExtractionInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
+    doc_id: str = doc_id_field()
 
 
 class SubmitExtractionOutput(BaseModel):
     run_id: str
     doc_id: str
+    short_id: str
 
 
 class SubmitPatentAnalysisInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
+    doc_id: str = doc_id_field()
 
 
 class SubmitPatentAnalysisOutput(BaseModel):
     doc_id: str
+    short_id: str
     run_ids: list[str] = Field(default_factory=list)
     enqueued: int
     skipped: int
 
 
 class ReingestDocumentInput(BaseModel):
-    doc_id: str = Field(..., min_length=1, max_length=128)
+    doc_id: str = doc_id_field()
 
 
 class ReingestDocumentOutput(BaseModel):
     run_id: str
     doc_id: str
+    short_id: str
 
 
 class RunActionInput(BaseModel):
@@ -133,7 +140,14 @@ async def import_pdf(
     path = _resolve_import_path(context.library_root, request.path)
     store = LibraryStore.get(context.library_root)
     document = await asyncio.to_thread(store.add_document, path, request.title)
-    return CapabilityResult(data=ImportPdfOutput(**document.to_dict()))
+    run_id = await ingest.auto_enqueue_on_import(context.library_root, document.doc_id)
+    return CapabilityResult(
+        data=ImportPdfOutput(
+            **document.to_dict(),
+            short_id=short_doc_id(document.doc_id),
+            run_id=run_id,
+        )
+    )
 
 
 async def submit_extraction(
@@ -149,7 +163,11 @@ async def submit_extraction(
             raise ConflictError("document already has an active run", detail=active)
         run_id = await ingest.enqueue(context.library_root, request.doc_id)
     return CapabilityResult(
-        data=SubmitExtractionOutput(run_id=run_id, doc_id=request.doc_id)
+        data=SubmitExtractionOutput(
+            run_id=run_id,
+            doc_id=request.doc_id,
+            short_id=short_doc_id(request.doc_id),
+        )
     )
 
 
@@ -181,6 +199,7 @@ async def submit_patent_analysis(
     return CapabilityResult(
         data=SubmitPatentAnalysisOutput(
             doc_id=request.doc_id,
+            short_id=short_doc_id(request.doc_id),
             run_ids=result.run_ids,
             enqueued=result.updated,
             skipped=result.skipped,
@@ -205,7 +224,11 @@ async def reingest_document(
         await asyncio.to_thread(store.clear_pipeline_data, request.doc_id)
         run_id = await ingest.enqueue(context.library_root, request.doc_id)
     return CapabilityResult(
-        data=ReingestDocumentOutput(run_id=run_id, doc_id=request.doc_id)
+        data=ReingestDocumentOutput(
+            run_id=run_id,
+            doc_id=request.doc_id,
+            short_id=short_doc_id(request.doc_id),
+        )
     )
 
 
@@ -244,7 +267,12 @@ async def propose_review(
 register(
     Capability(
         name="import_pdf",
-        description="Register a PDF already inside the active library directory.",
+        description=(
+            "Register a PDF already inside the active library directory and, "
+            "unless ingest.auto_enqueue_on_import is disabled, queue Extract -> "
+            "Markdown. Returns run_id (null when not queued or the enqueue "
+            "failed); continue with submit_patent_analysis for Patent."
+        ),
         input_model=ImportPdfInput,
         output_model=ImportPdfOutput,
         mutating=True,
@@ -254,7 +282,11 @@ register(
 register(
     Capability(
         name="submit_extraction",
-        description="Submit a registered document to Extract -> Markdown; Patent is a separate opt-in run.",
+        description=(
+            "Submit a registered document to Extract -> Markdown; Patent is a "
+            "separate opt-in run. The CLI notifies the session when the run "
+            "ends, so do not poll get_run."
+        ),
         input_model=SubmitExtractionInput,
         output_model=SubmitExtractionOutput,
         mutating=True,
@@ -264,7 +296,11 @@ register(
 register(
     Capability(
         name="submit_patent_analysis",
-        description="Queue the Patent stage for a document whose Extract evidence exists; poll get_run, then read get_patent_result.",
+        description=(
+            "Queue the Patent stage for a document whose Extract evidence "
+            "exists. The CLI notifies the session when it ends; then read "
+            "get_patent_result."
+        ),
         input_model=SubmitPatentAnalysisInput,
         output_model=SubmitPatentAnalysisOutput,
         mutating=True,
@@ -274,7 +310,10 @@ register(
 register(
     Capability(
         name="reingest_document",
-        description="Clear pipeline outputs and submit the document again.",
+        description=(
+            "Clear pipeline outputs and submit the document again. The CLI "
+            "notifies the session when the run ends."
+        ),
         input_model=ReingestDocumentInput,
         output_model=ReingestDocumentOutput,
         mutating=True,

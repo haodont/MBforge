@@ -26,6 +26,7 @@ from mbforge.foundation.layout import LibraryLayout, sanitize_upload_filename
 from mbforge.foundation.logger import get_logger
 from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.documents.backup import create_backup
+from mbforge.service.use_cases.documents.document_refs import resolve_reference
 
 logger = get_logger("mbforge.service.use_cases.documents.library")
 
@@ -208,6 +209,19 @@ class LibraryStore:
             statuses=sorted(VISIBLE_DOCUMENT_STATUSES)
         )
         return [Document.from_dict(row, self._root) for row in rows]
+
+    def resolve_reference(self, reference: str) -> str | None:
+        """Resolve a human document reference to its canonical ``doc_id``.
+
+        Accepts a full ``doc_id``, a unique hash prefix, the exact file name,
+        or the exact title. Returns ``None`` when nothing matches; raises
+        ``ValidationError`` when the reference is ambiguous.
+        """
+        ref = reference.strip()
+        if not ref:
+            return None
+        rows = get_repositories(self._root).documents.list_rows()
+        return resolve_reference(rows, ref)
 
     def search_documents(self, query: str, limit: int | None = None) -> list[Document]:
         """Case-insensitive substring search over title and file_name."""

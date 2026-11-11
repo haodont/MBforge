@@ -188,6 +188,13 @@ def test_pdf_render_pages_rejects_outside_paths_and_accepts_in_library(
     app_client: TestClient, tmp_library: Path, sample_pdf: Path
 ) -> None:
     """Only PDFs inside the library root render; traversal/outside paths are rejected."""
+    response = app_client.post(
+        "/api/v1/pdf/render-pages",
+        json={"library_root": "library", "pdf_path": "sample.pdf"},
+    )
+    assert response.status_code == 422, response.text
+    assert "absolute" in response.text
+
     for pdf_path in _TRAVERSAL_PDF_PATHS:
         response = app_client.post(
             "/api/v1/pdf/render-pages",

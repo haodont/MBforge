@@ -1,5 +1,6 @@
 """Application ports used to keep use cases independent from adapters."""
 
+from .api_surface import ApiField, ApiRoute, ApiSurfaceProvider
 from .pipeline import (
     PipelineRuntime,
     TaskCancelledError,
@@ -18,6 +19,9 @@ from .repositories import (
 from .runtime import RuntimeProvider, configure_runtime_provider, get_runtime
 
 __all__ = [
+    "ApiField",
+    "ApiRoute",
+    "ApiSurfaceProvider",
     "DatabaseRepository",
     "ArtifactStore",
     "EvidenceRepository",

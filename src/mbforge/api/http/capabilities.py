@@ -56,7 +56,8 @@ def _context(request: Request) -> CapabilityContext:
     root = str(resolve_library_root(None))
     token = request.headers.get("x-mbforge-token")
     mode = "edit" if verify_capability_token(root, token) else "readonly"
-    return CapabilityContext(library_root=root, mode=mode)
+    provider = getattr(request.app.state, "api_surface", None)
+    return CapabilityContext(library_root=root, mode=mode, api_surface=provider)
 
 
 def _guide(token_path: str) -> str:

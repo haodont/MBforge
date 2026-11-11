@@ -7,9 +7,10 @@ Thin HTTP shell; rendering lives in
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from fastapi import APIRouter
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from mbforge.api.http._path_utils import (
     DocumentNotFoundError,
@@ -31,8 +32,22 @@ class RenderPagesRequest(BaseModel):
     page_indices: list[int] | None = None
     dpi: int = 200
     library_root: str = Field(
-        default="", validation_alias=AliasChoices("library_root", "libraryRoot")
+        default="",
+        validation_alias=AliasChoices("library_root", "libraryRoot"),
+        description=(
+            "Absolute library root. Omit to use the configured active library."
+        ),
     )
+
+    @field_validator("library_root")
+    @classmethod
+    def _library_root_must_be_absolute(cls, value: str) -> str:
+        if value and not Path(value).is_absolute():
+            raise ValueError(
+                "library_root must be an absolute path; "
+                "omit it to use the configured library"
+            )
+        return value
 
 
 @router.post("/render-pages")
