@@ -134,12 +134,33 @@ export async function ensureMemoryFile(): Promise<string> {
 /** Read the file with a hard cap so a large memory cannot consume the prompt. */
 export async function readMemory(): Promise<string> {
   const path = await ensureMemoryFile()
-  const text = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '')
+  const run = writeChain.then(async () => {
+    const text = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '')
+    if (Buffer.byteLength(text, 'utf8') <= MAX_MEMORY_BYTES) return text
+
+    const compacted = compactMemory(text, '')
+    if (compacted.archived.length > 0) {
+      await archiveEntries(path, compacted.archived)
+      await writeMemory(path, compacted.text)
+      if (Buffer.byteLength(compacted.text, 'utf8') <= MAX_MEMORY_BYTES) {
+        return compacted.text
+      }
+    }
+    return `${truncateUtf8(compacted.text, MAX_MEMORY_BYTES)}\n\n[memory truncated; edit ${path}]\n`
+  })
+  writeChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+function truncateUtf8(text: string, maxBytes: number): string {
   const bytes = Buffer.from(text, 'utf8')
-  if (bytes.length <= MAX_MEMORY_BYTES) return text
-  let end = MAX_MEMORY_BYTES
+  if (bytes.length <= maxBytes) return text
+  let end = maxBytes
   while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1
-  return `${bytes.subarray(0, end).toString('utf8')}\n\n[memory truncated; edit ${path}]\n`
+  return bytes.subarray(0, end).toString('utf8')
 }
 
 /** Prompt section for the current memory, or an empty string for a fresh file. */

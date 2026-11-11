@@ -121,6 +121,30 @@ test('memory compaction archives old entries and keeps the active file bounded',
 
   const archive = readFileSync(memoryArchivePath(path), 'utf8')
   assert.match(archive, /project note 0 /)
+
+  const readPath = join(
+    mkdtempSync(join(tmpdir(), 'mbforge-memory-read-')),
+    'MEMORY.md',
+  )
+  process.env.MBFORGE_MEMORY_FILE = readPath
+  const entries = Array.from({ length: 10 }, (_, index) => {
+    const id = `p-${index.toString(16).padStart(8, '0')}`
+    return `- [${id}] 2026-01-01: project read note ${index} ${'x'.repeat(1_800)}`
+  })
+  writeFileSync(
+    readPath,
+    `# MBForge memory\n\n## project\n\n${entries.join('\n')}\n`,
+    'utf8',
+  )
+
+  const compacted = await readMemory()
+  const readActive = readFileSync(readPath, 'utf8')
+  assert.ok(Buffer.byteLength(readActive, 'utf8') <= 16 * 1024)
+  assert.match(compacted, /project read note 9 /)
+  assert.match(
+    readFileSync(memoryArchivePath(readPath), 'utf8'),
+    /project read note 0 /,
+  )
 })
 
 test('the memory tool stores, lists, and deletes notes through one action switch', async (t) => {
