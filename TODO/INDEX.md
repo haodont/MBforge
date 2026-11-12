@@ -1613,3 +1613,15 @@ Verified: `uv run pytest tests/unit` 464 passed, including
 `test_a_reading_bound_by_a_later_pass_closes_its_queue_item` and the
 measurement-replace counterpart. After the fixes, a Patent re-run of
 CN119504738A leaves 17/18 with both agent links intact.
+
+## A review candidate can be the comparator's drawing (2026-11-12)
+
+CN120943813A p95 prints a second activity table and, under it,
+`[0687]阳参化合物结构如下：` with one undesignated drawing. Because the queue
+scopes candidates by page, that comparator drawing appears in the candidate list
+of every unbound reading on p95 — including `化合物7-P1`, whose own structure the
+document never draws. A reviewer could pick it and bind a compound to the
+positive control. The page text says what it is, so the fix is a scope rule: a
+drawing introduced by a comparator/positive-control caption is not a candidate
+for a compound designation. Not implemented yet; the page evidence is recorded
+here so the rule is written against the printed caption rather than a heuristic.
