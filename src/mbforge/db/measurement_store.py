@@ -140,19 +140,53 @@ def insert_attributions_in_transaction(
     return written
 
 
+def _kept_attributions(
+    conn: Any, doc_id: str, measured_ids: set[str]
+) -> list[MeasurementAttribution]:
+    """The human and agent links a re-run must not throw away.
+
+    A re-extraction replaces a document's readings. The readings' ids are
+    stable, but deleting the rows takes their attributions with them, so an
+    adjudication someone made by hand — or the agent made from the page —
+    vanished on the next re-run (measured on CN119504738A, whose two
+    agent-decided links disappeared when Extract was replayed). A rule link is
+    recomputed every run; a human or agent link is not.
+    """
+    rows = conn.execute(
+        "SELECT attribution_id, measurement_id, mol_id, doc_id, method, "
+        "confidence, evidence_id, review_status FROM measurement_attribution "
+        "WHERE doc_id = ? AND method IN ('human', 'agent')",
+        (doc_id,),
+    ).fetchall()
+    kept: list[MeasurementAttribution] = []
+    for row in rows:
+        if row["measurement_id"] not in measured_ids:
+            # The reading itself is gone: the link would reference nothing.
+            continue
+        kept.append(MeasurementAttribution(**dict(row)))
+    return kept
+
+
 def replace_document_measurements(
     library_root: str | Path,
     doc_id: str,
     records: Sequence[MeasurementRecord],
     attributions: Sequence[MeasurementAttribution] = (),
 ) -> int:
-    """Replace one document's readings and attributions in one transaction."""
+    """Replace one document's readings and attributions in one transaction.
+
+    Human and agent adjudications survive the replace whenever their reading
+    still exists: only the rule links are recomputed.
+    """
     db = DatabaseManager.get(str(library_root))
     db.initialize()
     with db.transaction() as conn:
+        kept = _kept_attributions(
+            conn, doc_id, {record.measurement_id for record in records}
+        )
         delete_document_measurements(conn, doc_id)
         written = insert_measurements_in_transaction(conn, records)
-        insert_attributions_in_transaction(conn, attributions)
+        insert_attributions_in_transaction(conn, [*kept, *attributions])
     return written
 
 
