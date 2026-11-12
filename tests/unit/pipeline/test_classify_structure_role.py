@@ -197,3 +197,36 @@ def test_a_designation_the_page_prints_keeps_the_structure_concrete() -> None:
 
     assert classify_structure_role(unnamed) == "review_required"
     assert unnamed.properties["structure_role_reasons"]
+
+
+def test_a_number_printed_on_two_drawings_of_one_structure_keeps_it_concrete() -> None:
+    """The document itself settles a generic-looking neighbourhood.
+
+    CN120118069A prints its example sections with R-group definitions beside the
+    final compound, which withheld ``30A``…``53A`` from the concrete library and
+    left 29 readings with no molecule to link to. Each of those numbers is
+    printed on two to four drawings of its own structure — the document naming
+    the compound, not a crop window reaching the neighbour. A single read stays
+    a crop guess and still requires review.
+    """
+    repeated = _molecule(
+        "Cc1cc(=O)n2cc[nH]c2n1",
+        properties={
+            "context_texts": ["R1 means -H, -CH3, -CH2CH3; R5, R6 and R7"],
+            "detection_designations": [
+                {"name": "30A", "page": 69},
+                {"name": "30A", "page": 70},
+                {"name": "30A", "page": 99},
+            ],
+        },
+    )
+    assert classify_structure_role(repeated) == "complete"
+
+    read_once = _molecule(
+        "Cc1cc(=O)n2cc[nH]c2n1",
+        properties={
+            "context_texts": ["R1 means -H, -CH3, -CH2CH3; R5, R6 and R7"],
+            "detection_designations": [{"name": "30A", "page": 70}],
+        },
+    )
+    assert classify_structure_role(read_once) == "review_required"

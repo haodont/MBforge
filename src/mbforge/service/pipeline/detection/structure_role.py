@@ -213,6 +213,44 @@ def _named_by_page_text(molecule: Molecule) -> bool:
     return False
 
 
+def _named_by_repeated_print(molecule: Molecule) -> bool:
+    """Return whether the document printed one compound number on 2+ of its drawings.
+
+    A drawing read once can be a crop window reaching the neighbour's number.
+    The same number read on two drawings of the *same* structure is the
+    document's own statement: it numbered this compound here, and again there.
+    Measured on CN120118069A, the finalized compounds (``30A``, ``50A``, ``51A``,
+    ``52A``, ``53A``) were withheld from the concrete library only because the
+    example sections around them also print R-group definitions; each of those
+    numbers is printed on two to four drawings of its own structure, and
+    withholding them left 29 readings with no molecule to link to.
+
+    Only a compound-space designation counts, and a scaffold never reaches this
+    check (it has a dummy atom).
+    """
+    from mbforge.service.pipeline.detection.label_normalization import (
+        LabelKind,
+        normalize_coref_label,
+    )
+
+    properties = getattr(molecule, "properties", {})
+    if not isinstance(properties, dict):
+        return False
+    claims = properties.get("detection_designations")
+    if not isinstance(claims, list):
+        return False
+    counts: dict[str, int] = {}
+    for claim in claims:
+        name = claim.get("name") if isinstance(claim, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            continue
+        normalized = normalize_coref_label(name)
+        if normalized is None or normalized.kind is not LabelKind.COMPOUND:
+            continue
+        counts[normalized.normalized] = counts.get(normalized.normalized, 0) + 1
+    return any(count >= 2 for count in counts.values())
+
+
 def _context_values(molecule: Molecule) -> list[str]:
     """Collect bounded, human-readable context used for role classification."""
     # Keep classification bounded even when a document contributes many
@@ -337,11 +375,12 @@ def classify_structure_role(molecule: Molecule) -> str:
             role = REVIEW_REQUIRED
             reasons.append("markush_without_dummy")
         elif not has_dummy:
-            if _named_by_page_text(molecule):
-                # The document prints this drawing's compound number in its own
-                # text. The prose next to the crop on such a page is the
-                # document's (often the generic formula's R-group list), and it
-                # is not evidence about this drawing.
+            if _named_by_page_text(molecule) or _named_by_repeated_print(molecule):
+                # The document itself named this drawing: either its own text
+                # prints the number beside it, or the same number is printed on
+                # two drawings of this structure. The prose next to the crop is
+                # then the document's (often the generic formula's R-group
+                # list), and it is not evidence about this drawing.
                 role = "complete"
             else:
                 context_values = _context_values(molecule)
