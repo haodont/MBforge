@@ -312,7 +312,10 @@ def _structure_row(
     return {
         "page": page_number,
         "evidence_id": getattr(detection, "evidence_id", None),
-        "mol_id": str(getattr(candidate, "mol_id", "") or ""),
+        # A detected structure carries no molecule id of its own: the stored
+        # molecule is keyed by its canonical SMILES, which is the identifier an
+        # attribution or a review decision has to reference.
+        "mol_id": str(getattr(candidate, "mol_id", "") or canonical or ""),
         "smiles": str(getattr(candidate, "smiles", "") or ""),
         "esmiles": str(getattr(candidate, "esmiles", "") or ""),
         "canonical_smiles": canonical,

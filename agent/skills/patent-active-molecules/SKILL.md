@@ -242,3 +242,10 @@ document but is not bound in the library.
 - Never present a pending or rejected reading as an accepted fact; show its
   status.
 - Never claim completeness while `next_offset` is non-null.
+
+## 缺口需要 agent 补齐时
+
+上面这套只读诊断说明"哪条读数没有结构、为什么"。要真正把读数关联完，走
+`patent-binding-repair` skill：它在同一个候选材料包上做裁决、用
+`assign_attributions` 批量落库，并把无法证实的项交复核。代码规则跑不通的
+那部分（编号未读到、同号不同图、示例与化合物编号不一致）归它处理。

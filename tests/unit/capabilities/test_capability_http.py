@@ -570,6 +570,102 @@ def test_assign_attribution_writes_an_agent_link(
     assert records[0]["effective_attribution"]["method"] == "agent"
 
 
+def test_assign_attributions_writes_a_validated_batch(
+    app_client: TestClient, tmp_library: Path
+) -> None:
+    """One inspection pass writes many links, and one bad decision writes none.
+
+    The agent settles tens of readings per pass, so a batch is the difference
+    between finishing a document and stopping halfway. Because the batch is the
+    path that applies an adjudication without a human, validation is per batch,
+    not per item: a reading that does not exist rejects the whole write instead
+    of leaving a partial one behind.
+    """
+    from mbforge.contracts.measurement import MeasurementRecord
+    from mbforge.db.document_records import insert as insert_document
+    from mbforge.db.measurement_store import replace_document_measurements
+    from mbforge.db.molecule_store import create as create_molecule
+    from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.service.use_cases.documents.activity_queries import (
+        list_activity_records,
+    )
+
+    doc_id = "doc-batch-cap"
+    DatabaseManager.get(str(tmp_library)).initialize()
+    insert_document(
+        tmp_library,
+        {
+            "doc_id": doc_id,
+            "file_name": "doc-batch-cap.pdf",
+            "title": "doc-batch-cap",
+            "page_count": 1,
+            "status": "extracted",
+            "created_at": "2026-01-01 00:00:00",
+        },
+    )
+    create_molecule(tmp_library, "CCO", "CCO", "CCO", "compound-1", "image")
+    replace_document_measurements(
+        tmp_library,
+        doc_id,
+        [
+            MeasurementRecord(
+                measurement_id=measurement_id,
+                doc_id=doc_id,
+                metric="IC50",
+                activity_type="IC50",
+                original_value=12.0,
+                original_unit="nM",
+                canonical_value=12.0,
+                canonical_unit="nM",
+                operator="=",
+                reference_raw="化合物1",
+                reference_key="1",
+                reference_type="compound",
+                page_num=1,
+                evidence_ids=["ev-1"],
+            )
+            for measurement_id in ("m-1", "m-2")
+        ],
+    )
+
+    app_client.get("/api/v1/capabilities/guide")
+    token = (
+        (tmp_library / ".mbforge" / "capability-token")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    decisions = [
+        {"measurement_id": "m-1", "mol_id": "CCO"},
+        {"measurement_id": "m-2", "mol_id": "CCO", "confidence": 0.8},
+    ]
+
+    response = app_client.post(
+        "/api/v1/capabilities/assign_attributions",
+        json={"doc_id": doc_id, "decisions": decisions},
+        headers={"x-mbforge-token": token},
+    )
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["count"] == 2
+    assert [item["measurement_id"] for item in body["written"]] == ["m-1", "m-2"]
+
+    records = list_activity_records(str(tmp_library), doc_id)
+    assert [row["effective_attribution"]["mol_id"] for row in records] == [
+        "CCO",
+        "CCO",
+    ]
+
+    rejected = app_client.post(
+        "/api/v1/capabilities/assign_attributions",
+        json={
+            "doc_id": doc_id,
+            "decisions": [*decisions, {"measurement_id": "m-missing", "mol_id": "CCO"}],
+        },
+        headers={"x-mbforge-token": token},
+    )
+    assert rejected.status_code == 404
+
+
 def test_submit_patent_analysis_requires_edit_token(
     app_client: TestClient, tmp_library: Path
 ) -> None:

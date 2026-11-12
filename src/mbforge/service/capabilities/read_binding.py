@@ -87,6 +87,22 @@ class StructureCandidate(BaseModel):
     entry: EntryRef | None = None
 
 
+class StructureRef(BaseModel):
+    """A drawing no designation has claimed: the material a reading is judged against."""
+
+    mol_id: str = ""
+    smiles: str = ""
+    name: str = ""
+    page: int | None = None
+    bbox: list[float] | None = None
+    detection_score: float = 0.0
+    structure_kind: str = "concrete"
+    formula: str = ""
+    exact_mass: float | None = None
+    printed_ms: list[dict[str, object]] = Field(default_factory=list)
+    mass_check: str = "no_printed_mass"
+
+
 class AttributionRef(BaseModel):
     """The reading's current structure link, reduced to what decides precedence."""
 
@@ -109,6 +125,9 @@ class DesignationBinding(BaseModel):
     #: no reading references is context the document printed.
     has_reading: bool = False
     candidates: list[StructureCandidate] = Field(default_factory=list)
+    #: Unlabelled drawings printed on this designation's reading pages: what a
+    #: ``label_not_read`` decision compares the reading against.
+    nearby_structures: list[StructureRef] = Field(default_factory=list)
     attribution: AttributionRef | None = None
 
 
@@ -136,6 +155,7 @@ class BindingSummary(BaseModel):
     unattributed_readings: int = 0
     designations: int = 0
     candidate_structures: int = 0
+    unlabeled_structures: int = 0
     review_items: int = 0
     table_cells: int = 0
     names: int = 0
@@ -147,6 +167,7 @@ class GetBindingCandidatesOutput(BaseModel):
     summary: BindingSummary
     designations: list[DesignationBinding]
     readings: list[ReadingRef]
+    unlabeled_structures: list[StructureRef] = Field(default_factory=list)
     review_items: list[ReviewItemRef]
     table_cells: list[TableCell]
     names: list[str]
@@ -214,6 +235,27 @@ def _candidate(row: dict[str, object]) -> StructureCandidate:
     )
 
 
+def _structure_ref(row: dict[str, object]) -> StructureRef:
+    bbox = row.get("bbox")
+    mass = row.get("exact_mass")
+    score = row.get("detection_score")
+    return StructureRef(
+        mol_id=str(row.get("mol_id") or ""),
+        smiles=str(row.get("smiles") or ""),
+        name=str(row.get("name") or ""),
+        page=row.get("page") if isinstance(row.get("page"), int) else None,
+        bbox=[float(value) for value in bbox] if isinstance(bbox, list) else None,
+        detection_score=float(score) if isinstance(score, (int, float)) else 0.0,
+        structure_kind=str(row.get("structure_kind") or "concrete"),
+        formula=str(row.get("formula") or ""),
+        exact_mass=float(mass) if isinstance(mass, (int, float)) else None,
+        printed_ms=[
+            dict(item) for item in row.get("printed_ms") or [] if isinstance(item, dict)
+        ],
+        mass_check=str(row.get("mass_check") or "no_printed_mass"),
+    )
+
+
 async def get_binding_candidates(
     context: CapabilityContext, request: GetBindingCandidatesInput
 ) -> CapabilityResult:
@@ -253,6 +295,9 @@ async def get_binding_candidates(
                 reading_ids=[str(value) for value in item.get("reading_ids") or []],
                 has_reading=bool(item.get("has_reading")),
                 candidates=[_candidate(row) for row in item.get("candidates") or []],
+                nearby_structures=[
+                    _structure_ref(row) for row in item.get("nearby_structures") or []
+                ],
                 attribution=(
                     AttributionRef(
                         mol_id=str(attribution.get("mol_id") or ""),
@@ -277,6 +322,9 @@ async def get_binding_candidates(
             summary=BindingSummary(**report["summary"]),
             designations=designations,
             readings=[ReadingRef(**row) for row in report["readings"]],
+            unlabeled_structures=[
+                _structure_ref(row) for row in report["unlabeled_structures"]
+            ],
             review_items=[_review_item(item) for item in report["review_items"]],
             table_cells=[TableCell(**row) for row in report["table_cells"]],
             names=list(report["names"]),

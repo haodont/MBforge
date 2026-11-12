@@ -137,3 +137,129 @@ register(
         handler=assign_attribution,
     )
 )
+
+
+class AttributionDecision(BaseModel):
+    """One reading -> structure decision inside a batch."""
+
+    measurement_id: str = Field(..., min_length=1, max_length=128)
+    mol_id: str = Field(..., min_length=1, max_length=128)
+    evidence_id: str = Field("", max_length=128)
+    confidence: float | None = Field(None, ge=0, le=1)
+
+
+class AssignAttributionsInput(BaseModel):
+    doc_id: str = doc_id_field()
+    decisions: list[AttributionDecision] = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description=(
+            "The adjudications this pass decided. Every reading must exist in "
+            "the document and every structure must be a stored molecule: one "
+            "unverifiable decision rejects the whole batch, so a partial write "
+            "never looks like a finished pass."
+        ),
+    )
+
+
+class AssignAttributionsOutput(BaseModel):
+    doc_id: str
+    short_id: str
+    written: list[AssignAttributionOutput] = Field(default_factory=list)
+    count: int
+    method: str = "agent"
+
+
+async def assign_attributions(
+    context: CapabilityContext, request: AssignAttributionsInput
+) -> CapabilityResult:
+    """Write a batch of agent-decided reading -> structure links.
+
+    One inspection pass usually settles tens of readings, and writing them one
+    tool call at a time is what made the agent stop halfway. The batch is
+    validated as a whole before anything is written: a decision that names a
+    reading from another document or a structure the library does not hold
+    rejects the batch instead of leaving a half-applied adjudication behind.
+    """
+    from mbforge.service.ports import get_repositories
+
+    root = context.library_root
+    store = LibraryStore.get(root)
+    document = await asyncio.to_thread(store.load_document, request.doc_id)
+    if document is None:
+        raise NotFoundError("document not found", detail=request.doc_id)
+
+    repositories = get_repositories(root)
+    readings = await asyncio.to_thread(
+        repositories.measurements.list,
+        MeasurementQuery(doc_id=request.doc_id, limit=1000),
+    )
+    known_readings = {str(row["measurement_id"]) for row in readings}
+    missing_readings = [
+        decision.measurement_id
+        for decision in request.decisions
+        if decision.measurement_id not in known_readings
+    ]
+    if missing_readings:
+        raise NotFoundError(
+            "measurement not found", detail=", ".join(sorted(set(missing_readings)))
+        )
+    mol_ids = list(dict.fromkeys(decision.mol_id for decision in request.decisions))
+    identity = await asyncio.to_thread(repositories.molecules.identity_fields, mol_ids)
+    missing_molecules = [mol_id for mol_id in mol_ids if mol_id not in identity]
+    if missing_molecules:
+        raise NotFoundError(
+            "molecule not found", detail=", ".join(sorted(missing_molecules))
+        )
+
+    written: list[AssignAttributionOutput] = []
+    for decision in request.decisions:
+        attribution_id = await asyncio.to_thread(
+            repositories.measurements.bind_attribution,
+            measurement_id=decision.measurement_id,
+            mol_id=decision.mol_id,
+            doc_id=request.doc_id,
+            evidence_id=decision.evidence_id,
+            method="agent",
+            confidence=decision.confidence,
+        )
+        written.append(
+            AssignAttributionOutput(
+                attribution_id=attribution_id,
+                doc_id=request.doc_id,
+                short_id=short_doc_id(request.doc_id),
+                measurement_id=decision.measurement_id,
+                mol_id=decision.mol_id,
+                method="agent",
+                confidence=decision.confidence,
+                evidence_id=decision.evidence_id,
+                review_status="accepted",
+            )
+        )
+    return CapabilityResult(
+        data=AssignAttributionsOutput(
+            doc_id=request.doc_id,
+            short_id=short_doc_id(request.doc_id),
+            written=written,
+            count=len(written),
+        )
+    )
+
+
+register(
+    Capability(
+        name="assign_attributions",
+        description=(
+            "Write a batch of agent structure-activity adjudications: every "
+            "reading -> structure link is validated first (the reading must "
+            "exist in the document, the structure must be a stored molecule) and "
+            "the whole batch is rejected if one decision cannot be verified. "
+            "Each link is written with method=agent; a human link outranks it."
+        ),
+        input_model=AssignAttributionsInput,
+        output_model=AssignAttributionsOutput,
+        mutating=True,
+        handler=assign_attributions,
+    )
+)

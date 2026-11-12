@@ -380,11 +380,11 @@ def associate_facts(
             and set(_string_ids(entry.get("evidence_ids")))
             & set(section.title_evidence_ids)
         ]
-        declared = [
+        declared = [group[0] for group in _group_by_label(compound_entries).values()]
+        identity = [
             group[0]
             for group in _group_by_label(
-                compound_entries
-                or [entry for entry in example_entries if _is_example_identity(entry)]
+                [entry for entry in example_entries if _is_example_identity(entry)]
             ).values()
         ]
         if len(declared) == 1:
@@ -398,16 +398,19 @@ def associate_facts(
                 fact_id,
             )
         elif reference.key and reference.reference_type == "example":
-            # No title-backed product identity exists; retain the printed example
-            # designation without borrowing a body compound or an equal number.
-            # The one exception is the document stating its own product
-            # (``实施例29 … 得到55mg化合物29``): that names compound 29, so the
-            # reading belongs to it.
+            # No title-backed compound exists. The section identity is the
+            # fallback, but a section that prints its own product
+            # (``实施例29 … 得到55mg化合物29``) names compound 29, and that entry
+            # is the one a recognized structure can answer to.
             product = _example_product_entry(
                 reference.key, example_sections, entries_by_label
             )
             if product is not None:
                 measurement["compound_entry_id"] = product["entry_id"]
+            elif identity:
+                # Retain the example designation without borrowing a body compound
+                # or an equal number from another section.
+                measurement["compound_entry_id"] = identity[0]["entry_id"]
             else:
                 measurement["compound_entry_id"] = _declare_entry(
                     entries,

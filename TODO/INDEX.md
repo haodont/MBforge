@@ -1431,3 +1431,44 @@ never import `server`.
   observations; `CompoundEntry` remains a document-level patent record.
 - Cross-business-package imports use absolute `mbforge...` paths; relative
   imports are for a package and its immediate local modules.
+
+## Binding repair is an agent loop, not a rule (2026-11-12)
+
+Measured across the six CN test patents: 235 stored readings, 143 linked by the
+deterministic pass (61%), 92 unowned — 57 `label_not_read`, 27
+`structure_detected_unmatched`, 8 `no_printed_designation`. The classes have
+different owners: the first two are decisions a reader makes by looking at the
+page, and no rule that must stay evidence-tight can make them safely. So the
+repair path is agent-driven, and the code's job is to hand the agent the
+material and to accept its adjudication.
+
+- `agent/skills/patent-binding-repair/SKILL.md` is the loop: measure →
+  triage by reason → packet → decide → one validated batch → re-measure →
+  record. It carries a per-reason playbook and an evidence ladder (printed
+  product statement > printed mass > page-text caption > section locality >
+  geometry). `patent-active-molecules` stays the read-only diagnostic skill and
+  points at it.
+- `get_binding_candidates` now also publishes what a `label_not_read` decision
+  needs: `unlabeled_structures` (every drawing with no designation, with
+  formula, exact mass, printed-MS verdict) and, per designation with no
+  candidate, `nearby_structures` limited to that designation's reading pages.
+  Before this the packet was empty exactly where the gap was.
+- `verify_structures` fills `mol_id` from the canonical SMILES when the evidence
+  row carries none, so the agent has an id `assign_attributions` accepts.
+- New mutating capability `assign_attributions`: up to 200
+  `{measurement_id, mol_id, evidence_id?, confidence?}` decisions, all validated
+  before any is written (one unknown reading or molecule rejects the batch).
+  Writing 40 links one tool call at a time is why a pass used to stop halfway.
+- Also fixed in this round: an example reading now binds through the printed
+  product sentence (`实施例29 … 得到55mg化合物29`) and through a drawing
+  captioned with the example heading (the page-text pass stores `@example:N`,
+  which the candidate index now reads). `_ROUTE_PRODUCT_RE` accepts the printed
+  amount in a yield sentence. Measured effect: CN121270515A 5/34 → 29/34 linked
+  (the 5 left are positive controls and a WO comparator with no compound),
+  CN120943813A 14/45 → 25/45 (the rest still need label repair).
+
+Verified: `uv run pytest tests/unit -q` (456 passed), `uv run ruff check` on the
+touched modules. Batch writer covered by
+`test_assign_attributions_writes_a_validated_batch`; the product-sentence path
+by `test_an_example_reading_goes_to_the_compound_its_body_prints`; the example
+key space by `test_an_example_captioned_drawing_answers_to_its_example_identity`.

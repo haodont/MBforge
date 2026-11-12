@@ -35,7 +35,13 @@ _TABLE_TOKEN_RE = re.compile(r"\[MOL:\d+\]")
 def _candidate_structures(
     library_root: str | Path, doc_id: str
 ) -> list[dict[str, Any]]:
-    """Every structure that carries at least one designation, with its evidence."""
+    """Every recognized structure, labelled or not, with its evidence.
+
+    A ``label_not_read`` gap is exactly the case where the structure exists and
+    carries no designation, so filtering the unlabelled drawings out here would
+    leave the agent with nothing to judge against. The designation index below
+    keeps only the labelled ones; the packet publishes the rest separately.
+    """
     rows: list[dict[str, Any]] = []
     offset = 0
     while True:
@@ -43,7 +49,7 @@ def _candidate_structures(
             library_root, doc_id, offset=offset, limit=_STRUCTURE_PAGE_SIZE
         )
         items = list(report.get("items") or [])
-        rows.extend(item for item in items if item.get("label_keys"))
+        rows.extend(items)
         offset += len(items)
         if not items or offset >= int(report.get("total") or 0):
             return rows
@@ -249,6 +255,27 @@ def _candidate_ref(row: dict[str, Any], key: str) -> dict[str, Any]:
     }
 
 
+def _structure_ref(row: dict[str, Any]) -> dict[str, Any]:
+    """One drawing a designation has not claimed: what a reader compares against.
+
+    The deciding evidence for such a drawing is its printed mass (``mass_check``
+    against the document's own MS lines), its formula and where it is printed.
+    """
+    return {
+        "mol_id": str(row.get("mol_id") or row.get("canonical_smiles") or ""),
+        "smiles": row.get("canonical_smiles") or row.get("smiles") or "",
+        "name": row.get("name", ""),
+        "page": row.get("page"),
+        "bbox": row.get("bbox"),
+        "detection_score": row.get("detection_score", 0.0),
+        "structure_kind": row.get("structure_kind", "concrete"),
+        "formula": row.get("formula", ""),
+        "exact_mass": row.get("exact_mass"),
+        "printed_ms": list(row.get("printed_ms") or []),
+        "mass_check": row.get("mass_check", "no_printed_mass"),
+    }
+
+
 def binding_candidates(
     library_root: str | Path,
     doc_id: str,
@@ -270,12 +297,14 @@ def binding_candidates(
             "unattributed_readings": 0,
             "designations": 0,
             "candidate_structures": 0,
+            "unlabeled_structures": 0,
             "review_items": 0,
             "table_cells": 0,
             "names": 0,
         },
         "designations": [],
         "readings": [],
+        "unlabeled_structures": [],
         "review_items": [],
         "table_cells": [],
         "names": [],
@@ -285,7 +314,9 @@ def binding_candidates(
         return empty
 
     readings = list_activity_records(library_root, doc_id, limit=_READING_LIMIT)
-    structures = _candidate_structures(library_root, doc_id)
+    all_structures = _candidate_structures(library_root, doc_id)
+    structures = [row for row in all_structures if row.get("label_keys")]
+    unlabeled = [row for row in all_structures if not row.get("label_keys")]
     entries = _entries(library_root, doc_id)
     review_items = _review_items(library_root, doc_id)
     table_cells = _table_cells(library_root, doc_id)
@@ -326,6 +357,15 @@ def binding_candidates(
                 "reading_ids": item["reading_ids"],
                 "has_reading": item["has_reading"],
                 "candidates": [_candidate_ref(row, key) for row in by_key.get(key, [])],
+                "nearby_structures": (
+                    []
+                    if by_key.get(key)
+                    else [
+                        _structure_ref(row)
+                        for row in unlabeled
+                        if row.get("page") in set(item["pages"])
+                    ]
+                ),
                 "attribution": attribution,
             }
         )
@@ -341,6 +381,7 @@ def binding_candidates(
             "unattributed_readings": len(readings) - attributed,
             "designations": total,
             "candidate_structures": len(structures),
+            "unlabeled_structures": len(unlabeled),
             "review_items": len(review_items),
             "table_cells": len(table_cells),
             # Name → structure is a declared TODO: the package reserves the slot
@@ -349,6 +390,7 @@ def binding_candidates(
         },
         "designations": page_rows,
         "readings": [_reading_ref(reading) for reading in readings],
+        "unlabeled_structures": [_structure_ref(row) for row in unlabeled],
         "review_items": review_items,
         "table_cells": table_cells,
         "names": [],
