@@ -218,6 +218,67 @@ def _designation_scope(artifact: PatentFactsArtifact) -> dict[str, set[int]]:
     return scope
 
 
+def _queue_withheld_structures(
+    review: Any, doc_id: str, candidates: Sequence[Any]
+) -> int:
+    """Queue the drawings the role gate withheld, so a person can promote them.
+
+    ``classify_structure_role`` refuses a closed structure whose neighbouring
+    prose looks generic, and persist then drops it. Without an item that refusal
+    is invisible: the drawing is in no table a reader can act on. CN121717757A's
+    ``I-2`` is exactly this — the claims drawing whose mass matches 实施例3's
+    printed ``(M+H)+ = 504.1`` was never stored, so no reading could name it and
+    no queue asked anyone to look.
+
+    A scaffold or dummy-atom fragment is not queued: it is not a compound the
+    document could have measured. A decided item keeps its status, so a re-run
+    does not reopen it.
+    """
+    from mbforge.foundation.ids import stable_id
+    from mbforge.service.pipeline.detection.structure_role import (
+        PROPERTY_KEY,
+        classify_structure_role,
+    )
+
+    queued = 0
+    seen: set[str] = set()
+    for candidate in candidates:
+        smiles = str(getattr(candidate, "canonical_smiles", "") or "")
+        if not smiles or "*" in smiles or smiles in seen:
+            continue
+        properties = getattr(candidate, "properties", {})
+        properties = properties if isinstance(properties, dict) else {}
+        role = properties.get(PROPERTY_KEY)
+        if role is None:
+            role = classify_structure_role(candidate)
+        if role != "review_required":
+            continue
+        seen.add(smiles)
+        detections = list(getattr(candidate, "detections", []) or [])
+        page = (
+            int(detections[0].page) + 1
+            if detections and detections[0].page is not None
+            else None
+        )
+        review.insert_review_item(
+            item_id=stable_id("withheld-structure", doc_id, smiles),
+            kind="review_required",
+            doc_id=doc_id,
+            page=page,
+            smiles=smiles,
+            name=str(getattr(candidate, "name", "") or "") or None,
+            reasons=list(properties.get("structure_role_reasons") or []),
+            payload={
+                "doc_id": doc_id,
+                "mol_id": smiles,
+                "structure_role": role,
+                "reasons": list(properties.get("structure_role_reasons") or []),
+            },
+        )
+        queued += 1
+    return queued
+
+
 def _queue_unbound_readings(
     review: Any,
     doc_id: str,
@@ -371,6 +432,7 @@ def _queue_unbound_readings(
             },
         )
         queued += 1
+    queued += _queue_withheld_structures(review, doc_id, candidates)
     return queued
 
 

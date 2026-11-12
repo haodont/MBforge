@@ -232,3 +232,62 @@ def test_republishing_subset_keeps_other_structures_detections(
             "SELECT COUNT(*) AS n FROM molecule_detections WHERE doc_id = ?", (DOC,)
         ).fetchone()["n"]
     assert after == 3
+
+
+def test_a_withheld_drawing_becomes_a_review_item(tmp_path) -> None:
+    """The role gate's refusal must be visible, not silent.
+
+    CN121717757A's I-2 drawing matches 实施例3's printed MS but was withheld and
+    stored nowhere, so no reading could name it and no queue asked anyone to
+    look. A withheld concrete structure is now an item a person can promote; a
+    scaffold is still not one, because the document cannot have measured it.
+    """
+    from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.domain.molecule import Molecule
+    from mbforge.domain.types import DetectionSource
+    from mbforge.service.ports import get_repositories
+    from mbforge.service.use_cases.documents.patent_facts import (
+        _queue_withheld_structures,
+    )
+
+    DatabaseManager.get(str(tmp_path)).initialize()
+    review = get_repositories(str(tmp_path)).review
+
+    def _candidate(smiles: str, page: int) -> Molecule:
+        return Molecule(
+            canonical_smiles=smiles,
+            esmiles=smiles,
+            name="",
+            status="pending",
+            detections=[
+                DetectionSource(source="image", page=page, bbox=(1.0, 2.0, 3.0, 4.0))
+            ],
+            properties={
+                "structure_role": "review_required",
+                "structure_role_reasons": ["context_numbered_r_group"],
+            },
+        )
+
+    queued = _queue_withheld_structures(
+        review,
+        "doc-1",
+        [
+            _candidate("COc1ccc(C(=O)NC2CCCCC2)cc1", 31),
+            _candidate("*c1ccccc1", 5),
+        ],
+    )
+
+    assert queued == 1
+    items, total = review.list_queue(kind="review_required", status="pending")
+    assert total == 1
+    assert items[0]["smiles"] == "COc1ccc(C(=O)NC2CCCCC2)cc1"
+    assert items[0]["page"] == 32
+    assert items[0]["reasons"] == ["context_numbered_r_group"]
+
+    # A re-run does not reopen a decided item.
+    item_id = items[0].get("id") or items[0]["item_id"]
+    review.set_review_item_status(item_id, "review_required", "confirmed")
+    _queue_withheld_structures(
+        review, "doc-1", [_candidate("COc1ccc(C(=O)NC2CCCCC2)cc1", 31)]
+    )
+    assert review.get_item("review_required", item_id)["status"] == "confirmed"
