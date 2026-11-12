@@ -118,3 +118,97 @@ def test_a_reprint_that_still_disagrees_changes_nothing(library: Path) -> None:
         )[0]["n"]
         == 0
     )
+
+
+def test_an_unlabelled_drawing_is_named_after_the_designation_its_mass_matches(
+    library: Path,
+) -> None:
+    """A designation with no drawing still names the drawing its LC-MS measures.
+
+    CN121717757A cites ``I-2`` in its table and prints ``(M+H)+ = 504.1`` in
+    实施例3; the claims drawing whose mass is 503.16 was read but never
+    captioned. Exactly one unlabelled drawing matches, so the document has
+    already said which structure it means — the promotion stores it under the
+    designation and the association binds the readings by rule.
+    """
+    from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.service.pipeline.patent.structure_recovery import (
+        promote_structures_by_printed_mass,
+    )
+
+    DatabaseManager.get(str(library)).initialize()
+    candidate = Molecule(
+        canonical_smiles=(
+            "COc1ccc(C(=O)NC23CCC(CC2)C(Nc2cc(C(F)(F)F)nc4ccc(Cl)cc34)C3)cc1"
+        ),
+        esmiles="",
+        name="",
+        status="pending",
+        detections=[
+            DetectionSource(
+                source="image",
+                page=31,
+                bbox=(249.81, 339.82, 358.15, 419.74),
+                evidence_id="ev-p32",
+            )
+        ],
+        properties={},
+    )
+    issues: list[dict] = []
+
+    promoted = promote_structures_by_printed_mass(
+        library_root=library,
+        doc_id="doc-1",
+        candidates=[candidate],
+        characterizations=[
+            {
+                "technique": "ms",
+                "label_key": "I-2",
+                "raw_text": "LC-MS:m/z:(M+H)+=504.1",
+                "evidence_ids": ["ev-153"],
+            }
+        ],
+        issues=issues,
+    )
+
+    assert [item.name for item in promoted] == ["I-2"]
+    assert any(
+        issue["code"] == "designation_promoted_by_printed_mass" for issue in issues
+    )
+    stored = DatabaseManager.get(str(library)).execute(
+        "SELECT name FROM molecules WHERE mol_id = ?", (candidate.canonical_smiles,)
+    )
+    assert stored and stored[0]["name"] == "I-2"
+
+    # A mass that matches two drawings is not a name for either.
+    other = Molecule(
+        canonical_smiles=(
+            "COc1ccc(C(=O)NC23CCC(Nc4cc(C(F)(F)F)nc5ccc(Cl)cc45)(C2)C3)cc1"
+        ),
+        esmiles="",
+        name="",
+        status="pending",
+        detections=[
+            DetectionSource(
+                source="image", page=113, bbox=(1.0, 2.0, 3.0, 4.0), evidence_id="ev-113"
+            )
+        ],
+        properties={"structure_role": "complete"},
+    )
+    assert (
+        promote_structures_by_printed_mass(
+            library_root=library,
+            doc_id="doc-2",
+            candidates=[candidate, other],
+            characterizations=[
+                {
+                    "technique": "ms",
+                    "label_key": "I-3",
+                    "raw_text": "LC-MS:m/z:(M+H)+=504.1",
+                    "evidence_ids": ["ev-153"],
+                }
+            ],
+            issues=[],
+        )
+        == []
+    )

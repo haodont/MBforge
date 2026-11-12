@@ -216,3 +216,124 @@ def _append_issue(issues: list[dict[str, Any]], issue: dict[str, Any]) -> None:
 
 
 __all__ = ["REPRINT_SCALE", "recover_structures_by_printed_mass"]
+
+
+def promote_structures_by_printed_mass(
+    *,
+    library_root: str | Path,
+    doc_id: str,
+    candidates: Sequence[Any],
+    characterizations: Sequence[dict],
+    issues: list[dict[str, Any]],
+) -> list[Any]:
+    """Name an unlabelled drawing after the designation whose printed mass it matches.
+
+    A designation can be cited by a reading and printed with its own ``LC-MS``
+    while no drawing carries the number: CN121717757A prints ``I-2`` in its
+    activity table and ``(M+H)+ = 504.1`` in 实施例3, and the claims drawing whose
+    mass is 503.16 was read but captioned by neither. The document has said
+    which structure it means; only the label never reached the drawing.
+
+    The promotion is deliberately narrow: the designation must have no structure
+    answering it already, the printed mass must match **exactly one** unlabelled
+    concrete drawing, and a scaffold is never a candidate. The molecule is stored
+    under the designation so the association can then bind the readings by rule.
+    """
+    from mbforge.foundation.ids import stable_id
+    from mbforge.service.pipeline.detection.label_recovery import exact_mass
+    from mbforge.service.pipeline.detection.structure_role import (
+        PROPERTY_KEY,
+        classify_structure_role,
+    )
+    from mbforge.service.pipeline.patent.candidate_labels import candidate_label_keys
+    from mbforge.service.pipeline.patent.rules.characterization import (
+        MASS_TOLERANCE_DA,
+        adduct_mass_delta,
+        printed_ms_mz,
+    )
+    from mbforge.service.pipeline.persist.molecules import (
+        persist_molecule_candidates,
+    )
+
+    named: set[str] = set()
+    for candidate in candidates:
+        named |= candidate_label_keys(candidate)
+
+    unlabelled = []
+    for candidate in candidates:
+        smiles = str(getattr(candidate, "canonical_smiles", "") or "")
+        if not smiles or "*" in smiles or candidate_label_keys(candidate):
+            continue
+        properties = getattr(candidate, "properties", {})
+        properties = properties if isinstance(properties, dict) else {}
+        role = properties.get(PROPERTY_KEY)
+        if role is None:
+            role = classify_structure_role(candidate)
+        if role in ("fragment", "scaffold", "rejected"):
+            continue
+        unlabelled.append(candidate)
+
+    promoted: list[Any] = []
+    for item in characterizations:
+        label_key = str(item.get("label_key") or "")
+        if item.get("technique") != "ms" or not label_key or label_key in named:
+            continue
+        parsed = printed_ms_mz(str(item.get("raw_text") or ""))
+        if parsed is None:
+            continue
+        printed, adduct = parsed
+        delta_mass = adduct_mass_delta(adduct)
+        if delta_mass is None:
+            continue
+        matches = []
+        for candidate in unlabelled:
+            structure_mass = exact_mass(
+                str(getattr(candidate, "canonical_smiles", "") or "")
+            )
+            if structure_mass is None:
+                continue
+            if abs(printed - (structure_mass + delta_mass)) <= MASS_TOLERANCE_DA:
+                matches.append(candidate)
+        if len(matches) != 1:
+            continue
+        target = matches[0]
+        target.name = label_key
+        target.properties[PROPERTY_KEY] = "complete"
+        target.properties["designation_promotion"] = {
+            "label_key": label_key,
+            "printed_mz": printed,
+            "adduct": adduct,
+            "reason": "printed_mass_names_this_drawing",
+        }
+        persist_molecule_candidates(str(library_root), doc_id, [target])
+        unlabelled.remove(target)
+        named.add(label_key)
+        promoted.append(target)
+        _append_issue(
+            issues,
+            {
+                "code": "designation_promoted_by_printed_mass",
+                "message": (
+                    f"{label_key}: the unlabelled drawing whose mass is {printed:g} "
+                    f"was named after the designation its LC-MS prints"
+                ),
+                "severity": "info",
+                "evidence_ids": [
+                    detection.evidence_id
+                    for detection in getattr(target, "detections", [])
+                    if getattr(detection, "evidence_id", None)
+                ],
+                "related_fact_id": stable_id("promoted-by-mass", doc_id, label_key),
+                "label_key": label_key,
+                "smiles": str(getattr(target, "canonical_smiles", "") or ""),
+                "printed_mz": printed,
+            },
+        )
+    return promoted
+
+
+__all__ = [
+    "REPRINT_SCALE",
+    "promote_structures_by_printed_mass",
+    "recover_structures_by_printed_mass",
+]

@@ -355,6 +355,7 @@ class PatentStage:
         # corrected structures join the candidate set so the association can bind
         # them (and the mass tie-break prefers them over the mismatching read).
         from mbforge.service.pipeline.patent.structure_recovery import (
+            promote_structures_by_printed_mass,
             recover_structures_by_printed_mass,
         )
 
@@ -371,6 +372,22 @@ class PatentStage:
             logger.info(
                 "Recovered %d misread structure(s) by reprinting their drawing",
                 len(recovered),
+            )
+        # A designation can be cited and its mass printed while no drawing carries
+        # the number. When exactly one unlabelled drawing matches that mass, the
+        # document has already said which structure it means.
+        promoted = promote_structures_by_printed_mass(
+            library_root=ctx.library_root,
+            doc_id=ctx.doc_id,
+            candidates=candidates,
+            characterizations=characterizations,
+            issues=issues,
+        )
+        if promoted:
+            candidates = [*candidates, *promoted]
+            logger.info(
+                "Promoted %d unlabelled drawing(s) to the designation their mass names",
+                len(promoted),
             )
         associate_facts(
             sections,

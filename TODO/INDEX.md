@@ -1786,3 +1786,22 @@ I-2-3 +13.8) and no reprint passed the mass check, so nothing was rewritten.
 The ±0.7 pair re-reads identically at 2×, which says the disagreement is the
 printed value, not the recognition; the +27.8/+13.8 pair is the remaining
 re-recognition target (an intermediate read one fragment short/long).
+
+## Correction: I-2's p32 drawing is an unparseable read, not a withheld structure (2026-11-12)
+
+`COc1ccc(C(=O)NC23CCC(CC2)C(Nc2cc(C(F)(F)F)nc4ccc(Cl)cc34)C3)cc1` fails RDKit
+("unclosed ring"), so `promote_structure` was never the right tool: the drawing
+has no valid structure to promote, and no molecule row exists because the read is
+invalid, not because the role gate withheld it. Two consequences:
+
+- the `designation_promoted_by_printed_mass` pass (added this round) refuses it
+  too, correctly: it only considers drawings whose structure parses;
+- the reprint recovery is the right home, but it currently only fires on a
+  **mass mismatch** — it has no case for "the read does not parse at all".
+
+Next rule to write: extend `recover_structures_by_printed_mass` to also re-read a
+drawing whose SMILES RDKit rejects, keep the reprint when it parses and matches
+the printed mass of the designation the drawing is scoped to, and then let
+`promote_structures_by_printed_mass` name it. That is I-2's whole chain in one
+pass, and the same for the `+27.8`/`+13.8` intermediates if their reads are partly
+broken rather than merely wrong.
