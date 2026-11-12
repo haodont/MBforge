@@ -312,6 +312,7 @@ def associate_facts(
     candidates: list[Any],
     valid_evidence_ids: set[str],
     issues: list[dict[str, Any]],
+    characterizations: Sequence[Mapping[str, Any]] = (),
 ) -> None:
     """Attach only deterministic, evidence-backed relationships in Patent.
 
@@ -590,6 +591,40 @@ def associate_facts(
             for candidate, keys, evidence_ids in matches
             if candidate_owns_designation(candidate, label_key)
         ]
+        if len(owned) != 1 and characterizations:
+            # Two drawings claim one designation. The filing usually settles it:
+            # the section that prepares the compound prints its LC-MS, and only
+            # one structure is consistent with it (CN121717757A: I-266-A's
+            # claims drawing is 572.2 while 实施例26 prints 558.0).
+            from mbforge.service.pipeline.patent.rules.characterization import (
+                mass_consistent_structures,
+            )
+
+            consistent = mass_consistent_structures(
+                list(characterizations),
+                [candidate for candidate, _, _ in matches],
+                label_key,
+            )
+            if len(consistent) == 1:
+                owned = [
+                    (candidate, keys, evidence_ids)
+                    for candidate, keys, evidence_ids in owned
+                    if candidate is consistent[0]
+                ] or [
+                    next(
+                        (match for match in matches if match[0] is consistent[0]),
+                        (consistent[0], set(), []),
+                    )
+                ]
+                _append_issue(
+                    issues,
+                    "designation_settled_by_printed_mass",
+                    f"compound label {label_key} resolved by the printed MS",
+                    _string_ids(owned[0][2]),
+                    fact_entry_id,
+                    severity="info",
+                    label_key=label_key,
+                )
         if len(owned) != 1:
             _append_issue(
                 issues,

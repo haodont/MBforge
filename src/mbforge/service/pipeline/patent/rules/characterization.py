@@ -466,3 +466,50 @@ def find_mass_mismatches(
             }
         )
     return mismatches
+
+
+def mass_consistent_structures(
+    characterizations: Sequence[dict],
+    candidates: Sequence[Any],
+    label_key: str,
+    *,
+    tolerance: float = MASS_TOLERANCE_DA,
+) -> list[Any]:
+    """The structures whose calculated ion mass matches the mass printed for a label.
+
+    When two drawings claim one designation the filing often settles it itself:
+    the section that prepares the compound prints its ``LC-MS`` and only one of
+    the two structures is consistent with it. Measured on CN121717757A, whose
+    ``I-266-A`` has a claims drawing of ``C26H30…`` (572.2) and an example
+    drawing of ``C25H28…`` (558.16) while 实施例26 prints ``(M+H)+ = 558.0``.
+
+    Returns every candidate consistent with every mass printed for the label; an
+    empty list means the printed mass does not decide (no line, or both match).
+    """
+    from mbforge.service.pipeline.detection.label_recovery import exact_mass
+
+    printed: list[tuple[float, float]] = []
+    for item in characterizations:
+        if item.get("technique") != "ms" or str(item.get("label_key") or "") != label_key:
+            continue
+        parsed = printed_ms_mz(str(item.get("raw_text") or ""))
+        if parsed is None:
+            continue
+        printed.append(parsed)
+    if not printed:
+        return []
+
+    consistent: list[Any] = []
+    for candidate in candidates:
+        structure_mass = exact_mass(
+            str(getattr(candidate, "canonical_smiles", "") or "")
+        )
+        if structure_mass is None:
+            continue
+        if all(
+            (delta := adduct_mass_delta(adduct)) is not None
+            and abs(mz - (structure_mass + delta)) <= tolerance
+            for mz, adduct in printed
+        ):
+            consistent.append(candidate)
+    return consistent

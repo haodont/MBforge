@@ -1420,3 +1420,76 @@ def test_an_example_label_with_no_section_cites_the_compound_it_names() -> None:
         if entry["entry_id"] == undrawn["compound_entry_id"]
     )
     assert declared["label_key"] == "@example:27A"
+
+
+def test_the_printed_mass_settles_a_designation_two_drawings_claim() -> None:
+    """Two drawings claim one number; the section's own LC-MS picks the structure.
+
+    CN121717757A prints ``I-266-A`` on a claims drawing of ``C26H30…`` (572.2)
+    and on the example drawing of ``C25H28…`` (558.16), while 实施例26 prints
+    ``(M+H)+ = 558.0``. Without this the entry stayed ambiguous and both readings
+    were unowned.
+    """
+    entry = {
+        **_entry("entry-266", "化合物I-266-A", "sec-266"),
+        "label_raw": "I-266-A",
+        "label_key": "I-266-A",
+    }
+    right = Molecule(
+        canonical_smiles=(
+            "CC(C)(O)CCn1cc(C(=O)N[C@@H]2CCC[C@H](Nc3cc(C(F)(F)F)nc4ccc(Cl)cc34)C2)c(Cl)n1"
+        ),
+        esmiles="",
+        name="I-266-A",
+        status="pending",
+        detections=[
+            DetectionSource(
+                source="image",
+                page=138,
+                bbox=(1.0, 2.0, 3.0, 4.0),
+                evidence_id="ev-266",
+            )
+        ],
+        properties={"detection_designations": [{"name": "I-266-A"}]},
+    )
+    wrong = Molecule(
+        canonical_smiles=(
+            "CC(C)(CO)CCn1cc(C(=O)N[C@@H]2CCC[C@H](Nc3cc(C(F)(F)F)nc4ccc(Cl)cc34)C2)c(Cl)n1"
+        ),
+        esmiles="",
+        name="I-266-A",
+        status="pending",
+        detections=[
+            DetectionSource(
+                source="image",
+                page=56,
+                bbox=(5.0, 6.0, 7.0, 8.0),
+                evidence_id="ev-266-claims",
+            )
+        ],
+        properties={"detection_designations": [{"name": "I-266-A"}]},
+    )
+    issues: list[dict] = []
+
+    associate_facts(
+        [],
+        [entry],
+        [],
+        [],
+        [right, wrong],
+        {"ev-266", "ev-266-claims"},
+        issues,
+        characterizations=[
+            {
+                "technique": "ms",
+                "label_key": "I-266-A",
+                "raw_text": "LC-MS:m/z:(M+H)+=558.0",
+                "evidence_ids": ["ev-266"],
+            }
+        ],
+    )
+
+    assert entry["entity_id"] == right.canonical_smiles
+    assert any(
+        issue["code"] == "designation_settled_by_printed_mass" for issue in issues
+    )

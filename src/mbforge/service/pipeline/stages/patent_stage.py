@@ -357,6 +357,7 @@ class PatentStage:
             candidates,
             {item.evidence_id for item in source_evidence},
             issues,
+            characterizations=characterizations,
         )
 
         routes = extract_synthesis_routes(sections, blocks_by_id, ctx.doc_id)
