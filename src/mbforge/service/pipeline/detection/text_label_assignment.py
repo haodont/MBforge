@@ -408,15 +408,10 @@ def assign_text_labels(
                 continue
             under = _under_gap(designation.bbox, bbox) is not None
             if under:
-                # A caption printed centred over a drawing names that drawing.
-                # CN patents put the number below the structure in a scheme and
-                # above it in a claims list, and one page can do both: on
-                # CN121717757A p32 the left column's caption sits under its
-                # drawing while the middle column's sits over it. The centring
-                # is the strong signal; the caption only has to be adjacent.
-                gap = _box_gap(designation.bbox, bbox)
-                if gap > _FOOT_MIN_REACH:
+                # A caption printed under the drawing names that drawing.
+                if not _at_the_foot(designation.bbox, bbox):
                     continue
+                gap = 0.0
             else:
                 if not _at_the_head(designation.bbox, bbox):
                     continue
@@ -437,6 +432,31 @@ def assign_text_labels(
         used_prints.add(print_index)
         used_structures.add(structure_index)
         assignments[designations[print_index].text] = structures[structure_index][0]
+
+    # A caption the first pass could not place may still be centred over an
+    # unused drawing instead of under it: CN121717757A p32 prints one column's
+    # caption below its structure and the middle column's 7 pt above it. The
+    # recovery only runs on what is left over, so it cannot displace a pairing
+    # the page's own convention already decided.
+    for print_index, designation in enumerate(designations):
+        if print_index in used_prints:
+            continue
+        best: tuple[float, int] | None = None
+        for structure_index, (_structure_id, bbox) in enumerate(structures):
+            if structure_index in used_structures:
+                continue
+            if _under_gap(designation.bbox, bbox) is None:
+                continue
+            gap = _box_gap(designation.bbox, bbox)
+            if gap > _FOOT_MIN_REACH:
+                continue
+            if best is None or gap < best[0]:
+                best = (gap, structure_index)
+        if best is None:
+            continue
+        used_prints.add(print_index)
+        used_structures.add(best[1])
+        assignments[designation.text] = structures[best[1]][0]
     contested = tuple(
         designation.text
         for index, designation in enumerate(designations)
