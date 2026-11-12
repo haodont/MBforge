@@ -8,6 +8,7 @@ the existing review repository boundary.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from mbforge.domain.review import ReviewNotFoundError
@@ -208,3 +209,34 @@ __all__ = [
     "set_review_item_status",
     "stats",
 ]
+
+
+def resolve_bound_designations(
+    conn: Any, doc_id: str, measurement_ids: Sequence[str]
+) -> int:
+    """Close pending ``designation_unbound`` items whose reading now has an owner.
+
+    The queue is a set of questions. A later pass can answer one of them — the
+    example-label fallback bound thirty ``实施例…`` readings in CN120943813A —
+    and an answered question left pending makes a human adjudicate a link that
+    already exists. Only items whose reading is bound are closed; a reading that
+    stopped being queued for another reason (its section drew nothing) keeps its
+    item, because no structure was found for it.
+    """
+    ids = [item for item in dict.fromkeys(measurement_ids) if item]
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    cursor = conn.execute(
+        f"""
+        UPDATE review_items
+           SET status = 'confirmed',
+               resolved_at = datetime('now')
+         WHERE kind = 'designation_unbound'
+           AND status = 'pending'
+           AND doc_id = ?
+           AND json_extract(payload, '$.measurement_id') IN ({placeholders})
+        """,
+        [doc_id, *ids],
+    )
+    return int(cursor.rowcount or 0)

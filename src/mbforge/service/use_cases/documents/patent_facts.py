@@ -303,6 +303,22 @@ def _queue_unbound_readings(
         if isinstance(entry, dict) and entry.get("entry_id")
     }
     declared = _designation_scope(artifact)
+    # A question this pass can answer must not stay pending: the example-label
+    # fallback bound thirty readings in CN120943813A while their items stayed in
+    # the queue, asking a human to decide a link that already existed.
+    bound: list[str] = []
+    for measurement in artifact.measurements:
+        if not isinstance(measurement, dict):
+            continue
+        owner_entry = entries.get(str(measurement.get("compound_entry_id") or ""))
+        if measurement.get("mol_id") or (
+            owner_entry is not None and owner_entry.get("entity_id")
+        ):
+            measurement_id = str(measurement.get("measurement_id") or "")
+            if measurement_id:
+                bound.append(measurement_id)
+    if bound:
+        review.resolve_bound_designations(doc_id, bound)
     queued = 0
     for measurement in artifact.measurements:
         if not isinstance(measurement, dict):

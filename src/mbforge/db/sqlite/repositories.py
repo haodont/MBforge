@@ -344,6 +344,14 @@ class SqliteReviewRepository:
         with self._conn() as conn:
             return review_store.get_item(conn, kind, item_id)
 
+    def resolve_bound_designations(
+        self, doc_id: str, measurement_ids: Sequence[str]
+    ) -> int:
+        with self._conn() as conn:
+            return review_store.resolve_bound_designations(
+                conn, doc_id, measurement_ids
+            )
+
     def stats(self, doc_id: str | None = None) -> dict[str, Any]:
         with self._conn() as conn:
             return review_store.stats(conn, doc_id=doc_id)

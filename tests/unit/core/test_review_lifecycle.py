@@ -55,3 +55,37 @@ def test_resolve_status_transition_allows_terminal_reopen_and_rejects_invalid() 
         resolve_status_transition(
             "pending", "archive", action_targets={"confirm": "confirmed"}
         )
+
+
+def test_a_reading_bound_by_a_later_pass_closes_its_queue_item(tmp_path) -> None:
+    """An answered question must leave the queue.
+
+    The example-label fallback bound thirty ``实施例…`` readings in
+    CN120943813A while their ``designation_unbound`` items stayed pending, so a
+    human was asked to decide a link that already existed. Only items whose
+    reading is bound are closed; an unrelated item keeps waiting.
+    """
+    from mbforge.db.sqlite.database import DatabaseManager
+    from mbforge.service.ports import get_repositories
+
+    DatabaseManager.get(str(tmp_path)).initialize()
+    review = get_repositories(str(tmp_path)).review
+    for item_id, measurement_id in (("unbound-1", "m-1"), ("unbound-2", "m-2")):
+        review.insert_review_item(
+            item_id=item_id,
+            kind="designation_unbound",
+            doc_id="doc-1",
+            page=94,
+            name="30A",
+            reasons=["designation_without_structure"],
+            payload={"doc_id": "doc-1", "measurement_id": measurement_id},
+        )
+
+    closed = review.resolve_bound_designations("doc-1", ["m-1"])
+
+    assert closed == 1
+    assert review.get_item("designation_unbound", "unbound-1")["status"] == "confirmed"
+    assert review.get_item("designation_unbound", "unbound-2")["status"] == "pending"
+
+    # A repeat run finds nothing left to close.
+    assert review.resolve_bound_designations("doc-1", ["m-1"]) == 0
