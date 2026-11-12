@@ -1779,3 +1779,10 @@ What 94dd reports after both fixes (6 real mismatches, down from 8 with two
 false ones): I-47-4 +0.70, I-30-5 +0.67, I-60-5 +1.57, I-32-2 −2.44, I-2-2
 +27.8, I-2-3 +13.8. The ±0.7 pair is where the reprint loop should act next; the
 +27.8/+13.8 pair looks like a misread intermediate rather than a rounding.
+
+Measured after the gate: 94dd reports exactly the six genuine disagreements
+(I-47-4 +0.70, I-30-5 +0.67, I-60-5 +1.57, I-32-2 −2.44, I-2-2 +27.8,
+I-2-3 +13.8) and no reprint passed the mass check, so nothing was rewritten.
+The ±0.7 pair re-reads identically at 2×, which says the disagreement is the
+printed value, not the recognition; the +27.8/+13.8 pair is the remaining
+re-recognition target (an intermediate read one fragment short/long).
