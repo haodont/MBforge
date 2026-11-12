@@ -1562,3 +1562,29 @@ Two classes remain in the other documents, and neither is a code gap:
 Also verified in this round: `promote_structure` is now a live capability, so a
 withheld drawing can be promoted one at a time when the printed-twice rule does
 not reach it.
+
+## Page-verified residue after the repair passes (2026-11-12)
+
+Scoreboard by `query_activities` (6 CN documents, 235 readings):
+
+| document | linked | remaining | what the pages show |
+| --- | --- | --- | --- |
+| CN119504738A | 17/18 | 1 | one SMILES carries both `1` and `22`; two printings disagree about one compound |
+| CN120118069A | 68/69 | 1 | `对照化合物1` — a comparator, no compound of this document |
+| CN120329282A | 24/27 | 3 | `77-A` / `77-B` are named and characterized (MS 562.2) on p89 but **never drawn** — only the racemate `77` is (p88, MS 562.1); `177-A` is an OCR duplicate of `77-A` (same 27 nM row, p110) |
+| CN121270515A | 29/34 | 5 | positive controls and a WO comparator |
+| CN121717757A | 25/42 | 17 | `I-273-A`/`I-273-B` share one racemate drawing captioned "I-273-A 或I-273-B" (p180); `I-2`, `I-109`, `I-298-A`, `实施例15 组分1/2`, `实施例52 组分2` are cited in the table (p195) with no drawing anywhere |
+| CN120943813A | 24/45 | 21 | `-P1/-P2/-P4` designations are never printed beside a drawing; `19` is a pair captioned "19-P1 or 19-P2" (p72) |
+
+Total 187/235 linked (80%, from 143/235 at the start). Two adjudications were
+made from the page in this pass and written with `method=agent`:
+`化合物80 → ` the quinoline drawing (its printed name is
+`1-(1-(甲基磺酰基)乙基)…`, MS 558.1 on p91), and `化合物86 → ` the
+`N-CH2-SO2Me` drawing (printed name `1-((甲基磺酰基)甲基)…`, p91). In both the
+document drew the compound twice; the printed name and MS settled which drawing
+is right.
+
+The residue is not a pipeline gap: each remaining designation is either a
+compound the patent never drew, a pair printed under one shared caption, or a
+comparator. Those are review-queue decisions, and `list_review_queue` already
+holds the `designation_unbound` items for them.
