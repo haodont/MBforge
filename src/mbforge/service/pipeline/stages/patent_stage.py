@@ -349,6 +349,29 @@ class PatentStage:
                     "raw_text": mismatch["raw_text"],
                 }
             )
+        # A printed mass that disagrees with the structure is evidence the
+        # *recognition* is wrong. Re-read that drawing at higher resolution and
+        # keep the new structure only when it matches the printed mass; the
+        # corrected structures join the candidate set so the association can bind
+        # them (and the mass tie-break prefers them over the mismatching read).
+        from mbforge.service.pipeline.patent.structure_recovery import (
+            recover_structures_by_printed_mass,
+        )
+
+        recovered = recover_structures_by_printed_mass(
+            pdf_path=ctx.pdf_path,
+            library_root=ctx.library_root,
+            doc_id=ctx.doc_id,
+            candidates=candidates,
+            characterizations=characterizations,
+            issues=issues,
+        )
+        if recovered:
+            candidates = [*candidates, *recovered]
+            logger.info(
+                "Recovered %d misread structure(s) by reprinting their drawing",
+                len(recovered),
+            )
         associate_facts(
             sections,
             all_entries,

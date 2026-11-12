@@ -32,7 +32,6 @@ from mbforge.service.pipeline.detection.label_normalization import (
     LabelKind,
     normalize_coref_label,
 )
-from mbforge.service.pipeline.detection.label_recovery import recover_labels_from_ms
 from mbforge.service.pipeline.detection.normalization import (
     normalize_molecules,
     select_molecule_name,
@@ -41,6 +40,25 @@ from mbforge.service.pipeline.detection.structure_role import (
     classify_structure_role,
 )
 from mbforge.service.pipeline.markdown.esmiles_insert import insert_esmiles_blocks
+
+
+def __getattr__(name: str):
+    """Resolve the label-recovery re-export on first use.
+
+    ``label_recovery`` imports ``markdown.markers``, so importing it here at
+    module load closes a cycle: anything that imports ``markdown.markers`` first
+    triggers this package's ``__init__``, which imports ``label_recovery``, which
+    is half-initialised. Deferring the one name keeps the public surface and
+    makes the import order irrelevant.
+    """
+    if name == "recover_labels_from_ms":
+        from mbforge.service.pipeline.detection.label_recovery import (
+            recover_labels_from_ms,
+        )
+
+        return recover_labels_from_ms
+    raise AttributeError(name)
+
 
 __all__ = [
     "DetectionSource",
