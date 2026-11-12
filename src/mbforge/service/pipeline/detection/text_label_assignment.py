@@ -296,6 +296,16 @@ def _under_gap(
     return 0.0
 
 
+def _box_gap(
+    print_box: tuple[float, float, float, float],
+    structure: tuple[float, float, float, float],
+) -> float:
+    """The straight-line distance between two boxes; 0 when they touch."""
+    gap_x = max(0.0, max(print_box[0], structure[0]) - min(print_box[2], structure[2]))
+    gap_y = max(0.0, max(print_box[1], structure[1]) - min(print_box[3], structure[3]))
+    return (gap_x**2 + gap_y**2) ** 0.5
+
+
 def _columns(
     structures: list[tuple[str, tuple[float, float, float, float]]],
 ) -> list[tuple[float, float, list[int]]]:
@@ -398,10 +408,15 @@ def assign_text_labels(
                 continue
             under = _under_gap(designation.bbox, bbox) is not None
             if under:
-                # A caption printed under the drawing names that drawing.
-                if not _at_the_foot(designation.bbox, bbox):
+                # A caption printed centred over a drawing names that drawing.
+                # CN patents put the number below the structure in a scheme and
+                # above it in a claims list, and one page can do both: on
+                # CN121717757A p32 the left column's caption sits under its
+                # drawing while the middle column's sits over it. The centring
+                # is the strong signal; the caption only has to be adjacent.
+                gap = _box_gap(designation.bbox, bbox)
+                if gap > _FOOT_MIN_REACH:
                     continue
-                gap = 0.0
             else:
                 if not _at_the_head(designation.bbox, bbox):
                     continue

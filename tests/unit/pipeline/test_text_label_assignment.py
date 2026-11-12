@@ -241,3 +241,32 @@ def test_two_standalone_spellings_are_left_to_a_reader() -> None:
 def test_a_page_that_prints_no_series_spelling_does_not_correct() -> None:
     """Without the page's own spelling there is nothing to correct to."""
     assert reconcile_printed_spelling("1-60-3", ["[0510]"]) == "1-60-3"
+
+
+def test_a_centred_caption_names_its_drawing_above_or_below() -> None:
+    """One page can print one column's caption over its drawing and another's under.
+
+    CN121717757A p32 (claims) numbers nine drawings `I-1`…`I-9`; the left
+    column's caption sits under its drawing while the middle column's sits over
+    it, 7 pt away. The old rule accepted a centred caption only at the foot, so
+    half the captions named no drawing and the table's `I-2` reading had no
+    structure to bind to.
+    """
+    page_height = 842.0
+    drawing_left = (87.11, 442.06, 173.14, 523.78)
+    drawing_middle = (249.81, 339.82, 358.15, 419.74)
+    regions = [
+        # Under the left drawing (PDF y just below its 442.06 edge).
+        {"kind": "figno", "bbox": (122.72, 426.29, 135.25, 435.07), "text": "1-1"},
+        # Over the middle drawing (PDF y just above its 419.74 edge).
+        {"kind": "figno", "bbox": (288.81, 425.85, 302.08, 435.10), "text": "1-2"},
+    ]
+    designations = page_designations(regions, page_height)
+    structures = [
+        ("left", to_top_down(drawing_left, page_height)),
+        ("middle", to_top_down(drawing_middle, page_height)),
+    ]
+
+    assignment = assign_text_labels(structures, designations)
+
+    assert assignment.assignments == {"1-1": "left", "1-2": "middle"}
