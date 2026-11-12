@@ -1734,3 +1734,29 @@ Still open, in order of value:
    page and role reasons, would turn the gate's refusals into a worklist.
 2. **`promote_structure` needs to be reachable from the pass that finds the
    gap.** The capability exists; the session that discovered I-2 predates it.
+
+## The mismatch -> reprint loop is live, and its gate is now the honest one (2026-11-12)
+
+`recover_structures_by_printed_mass` re-renders a mismatching drawing at 2× and
+re-reads it, keeping the new structure only when it matches the printed mass.
+Running it on CN121717757A showed the loop works but nothing was recovered —
+and the reasons are worth keeping:
+
+- **Characterizations were unlabelled.** All 60 of 94dd's printed spectra had an
+  empty `label_key`, so `find_mass_mismatches` (and the new mass tie-break) saw
+  nothing. Two gaps caused it: `_DESIGNATION_MENTION_RE` accepted only a
+  digit-headed token, so `化合物I-50-2` was invisible in prose; and a preparation
+  paragraph names its reagent *and* its product, so the line carried two
+  designations and the owner stayed empty. The product verb (`得/得到/制得`) now
+  breaks that tie. After the fix: **8 labelled `smiles_mass_mismatch` issues**
+  (I-47-4, I-2-2, I-2-3, I-60-5, I-30-2, I-30-5, I-32-2) where there were none.
+- **The recovery refused every one of them, correctly.** Several "mismatches" are
+  adduct-notation artefacts, not recognition errors: `I-30-2` prints
+  `(M+H-100)+=128.0` and `printed_ms_mz` read `100.0` out of the adduct text;
+  a plain `[M+H]+` is what a mismatch gate may act on. Until the parser either
+  reads `(M+H-x)` or skips it, the loop must not rewrite a structure — and it
+  does not.
+
+Next: make the mismatch gate adduct-aware (only `+H`/`-H`/`+Na`-style plain
+ions, or parse the arithmetical form), then re-run: 94dd's I-47-4/I-30-5 are
+off by ~0.7 Da, which is the reprint's target shape.
