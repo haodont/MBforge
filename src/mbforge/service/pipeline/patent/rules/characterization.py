@@ -42,9 +42,14 @@ _STEP_MARKER_RE = re.compile(
 _YIELD_RE = re.compile(
     r"(?:收率|収率|产率|yield)\s*[:：]?\s*\d+(?:\.\d+)?\s*%", re.IGNORECASE
 )
-#: ``制得化合物7`` / ``得白色固体化合物11`` — the route names its own product.
+#: ``制得化合物7`` / ``得白色固体化合物11`` / ``得到55mg化合物29`` — the route
+#: names its own product. A printed amount may stand between the verb and the
+#: designation (``得到55mg化合物29``), because the yield sentence puts the mass
+#: first; a ``中间体`` product is an intermediate, not a compound.
 _ROUTE_PRODUCT_RE = re.compile(
-    r"(?:制得|得到|得)\s*(?:[\u4e00-\u9fff]{0,4}(?:固体|粉末|油状物|油状|晶体))?\s*"
+    r"(?:制得|得到|得)\s*"
+    r"(?:\d+(?:\.\d+)?\s*(?:mg|g|kg|μg|ug|mL)?\s*)?"
+    r"(?:[\u4e00-\u9fff]{0,4}(?:固体|粉末|油状物|油状|晶体))?\s*"
     r"(化合物\s*\d+[A-Za-z]?(?:-\d+)?)"
 )
 #: A shared-method or precedent sentence: the fact that a group of compounds was
@@ -243,6 +248,24 @@ def extract_synthesis_routes(
 
 #: Spectra and elemental lines as the corpus prints them: ``1H NMR (400 MHz,
 #: CDCl3) δ …``, ``MS (ESI) m/z: 456.2 [M+H]+``, ``LCMS: m/z 329.0 [M+H]+``,
+
+
+def declared_product_labels(text: str) -> list[str]:
+    """Return the compound designations a preparation passage prints as its product.
+
+    ``参考实施例1方法，制得化合物36.8mg`` prints a mass, not compound 36, so the
+    same quantity guard the entry pass uses applies here. The function exists so
+    the association can ask the *document* which compound an example produced
+    instead of assuming an example and a compound sharing a number are the same.
+    """
+    labels: list[str] = []
+    for match in _ROUTE_PRODUCT_RE.finditer(text or ""):
+        if _MASS_SUFFIX_RE.match((text or "")[match.end(1) :]):
+            continue
+        token = match.group(1).strip()
+        if token and token not in labels:
+            labels.append(token)
+    return labels
 
 
 def _technique_of(line: str) -> str | None:

@@ -52,6 +52,21 @@ _COMPOUND_PREFIX_RE = re.compile(
 _COMPOUND_BARE_RE = re.compile(rf"^(?P<token>{_COMPOUND_TOKEN})$")
 
 
+def example_designation_key(value: object) -> str | None:
+    """The example identity a printed designation names, or ``None``.
+
+    ``实施例19`` and ``Example 19`` → ``@example:19``; ``化合物19`` names the
+    compound space and yields ``None``. The already-stored key is accepted as it
+    is, because the page-text naming pass records the key it matched on the
+    structure's ``name`` and that round trip must not lose the identity.
+    """
+    cleaned = unicodedata.normalize("NFKC", str(value or "")).strip()
+    if cleaned.startswith(EXAMPLE_KEY_PREFIX):
+        return cleaned if len(cleaned) > len(EXAMPLE_KEY_PREFIX) else None
+    key = designation_key(cleaned)
+    return key if key.startswith(EXAMPLE_KEY_PREFIX) else None
+
+
 def entry_id(doc_id: str, section_id: str, label_key: str) -> str:
     """Deterministic entry ID: doc + type + section + normalized label.
 

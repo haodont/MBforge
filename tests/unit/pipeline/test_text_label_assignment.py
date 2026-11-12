@@ -75,6 +75,25 @@ def test_only_a_bare_token_names_a_drawing() -> None:
     assert bare_designation("") is None
 
 
+def test_a_figure_number_without_a_letter_names_its_drawing() -> None:
+    """A CN patent numbers a compound with a bare figure number.
+
+    ``14`` carries no letter, so the text rule alone rejects it — but the
+    layout producer printed it as ``figno``, its own statement that the number
+    belongs to a drawing. The kind decides for a pure number; a bare number in
+    prose is still not a designation, so the prose token is dropped.
+    """
+    regions = [
+        {"kind": "figno", "bbox": (146.63, 640.83, 160.56, 649.51), "text": "14"},
+        {"kind": "text", "bbox": (61.31, 233.23, 99.48, 250.18), "text": "14"},
+    ]
+
+    reads = page_designations(regions, _PAGE_HEIGHT)
+
+    assert [read.text for read in reads] == ["14"]
+    assert reads[0].bbox[0] == 146.63
+
+
 def test_page_reads_carry_only_the_numbers_the_page_prints() -> None:
     """The page's text becomes reads; the phrases around it do not."""
     regions = _regions(

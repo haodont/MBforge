@@ -15,7 +15,7 @@ from mbforge.domain.patent import (
     entry_id,
 )
 from mbforge.service.pipeline.patent.candidate_labels import (
-    candidate_label_keys,
+    candidate_designation_keys,
     candidate_owns_designation,
 )
 from mbforge.service.pipeline.patent.sections import (
@@ -269,6 +269,41 @@ def _declare_entry(
     return minted
 
 
+def _example_product_entry(
+    token: str,
+    example_sections: Mapping[str, Sequence[DocumentSection]],
+    entries_by_label: Mapping[str, list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    """The compound entry an example section's printed product statement names.
+
+    ``实施例29`` whose body prints ``得到 55 mg 化合物29`` states the product
+    itself, so the reading belongs to compound 29 — not to the example identity,
+    which no structure answers to. The statement must name exactly one compound:
+    a route that prints several products names no single owner, and the reading
+    then keeps the example identity it printed.
+    """
+    from mbforge.domain.patent import label_key_for
+    from mbforge.service.pipeline.patent.rules.characterization import (
+        declared_product_labels,
+    )
+
+    for section in example_sections.get(token, []):
+        labels = declared_product_labels(section.raw_text)
+        if len(labels) != 1:
+            continue
+        key = label_key_for(labels[0])
+        matches = [
+            entry
+            for entry in entries_by_label.get(key, [])
+            if entry.get("section_id") == section.section_id
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches and len(entries_by_label.get(key, [])) == 1:
+            return entries_by_label[key][0]
+    return None
+
+
 def associate_facts(
     sections: list[DocumentSection],
     entries: list[dict[str, Any]],
@@ -303,6 +338,7 @@ def associate_facts(
     # ``实施例9`` names the compound its own section prepares; a bare number is
     # never a document-wide alias for every compound that shares it.
     entries_by_example: dict[str, list[dict[str, Any]]] = {}
+    example_sections: dict[str, list[DocumentSection]] = {}
     for section in sections:
         token = example_token(section)
         if token is None:
@@ -310,6 +346,7 @@ def associate_facts(
         entries_by_example.setdefault(token, []).extend(
             entries_by_section.get(section.section_id, [])
         )
+        example_sections.setdefault(token, []).append(section)
 
     methods_by_section: dict[str, list[dict[str, Any]]] = {}
     for method in assay_methods:
@@ -363,14 +400,23 @@ def associate_facts(
         elif reference.key and reference.reference_type == "example":
             # No title-backed product identity exists; retain the printed example
             # designation without borrowing a body compound or an equal number.
-            measurement["compound_entry_id"] = _declare_entry(
-                entries,
-                entries_by_label,
-                measurement,
-                reference,
-                provenance,
-                evidence_ids,
-            )["entry_id"]
+            # The one exception is the document stating its own product
+            # (``实施例29 … 得到55mg化合物29``): that names compound 29, so the
+            # reading belongs to it.
+            product = _example_product_entry(
+                reference.key, example_sections, entries_by_label
+            )
+            if product is not None:
+                measurement["compound_entry_id"] = product["entry_id"]
+            else:
+                measurement["compound_entry_id"] = _declare_entry(
+                    entries,
+                    entries_by_label,
+                    measurement,
+                    reference,
+                    provenance,
+                    evidence_ids,
+                )["entry_id"]
         elif (
             reference.key is None
             or reference.reference_type != "compound"
@@ -461,7 +507,7 @@ def associate_facts(
 
     candidate_matches: dict[str, list[tuple[Any, set[str], list[str]]]] = {}
     for candidate in filter_persistable_candidates("", list(candidates), warn=False):
-        keys = candidate_label_keys(candidate)
+        keys = candidate_designation_keys(candidate)
         evidence_ids = _candidate_evidence_ids(candidate, valid_evidence_ids)
         if not keys:
             if evidence_ids:

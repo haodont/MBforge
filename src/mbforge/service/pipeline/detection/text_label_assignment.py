@@ -167,6 +167,23 @@ def _embedded_tokens(text: str) -> list[str]:
     )
 
 
+def _figure_number_designation(text: str) -> str | None:
+    """Return a figure number that numbers a drawing without carrying a letter.
+
+    ``bare_designation`` rejects a pure number because a bare number in prose is
+    a step or a paragraph marker. The layout producer already separates the two
+    cases: a region it classified as ``figno`` is a number printed beside a
+    drawing, which is exactly what the letter rule approximates. When the kind
+    says so and the token is a designation key, the number names a drawing.
+    """
+    cleaned = str(text or "").strip().strip(_TRIM)
+    if not cleaned or len(cleaned) > _MAX_TOKEN:
+        return None
+    if not cleaned.isdigit():
+        return None
+    return cleaned if designation_key(cleaned) else None
+
+
 def page_designations(
     regions: list[dict[str, Any]], page_height: float
 ) -> list[TextDesignation]:
@@ -188,6 +205,8 @@ def page_designations(
             continue
         raw = str(region.get("text") or "").strip()
         token = bare_designation(raw)
+        if token is None and str(region.get("kind") or "text") == "figno":
+            token = _figure_number_designation(raw)
         if token is None:
             # A caption the OCR read with the wrong letter is not a designation
             # yet; the page's own spelling may make it one.

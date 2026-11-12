@@ -1287,3 +1287,80 @@ def test_a_reading_pairs_with_the_structure_its_compound_number_names(
     assert pairs[0]["smiles"] == "CCO"
     # The document prints no mass for the compound, so the pair says so.
     assert pairs[0]["verified_by_mass"] is False
+
+
+def test_an_example_reading_goes_to_the_compound_its_body_prints() -> None:
+    """The document's own product statement settles what ``实施例29`` prepared.
+
+    A CN patent numbers its examples and its compounds separately: the activity
+    table cites ``实施例29`` while the structure it belongs to is drawn under
+    ``化合物29``. The example identity answers to no drawing, so the reading
+    stayed unowned. ``得到55mg化合物29`` is the document naming its product, and a
+    passage that prints two products names no single owner.
+    """
+    section = ParsedSection(
+        section_id="sec-29",
+        title="实施例29",
+        kind="example",
+        page_start=80,
+        page_end=80,
+        raw_text="实施例29\n以4-甲氧基苯甲酸为原料，得到55mg化合物29。",
+        labels=[],
+        esmiles_candidate_ids=[],
+        evidence_ids=["ev-sec-29"],
+        title_evidence_ids=["ev-sec-29"],
+        heading_line="实施例29",
+    )
+    entries = [
+        {**_entry("entry-29", "化合物29", "sec-29"), "evidence_ids": ["ev-body-29"]}
+    ]
+    measurement = _example_measurement("实施例 29", "29")
+    issues: list[dict] = []
+
+    associate_facts(
+        [section],
+        entries,
+        [],
+        [measurement],
+        [],
+        {"ev-sec-29", "ev-body-29", "ev-table"},
+        issues,
+    )
+
+    assert measurement["compound_entry_id"] == "entry-29"
+
+    ambiguous = ParsedSection(
+        section_id="sec-30",
+        title="实施例30",
+        kind="example",
+        page_start=81,
+        page_end=81,
+        raw_text="实施例30\n分步制得化合物30，随后得到化合物31。",
+        labels=[],
+        esmiles_candidate_ids=[],
+        evidence_ids=["ev-sec-30"],
+        title_evidence_ids=["ev-sec-30"],
+        heading_line="实施例30",
+    )
+    ambiguous_measurement = _example_measurement("实施例 30", "30")
+    ambiguous_entries = [
+        {**_entry("entry-30", "化合物30", "sec-30"), "evidence_ids": ["ev-body-30"]}
+    ]
+    ambiguous_issues: list[dict] = []
+
+    associate_facts(
+        [ambiguous],
+        ambiguous_entries,
+        [],
+        [ambiguous_measurement],
+        [],
+        {"ev-sec-30", "ev-body-30", "ev-table"},
+        ambiguous_issues,
+    )
+
+    declared = next(
+        entry
+        for entry in ambiguous_entries
+        if entry["entry_id"] == ambiguous_measurement["compound_entry_id"]
+    )
+    assert declared["label_key"] == "@example:30"

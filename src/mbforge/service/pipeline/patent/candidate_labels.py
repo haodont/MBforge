@@ -12,18 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 
-def candidate_label_keys(candidate: Any) -> set[str]:
-    """Return the ``compound`` designation keys *candidate* prints.
-
-    Only strings the normalizer accepts as a compound designation survive; a
-    printed chemistry name yields no key, so reading more channels cannot invent
-    an association.
-    """
-    from mbforge.service.pipeline.detection.label_normalization import (
-        LabelKind,
-        normalize_coref_label,
-    )
-
+def _printed_values(candidate: Any) -> list[str]:
+    """Every string a candidate records a designation in."""
     properties = getattr(candidate, "properties", {})
     properties = properties if isinstance(properties, dict) else {}
     values: list[str] = []
@@ -34,6 +24,7 @@ def candidate_label_keys(candidate: Any) -> set[str]:
         "normalized_label",
         "label",
         "formula_label",
+        "designation_key",
     ):
         value = properties.get(key)
         if isinstance(value, str):
@@ -56,13 +47,57 @@ def candidate_label_keys(candidate: Any) -> set[str]:
     labels = getattr(candidate, "labels", None)
     if isinstance(labels, (list, tuple)):
         values.extend(item for item in labels if isinstance(item, str))
+    return values
+
+
+def candidate_printed_names(candidate: Any) -> list[str]:
+    """The channel values a candidate recorded, in the order they are read."""
+    return _printed_values(candidate)
+
+
+def candidate_label_keys(candidate: Any) -> set[str]:
+    """Return the ``compound`` designation keys *candidate* prints.
+
+    Only strings the normalizer accepts as a compound designation survive; a
+    printed chemistry name yields no key, so reading more channels cannot invent
+    an association.
+    """
+    from mbforge.service.pipeline.detection.label_normalization import (
+        LabelKind,
+        normalize_coref_label,
+    )
 
     keys: set[str] = set()
-    for value in values:
+    for value in _printed_values(candidate):
         normalized = normalize_coref_label(value)
         if normalized is not None and normalized.kind is LabelKind.COMPOUND:
             keys.add(normalized.normalized)
     return keys
+
+
+def candidate_example_keys(candidate: Any) -> set[str]:
+    """Return the example designations a candidate's drawing stands for.
+
+    A CN patent captions an example's product with the example heading itself
+    (``实施例19`` under the drawn product), and the page-text naming pass stores
+    the *key* it matched (``@example:19``). Those drawings answer to the example
+    identity, not to a compound number, so the association needs both key spaces
+    or every reading that cites ``实施例19`` stays unowned while its structure was
+    recognized and drawn in the same section.
+    """
+    from mbforge.domain.patent import example_designation_key
+
+    keys: set[str] = set()
+    for value in _printed_values(candidate):
+        key = example_designation_key(value)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def candidate_designation_keys(candidate: Any) -> set[str]:
+    """Return every designation key the candidate answers to, both key spaces."""
+    return candidate_label_keys(candidate) | candidate_example_keys(candidate)
 
 
 def candidate_designation_counts(candidate: Any) -> dict[str, int]:
@@ -102,8 +137,12 @@ def candidate_owns_designation(candidate: Any, label_key: str) -> bool:
     drawings of one structure carry several designations, the one the minority
     of them carry is a misreading — the drawing belongs to the compound the
     other drawings name. A candidate whose designations tie owns none of them,
-    because none of them is established.
+    because none of them is established. An example designation has no
+    per-drawing tally (the page prints the example heading once), so the merged
+    label set decides it, exactly as it does for a candidate without claims.
     """
+    if label_key.startswith("@"):
+        return label_key in candidate_example_keys(candidate)
     counts = candidate_designation_counts(candidate)
     if not counts:
         # No per-drawing record (a candidate from another producer): the
@@ -116,7 +155,10 @@ def candidate_owns_designation(candidate: Any, label_key: str) -> bool:
 
 
 __all__ = [
+    "candidate_designation_keys",
     "candidate_designation_counts",
+    "candidate_example_keys",
     "candidate_label_keys",
     "candidate_owns_designation",
+    "candidate_printed_names",
 ]

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mbforge.service.pipeline.patent.candidate_labels import (
+    candidate_example_keys,
     candidate_label_keys,
     candidate_owns_designation,
 )
@@ -78,3 +79,21 @@ def test_ownership_is_decided_by_the_drawings_that_agree() -> None:
 
     assert candidate_owns_designation(candidate, "13") is True
     assert candidate_owns_designation(candidate, "14") is False
+
+
+def test_an_example_captioned_drawing_answers_to_its_example_identity() -> None:
+    """A drawing captioned ``实施例19`` is not compound 19 — but it is not nothing.
+
+    The page-text naming pass stores the key it matched, so the structure's name
+    is ``@example:19``. The compound key space stays clean (no ``19`` is
+    invented), while the example identity reaches the drawing that was printed
+    under its own heading.
+    """
+    stored = _Candidate(name="@example:19")
+    printed = _Candidate(name="实施例 19")
+
+    assert candidate_label_keys(stored) == set()
+    assert candidate_label_keys(printed) == set()
+    assert candidate_example_keys(stored) == {"@example:19"}
+    assert candidate_example_keys(printed) == {"@example:19"}
+    assert candidate_owns_designation(stored, "@example:19") is True
