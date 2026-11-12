@@ -510,6 +510,16 @@ def adduct_mass_delta(adduct: str) -> float | None:
     return total
 
 
+def _loss_expression(adduct: str) -> bool:
+    """Whether a printed adduct subtracts a named group after the ion.
+
+    ``-H`` and ``+H`` are plain ions; ``H-t-Bu`` (two fragments) is a loss
+    expression whose meaning the document does not fix.
+    """
+    body = str(adduct or "").strip().lstrip("+-")
+    return re.search(r"[+-]", body) is not None
+
+
 def find_mass_mismatches(
     characterizations: Sequence[dict],
     candidates: Sequence[Any],
@@ -542,6 +552,13 @@ def find_mass_mismatches(
         if parsed is None:
             continue
         printed, adduct = parsed
+        if _loss_expression(adduct):
+            # ``(M+H-t-Bu)+`` is the corpus's loose way of printing a group
+            # loss: on a Boc-protected amine it means the whole Boc (≈100 Da),
+            # on another compound the alkene (≈56 Da). The notation does not say
+            # which, so the line cannot decide whether a structure is wrong —
+            # treating it as one mass would invent a 44 Da mismatch.
+            continue
         delta_mass = adduct_mass_delta(adduct)
         if delta_mass is None:
             continue

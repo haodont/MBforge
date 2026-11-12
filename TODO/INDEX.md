@@ -1760,3 +1760,22 @@ and the reasons are worth keeping:
 Next: make the mismatch gate adduct-aware (only `+H`/`-H`/`+Na`-style plain
 ions, or parse the arithmetical form), then re-run: 94dd's I-47-4/I-30-5 are
 off by ~0.7 Da, which is the reprint's target shape.
+
+## Mass checks are adduct-aware, and loss notation is not comparable (2026-11-12)
+
+`printed_ms_mz` read the first number after `m/z`, which in `(M+H-100)†=128.0`
+is the `100` inside the adduct — a 128 Da "mismatch" against a correct structure.
+The value is now read where the document prints it (both orders:
+`(M+H)+=558.0` and `m/z 456.2 [M+H]+`), and the adduct is parsed fragment by
+fragment with unknown fragments leaving the line unreadable.
+
+One more gate the corpus forces: `(M+H-t-Bu)+` is a *loss* expression used
+loosely — on Boc-protected amines it means the whole Boc (I-50-2: 348.20 → 249.1,
+i.e. −Boc 100.05, not −isobutene 56.06), elsewhere the alkene. A line whose
+adduct subtracts a named group is now skipped rather than compared, so it cannot
+invent a 44 Da mismatch and cannot drive the reprint recovery.
+
+What 94dd reports after both fixes (6 real mismatches, down from 8 with two
+false ones): I-47-4 +0.70, I-30-5 +0.67, I-60-5 +1.57, I-32-2 −2.44, I-2-2
++27.8, I-2-3 +13.8. The ±0.7 pair is where the reprint loop should act next; the
++27.8/+13.8 pair looks like a misread intermediate rather than a rounding.
