@@ -49,6 +49,11 @@ class _Candidate:
         self.canonical_smiles = smiles
         self.smiles = smiles
         self.name = name
+        # The publication pass classifies unclassified candidates, so the stub
+        # has to look like a molecule record (role, not just smiles).
+        self.status = "pending"
+        self.properties = {}
+        self.labels = []
         self.detections = [_Detection(page0, bbox, image_path)]
 
 
