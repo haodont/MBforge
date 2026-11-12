@@ -426,8 +426,13 @@ def associate_facts(
                 # designation. When no example section claims the token and the
                 # document drew that compound, the compound key space is what
                 # the reading cites.
+                # Several sections name the same compound (its preparation and
+                # its synthesis route), so one designation can own several
+                # entries. They all carry the same label key, so the first is
+                # the compound the reading cites; a disputed designation is
+                # reported by the entry pass on its own.
                 matches = entries_by_label.get(reference.key, [])
-                if len(matches) == 1:
+                if matches:
                     product = matches[0]
             if product is not None:
                 measurement["compound_entry_id"] = product["entry_id"]
