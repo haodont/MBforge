@@ -354,6 +354,16 @@ def associate_facts(
         if isinstance(section_id, str):
             methods_by_section.setdefault(section_id, []).append(method)
 
+    # Which designations a recognized drawing actually answers to. A reading may
+    # only fall back from an example label to the compound space when the
+    # document drew that compound: a bare section number never borrows a
+    # compound another section declares.
+    drawn_before: set[str] = set()
+    for candidate in filter_persistable_candidates("", list(candidates), warn=False):
+        for key in candidate_designation_keys(candidate):
+            if candidate_owns_designation(candidate, key):
+                drawn_before.add(key)
+
     for measurement in measurements:
         measurement_id = measurement.get("measurement_id")
         fact_id = measurement_id if isinstance(measurement_id, str) else None
@@ -405,6 +415,20 @@ def associate_facts(
             product = _example_product_entry(
                 reference.key, example_sections, entries_by_label
             )
+            if (
+                product is None
+                and reference.key not in example_sections
+                and reference.key in drawn_before
+            ):
+                # The activity table labels the row ``Example 27A`` while the
+                # section that prepares it is numbered elsewhere (``实施例6``),
+                # and the drawing it names is printed ``27A`` — the compound
+                # designation. When no example section claims the token and the
+                # document drew that compound, the compound key space is what
+                # the reading cites.
+                matches = entries_by_label.get(reference.key, [])
+                if len(matches) == 1:
+                    product = matches[0]
             if product is not None:
                 measurement["compound_entry_id"] = product["entry_id"]
             elif identity:

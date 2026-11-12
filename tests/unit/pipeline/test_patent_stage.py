@@ -1364,3 +1364,59 @@ def test_an_example_reading_goes_to_the_compound_its_body_prints() -> None:
         if entry["entry_id"] == ambiguous_measurement["compound_entry_id"]
     )
     assert declared["label_key"] == "@example:30"
+
+
+def test_an_example_label_with_no_section_cites_the_compound_it_names() -> None:
+    """A table may label a row ``Example 27A`` while sections number otherwise.
+
+    CN120118069A prints ``Example 27A`` in its activity table while the section
+    that prepares it is ``实施例6``; the drawing is printed ``27A``. With no
+    example section claiming the token, the compound key space is what the
+    reading cites — and only when the document actually drew that compound, so
+    a bare section number still never borrows another section's compound.
+    """
+    entries = [_entry("entry-27A", "化合物27A", "sec-27A")]
+    measurement = _example_measurement("Example 27A", "27A")
+    section = _example_section("sec-6", "实施例6：化合物27A的制备")
+    issues: list[dict] = []
+    drawn = Molecule(
+        canonical_smiles="CCO",
+        esmiles="CCO",
+        name="27A",
+        status="pending",
+        detections=[
+            DetectionSource(source="image", page=62, bbox=(1.0, 2.0, 3.0, 4.0))
+        ],
+        properties={"detection_designations": [{"name": "27A"}, {"name": "27A"}]},
+    )
+
+    associate_facts(
+        [section],
+        entries,
+        [],
+        [measurement],
+        [drawn],
+        {"ev-sec-6", "ev-table"},
+        issues,
+    )
+
+    assert measurement["compound_entry_id"] == "entry-27A"
+
+    # Without a drawing of that compound the label keeps its example identity.
+    undrawn = _example_measurement("Example 27A", "27A")
+    undrawn_entries = [_entry("entry-27A", "化合物27A", "sec-27A")]
+    associate_facts(
+        [section],
+        undrawn_entries,
+        [],
+        [undrawn],
+        [],
+        {"ev-sec-6", "ev-table"},
+        [],
+    )
+    declared = next(
+        entry
+        for entry in undrawn_entries
+        if entry["entry_id"] == undrawn["compound_entry_id"]
+    )
+    assert declared["label_key"] == "@example:27A"
