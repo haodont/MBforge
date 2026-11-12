@@ -118,7 +118,6 @@ def ocr_page_region(
             zoom=DEFAULT_RENDER_ZOOM,
             detector=detector,
             cross_model=False,
-            mask_table_molecules=False,
         )
     finally:
         document.close()

@@ -26,6 +26,9 @@ from mbforge.service.pipeline.cancellation import (
     default_registry,
     make_cancel_check,
 )
+from mbforge.service.pipeline.detection.normalization import (
+    resolve_repeated_print_labels,
+)
 from mbforge.service.pipeline.run.context import PipelineContext
 from mbforge.service.pipeline.stage import PipelineErrorCode, StageResult, register
 
@@ -183,6 +186,10 @@ class ExtractStage:
             from mbforge.service.pipeline.detection.structure_role import (
                 classify_structure_role,
             )
+            from mbforge.service.pipeline.extract.anchors import (
+                build_label_anchors,
+                build_page_geometry,
+            )
             from mbforge.service.pipeline.extract.text import extract_layout_text
             from mbforge.service.ports import get_repositories
 
@@ -206,6 +213,15 @@ class ExtractStage:
             ctx.candidates = []
 
             frames = page_frames_from_pdf(ctx.pdf_path)
+            repeated = resolve_repeated_print_labels(
+                list(molecule_stats.get("results", []))
+            )
+            if repeated:
+                logger.info(
+                    "Named %d drawings from a number printed on the same "
+                    "compound twice",
+                    repeated,
+                )
             named_from_text = _name_drawings_from_page_text(
                 list(molecule_stats.get("results", [])),
                 list(ctx.extracted.pages),
@@ -231,17 +247,14 @@ class ExtractStage:
                 classify_structure_role(candidate)
 
             repositories = get_repositories(ctx.library_root)
-            # Canonical evidence and the Markush review queue are written in
-            # one transaction: either both land or both roll back.
-            (
-                ctx.source_evidence_count,
-                markush_candidate_count,
-            ) = repositories.evidence.persist_extraction(
-                doc_id=ctx.doc_id,
-                evidence=evidence,
-                candidates=candidates,
-            )
-            molecule_stats["markush_review_candidate_count"] = markush_candidate_count
+            ctx.source_evidence_count = repositories.evidence.persist(evidence)
+            # ADR 0001: persist the printed-designation anchor index beside the
+            # evidence it cites, so association becomes a lookup instead of an
+            # in-memory rebuild. Derived from the same evidence rows, so each
+            # anchor already carries its evidence_id and geometry.
+            anchors = build_label_anchors(evidence, doc_id=ctx.doc_id)
+            geometry = build_page_geometry(ctx.doc_id, frames)
+            anchor_count = repositories.anchors.persist(ctx.doc_id, anchors, geometry)
             # Concrete structures have to reach ``molecules`` here: nothing later
             # does it. The Patent stage only re-persists candidates it can prove
             # an activity belongs to, so a molecule without a reading (or whose
@@ -265,12 +278,12 @@ class ExtractStage:
             molecule_count = molecule_stats.get("molecule_count", 0)
             logger.info(
                 "Extracted %d pages (%d chars, %d molecules, %d evidence rows, "
-                "%d new Markush review candidates) from %s",
+                "%d anchors) from %s",
                 ctx.extracted.page_count,
                 len(ctx.extracted.raw_text),
                 molecule_count,
                 ctx.source_evidence_count,
-                markush_candidate_count,
+                anchor_count,
                 ctx.doc_id,
             )
 
@@ -300,7 +313,7 @@ class ExtractStage:
                     "rejected_count": molecule_stats.get("rejected_count", 0),
                     "skipped": molecule_stats.get("skipped", False),
                     "source_evidence_count": ctx.source_evidence_count,
-                    "markush_review_candidate_count": markush_candidate_count,
+                    "label_anchor_count": anchor_count,
                     "tool_stats": molecule_stats.get("tool_stats", {}),
                 },
             )

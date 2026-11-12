@@ -7,8 +7,6 @@ shifted/scaled boxes renders once.
 
 from __future__ import annotations
 
-from typing import Any
-
 BBox = tuple[float, float, float, float]
 
 
@@ -26,23 +24,3 @@ def bbox_iou(a: BBox, b: BBox) -> float:
     inter = inter_w * inter_h
     union = bbox_area(a) + bbox_area(b) - inter
     return inter / union if union > 0 else 0.0
-
-
-def add_bbox_keep_larger(
-    kept: list[tuple[BBox, Any]],
-    bbox: BBox,
-    payload: Any,
-    iou_threshold: float = 0.5,
-) -> None:
-    """Register (bbox, payload) into *kept*, keeping only the larger on overlap.
-
-    When *bbox* overlaps an existing kept box above ``iou_threshold``, the
-    larger-area box survives (replaced in place, order stable); otherwise the
-    pair is appended. Non-overlapping boxes always append.
-    """
-    for i, (kbox, _) in enumerate(kept):
-        if bbox_iou(kbox, bbox) > iou_threshold:
-            if bbox_area(bbox) > bbox_area(kbox):
-                kept[i] = (bbox, payload)
-            return
-    kept.append((bbox, payload))

@@ -22,8 +22,6 @@ const REVIEW_KINDS: Record<string, true> = {
   unparsable_smiles: true,
   missing_evidence: true,
   ambiguous_coref: true,
-  markush_link: true,
-  patent_fact_review: true,
   smiles_correction: true,
   ai_review: true,
   designation_unbound: true,
@@ -105,7 +103,7 @@ export function linkifyUiLinks(markdown: string): string {
 
 /** Tools whose results the user should inspect in the browser, not only read. */
 const DOC_LINK_TOOLS: Record<string, true> = {
-  get_document: true,
+  document_read: true,
   list_evidence: true,
   verify_structures: true,
   get_patent_result: true,

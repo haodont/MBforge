@@ -1,7 +1,3 @@
-import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
-
 import { defineTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 
@@ -15,13 +11,14 @@ import {
   IMPROVEMENT_AREAS,
   type ImprovementArea,
 } from './improvements.js'
+import { projectCwd, spawnPiText } from './piChild.js'
+import { toolRenderers } from './toolRender.js'
 
 const MAX_MESSAGE_CHARS = 2_500
 const MAX_TRANSCRIPT_CHARS = 12_000
 const MAX_LESSONS = 5
 const MAX_IMPROVEMENTS = 3
-const REVIEW_TIMEOUT_MS = 180_000
-const CHILD_OUTPUT_LIMIT = 200_000
+const REVIEW_STALL_MS = 300_000
 
 export const REVIEW_TOOL_NAME = 'review_task'
 export const REVIEW_TOOL_NAMES = [REVIEW_TOOL_NAME] as const
@@ -63,6 +60,8 @@ export interface ReviewRunnerInput {
   systemPrompt: string
   prompt: string
   signal?: AbortSignal
+  /** Active session model as `provider/id`, so the reviewer matches the session. */
+  model?: string
 }
 
 export type ReviewRunner = (input: ReviewRunnerInput) => Promise<string>
@@ -319,100 +318,106 @@ export function parseReviewReport(raw: string): ReviewReport {
   return { summary, lessons, improvements, warnings }
 }
 
-function projectCwd(cwd: string): string {
-  const parent = dirname(cwd)
-  if (
-    basename(cwd).toLowerCase() === 'agent' &&
-    (existsSync(join(parent, 'pyproject.toml')) || existsSync(join(parent, '.git')))
-  ) {
-    return parent
+/**
+ * JSON mode emits one event per line. The final assistant text is the report;
+ * earlier assistant messages are tool-use turns or commentary. A truncated or
+ * error-stopped run must fail instead of returning partial JSON.
+ */
+export function finalAssistantText(raw: string): string {
+  let last:
+    | { text: string; stopReason: string; errorMessage?: string }
+    | undefined
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    let event: unknown
+    try {
+      event = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (typeof event !== 'object' || event === null) continue
+    const record = event as Record<string, unknown>
+    if (record.type !== 'message_end') continue
+    const message = record.message
+    if (typeof message !== 'object' || message === null) continue
+    const msg = message as Record<string, unknown>
+    if (msg.role !== 'assistant') continue
+    const content = Array.isArray(msg.content) ? msg.content : []
+    const text = content
+      .map((part) => {
+        if (typeof part !== 'object' || part === null) return ''
+        const value = part as Record<string, unknown>
+        return value.type === 'text' && typeof value.text === 'string'
+          ? value.text
+          : ''
+      })
+      .filter((part) => part !== '')
+      .join('\n')
+    last = {
+      text,
+      stopReason:
+        typeof msg.stopReason === 'string' ? msg.stopReason : 'unknown',
+      errorMessage:
+        typeof msg.errorMessage === 'string' ? msg.errorMessage : undefined,
+    }
   }
-  return cwd
+  if (!last) throw new Error('review subagent returned no assistant message')
+  if (last.stopReason === 'error' || last.stopReason === 'aborted') {
+    throw new Error(last.errorMessage || `review subagent ${last.stopReason}`)
+  }
+  if (last.stopReason === 'length') {
+    throw new Error('review subagent response was truncated')
+  }
+  if (last.stopReason === 'toolUse') {
+    throw new Error('review subagent stopped on a tool call without a final answer')
+  }
+  if (!last.text.trim()) {
+    throw new Error('review subagent returned no text')
+  }
+  return last.text
 }
 
-function piInvocation(args: string[]): { command: string; args: string[] } {
-  const script = process.argv[1]
-  if (script && existsSync(script)) {
-    return { command: process.execPath, args: [script, ...args] }
-  }
-  return { command: 'pi', args }
-}
-
-/** Run a real read-only child Pi session. */
-export const spawnReviewer: ReviewRunner = async (input) => {
-  const cwd = projectCwd(input.cwd)
+/** Reviewer CLI arguments; the session model is inherited when one is active.
+ *
+ * The prompt itself is not an argument: `goalTranscript` can easily exceed the
+ * Windows command-line limit (~32k) and `spawn` then fails with ENAMETOOLONG.
+ * `spawnPiText` delivers it over stdin instead. JSON mode gives the parent a
+ * progress signal while still ending with the reviewer's text.
+ */
+export function buildReviewerArgs(input: ReviewRunnerInput): string[] {
   const args = [
     '--offline',
     '--mode',
-    'text',
+    'json',
     '--print',
     '--no-session',
     '--tools',
     'read,grep,find,ls',
     '--append-system-prompt',
     input.systemPrompt,
-    input.prompt,
   ]
-  const invocation = piInvocation(args)
-  const { promise, resolve, reject } = Promise.withResolvers<string>()
-  const child = spawn(invocation.command, invocation.args, {
-    cwd,
-    shell: false,
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, MBFORGE_REVIEW_CHILD: '1' },
+  if (input.model) args.push('--model', input.model)
+  return args
+}
+
+/** Run a real read-only child Pi session. */
+export const spawnReviewer: ReviewRunner = async (input) => {
+  const raw = await spawnPiText({
+    cwd: projectCwd(input.cwd),
+    args: buildReviewerArgs(input),
+    env: { MBFORGE_REVIEW_CHILD: '1' },
+    idleTimeoutMs: REVIEW_STALL_MS,
+    signal: input.signal,
+    label: 'review subagent',
+    stdin: input.prompt,
   })
-  let stdout = ''
-  let stderr = ''
-  let settled = false
-  let timer: NodeJS.Timeout | undefined
-  const finish = (error: Error | undefined, output = '') => {
-    if (settled) return
-    settled = true
-    if (timer) clearTimeout(timer)
-    input.signal?.removeEventListener('abort', abort)
-    if (error) reject(error)
-    else resolve(output)
-  }
-  const abort = () => {
-    child.kill()
-    finish(new Error('review subagent was aborted'))
-  }
-  timer = setTimeout(() => {
-    child.kill()
-    finish(new Error(`review subagent timed out after ${REVIEW_TIMEOUT_MS}ms`))
-  }, REVIEW_TIMEOUT_MS)
-  child.stdout.setEncoding('utf8')
-  child.stderr.setEncoding('utf8')
-  child.stdout.on('data', (chunk: string) => {
-    stdout = (stdout + chunk).slice(-CHILD_OUTPUT_LIMIT)
-  })
-  child.stderr.on('data', (chunk: string) => {
-    stderr = (stderr + chunk).slice(-CHILD_OUTPUT_LIMIT)
-  })
-  child.on('error', (error) => finish(error, ''))
-  child.on('close', (code) => {
-    if (code === 0 && stdout.trim()) {
-      finish(undefined, stdout.trim())
-      return
-    }
-    finish(
-      new Error(
-        `review subagent failed (exit ${code ?? 'unknown'}): ${stderr.trim() || stdout.trim() || 'no output'}`,
-      ),
-      '',
-    )
-  })
-  if (input.signal) {
-    if (input.signal.aborted) abort()
-    else input.signal.addEventListener('abort', abort, { once: true })
-  }
-  return promise
+  return finalAssistantText(raw)
 }
 
 /** Run the reviewer and persist its durable lessons through the local memory tool. */
 export async function runReview(
-  input: { cwd: string; transcript: string; signal?: AbortSignal },
+  input: { cwd: string; transcript: string; signal?: AbortSignal; model?: string },
   runner: ReviewRunner = spawnReviewer,
 ): Promise<ReviewResult> {
   const cwd = projectCwd(input.cwd)
@@ -421,6 +426,7 @@ export async function runReview(
     systemPrompt: REVIEW_SYSTEM_PROMPT,
     prompt: reviewPrompt(cwd, input.transcript),
     signal: input.signal,
+    model: input.model,
   })
   const report = parseReviewReport(raw)
   const memories: ReviewMemory[] = []
@@ -461,6 +467,7 @@ export function reviewTaskTool() {
       'Do not call `review_task` from a subagent, for every intermediate tool step, or repeatedly after it fails. If it fails or times out, report that and continue with the answer.',
     ],
     parameters: reviewParameters,
+    ...toolRenderers(REVIEW_TOOL_NAME),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       setMemoryRuntime(ctx.model, ctx.modelRegistry)
       const transcript = collectTranscript(ctx.sessionManager.getBranch())
@@ -470,6 +477,7 @@ export function reviewTaskTool() {
           cwd: ctx.cwd,
           transcript: focus ? `${transcript}\n\nReviewer focus: ${focus}` : transcript,
           signal,
+          model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
         },
         spawnReviewer,
       )

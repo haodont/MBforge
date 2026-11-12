@@ -48,7 +48,7 @@ def test_delete_documents_clears_ingest_bookkeeping(tmp_path: Path) -> None:
     doc = store.add_document(src, title="Ingest cleanup")
 
     db = DatabaseManager.get(str(tmp_path))
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         kb.execute(
             "INSERT INTO ingest_runs (doc_id, run_id) VALUES (?, ?)",
             (doc.doc_id, "run-1"),
@@ -70,7 +70,7 @@ def test_delete_documents_clears_ingest_bookkeeping(tmp_path: Path) -> None:
 
     store.delete_documents([doc.doc_id])
 
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         for table in (
             "ingest_runs",
             "ingest_stage_deps",

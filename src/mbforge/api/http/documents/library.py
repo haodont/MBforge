@@ -15,8 +15,6 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from mbforge.api.http._path_utils import (
     resolve_library_root,
-    resolve_library_root_candidate,
-    sanitize_upload_filename,
     validate_doc_id,
 )
 from mbforge.domain.evidence_kind import category_of
@@ -26,6 +24,10 @@ from mbforge.foundation.errors import (
     MBForgeError,
     NotFoundError,
     ValidationError,
+)
+from mbforge.foundation.layout import (
+    resolve_library_root_candidate,
+    sanitize_upload_filename,
 )
 from mbforge.service.dto.library import (
     MAX_EVIDENCE_RESOLVE_IDS,

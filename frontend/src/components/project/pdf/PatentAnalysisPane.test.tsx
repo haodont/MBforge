@@ -1,114 +1,61 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+/**
+ * PatentAnalysisPane (src/components/project/pdf/PatentAnalysisPane.tsx):
+ * the deterministic Patent result — status/publication badges, the adopted
+ * measurement table (assays and species stay separate), extraction notices and
+ * the pane's empty state, all read from the committed facts artifact alone.
+ */
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import '@/i18n'
 import type { PatentFactsArtifact } from '@/api/http/library'
 import PatentAnalysisPane from './PatentAnalysisPane'
 
-const reviewHooks = vi.hoisted(() => ({
-  useReviewQueue: vi.fn(),
-  mutateAsync: vi.fn(),
-}))
-vi.mock('@/api/query/hooks/useReview', () => ({
-  useReviewQueue: reviewHooks.useReviewQueue,
-  useReviewDecide: () => ({ mutateAsync: reviewHooks.mutateAsync, isPending: false }),
+const methods = ['human MRGPRX2 HEK293', 'mouse Mrgprb2 mast cells'].map((system, index) => ({
+  assay_method_id: `assay-${index}`, doc_id: 'doc-1', target: index ? 'Mrgprb2' : 'MRGPRX2', system,
+  endpoint: index ? 'degranulation' : 'calcium flux', assay_type: 'IC50', conditions: { species: index ? 'mouse' : 'human' },
+  raw_text: system, section_id: '', page_start: index + 1, page_end: index + 1, evidence_ids: [`method-${index}`],
 }))
 
-const conflict = {
-  conflict_id: 'conflict-1',
-  slot_id: 'slot-1',
-  kind: 'measurement' as const,
-  doc_id: 'doc-1',
-  page: 4,
-  evidence_ids: ['evidence-rule', 'evidence-llm'],
-  candidates: [
-    { source: 'deterministic' as const, fields: { metric: 'IC50', comparator: '<', value_text: '10', unit: 'nM' }, signature: 'rule', evidence_ids: ['evidence-rule'] },
-    { source: 'llm' as const, fields: { metric: 'IC50', comparator: '=', value_text: '20', unit: 'nM' }, signature: 'llm', evidence_ids: ['evidence-llm'] },
-  ],
-}
+const measurements = methods.map((method, index) => ({
+  measurement_id: `measurement-${index}`, doc_id: 'doc-1', compound_entry_id: null, assay_method_id: method.assay_method_id,
+  mol_id: 'mol-1', metric: 'IC50', linking_status: 'linked', evidence_ids: [`value-${index}`], provenance: {},
+  value: { raw_text: index ? '> 2 µM' : '< 100 nM', operator: index ? '>' : '<', original_value: index ? 2 : 100,
+    original_unit: index ? 'µM' : 'nM', canonical_value: null, canonical_unit: '', qualitative_value: '' },
+}))
 
 const facts: PatentFactsArtifact = {
   doc_id: 'doc-1',
   run_id: 'run-1',
+  revision: 3,
+  projection_status: 'current',
   sections: [],
   entries: [],
   synthesis_steps: [],
-  assay_methods: [],
+  assay_methods: methods,
   examples: [],
-  measurements: [],
-  issues: [{ code: 'llm_analysis_fallback', severity: 'warning', message: 'LLM unavailable' }],
+  measurements,
+  issues: [{
+    code: 'compound_reference_unresolved',
+    severity: 'warning',
+    message: 'measurement has no unambiguous compound reference',
+    evidence_ids: ['issue-evidence'],
+    related_fact_id: null,
+  }],
   stats: {},
-  analysis_status: 'fallback',
+  analysis_status: 'disabled',
   extraction_mode: 'deterministic',
-  conflicts: [conflict],
-  review_candidates: [],
-  llm: { error_code: 'sidecar_not_ready', error: 'raw provider details must not be shown' },
 }
 
-const reviewItem = {
-  id: 'review-1',
-  kind: 'patent_fact_review',
-  doc_id: 'doc-1',
-  page: 4,
-  bbox: null,
-  crop_relpath: null,
-  smiles: null,
-  name: 'IC50',
-  confidence: null,
-  reasons: [],
-  context_text: null,
-  status: 'pending',
-  payload: { slot_id: 'slot-1', doc_id: 'doc-1', revision: 4, conflict },
-  created_at: null,
-  resolved_at: null,
-}
+const EMPTY_TEXT = 'No adopted measurements or extraction notices were recorded.'
 
 describe('PatentAnalysisPane', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    reviewHooks.useReviewQueue.mockReturnValue({
-      data: { items: [reviewItem], total: 1, page: 1, page_size: 100 },
-      isPending: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
-    reviewHooks.mutateAsync.mockResolvedValue({ updated: 1, skipped: 0, results: [] })
-  })
-
-  it('renders the fallback conflict, keeps assays and species separate and submits an explicit revisioned decision', async () => {
+  it('reports the deterministic result, keeps assays and species separate and links every fact to its evidence', () => {
     const onOpenEvidence = vi.fn()
-    render(<PatentAnalysisPane docId="doc-1" libraryRoot="/library" facts={facts} onOpenEvidence={onOpenEvidence} />)
+    render(<PatentAnalysisPane facts={facts} onOpenEvidence={onOpenEvidence} />)
 
-    expect(screen.getByText(/Fell back to rule extraction/)).toBeInTheDocument()
-    expect(screen.getByText(/LLM service is unavailable/)).toBeInTheDocument()
-    expect(screen.getByText('< 10 nM')).toBeInTheDocument()
-    expect(screen.getByText('= 20 nM')).toBeInTheDocument()
-    expect(screen.getByText('Analysis revision 4')).toBeInTheDocument()
-    expect(screen.queryByText('raw provider details must not be shown')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Open source' })[1])
-    expect(onOpenEvidence).toHaveBeenCalledWith('evidence-llm', 4)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Use LLM suggestion' }))
-    await waitFor(() => expect(reviewHooks.mutateAsync).toHaveBeenCalledWith({
-      libraryRoot: '/library',
-      items: [{ kind: 'patent_fact_review', id: 'review-1', expected_revision: 4, choice: 'llm' }],
-      action: 'confirm',
-    }))
-
-    // With no review conflicts left the reporting table owns the pane.
-    cleanup()
-    reviewHooks.useReviewQueue.mockReturnValue({ data: { items: [], total: 0 }, isPending: false, isError: false })
-    const methods = ['human MRGPRX2 HEK293', 'mouse Mrgprb2 mast cells'].map((system, index) => ({
-      assay_method_id: `assay-${index}`, doc_id: 'doc-1', target: index ? 'Mrgprb2' : 'MRGPRX2', system,
-      endpoint: index ? 'degranulation' : 'calcium flux', assay_type: 'IC50', conditions: { species: index ? 'mouse' : 'human' },
-      raw_text: system, section_id: '', page_start: index + 1, page_end: index + 1, evidence_ids: [`method-${index}`],
-    }))
-    const measurements = methods.map((method, index) => ({
-      measurement_id: `measurement-${index}`, doc_id: 'doc-1', compound_entry_id: null, assay_method_id: method.assay_method_id,
-      mol_id: 'mol-1', metric: 'IC50', linking_status: 'linked', evidence_ids: [`value-${index}`], provenance: {},
-      value: { raw_text: index ? '> 2 µM' : '< 100 nM', operator: index ? '>' : '<', original_value: index ? 2 : 100,
-        original_unit: index ? 'µM' : 'nM', canonical_value: null, canonical_unit: '', qualitative_value: '' },
-    }))
-    render(<PatentAnalysisPane docId="doc-1" libraryRoot="/library" facts={{ ...facts, measurements, assay_methods: methods }} onOpenEvidence={onOpenEvidence} />)
+    expect(screen.getByText('Rule extraction')).toBeInTheDocument()
+    expect(screen.getByText('Deterministic result')).toBeInTheDocument()
+    expect(screen.getByText('Committed facts and file projection are current.')).toBeInTheDocument()
 
     const table = screen.getByRole('table')
     expect(within(table).getAllByRole('row')).toHaveLength(3)
@@ -119,5 +66,22 @@ describe('PatentAnalysisPane', () => {
     fireEvent.click(within(table).getAllByRole('button', { name: '2 sources' })[0])
     fireEvent.click(screen.getByRole('button', { name: /Source 2.*method-0/ }))
     expect(onOpenEvidence).toHaveBeenCalledWith('method-0')
+
+    // Extraction notices stay readable and reach their own source.
+    expect(screen.getByText('measurement has no unambiguous compound reference')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open source evidence' }))
+    expect(onOpenEvidence).toHaveBeenCalledWith('issue-evidence')
+
+    // Measurements without notices are a populated result, not an empty pane.
+    cleanup()
+    render(<PatentAnalysisPane facts={{ ...facts, issues: [] }} onOpenEvidence={onOpenEvidence} />)
+    expect(screen.queryByText('Extraction notices (1)')).not.toBeInTheDocument()
+    expect(screen.queryByText(EMPTY_TEXT)).not.toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+
+    cleanup()
+    render(<PatentAnalysisPane facts={{ ...facts, measurements: [], assay_methods: [], issues: [] }} onOpenEvidence={onOpenEvidence} />)
+    expect(screen.getByText(EMPTY_TEXT)).toBeInTheDocument()
+    expect(screen.getByText('No adopted measurements.')).toBeInTheDocument()
   })
 })

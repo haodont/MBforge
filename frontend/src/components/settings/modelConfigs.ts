@@ -30,27 +30,11 @@ export const LLM_MODELS: ModelMap = {
   ],
 }
 
-export const VLM_MODELS: ModelMap = {
-  openai_compatible: [
-    { value: 'gpt-4o', label: 'GPT-4o' },
-    { value: 'gpt-4o-mini', label: 'GPT-4o mini' },
-  ],
-  anthropic: [{ value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' }],
-  qwen_vl: [
-    { value: 'Qwen/Qwen2-VL-7B-Instruct', label: 'Qwen2-VL-7B-Instruct' },
-    { value: 'Qwen/Qwen2-VL-72B-Instruct', label: 'Qwen2-VL-72B-Instruct' },
-  ],
-}
-
-
 /** Human-readable provider label + default placeholder URL (for guidance). */
 export const PROVIDER_META: Record<string, { label: string; defaultUrl: string; needsKey: boolean }> = {
-  // LLM
   openai_compatible: { label: 'OpenAI Compatible', defaultUrl: 'https://api.openai.com/v1', needsKey: true },
   anthropic: { label: 'Anthropic', defaultUrl: 'https://api.anthropic.com', needsKey: true },
   ollama: { label: 'Ollama (local)', defaultUrl: 'http://localhost:11434', needsKey: false },
-  // VLM
-  qwen_vl: { label: 'Qwen-VL (local)', defaultUrl: '', needsKey: false },
 }
 
 export type Translate = (key: string, options?: Record<string, unknown>) => string

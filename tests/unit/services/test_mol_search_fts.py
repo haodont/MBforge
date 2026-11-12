@@ -23,7 +23,7 @@ def test_mol_search_index_tracks_writes_and_treats_punctuation_literally(
     db = DatabaseManager.get(root)
     db.initialize()
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             """
             INSERT INTO molecules
@@ -38,7 +38,7 @@ def test_mol_search_index_tracks_writes_and_treats_punctuation_literally(
     assert len(results) == 1
     assert results[0]["name"] == "ethanol"
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "UPDATE molecules SET name = ?, notes = ? WHERE mol_id = ?",
             ("literal = syntax", "punctuation", "mol_1"),
@@ -48,7 +48,7 @@ def test_mol_search_index_tracks_writes_and_treats_punctuation_literally(
     results = search_molecules(root, "literal = syntax", top_k=10)
     assert [result["mol_id"] for result in results] == ["mol_1"]
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         DatabaseManager.delete_molecule_from_mol_search(conn, "mol_1")
         conn.execute(
             "UPDATE molecules SET name = ?, notes = ? WHERE mol_id = ?",
@@ -59,7 +59,7 @@ def test_mol_search_index_tracks_writes_and_treats_punctuation_literally(
     assert len(search_molecules(root, "literal = syntax")) == 0
     assert len(search_molecules(root, "methanol")) == 1
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         DatabaseManager.delete_molecule_records(conn, ["mol_1"])
 
     assert len(search_molecules(root, "methanol")) == 0
@@ -71,7 +71,7 @@ def test_fingerprint_populated_after_insert(tmp_path: pytest.TempPathFactory) ->
     db = DatabaseManager.get(root)
     db.initialize()
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name) VALUES (?, ?, ?)",
             ("mol_1", "CCO", "ethanol"),

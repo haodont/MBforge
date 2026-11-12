@@ -19,6 +19,35 @@ from mbforge.contracts.measurement import (
 )
 from mbforge.service.ports import get_repositories
 
+#: Precedence for the attribution a reader should trust. A human decision
+#: outranks the agent's adjudication, which outranks the rules'; within one
+#: method an accepted link outranks a pending one.
+_ATTRIBUTION_METHOD_RANK = {"human": 3, "agent": 2, "model": 2, "rule": 1}
+_ATTRIBUTION_STATUS_RANK = {"accepted": 2, "pending": 1, "rejected": 0}
+
+
+def effective_attribution(
+    links: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The attribution a reader should trust among every link a reading carries.
+
+    A reading may carry several candidates (a rule link and a human override, or
+    a contested pair). The effective one is the highest-precedence non-rejected
+    link; the rest stay on the reading for audit.
+    """
+    candidates = [
+        link for link in links if str(link.get("review_status") or "") != "rejected"
+    ]
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda link: (
+            _ATTRIBUTION_METHOD_RANK.get(str(link.get("method") or ""), 0),
+            _ATTRIBUTION_STATUS_RANK.get(str(link.get("review_status") or ""), 0),
+        ),
+    )
+
 
 def list_measurements(
     library_root: str | None,
@@ -58,12 +87,14 @@ def list_measurements(
     enriched: list[dict[str, Any]] = []
     for row in rows:
         links = attributions.get(row["measurement_id"], [])
+        effective = effective_attribution(links)
         enriched.append(
             {
                 **row,
                 "attributions": links,
+                "effective_attribution": effective,
                 "mol_ids": [link["mol_id"] for link in links],
-                "attributed": bool(links),
+                "attributed": effective is not None,
             }
         )
     return enriched
@@ -194,6 +225,11 @@ def list_activity_records(
             "review_status": row["review_status"],
             "attributed": row["attributed"],
             "mol_ids": row["mol_ids"],
+            "attributions": row["attributions"],
+            "effective_attribution": row.get("effective_attribution"),
+            "effective_mol_id": (
+                (row.get("effective_attribution") or {}).get("mol_id") or None
+            ),
             "reasons": (
                 []
                 if row["attributed"]

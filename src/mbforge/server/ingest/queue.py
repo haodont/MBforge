@@ -57,7 +57,7 @@ def insert_dag(
             for stage in selected
         }
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "DELETE FROM ingest_queue WHERE doc_id = ? AND run_id != ? "
             "AND status IN ('done', 'failed', 'cancelled')",
@@ -102,7 +102,7 @@ def set_node_status(
 ) -> bool:
     """Set one node's status; returns True when a claimed row was updated."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(
             "UPDATE ingest_queue SET status = ?, error = ?, "
             "claimed_by = NULL, heartbeat_ts = NULL, updated_at = datetime('now') "
@@ -138,7 +138,7 @@ def advance_dependents(
     """
     db = DatabaseManager.get(library_root)
     promoted: list[str] = []
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         for stage in _dependents(conn, doc_id, run_id, completed_stage):
             unmet = conn.execute(
                 "SELECT COUNT(*) FROM ingest_stage_deps d "
@@ -178,7 +178,7 @@ def fail_cascade(
     """
     db = DatabaseManager.get(library_root)
     cascaded: list[str] = []
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         frontier = [failed_stage]
         seen: set[str] = set()
         while frontier:
@@ -203,7 +203,7 @@ def fail_cascade(
 def all_stages_done(library_root: str, *, doc_id: str, run_id: str) -> bool:
     """Return True when every node of the run has status ``done``."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM ingest_queue WHERE doc_id = ? AND run_id = ?",
             (doc_id, run_id),
@@ -219,7 +219,7 @@ def all_stages_done(library_root: str, *, doc_id: str, run_id: str) -> bool:
 def claim_finalize(library_root: str, *, doc_id: str, run_id: str) -> bool:
     """Atomically claim the right to publish this run; True exactly once."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(
             "UPDATE ingest_runs SET finalized = 1 "
             "WHERE doc_id = ? AND run_id = ? AND finalized = 0 "
@@ -238,7 +238,7 @@ def stages_in_run(library_root: str, *, doc_id: str, run_id: str) -> list[str]:
     finalizer uses this to decide the document's resting status.
     """
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT stage FROM ingest_queue WHERE doc_id = ? AND run_id = ?",
             (doc_id, run_id),
@@ -249,7 +249,7 @@ def stages_in_run(library_root: str, *, doc_id: str, run_id: str) -> list[str]:
 def run_ids_for_doc(library_root: str, doc_id: str) -> list[str]:
     """Return the distinct run IDs already queued for a document."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT DISTINCT run_id FROM ingest_queue "
             "WHERE doc_id = ? AND run_id IS NOT NULL",
@@ -264,7 +264,7 @@ def node_ids_for_runs(library_root: str, run_ids: list[str]) -> list[str]:
         return []
     placeholders = ",".join("?" for _ in run_ids)
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             f"SELECT id FROM ingest_queue WHERE run_id IN ({placeholders})",
             run_ids,
@@ -278,7 +278,7 @@ def doc_ids_for_runs(library_root: str, run_ids: list[str]) -> list[str]:
         return []
     placeholders = ",".join("?" for _ in run_ids)
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             f"SELECT DISTINCT doc_id FROM ingest_queue WHERE run_id IN ({placeholders}) AND doc_id IS NOT NULL",
             run_ids,
@@ -289,7 +289,7 @@ def doc_ids_for_runs(library_root: str, run_ids: list[str]) -> list[str]:
 def cancel_doc(library_root: str, doc_id: str) -> int:
     """Cancel every non-terminal node of *doc_id*; returns rows updated."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(
             "UPDATE ingest_queue SET status = 'cancelled', "
             "updated_at = datetime('now') "
@@ -312,7 +312,7 @@ def reset_node(library_root: str, task_id: str, *, allow_done: bool = False) -> 
     allowed = ("done", "failed", "cancelled") if allow_done else ("failed", "cancelled")
     placeholders = ",".join("?" for _ in allowed)
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT doc_id, run_id, stage FROM ingest_queue WHERE id = ?",
             (task_id,),
@@ -355,7 +355,7 @@ def reset_node(library_root: str, task_id: str, *, allow_done: bool = False) -> 
 def doc_queued(library_root: str, doc_id: str) -> bool:
     """Return True when *doc_id* already has any queue row (any status)."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT 1 FROM ingest_queue WHERE doc_id = ? LIMIT 1", (doc_id,)
         ).fetchone()
@@ -370,7 +370,7 @@ def active_run_id(library_root: str, doc_id: str) -> str | None:
     cancels it) instead of deleting its rows out from under a live writer.
     """
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT run_id FROM ingest_queue "
             "WHERE doc_id = ? AND status IN ('pending', 'processing', 'blocked') "
@@ -391,7 +391,7 @@ def _task_dict(row: Any) -> dict:
 def list_tasks(library_root: str) -> list[dict]:
     """Return all ``ingest_queue`` rows, newest first (blocking)."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT * FROM ingest_queue ORDER BY created_at DESC"
         ).fetchall()
@@ -401,7 +401,7 @@ def list_tasks(library_root: str) -> list[dict]:
 def list_run_tasks(library_root: str, run_id: str) -> list[dict]:
     """Return the queue rows belonging to one run, newest first (blocking)."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT * FROM ingest_queue WHERE run_id = ? ORDER BY created_at DESC",
             (run_id,),
@@ -409,10 +409,87 @@ def list_run_tasks(library_root: str, run_id: str) -> list[dict]:
     return [_task_dict(row) for row in rows]
 
 
+def list_runs(
+    library_root: str,
+    *,
+    doc_id: str | None = None,
+    active_only: bool = True,
+    limit: int = 20,
+) -> list[dict]:
+    """Return up to *limit* runs grouped from their queue nodes, newest first.
+
+    A run is one ``run_id`` with its stage nodes. ``active_only`` keeps runs
+    whose aggregate status is ``pending``/``processing``/``blocked``: a run
+    with any failed or cancelled node is terminal and is excluded even when a
+    sibling node is still pending.
+
+    Filtering happens on the run-level status, never on individual nodes, so a
+    returned run always carries every node of its DAG.
+    """
+    db = DatabaseManager.get(library_root)
+    clauses = ["run_id IS NOT NULL"]
+    params: list[Any] = []
+    if doc_id:
+        clauses.append("doc_id = ?")
+        params.append(doc_id)
+    having = ""
+    if active_only:
+        having = (
+            " HAVING SUM(CASE WHEN status IN "
+            "('pending', 'processing', 'blocked') THEN 1 ELSE 0 END) > 0"
+            " AND SUM(CASE WHEN status IN ('failed', 'cancelled') "
+            "THEN 1 ELSE 0 END) = 0"
+        )
+    with db.connection() as conn:
+        candidates = conn.execute(
+            f"SELECT run_id FROM ingest_queue WHERE {' AND '.join(clauses)} "
+            f"GROUP BY run_id{having} ORDER BY MAX(created_at) DESC LIMIT ?",
+            [*params, max(1, limit)],
+        ).fetchall()
+        run_ids = [str(row["run_id"]) for row in candidates]
+        if not run_ids:
+            return []
+        placeholders = ", ".join("?" for _ in run_ids)
+        rows = conn.execute(
+            f"SELECT * FROM ingest_queue WHERE run_id IN ({placeholders}) "
+            "ORDER BY created_at ASC",
+            run_ids,
+        ).fetchall()
+
+    grouped: dict[str, list[dict]] = {run_id: [] for run_id in run_ids}
+    for row in rows:
+        grouped.setdefault(str(row["run_id"]), []).append(_task_dict(row))
+    result: list[dict] = []
+    for run_id in run_ids:
+        nodes = grouped.get(run_id) or []
+        if not nodes:
+            continue
+        result.append(
+            {
+                "run_id": run_id,
+                "doc_id": nodes[0].get("doc_id"),
+                "status": _worst_status(
+                    [str(node.get("status") or "") for node in nodes]
+                )
+                or "unknown",
+                "created_at": min(
+                    (str(node.get("created_at") or "") for node in nodes),
+                    default="",
+                ),
+                "updated_at": max(
+                    (str(node.get("updated_at") or "") for node in nodes),
+                    default="",
+                ),
+                "nodes": nodes,
+            }
+        )
+    return result
+
+
 def queue_snapshot(library_root: str) -> dict:
     """Return total + per-status counts for ``ingest_queue`` (blocking)."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         total = conn.execute("SELECT COUNT(*) FROM ingest_queue").fetchone()[0]
         by_status = {
             r["status"]: r["cnt"]
@@ -423,6 +500,31 @@ def queue_snapshot(library_root: str) -> dict:
     return {"total": total, "by_status": by_status}
 
 
+#: Run-level status precedence: a terminal failure outranks active work, and
+#: an active stage outranks a blocked/done tail.
+_RUN_STATUS_PRECEDENCE = {
+    "cancelled": 0,
+    "failed": 1,
+    "processing": 2,
+    "pending": 3,
+    "blocked": 4,
+    "done": 5,
+}
+
+
+def _worst_status(statuses: Sequence[str]) -> str | None:
+    """Aggregate node statuses into one run status by worst precedence."""
+    if not statuses:
+        return None
+    worst = min(
+        (_RUN_STATUS_PRECEDENCE.get(status, 99) for status in statuses), default=99
+    )
+    for status, rank in _RUN_STATUS_PRECEDENCE.items():
+        if rank == worst:
+            return status
+    return statuses[0]
+
+
 def fetch_run_status(library_root: str, run_id: str) -> str | None:
     """Aggregate a run's status across its queue nodes by worst precedence.
 
@@ -430,16 +532,8 @@ def fetch_run_status(library_root: str, run_id: str) -> str | None:
     winning over active ones so the UI shows a stable run-level status:
     cancelled/failed > processing > pending > done.
     """
-    precedence = {
-        "cancelled": 0,
-        "failed": 1,
-        "processing": 2,
-        "pending": 3,
-        "blocked": 4,
-        "done": 5,
-    }
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             """
             SELECT status FROM ingest_queue
@@ -447,19 +541,13 @@ def fetch_run_status(library_root: str, run_id: str) -> str | None:
             """,
             (run_id,),
         ).fetchall()
-        if not rows:
-            return None
-        worst = min((precedence.get(r["status"], 99) for r in rows), default=99)
-        for status, rank in precedence.items():
-            if rank == worst:
-                return status
-    return None
+    return _worst_status([str(row["status"]) for row in rows])
 
 
 def fetch_logs_since(library_root: str, run_id: str, last_seen_id: int) -> list:
     """Fetch ingest log rows for a run newer than ``last_seen_id`` (blocking)."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         return conn.execute(
             """
             SELECT id, stage, level, message, data, ts_ms
@@ -474,7 +562,7 @@ def fetch_logs_since(library_root: str, run_id: str, last_seen_id: int) -> list:
 def fetch_doc_logs(library_root: str, doc_id: str, limit: int) -> list[dict]:
     """Return recent ingest log rows for a document, chronological order."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             """
             SELECT doc_id, stage, level, message, ts_ms, task_id
@@ -491,6 +579,6 @@ def fetch_doc_logs(library_root: str, doc_id: str, limit: int) -> list[dict]:
 def delete_run(library_root: str, run_id: str) -> int:
     """Remove all ``ingest_queue`` rows of *run_id*. Returns rows deleted."""
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute("DELETE FROM ingest_queue WHERE run_id = ?", (run_id,))
         return cursor.rowcount

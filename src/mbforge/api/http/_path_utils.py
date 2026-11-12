@@ -15,10 +15,7 @@ from mbforge.foundation.layout import (
     InvalidDocIdError,
     InvalidPathError,
     LibraryLayout,
-    extract_library_root,  # noqa: F401 — public router compatibility export
     resolve_library_root,
-    resolve_library_root_candidate,  # noqa: F401 — public router compatibility export
-    sanitize_upload_filename,  # noqa: F401 — public router compatibility export
 )
 
 

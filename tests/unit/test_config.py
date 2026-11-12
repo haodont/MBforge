@@ -18,7 +18,6 @@ from mbforge.foundation.config import (
     AppConfig,
     IngestConfig,
     MoldetConfig,
-    PdfParseConfig,
     reset_config_cache,
     update_settings,
 )
@@ -41,7 +40,6 @@ def test_sub_config_defaults_match_historical_fallbacks() -> None:
     """The sub-config defaults must match the historical hard-coded fallbacks."""
     moldet = MoldetConfig()
     assert moldet.device == "auto"
-    assert moldet.auto_moldet_on_import is True
     assert moldet.detection_dpi == pytest.approx(200.0)
     assert moldet.detection_batch_size == 0
     assert moldet.text_page_char_threshold == 500
@@ -51,10 +49,6 @@ def test_sub_config_defaults_match_historical_fallbacks() -> None:
     assert ingest.auto_enqueue_on_import is True
     assert ingest.default_priority == 0
     assert ingest.max_retries == 1
-
-    pdf_parse = PdfParseConfig()
-    assert pdf_parse.chunk_size == 1000
-    assert pdf_parse.chunk_overlap == 200
 
 
 def test_app_config_rejects_invalid_field_types() -> None:
@@ -135,12 +129,12 @@ def test_redact_secrets_masks_only_credential_keys() -> None:
 
     data = {
         "llm": {"api_key": "ak", "model": "m"},
-        "vlm": {"api_key": "vk"},
+        "nested": {"api_key": "vk"},
     }
     redacted = _redact_secrets(data)
     assert redacted["llm"]["api_key"] == "***"
     assert redacted["llm"]["model"] == "m"
-    assert redacted["vlm"]["api_key"] == "***"
+    assert redacted["nested"]["api_key"] == "***"
 
 
 def test_redacted_roundtrip_preserves_real_secret(monkeypatch, tmp_path) -> None:
@@ -164,15 +158,12 @@ def test_redacted_roundtrip_preserves_real_secret(monkeypatch, tmp_path) -> None
     new_cfg = update_settings(
         {
             "llm": {"api_key": "***", "model": "gpt-4o"},
-            "vlm": {"api_key": "***"},
         }
     )
     assert new_cfg.llm["api_key"] == _DISK_VALUE, (
         f"*** marker must preserve the disk value, but got {new_cfg.llm['api_key']!r}"
     )
     assert new_cfg.llm["model"] == "gpt-4o"
-    # The VLM key was empty on disk → *** marker preserves that empty state
-    assert new_cfg.vlm.api_key == ""
     # Real PUT (e.g., user typing a new key, or empty to clear) still works.
     cleared = update_settings({"llm": {"api_key": ""}})
     assert cleared.llm["api_key"] == ""

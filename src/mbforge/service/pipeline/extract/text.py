@@ -130,7 +130,6 @@ def extract_layout_text(
         doc_id=doc_id,
         conf=float(config.get("conf_threshold", DEFAULT_CONF)),
         cross_model=bool(config.get("cross_model", True)),
-        mask_table_molecules=bool(config.get("mask_table_molecules", False)),
         max_pages=config.get("max_pages_per_doc"),
         cancel_check=cancel_check,
         detector=detector,

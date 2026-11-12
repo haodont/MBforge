@@ -3,9 +3,8 @@
 Protects: one transaction commits the snapshot and the derived rows, a stale
 caller is refused instead of overwriting newer facts, the file projection always
 carries the committed revision, reads prefer the snapshot over a stale file and
-repair it, a failed projection is reported and repaired, human decisions survive
-later publications, and deleting or clearing a document treats the facts and the
-decisions as the plan requires.
+repair it, a failed projection is reported and repaired, and publishing empty or
+partial facts never deletes the structures Extract stored.
 
 Functions under test: ``publish_document_facts`` / ``load_patent_facts``
 (``mbforge.service.use_cases.documents.patent_facts``), ``read_patent_facts`` /
@@ -20,7 +19,6 @@ from typing import Any
 
 import pytest
 
-from mbforge.contracts.patent import PATENT_FACT_REVIEW_KIND
 from mbforge.db.sqlite.database import DatabaseManager
 from mbforge.domain.molecule import Molecule
 from mbforge.domain.types import DetectionSource
@@ -28,7 +26,7 @@ from mbforge.foundation.errors import ConflictError
 from mbforge.foundation.layout import LibraryLayout
 from mbforge.service.pipeline.patent.artifact import PatentFactsArtifact
 from mbforge.service.ports import get_repositories
-from mbforge.service.use_cases.documents.library import LibraryStore, read_patent_facts
+from mbforge.service.use_cases.documents.library import read_patent_facts
 from mbforge.service.use_cases.documents.patent_facts import (
     load_patent_facts,
     publish_document_facts,
@@ -142,66 +140,6 @@ def test_reads_prefer_the_snapshot_and_repair_a_failed_projection(
     assert LibraryLayout(projection_root).patent_facts_json(DOC).is_file()
 
 
-def test_human_decisions_survive_publication_and_teardown(tmp_path: Path) -> None:
-    """A decision a human made survives every later publication.
-
-    The item id is derived from the candidate set, so an unchanged set keeps its
-    decision; a changed set is a new pending item and leaves the old one alone.
-    Deleting or clearing the document then drops the facts the plan says to drop.
-    """
-    candidate = {
-        "reason": "llm_only",
-        "kind": "measurement",
-        "slot_id": "slot-1",
-        "review_item_id": "item-1",
-        "page": 1,
-        "evidence_ids": ["ev-1"],
-        "deterministic": None,
-        "llm": {"value_text": "++"},
-        "conflict": None,
-    }
-    changed = {**candidate, "review_item_id": "item-2", "llm": {"value_text": "+++"}}
-
-    decisions_root = tmp_path / "decisions"
-    review = get_repositories(decisions_root).review
-
-    _publish(decisions_root, _artifact(review_candidates=[candidate]))
-    review.set_review_item_status("item-1", PATENT_FACT_REVIEW_KIND, "rejected")
-
-    _publish(decisions_root, _artifact(review_candidates=[candidate]))
-    again = review.review_item_status_payload("item-1", PATENT_FACT_REVIEW_KIND)
-    assert again is not None
-    assert again["status"] == "rejected"
-
-    _publish(decisions_root, _artifact(review_candidates=[candidate, changed]))
-    still = review.review_item_status_payload("item-1", PATENT_FACT_REVIEW_KIND)
-    fresh = review.review_item_status_payload("item-2", PATENT_FACT_REVIEW_KIND)
-    assert still is not None and still["status"] == "rejected"
-    assert fresh is not None and fresh["status"] == "pending"
-
-    deleted_root = tmp_path / "deleted"
-    _publish(deleted_root, _artifact())
-
-    LibraryStore.get(deleted_root).delete_documents([DOC])
-
-    assert get_repositories(deleted_root).patent_analysis.load(DOC) is None
-
-    cleared_root = tmp_path / "cleared"
-    _publish(
-        cleared_root,
-        _artifact(),
-        decisions={"slot-1": {"choice": "deterministic"}},
-    )
-
-    LibraryStore.get(cleared_root).clear_pipeline_data(DOC, backup=False)
-
-    state = get_repositories(cleared_root).patent_analysis.load(DOC)
-    assert state is not None
-    assert state["payload"] == {}
-    assert state["decisions"] == {"slot-1": {"choice": "deterministic"}}
-    assert load_patent_facts(cleared_root, DOC) is None
-
-
 def test_publishing_empty_facts_keeps_the_structures_evidence_owns(
     tmp_path: Path,
 ) -> None:
@@ -228,7 +166,7 @@ def test_publishing_empty_facts_keeps_the_structures_evidence_owns(
     get_repositories(tmp_path).molecules.replace_document_candidates(DOC, [candidate])
 
     db = DatabaseManager.get(str(tmp_path))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         seeded = conn.execute(
             "SELECT COUNT(*) AS n FROM molecule_detections WHERE doc_id = ?", (DOC,)
         ).fetchone()["n"]
@@ -237,7 +175,7 @@ def test_publishing_empty_facts_keeps_the_structures_evidence_owns(
     # No measurements at all: nothing is persistable this time.
     _publish(tmp_path, _artifact())
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         remaining = conn.execute(
             "SELECT COUNT(*) AS n FROM molecule_detections WHERE doc_id = ?", (DOC,)
         ).fetchone()["n"]
@@ -278,7 +216,7 @@ def test_republishing_subset_keeps_other_structures_detections(
         [_candidate("CCO", 1), _candidate("CCN", 2), _candidate("CCC", 3)],
     )
     db = DatabaseManager.get(str(tmp_path))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         before = conn.execute(
             "SELECT COUNT(*) AS n FROM molecule_detections WHERE doc_id = ?", (DOC,)
         ).fetchone()["n"]
@@ -289,7 +227,7 @@ def test_republishing_subset_keeps_other_structures_detections(
         DOC, [_candidate("CCO", 1)]
     )
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         after = conn.execute(
             "SELECT COUNT(*) AS n FROM molecule_detections WHERE doc_id = ?", (DOC,)
         ).fetchone()["n"]

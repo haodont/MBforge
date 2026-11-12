@@ -20,6 +20,7 @@ from mbforge.service.pipeline.detection.text_label_assignment import (
     assign_text_labels,
     bare_designation,
     page_designations,
+    reconcile_printed_spelling,
     to_top_down,
 )
 
@@ -148,3 +149,70 @@ def test_a_number_keeps_its_own_column_even_when_the_next_one_is_closer() -> Non
 
     assert assignment.assignments == {"B-46": "0"}
     assert assignment.contested == ()
+
+
+# --- a caption printed under the drawing (CN layout) ---
+
+#: CN121717757A p165: the scheme prints each compound number *under* its
+#: drawing (``I-256-1``, ``I-256-2``, ``I-256-3``, ``I-60-3``, ``I-256-A``).
+_CAPTION_DRAWINGS = [
+    (150.0, 560.0, 230.0, 620.0),
+    (300.0, 560.0, 380.0, 620.0),
+]
+#: The captions sit below their drawings (PDF points, bottom-left origin).
+_CAPTIONS = [
+    ("I-256-1", (150.0, 540.0, 230.0, 552.0)),
+    ("I-256-2", (300.0, 540.0, 380.0, 552.0)),
+]
+
+
+def test_a_number_printed_under_the_drawing_names_it() -> None:
+    """A CN patent prints the compound number as the caption of its drawing.
+
+    The caption is not in the crop window and not beside the drawing, so only
+    the page's own text can name it — and it sits at the drawing's foot.
+    """
+    structures = [
+        (str(index), to_top_down(bbox, _PAGE_HEIGHT))
+        for index, bbox in enumerate(_CAPTION_DRAWINGS)
+    ]
+    reads = page_designations(_regions(*_CAPTIONS), _PAGE_HEIGHT)
+
+    assignment = assign_text_labels(structures, reads)
+
+    assert assignment.contested == ()
+    assert assignment.assignments == {"I-256-1": "0", "I-256-2": "1"}
+
+
+# --- a caption the OCR read with the wrong letter ---
+
+_CN_PROSE_WITH_SERIES = (
+    "[0508] 将化合物I-60-3(100mg，0.29mmol)加入到二氯甲烷(10mL)中，加入二异丙基乙胺"
+)
+
+
+def test_a_caption_read_as_a_digit_takes_the_pages_spelling() -> None:
+    """``1-60-3`` is the page's ``I-60-3``.
+
+    The caption carries no letter, so it is not a designation at all and never
+    reaches the naming pass; the page's own prose prints the compound with the
+    series letter. The page's spelling is the compound's.
+    """
+    regions = _regions(
+        ("1-60-3", (150.0, 540.0, 230.0, 552.0)),
+        (_CN_PROSE_WITH_SERIES, (63.0, 300.0, 532.0, 390.0)),
+    )
+
+    assignment_reads = page_designations(regions, _PAGE_HEIGHT)
+
+    assert [read.text for read in assignment_reads] == ["I-60-3"]
+
+
+def test_two_standalone_spellings_are_left_to_a_reader() -> None:
+    """When the page prints both spellings as captions, neither is chosen."""
+    assert reconcile_printed_spelling("1-60-3", ["I-60-3", "1-60-3"]) == "1-60-3"
+
+
+def test_a_page_that_prints_no_series_spelling_does_not_correct() -> None:
+    """Without the page's own spelling there is nothing to correct to."""
+    assert reconcile_printed_spelling("1-60-3", ["[0510]"]) == "1-60-3"

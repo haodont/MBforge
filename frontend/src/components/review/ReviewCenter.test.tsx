@@ -31,24 +31,6 @@ const item = {
   status: 'pending', payload: {}, created_at: null, resolved_at: null,
 }
 
-const patentFactItem = {
-  id: 'patent-review-1', kind: 'patent_fact_review', doc_id: 'doc-1', page: 4,
-  bbox: null, crop_relpath: null, smiles: null, name: 'IC50', confidence: null,
-  reasons: [], context_text: null, status: 'pending',
-  payload: {
-    slot_id: 'slot-1', doc_id: 'doc-1', revision: 7,
-    conflict: {
-      conflict_id: 'conflict-1', slot_id: 'slot-1', kind: 'measurement', doc_id: 'doc-1',
-      page: 4, evidence_ids: ['ev-rule', 'ev-llm'],
-      candidates: [
-        { source: 'deterministic', fields: { metric: 'IC50', comparator: '<', value_text: '10', unit: 'nM' }, signature: 'rule', evidence_ids: ['ev-rule'] },
-        { source: 'llm', fields: { metric: 'IC50', comparator: '=', value_text: '20', unit: 'nM' }, signature: 'llm', evidence_ids: ['ev-llm'] },
-      ],
-    },
-  },
-  created_at: null, resolved_at: null,
-}
-
 describe('ReviewCenter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -56,7 +38,7 @@ describe('ReviewCenter', () => {
     api.reviewStats.mockResolvedValue({ items: [], pending: 1 })
     api.reviewHistory.mockResolvedValue({ entity_type: 'review_item', entity_id: 'r-1', history: [] })
     api.reviewDecide.mockResolvedValue({ updated: 1, skipped: 0, results: [] })
-    api.reviewClear.mockResolvedValue({ deleted_items: 1, deleted_candidates: 0 })
+    api.reviewClear.mockResolvedValue({ deleted_items: 1 })
   })
 
   function renderCenter() {
@@ -84,36 +66,6 @@ describe('ReviewCenter', () => {
     await waitFor(() => expect(api.reviewDecide).toHaveBeenCalledWith('/library', [{ kind: 'low_conf_molecule', id: 'r-1' }], 'confirm', ''))
     fireEvent.keyDown(window, { key: 'x' })
     await waitFor(() => expect(api.reviewDecide).toHaveBeenCalledWith('/library', [{ kind: 'low_conf_molecule', id: 'r-1' }], 'reject', ''))
-  })
-
-  it('requires an explicit patent value and submits its expected revision', async () => {
-    api.reviewQueue.mockResolvedValue({ items: [patentFactItem], total: 1, page: 1, page_size: 25 })
-    renderCenter()
-    expect(await screen.findByRole('heading', { name: 'IC50' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('checkbox', { name: 'review.selectItem' }))
-    expect(screen.getByRole('button', { name: 'review.confirm' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'review.reject' })).toBeDisabled()
-    expect(screen.getByText('review.patentFact.revision')).toBeInTheDocument()
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'review.openSource' })[1])
-    expect(api.openTab).toHaveBeenCalledWith({
-      type: 'document',
-      title: 'doc-1',
-      libraryRoot: '/library',
-      doc: { doc_id: 'doc-1', title: 'doc-1', path: 'storage/doc-1/source.pdf', doc_type: 'pdf', added_at: '', hash: '' },
-      initialPage: 4,
-      initialBbox: undefined,
-      initialEvidenceId: 'ev-llm',
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'review.patentFact.choose.llm' }))
-    await waitFor(() => expect(api.reviewDecide).toHaveBeenCalledWith('/library', [{
-      kind: 'patent_fact_review',
-      id: 'patent-review-1',
-      choice: 'llm',
-      expected_revision: 7,
-    }], 'confirm', ''))
   })
 
   it('clears the whole review center only after the confirmation dialog is confirmed', async () => {

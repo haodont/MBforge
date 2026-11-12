@@ -21,8 +21,124 @@ from mbforge.service.pipeline.activity.normalization import (
     normalize_reference_label,
 )
 from mbforge.service.pipeline.activity.table_scan import scan_table_evidence
+from mbforge.service.pipeline.detection.bbox_filter import bbox_area
 
 logger = get_logger("mbforge.service.pipeline.activity.extraction")
+
+#: A table region may overlap another region of the same page by a few PDF
+#: points (the layout producer sometimes stores one printed table twice, once
+#: cropped tight and once around it). Two boxes count as nested when one holds
+#: the other within this tolerance.
+_BOX_NEST_TOLERANCE = 4.0
+
+
+def _box_contains(
+    outer: tuple[float, float, float, float],
+    inner: tuple[float, float, float, float],
+    tolerance: float = _BOX_NEST_TOLERANCE,
+) -> bool:
+    return (
+        outer[0] <= inner[0] + tolerance
+        and outer[1] <= inner[1] + tolerance
+        and outer[2] >= inner[2] - tolerance
+        and outer[3] >= inner[3] - tolerance
+    )
+
+
+def _reading_key(measurement: ActivityMeasurement) -> tuple[Any, ...]:
+    """The identity of a printed reading, independent of which region held it."""
+    value = measurement.value
+    return (
+        measurement.page_num,
+        measurement.metric,
+        measurement.provenance.get("reference_key"),
+        measurement.provenance.get("column_target"),
+        value.raw_text,
+        value.operator_original,
+        str(value.canonical_value),
+        value.canonical_unit,
+    )
+
+
+def _drop_duplicate_fragment_readings(
+    measurements: list[ActivityMeasurement],
+    evidence: Sequence[SourceEvidence],
+    issues: list[dict[str, Any]],
+) -> list[ActivityMeasurement]:
+    """Drop the second reading of a row that two overlapping regions both hold.
+
+    One printed table can reach the store as two table regions whose boxes lie
+    inside each other; the overlapping rows are then read twice and the same
+    number appears twice in the dataset. Only a reading whose two copies come
+    from *nested* regions of the same page is dropped — two different tables that
+    print the same value keep both copies. The dropped copy is reported as an
+    issue so a reviewer can see what was removed.
+    """
+    boxes: dict[str, tuple[float, float, float, float]] = {}
+    pages: dict[str, int] = {}
+    for item in evidence:
+        if item.evidence_id and item.bbox:
+            boxes[item.evidence_id] = tuple(item.bbox)
+            pages[item.evidence_id] = item.page
+
+    groups: dict[tuple[Any, ...], list[ActivityMeasurement]] = {}
+    for measurement in measurements:
+        groups.setdefault(_reading_key(measurement), []).append(measurement)
+
+    dropped: set[str] = set()
+    for copies in groups.values():
+        if len(copies) < 2:
+            continue
+        regions = {
+            (
+                pages.get(measurement.evidence_ids[0]),
+                boxes.get(measurement.evidence_ids[0]),
+            )
+            for measurement in copies
+        }
+        if len(regions) != len(copies):
+            # Two copies from the same region are not an overlap of regions.
+            continue
+        if len({page for page, _ in regions}) != 1:
+            continue
+        if not all(box is not None for _, box in regions):
+            continue
+        boxes_only = [box for _, box in regions if box is not None]
+        if not any(
+            _box_contains(outer, inner)
+            for outer in boxes_only
+            for inner in boxes_only
+            if outer is not inner
+        ):
+            continue
+        # Keep the reading from the larger region: it holds the whole table.
+        keep = max(
+            copies,
+            key=lambda measurement: bbox_area(
+                boxes.get(measurement.evidence_ids[0], (0.0, 0.0, 0.0, 0.0))
+            ),
+        )
+        for measurement in copies:
+            if measurement is keep:
+                continue
+            dropped.add(measurement.measurement_id)
+            issues.append(
+                _issue(
+                    "duplicate_fragment_reading",
+                    (
+                        "reading of the same printed row held by two overlapping "
+                        f"table regions (kept the one from the larger region; "
+                        f"reference {measurement.provenance.get('reference_raw')!r}, "
+                        f"value {measurement.value.raw_text!r})"
+                    ),
+                    list(measurement.evidence_ids),
+                    fact_id=keep.measurement_id,
+                    severity="info",
+                )
+            )
+    if not dropped:
+        return measurements
+    return [m for m in measurements if m.measurement_id not in dropped]
 
 
 @dataclass
@@ -110,8 +226,8 @@ _SCALE_TAIL_RE = re.compile(
 # A single letter is only a bin label inside an enumeration (``A: ... B: ...``).
 # Scanned texts render the first letter oddly (``Λ: IC50 < 500 nM``), so the
 # token is any single Latin/Greek letter rather than A-D.
-_SCALE_LETTER_TAIL_RE = re.compile(r"(?<![A-Za-z])[A-Za-zΑ-Ωα-ω]\s*[:：]\s*$")
-_SCALE_LETTER_RE = re.compile(r"(?<![A-Za-z])[A-Za-zΑ-Ωα-ω]\s*[:：]")
+_SCALE_LETTER_TAIL_RE = re.compile(r"(?<![A-Za-z])[A-Za-zΑ-Ωα-ω]\s*(?:[:：]|表示)\s*$")
+_SCALE_LETTER_RE = re.compile(r"(?<![A-Za-z])[A-Za-zΑ-Ωα-ω]\s*(?:[:：]|表示)")
 
 # A metric named so that it can be *defined* measures nothing. Claim preambles
 # and glossaries ("术语“IC50”是指…", "the term ... refers to", "用語「アルキル」は…
@@ -681,6 +797,7 @@ def extract_activity_measurements_from_evidence(
                     )
                 )
     flush_text()
+    measurements = _drop_duplicate_fragment_readings(measurements, evidence, issues)
     logger.info(
         "Activity evidence parse for %s: %d measurements, %d issues",
         doc_id,

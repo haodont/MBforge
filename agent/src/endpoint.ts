@@ -1,12 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 import {
   getAgentDir,
@@ -15,6 +7,8 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 import { Value } from 'typebox/value'
+
+import { atomicWriteSync, readJsonFileSync } from './localStore.js'
 
 export const CUSTOM_PROVIDER_ID = 'custom'
 const CUSTOM_PROVIDER_NAME = 'Custom endpoint'
@@ -44,6 +38,7 @@ export interface ExistingEndpoint {
   modelName?: string
   contextWindow?: number
   maxTokens?: number
+  reasoning?: boolean
   hasKey: boolean
 }
 
@@ -54,6 +49,8 @@ export interface CustomEndpointInput {
   modelName?: string
   contextWindow?: number
   maxTokens?: number
+  /** Whether the model accepts thinking/reasoning parameters. */
+  reasoning?: boolean
   /** Omit to keep the existing saved key. */
   apiKey?: string
 }
@@ -68,6 +65,7 @@ export interface DiscoveredModel {
   id: string
   contextWindow?: number
   maxTokens?: number
+  reasoning?: boolean
 }
 
 function parseJsonObject(
@@ -243,6 +241,60 @@ function firstPositiveNumber(
   return undefined
 }
 
+/**
+ * Read a thinking/reasoning capability from the nonstandard fields that model
+ * gateways publish. The OpenAI `/models` schema has no such field, so this
+ * only answers when a gateway volunteers it.
+ */
+function recordReasoning(
+  record: Record<string, unknown>,
+): boolean | undefined {
+  for (const key of [
+    'reasoning',
+    'supports_reasoning',
+    'supportsReasoning',
+    'supports_reasoning_effort',
+    'supports_thinking',
+    'supportsThinking',
+    'thinking',
+  ]) {
+    const value = record[key]
+    if (typeof value === 'boolean') return value
+  }
+  const capabilities = record.capabilities
+  if (Array.isArray(capabilities)) {
+    // Ollama-style capability list.
+    if (capabilities.includes('thinking')) return true
+  } else if (capabilities && typeof capabilities === 'object') {
+    const nested = capabilities as Record<string, unknown>
+    for (const key of [
+      'reasoning',
+      'thinking',
+      'supports_reasoning',
+      'supports_thinking',
+    ]) {
+      const value = nested[key]
+      if (typeof value === 'boolean') return value
+    }
+  }
+  // OpenRouter lists accepted request parameters per model.
+  const supported = record.supported_parameters
+  if (Array.isArray(supported)) {
+    if (
+      supported.some(
+        (item) =>
+          item === 'reasoning' ||
+          item === 'reasoning_effort' ||
+          item === 'include_reasoning' ||
+          item === 'thinking',
+      )
+    ) {
+      return true
+    }
+  }
+  return undefined
+}
+
 function applyModelMetadata(
   record: Record<string, unknown>,
   model: DiscoveredModel,
@@ -266,6 +318,10 @@ function applyModelMetadata(
   }
   if (model.maxTokens === undefined && maxTokens) {
     model.maxTokens = maxTokens
+  }
+  if (model.reasoning === undefined) {
+    const reasoning = recordReasoning(record)
+    if (reasoning !== undefined) model.reasoning = reasoning
   }
 }
 
@@ -314,7 +370,11 @@ async function enrichModelFromDetail(
   api: CustomApi,
   apiKey: string | undefined,
 ): Promise<DiscoveredModel> {
-  if (model.contextWindow !== undefined && model.maxTokens !== undefined) {
+  if (
+    model.contextWindow !== undefined &&
+    model.maxTokens !== undefined &&
+    model.reasoning !== undefined
+  ) {
     return model
   }
   try {
@@ -381,17 +441,8 @@ export async function discoverModels(
 }
 
 function readJsonObject(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {}
-  const raw = readFileSync(path, 'utf8').replace(/^\uFEFF/, '').trim()
-  if (!raw) return {}
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`${path} is not valid JSON: ${reason}`)
-  }
-  return parseJsonObject(parsed, path)
+  const parsed = readJsonFileSync(path)
+  return parsed === undefined ? {} : parseJsonObject(parsed, path)
 }
 
 function writeJson(
@@ -399,26 +450,7 @@ function writeJson(
   value: Record<string, unknown>,
   mode?: number,
 ): void {
-  const directory = dirname(path)
-  mkdirSync(directory, { recursive: true, mode: 0o700 })
-  const temporary = join(
-    directory,
-    `.${basename(path)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`,
-  )
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode,
-  })
-  try {
-    renameSync(temporary, path)
-  } catch (error) {
-    try {
-      unlinkSync(temporary)
-    } catch {
-      // Best effort cleanup; preserve the original write error.
-    }
-    throw error
-  }
+  atomicWriteSync(path, `${JSON.stringify(value, null, 2)}\n`, mode)
 }
 
 function readProvider(
@@ -471,6 +503,8 @@ export function readCustomEndpoint(
     modelName: typeof model?.name === 'string' ? model.name : undefined,
     contextWindow: positiveIntegerOrUndefined(model?.contextWindow),
     maxTokens: positiveIntegerOrUndefined(model?.maxTokens),
+    reasoning:
+      typeof model?.reasoning === 'boolean' ? model.reasoning : undefined,
     hasKey:
       (credential.type === 'api_key' &&
         typeof credential.key === 'string' &&
@@ -486,6 +520,7 @@ function buildModelEntry(
   previous: Record<string, unknown> | undefined,
   contextWindow: number | undefined,
   maxTokens: number | undefined,
+  reasoning: boolean | undefined,
 ): Record<string, unknown> {
   const resolvedContextWindow =
     contextWindow ??
@@ -498,6 +533,9 @@ function buildModelEntry(
   if (resolvedMaxTokens > resolvedContextWindow) {
     throw new Error('Max output tokens cannot exceed the context window')
   }
+  const resolvedReasoning =
+    reasoning ??
+    (typeof previous?.reasoning === 'boolean' ? previous.reasoning : false)
   const input =
     Array.isArray(previous?.input) &&
     previous.input.every((item) => item === 'text' || item === 'image')
@@ -510,8 +548,7 @@ function buildModelEntry(
       modelName ||
       (typeof previous?.name === 'string' && previous.name) ||
       modelId,
-    reasoning:
-      typeof previous?.reasoning === 'boolean' ? previous.reasoning : false,
+    reasoning: resolvedReasoning,
     input,
     cost: {
       input: 0,
@@ -524,14 +561,16 @@ function buildModelEntry(
   }
 
   // Conservative defaults for OpenAI-compatible proxies; users can refine
-  // them in models.json when the endpoint supports more fields.
+  // them in models.json when the endpoint supports more fields. Reasoning
+  // effort stays auto-detected from the base URL once thinking is enabled,
+  // because a fixed false would make the thinking levels a no-op.
   if (api === 'openai-completions') {
     entry.compat = {
       supportsStore: false,
       supportsDeveloperRole: false,
-      supportsReasoningEffort: false,
       supportsUsageInStreaming: false,
       maxTokensField: 'max_tokens',
+      ...(resolvedReasoning ? {} : { supportsReasoningEffort: false }),
     }
   }
   return entry
@@ -601,6 +640,7 @@ export function saveCustomEndpoint(
         previous,
         contextWindow,
         maxTokens,
+        input.reasoning,
       ),
     )
 
@@ -734,6 +774,7 @@ export function registerEndpointCommand(pi: ExtensionAPI): void {
         let modelId: string | undefined
         let discoveredContext: number | undefined
         let discoveredMaxTokens: number | undefined
+        let discoveredReasoning: boolean | undefined
         if (orderedModels.length > 0) {
           const selectedModel = await ctx.ui.select(
             'Model (from /models)',
@@ -750,6 +791,7 @@ export function registerEndpointCommand(pi: ExtensionAPI): void {
             modelId = model?.id
             discoveredContext = model?.contextWindow
             discoveredMaxTokens = model?.maxTokens
+            discoveredReasoning = model?.reasoning
           }
         }
         if (!modelId) {
@@ -764,6 +806,19 @@ export function registerEndpointCommand(pi: ExtensionAPI): void {
         if (!modelId) throw new Error('Model ID is required')
 
         const sameModel = current.modelId === modelId
+        const reasoningDefault =
+          discoveredReasoning ?? (sameModel ? current.reasoning : undefined) ?? false
+        const thinkingOn = 'on — send thinking/reasoning parameters'
+        const thinkingOff = 'off — no thinking parameters'
+        const reasoningChoice = await ctx.ui.select(
+          discoveredReasoning === undefined
+            ? 'Thinking support'
+            : `Thinking support (endpoint reports ${discoveredReasoning ? 'on' : 'off'})`,
+          reasoningDefault ? [thinkingOn, thinkingOff] : [thinkingOff, thinkingOn],
+        )
+        if (reasoningChoice === undefined) return
+        const reasoning = reasoningChoice === thinkingOn
+
         const contextDefault =
           discoveredContext ??
           (sameModel ? current.contextWindow : undefined) ??
@@ -803,6 +858,7 @@ export function registerEndpointCommand(pi: ExtensionAPI): void {
             modelId,
             contextWindow,
             maxTokens,
+            reasoning,
             apiKey,
           },
           agentDir,
@@ -835,6 +891,7 @@ export function registerEndpointCommand(pi: ExtensionAPI): void {
             `provider  ${baseUrl}`,
             `context   ${contextWindow} tokens`,
             `max out   ${maxTokens} tokens`,
+            `thinking  ${reasoning ? 'on' : 'off'}`,
             selected
               ? 'selected as the current model'
               : 'run /model to select it',

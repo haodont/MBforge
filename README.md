@@ -98,7 +98,7 @@ npm --prefix agent run prefetch:bin
 # Development mode (backend reload + Vite HMR)
 npm --prefix frontend run dev:all
 
-# Agent CLI (separate terminal; starts the backend if needed)
+# Agent CLI (separate terminal; starts the backend with source reload if needed)
 npm --prefix agent run cli
 ```
 

@@ -13,7 +13,6 @@ import {
   listMemory,
   memoryArchivePath,
   memoryEphemeralPath,
-  memoryEphemeralTool,
   memoryStatePath,
   memorySystemPrompt,
   memoryTool,
@@ -125,9 +124,7 @@ test('seventeen ephemeral notes compact into hot, persona and cold layers', asyn
 test('memory tools list active layers and inspect ephemeral notes separately', async (t) => {
   useTempMemory(t)
   const tool = memoryTool()
-  const ephemeralTool = memoryEphemeralTool()
   assert.equal(tool.name, 'memory')
-  assert.equal(ephemeralTool.name, 'memory_ephemeral')
 
   const added = await tool.execute(
     'call-1',
@@ -157,9 +154,9 @@ test('memory tools list active layers and inspect ephemeral notes separately', a
   assert.doesNotMatch(JSON.stringify(listedDetails), /Prefer concise Chinese answers/)
   assert.match(listedDetails.hot, /# MBForge memory/)
 
-  const ephemeral = await ephemeralTool.execute(
+  const ephemeral = await tool.execute(
     'call-3',
-    {},
+    { action: 'ephemeral' },
     undefined,
     undefined,
     {} as never,

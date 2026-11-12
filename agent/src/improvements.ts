@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import {
   defineTool,
@@ -9,6 +7,10 @@ import {
   type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
+
+import { askUser } from './ask.js'
+import { atomicWrite, createSerializer, readJsonFile } from './localStore.js'
+import { improvementRenderers } from './toolRender.js'
 
 const IMPROVEMENTS_FILE_NAME = 'IMPROVEMENTS.json'
 const MAX_IMPROVEMENTS = 50
@@ -140,37 +142,16 @@ function normalizeInput(input: ImprovementInput): ImprovementInput {
   }
 }
 
-async function writeStore(path: string, store: ImprovementStore): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
-  try {
-    await writeFile(temporary, `${JSON.stringify(store, null, 2)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    })
-    await rename(temporary, path)
-  } catch (error) {
-    try {
-      await unlink(temporary)
-    } catch {
-      // Best effort cleanup; preserve the original write error.
-    }
-    throw error
-  }
-}
-
 async function readStore(path: string): Promise<ImprovementStore> {
-  if (!existsSync(path)) return { version: 1, items: [] }
-  const raw = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '')
-  if (!raw.trim()) return { version: 1, items: [] }
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = await readJsonFile(path)
   } catch (error) {
     throw new Error(`Improvement log is not valid JSON: ${path}`, {
       cause: error,
     })
   }
+  if (parsed === undefined) return { version: 1, items: [] }
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error(`Improvement log has an invalid shape: ${path}`)
   }
@@ -190,16 +171,7 @@ async function readStore(path: string): Promise<ImprovementStore> {
   return { version: 1, items }
 }
 
-let writeChain: Promise<unknown> = Promise.resolve()
-
-function serialize<T>(operation: () => Promise<T>): Promise<T> {
-  const run = writeChain.then(operation)
-  writeChain = run.then(
-    () => undefined,
-    () => undefined,
-  )
-  return run
-}
+const serialize = createSerializer()
 
 export interface ProposeImprovementOptions {
   project: string
@@ -268,7 +240,7 @@ export async function proposeImprovement(
       version: 1,
       items: [record, ...store.items].slice(0, MAX_IMPROVEMENTS),
     }
-    await writeStore(path, next)
+    await atomicWrite(path, `${JSON.stringify(next, null, 2)}\n`)
     return {
       path,
       id: record.id,
@@ -278,7 +250,7 @@ export async function proposeImprovement(
       message: approved
         ? options.canEdit
           ? 'Approved. Implement exactly this change with the repository tools, verify it, then call action=complete.'
-          : 'Approved, but repository edit tools are inactive. Ask the user to switch to dev mode; do not claim implementation.'
+          : 'Approved, but repository edit tools are inactive. Call request_dev_mode and wait for approval before implementing; do not claim implementation.'
         : 'Declined. Do not implement this change.',
     }
   })
@@ -322,7 +294,7 @@ export async function completeImprovement(
     item.updated_at = now
     item.completed_at = now
     item.completion_note = normalizedNote
-    await writeStore(path, store)
+    await atomicWrite(path, `${JSON.stringify(store, null, 2)}\n`)
     return {
       path,
       id: item.id,
@@ -404,10 +376,11 @@ export function improvementTool() {
     promptGuidelines: [
       'Use this tool only when a run reveals a concrete, scoped design or tooling gap that the user did not already ask you to change. Do not use it for library data corrections (use propose_review), ordinary requested edits, or speculative refactors.',
       'Call action="propose" with the observed problem, the exact change, the expected benefit, the risk, and the files involved. The tool shows the user a confirmation dialog. Never edit code before it returns approved=true.',
-      'If approved=true and executable=true, implement exactly the proposed scope with repository tools, verify it, then call action="complete" with the id and a short verification note. If approved=false, stop and do not implement. If executable=false, tell the user to switch to dev mode; do not claim the change was applied.',
+      'If approved=true and executable=true, implement exactly the proposed scope with repository tools, verify it, then call action="complete" with the id and a short verification note. If approved=false, stop and do not implement. If executable=false, call request_dev_mode and wait for approval; do not claim the change was applied.',
       'Use action="list" to inspect prior suggestions before proposing a duplicate.',
     ],
     parameters: improvementParameters,
+    ...improvementRenderers(),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (params.action === 'propose') {
         if (!params.title || !params.area || !params.problem || !params.change) {
@@ -431,7 +404,16 @@ export function improvementTool() {
               (tool) => tool.name === 'edit' || tool.name === 'write',
             ),
             hasUI: ctx.hasUI,
-            confirm: (title, message) => ctx.ui.confirm(title, message),
+            confirm: async (title, message) => {
+              const answer = await askUser(ctx, {
+                kind: 'confirm',
+                title,
+                message,
+                confirm_label: 'Apply improvement',
+                cancel_label: 'Decline',
+              })
+              return answer.confirmed === true
+            },
           },
         )
         const details: ImprovementToolDetails = {

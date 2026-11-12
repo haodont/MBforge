@@ -7,9 +7,10 @@ regions.
 
 Pipeline inside one page:
 
-    render (144 DPI)  →  Hiro-Layout regions and (optionally) MolDet molecules
+    render (144 DPI)  →  Hiro-Layout regions and MolDet molecules
                       →  merge R1/R2/R5 intra-detector + R3/R4 cross-model
                       →  column_sort reading order  →  layout-guided text OCR
+                      →  table crops with drawings masked, cell text read
 
 One render per page is reused by every consumer — region detector, molecule
 detector and text recognizer — so none of them disagree about geometry (the
@@ -86,18 +87,19 @@ def parse_page_image(
     detector: Any | None = None,
     conf: float = DEFAULT_CONF,
     cross_model: bool = True,
-    mask_table_molecules: bool = False,
     params: dict[str, Any] | None = None,
 ) -> LayoutPage:
     """Detect, merge, order and read one already-rendered page.
 
     ``image`` is HWC uint8 **RGB** at *zoom* px/pt. Text regions are always read
     with the local recognizer, and ``table`` region content is always recognized
-    with the local SLANet-1M backend (best-effort enrichment). ``cross_model``
-    also runs MolDet on that same render, so the merge rules can re-type a
-    figure region that is really one molecule (R3) and keep a multi-molecule
-    figure as a container (R4). ``mask_table_molecules`` uses those same
-    molecule boxes to keep structure drawings out of a table's cell text.
+    with the local SLANet-1M backend (best-effort enrichment).
+
+    MolDet always runs on that same render: the molecule boxes are what keeps a
+    drawn structure out of a table's cell text, so masking cannot depend on an
+    option. ``cross_model`` only decides whether the merge rules may use those
+    boxes to re-type a figure region that is really one molecule (R3) and keep a
+    multi-molecule figure as a container (R4).
     """
     from mbforge.service.ports import get_runtime
 
@@ -113,20 +115,16 @@ def parse_page_image(
         page_size_px=page_size_px,
         dpi=dpi,
     )
-    molecules = (
-        _detect_molecules(
-            image,
-            doc_id=doc_id,
-            page=page_num,
-            page_size_px=page_size_px,
-            dpi=dpi,
-        )
-        if cross_model
-        else []
+    molecules = _detect_molecules(
+        image,
+        doc_id=doc_id,
+        page=page_num,
+        page_size_px=page_size_px,
+        dpi=dpi,
     )
     regions, merge_stats = merge(
         regions,
-        molecules,
+        molecules if cross_model else [],
         page_height_pt=page_frame["height_pt"],
         px_per_pt=scale,
         params=params,
@@ -135,12 +133,7 @@ def parse_page_image(
     regions = assign_reading_order(regions, page_frame)
 
     text_stats = _fill_text(regions, image)
-    table_stats = _fill_tables(
-        regions,
-        image,
-        molecule_boxes=_molecule_boxes(regions) if mask_table_molecules else (),
-        mask_table_molecules=mask_table_molecules,
-    )
+    table_stats = _fill_tables(regions, image, molecule_boxes=molecules)
 
     return LayoutPage(
         page_num=page_num,
@@ -167,12 +160,15 @@ def _detect_molecules(
     page_size_px: tuple[float, float],
     dpi: float,
 ) -> list[dict[str, Any]]:
-    """MolDet's molecule boxes for one page, in the shape the merge rules read.
+    """MolDet's molecule boxes for one page, in the shape the mask and merge read.
 
     MolDet runs **after** the region detector and never nested inside it:
     each detector owns its model instance and runs its own forward pass. Both
     work off the one page render, so their boxes share a coordinate space and
     can be compared directly.
+
+    These boxes always feed the table mask (a drawing must never be read as
+    cell text); ``cross_model`` only lets them reach the R3/R4 merge rules.
 
     A failed detection degrades to no molecules. Detection is still the
     authoritative molecule source, so R3/R4 stay inert rather than failing a
@@ -227,33 +223,6 @@ def _crop_region(image: np.ndarray, bbox_px: Sequence[float]) -> Image.Image:
     return Image.fromarray(image[y0:y1, x0:x1])
 
 
-def _molecule_boxes(regions: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Every molecule box on the page, as standalone regions and R4 children.
-
-    A molecule is either its own region (R3 yield or a standalone MolDet box) or
-    a child of an image/chart container that holds several molecules, so both
-    shapes are collected.
-    """
-    boxes: list[dict[str, Any]] = []
-
-    def add(region: dict[str, Any]) -> None:
-        boxes.append(
-            {
-                "region_id": str(region.get("region_id", "")),
-                "bbox_px": list(region.get("bbox_px") or []),
-                "bbox_pdf": list(region.get("bbox_pdf") or []),
-            }
-        )
-
-    for region in regions:
-        if str(region.get("type")) == "molecule":
-            add(region)
-        for child in region.get("children") or []:
-            if str(child.get("type")) == "molecule":
-                add(child)
-    return boxes
-
-
 def _inside_table(molecule: dict[str, Any], table_box: Sequence[float]) -> bool:
     """Whether a molecule belongs to this table (centre inside, or >50% covered)."""
     box = molecule.get("bbox_px") or []
@@ -277,8 +246,7 @@ def _fill_tables(
     regions: list[dict[str, Any]],
     image: np.ndarray,
     *,
-    molecule_boxes: Sequence[dict[str, Any]] = (),
-    mask_table_molecules: bool = False,
+    molecule_boxes: Sequence[dict[str, Any]],
 ) -> dict[str, int]:
     """Recognize ``table`` region content with SLANet-1M and store it.
 
@@ -289,8 +257,8 @@ def _fill_tables(
     Recognition is best-effort enrichment: a missing model or a
     failed inference leaves the region empty and never breaks the page.
 
-    With ``mask_table_molecules`` a table that draws structures is parsed as
-    text: the molecule boxes inside it are blanked for cell-text recognition and
+    A table that draws structures inside its cells is parsed as text, always:
+    the molecule boxes inside it are blanked for cell-text recognition and
     replaced by a ``[MOL:n]`` token in the cell that holds them. The token keeps
     the molecule's row/column position; ``region["molecule_cells"]`` records the
     token → molecule mapping (PDF coordinates) so the evidence layer can fold in
@@ -310,40 +278,47 @@ def _fill_tables(
         try:
             crop = _crop_region(image, region["bbox_px"])
             molecule_cells: list[dict[str, Any]] = []
-            if mask_table_molecules and molecule_boxes:
-                inside = [
-                    molecule
-                    for molecule in molecule_boxes
-                    if _inside_table(molecule, region["bbox_px"])
-                ]
-                if inside:
-                    offset_x = float(region["bbox_px"][0])
-                    offset_y = float(region["bbox_px"][1])
-                    for seq, molecule in enumerate(inside):
-                        box = molecule["bbox_px"]
-                        molecule_cells.append(
-                            {
-                                "token": f"[MOL:{seq}]",
-                                "bbox": [
-                                    float(box[0]) - offset_x,
-                                    float(box[1]) - offset_y,
-                                    float(box[2]) - offset_x,
-                                    float(box[3]) - offset_y,
-                                ],
-                                "bbox_pdf": list(molecule.get("bbox_pdf") or []),
-                                "region_id": molecule["region_id"],
-                            }
-                        )
-                    region["molecule_cells"] = [
+            inside = [
+                molecule
+                for molecule in molecule_boxes
+                if _inside_table(molecule, region["bbox_px"])
+            ]
+            # Token number follows the drawing's position in the table, so a
+            # placeholder list reads top-to-bottom instead of detector order.
+            inside.sort(
+                key=lambda molecule: (
+                    float(molecule["bbox_px"][1]),
+                    float(molecule["bbox_px"][0]),
+                )
+            )
+            if inside:
+                offset_x = float(region["bbox_px"][0])
+                offset_y = float(region["bbox_px"][1])
+                for seq, molecule in enumerate(inside):
+                    box = molecule["bbox_px"]
+                    molecule_cells.append(
                         {
-                            "token": item["token"],
-                            "region_id": item["region_id"],
-                            "bbox_pdf": item["bbox_pdf"],
+                            "token": f"[MOL:{seq}]",
+                            "bbox": [
+                                float(box[0]) - offset_x,
+                                float(box[1]) - offset_y,
+                                float(box[2]) - offset_x,
+                                float(box[3]) - offset_y,
+                            ],
+                            "bbox_pdf": list(molecule.get("bbox_pdf") or []),
+                            "region_id": molecule["region_id"],
                         }
-                        for item in molecule_cells
-                    ]
-                    masked_tables += 1
-                    masked_molecules += len(molecule_cells)
+                    )
+                region["molecule_cells"] = [
+                    {
+                        "token": item["token"],
+                        "region_id": item["region_id"],
+                        "bbox_pdf": item["bbox_pdf"],
+                    }
+                    for item in molecule_cells
+                ]
+                masked_tables += 1
+                masked_molecules += len(molecule_cells)
             html = get_runtime().table_slanet.predict_table(
                 crop, molecule_cells=molecule_cells
             )
@@ -382,7 +357,6 @@ def parse_pdf_layout(
     detector: Any | None = None,
     conf: float = DEFAULT_CONF,
     cross_model: bool = True,
-    mask_table_molecules: bool = False,
     max_pages: int | None = None,
     cancel_check: Any | None = None,
     params: dict[str, Any] | None = None,
@@ -409,7 +383,6 @@ def parse_pdf_layout(
                 detector=detector,
                 conf=conf,
                 cross_model=cross_model,
-                mask_table_molecules=mask_table_molecules,
                 params=params,
             )
             pages.append(parsed)

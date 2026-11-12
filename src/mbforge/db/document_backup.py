@@ -19,10 +19,6 @@ _DOC_TABLES = (
     "ingest_runs",
     "ingest_logs",
     "molecule_detections",
-    "markush_scaffolds",
-    "markush_fragments",
-    "markush_review_candidates",
-    "markush_evidence",
     "source_evidence",
     "review_items",
     "measurements",
@@ -68,9 +64,8 @@ def _rows_by_owner(conn: Any, table: str, doc_id: str) -> list[dict[str, Any]]:
 def _snapshot(conn: Any, doc_id: str) -> dict[str, list[dict[str, Any]]]:
     """Export every database row owned by *doc_id*.
 
-    Walks the document's identity plus its child rows (molecule image /
-    relation / correction records and the Markush scaffold->site->option /
-    mount hierarchy) so the snapshot is self-contained and restorable.
+    Walks the document's identity plus its child rows (molecule image and
+    correction records) so the snapshot is self-contained and restorable.
     """
     snapshot: dict[str, list[dict[str, Any]]] = {}
     for table in _DOC_TABLES:
@@ -89,14 +84,6 @@ def _snapshot(conn: Any, doc_id: str) -> dict[str, list[dict[str, Any]]]:
         if corrections:
             snapshot["molecule_corrections"] = corrections
 
-    candidate_ids = [
-        row["candidate_id"] for row in snapshot.get("markush_review_candidates", [])
-    ]
-    if candidate_ids:
-        decisions = _rows_in(conn, "markush_decisions", "entity_id", candidate_ids)
-        if decisions:
-            snapshot["markush_decisions"] = decisions
-
     return snapshot
 
 
@@ -105,7 +92,7 @@ def snapshot_doc_db(
 ) -> dict[str, list[dict[str, Any]]]:
     """Return the document's database rows after ensuring the DB is ready."""
     manager.initialize()
-    with manager.mol_conn() as conn:
+    with manager.connection() as conn:
         return _snapshot(conn, doc_id)
 
 

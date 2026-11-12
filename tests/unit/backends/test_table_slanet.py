@@ -126,3 +126,55 @@ def test_unavailable_model_degrades_without_network(monkeypatch) -> None:
     monkeypatch.setattr(table_slanet, "load", lambda device=None: None)
     image = np.zeros((40, 80, 3), dtype=np.uint8)
     assert table_slanet.predict_table(image) == ""
+
+
+def test_table_cell_text_follows_the_drawn_ruled_grid(monkeypatch) -> None:
+    """A ruled table is read inside the cells it draws.
+
+    SLANet's per-cell boxes hug the text line it saw: on a row made tall by a
+    structure drawing they cover one line and can drift into the next row, so
+    the row's printed number and value fall outside them and are never read
+    (``b1603718dc46dd6e241fca4082e01530``, CN119504738A p122). When the drawn
+    rules match the structure model's rows and columns, the grid is the cell
+    geometry; a borderless table keeps the model's own boxes.
+    """
+    vocabulary = table_slanet._STRUCTURE_CHARS
+    tokens = ["sos", "<tr>", "<td></td>", "<td></td>", "</tr>", "eos"]
+    probs = np.zeros((1, len(tokens), len(vocabulary)), dtype=np.float32)
+    for index, token in enumerate(tokens):
+        probs[0, index, vocabulary.index(token)] = 1
+    boxes = np.zeros((1, len(tokens), 4), dtype=np.float32)
+    # Two tight one-line cells: [10,10,100,20] and [110,10,200,20] on 220x120.
+    boxes[0, 2] = [10 / 220, 10 / 120, 100 / 220, 20 / 120]
+    boxes[0, 3] = [110 / 220, 10 / 120, 200 / 220, 20 / 120]
+    monkeypatch.setattr(
+        table_slanet, "_SESSION", SimpleNamespace(run=lambda *args: [boxes, probs])
+    )
+    monkeypatch.setattr(table_slanet, "_AVAILABLE", True)
+    monkeypatch.setattr(table_slanet, "_preprocess", lambda image: (image, 1.0))
+
+    seen: list[list[list[float]]] = []
+
+    def recognize(image, regions):
+        seen.append([[float(v) for v in region[1]] for region in regions])
+        return {region[0]: region[0] for region in regions}
+
+    monkeypatch.setattr(page_text, "read_text_in_boxes", recognize)
+
+    ruled = np.full((120, 220, 3), 255, dtype=np.uint8)
+    ruled[5, :] = ruled[115, :] = 0
+    ruled[:, 5] = ruled[:, 105] = ruled[:, 215] = 0
+    html = table_slanet.predict_table(ruled)
+
+    # The drawn grid (rules + 3 px inset), then the recognizer's 2 px margin.
+    assert seen[-1] == [
+        [6.0, 6.0, 104.0, 114.0],
+        [106.0, 6.0, 214.0, 114.0],
+    ]
+    assert "<td>slanet-cell-0</td>" in html
+    assert "<td>slanet-cell-1</td>" in html
+
+    plain = np.full((120, 220, 3), 255, dtype=np.uint8)
+    table_slanet.predict_table(plain)
+    # Borderless: the structure model's boxes stay the cell geometry.
+    assert seen[-1] == [[8.0, 8.0, 102.0, 22.0], [108.0, 8.0, 202.0, 22.0]]

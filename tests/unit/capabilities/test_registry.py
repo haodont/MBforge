@@ -256,12 +256,12 @@ def test_document_reference_resolves_to_the_canonical_doc_id(tmp_library: Path) 
     assert match.short_id == doc_id[:12]
     assert len(match.short_id) == 12
 
-    document = asyncio.run(invoke("get_document", context, {"doc_id": match.short_id}))
+    document = asyncio.run(invoke("document_read", context, {"doc_id": match.short_id}))
     assert document.data.doc_id == doc_id
     assert document.data.short_id == match.short_id
 
     for reference in ("CN119504738A", "CN119504738A.pdf", doc_id[:8], doc_id):
-        result = asyncio.run(invoke("get_document", context, {"doc_id": reference}))
+        result = asyncio.run(invoke("document_read", context, {"doc_id": reference}))
         assert result.data.doc_id == doc_id
 
     evidence = asyncio.run(invoke("list_evidence", context, {"doc_id": match.short_id}))
@@ -276,7 +276,7 @@ def test_ambiguous_document_reference_is_rejected(tmp_library: Path) -> None:
     context = CapabilityContext(library_root=str(tmp_library), mode="readonly")
 
     with pytest.raises(ValidationError) as excinfo:
-        asyncio.run(invoke("get_document", context, {"doc_id": "Shared Title"}))
+        asyncio.run(invoke("document_read", context, {"doc_id": "Shared Title"}))
     assert len(excinfo.value.context["candidates"]) == 2
 
 

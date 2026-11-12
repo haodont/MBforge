@@ -1,14 +1,13 @@
 """Run-scoped artifact staging for the pipeline (PIPE-13).
 
-``storage/{doc_id}/images/`` and ``storage/{doc_id}/crops/`` are evidence for
-successful runs and must never be deleted unconditionally. Each pipeline run
-writes new evidence into ``storage/{doc_id}/.staging/`` and the
-runner promotes it into the canonical ``images/`` / ``crops/`` directories
-only after every stage succeeds. On failure or cancellation exactly this
-run's staging directory is removed — evidence from previous successful runs
-(including re-ingested documents) stays untouched. Successful promotion keeps
-the checkpoint in staging so an explicit retry can reuse completed work
-without rerunning it.
+``storage/{doc_id}/crops/`` is evidence for successful runs and must never be
+deleted unconditionally. Each pipeline run writes new crops into
+``storage/{doc_id}/.staging/`` and the runner promotes them into the canonical
+``crops/`` directory only after every stage succeeds. On failure or
+cancellation exactly this run's staging directory is removed — evidence from
+previous successful runs (including re-ingested documents) stays untouched.
+Successful promotion keeps the checkpoint in staging so an explicit retry can
+reuse completed work without rerunning it.
 """
 
 from __future__ import annotations

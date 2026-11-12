@@ -2,6 +2,384 @@
 
 This directory records active architecture and implementation plans.
 
+## Code drafts get a typed home and static checks (2026-11-12)
+
+The model often writes Python helper functions as fenced blocks, like drafting
+`SourceEvidence.create(...)` instead of editing a file. Executing those blocks
+would bypass capability validation and evidence provenance, so the answer is a
+draft artifact plus static checks, not an executor.
+
+- `agent/src/draft.ts` registers the local `draft` tool with `check`, `save`,
+  `list`, and `read`. `check` returns diagnostics without touching disk;
+  `save` writes `{agent_home}/DRAFTS/<id>.<ext>` plus an index and returns the
+  path, target file, line count, and checks.
+- Checkers are language-specific: Python uses an AST parse plus Ruff; TypeScript
+  and JavaScript use the TypeScript parser's syntax diagnostics (no type check);
+  JSON uses `JSON.parse`. SQL, YAML, TOML, Markdown and text are saved but
+  explicitly reported `unavailable`, never silently accepted.
+- No checker executes the supplied code. Python's AST parse and Ruff, and the
+  TypeScript `transpileModule` parser, are static. The no-execution behavior is
+  tested with a draft that writes a marker file; the marker stays absent.
+- The tool is active in both modes, is listed in the agent's local-tool context,
+  and is skipped from goal artifacts. The prompt now tells the model to call
+  `draft action="check"` before `edit`/`write`, or `action="save"` when the user
+  should review a file, and never to paste a fenced block as a substitute.
+- Tool rows summarize the verdict (`syntax ✓ · ruff ✗`), show diagnostics only
+  when expanded, and keep the code out of the call row.
+
+Verified with `npm --prefix agent run check` and the full `npm --prefix agent
+test` suite (62 passed, including `draft.test.ts` for Python/TS/JS/JSON checks,
+unavailable languages, no execution, and save/list/read).
+
+## Goal review streams events and only fails on silence (2026-11-12)
+
+Automatic goal review and `review_task` first failed on Windows with
+`spawn ENAMETOOLONG`: `spawnReviewer` placed the entire goal transcript — the
+goal definition, a 40-row tool index, and the conversation — into the final CLI
+argument. Windows caps a process command line at roughly 32k UTF-16 characters,
+so `CreateProcess` rejected the spawn before pi started. The next run then hit
+the old three-minute wall-clock limit while the reviewer was still working.
+
+- `buildReviewerArgs` returns only flags, the system prompt, and the inherited
+  model. The prompt travels on stdin; `pi --mode json` reads piped stdin.
+- Reviews use JSON event mode, so the parent sees `message_update`,
+  `tool_execution_*`, and `message_end` events while the child runs. The final
+  assistant `message_end` text is the report; error, aborted, length, and
+  tool-use-without-answer messages fail explicitly.
+- `spawnPiText` no longer requires a wall-clock deadline. It supports
+  `idleTimeoutMs`, which resets on stdout or stderr activity; review sets five
+  minutes of total silence. A slow but progressing review is no longer killed.
+  `research` keeps its absolute timeout because it is a foreground call.
+- The duplicated `projectCwd`/`piInvocation` definitions in `review.ts` are
+  removed in favor of `agent/src/piChild.ts`.
+- Failure notices show both the review id (`review-…`) and goal id (`goal-…`),
+  and `/goal-reviews retry` accepts either one; using the goal id shown in the
+  notice no longer dead-ends with "No failed review".
+- A review that finishes while a foreground goal is active is held in
+  `ReviewNoticeQueue` instead of being injected into the session. The queue is
+  released by `agent_settled`, `session_start`, or `session_tree` only after
+  `activeGoal` is empty; `/goal-reviews` reports how many notices are held.
+  Held failures also defer their warning toast. Retrying a failed review drops
+  its stale held notice before the new attempt. Held notices live only in the
+  session; a CLI exit before the foreground goal ends drops them.
+
+Verified with `npm --prefix agent run check` and `npm --prefix agent test`
+(70 passed; review tests cover 40k prompts staying off argv, extraction of
+the final assistant message from JSON events, retry by goal id, and holding
+notices until the foreground goal ends).
+
+## The active goal is pinned below the editor (2026-11-12)
+
+A `goal` begin was only visible as a tool row that scrolled away. The active
+goal now has a persistent checklist at the bottom of the screen
+(pi's `setWidget(..., {placement: "belowEditor"})`):
+
+- `agent/src/goalWidget.ts` reads `goalStateFromBranch` and renders
+  `⬡ GOAL “<title>”` with the goal id, then the objective, then todo-style
+  `Requirements` and `Acceptance` checkboxes and compact `Constraints` /
+  `Not in scope` rows. Requirements show all five; acceptance is capped at five,
+  constraints/non-goals at three, each with a `… N more` row.
+- The branch scan is cached by branch length + goal id, so an update or a
+  resumed session shows the latest definition and a frame does not rescan
+  hundreds of entries.
+- `agent/src/extension.ts` installs/removes the widget from `refreshBrand`,
+  `session_start`, `session_tree`, `agent_settled` (aborted goal), and the goal
+  tool's `setActiveGoal` callback. `goal` action `update` now calls
+  `setActiveGoal(id)` after appending the update so the checklist refreshes
+  without changing the active id.
+- A completed or cancelled goal removes the widget instead of leaving a stale
+  line. If the session has no active goal at startup, the widget is cleared.
+
+## TPS is shown in the footer (2026-11-12)
+
+- Final response speed uses `AssistantMessage.usage.output /
+  AssistantMessage.durationMs`, both supplied by pi-ai, so it is exact for the
+  completed message. `agent/src/footer.ts` also derives it from the latest
+  assistant entry when a session is resumed.
+- While streaming, `message_update` deltas accumulate and are approximated as
+  `chars / 4` over elapsed time; the footer marks this estimate with `~`.
+  Live TPS is accent-coloured, the final value is muted.
+- Display: full footer `23.4 tps` / `~18.2 tps`, compact footer `23 tps`.
+  `session_start` and `session_tree` reset the live estimate; `agent_settled`
+  clears the live flag without dropping the final value.
+
+Verified with `npm --prefix agent run check` and the full `npm --prefix agent
+test` suite (58 passed, including `goalWidget.test.ts` and `footer.test.ts`).
+
+## Paper-and-ink palette replaces the indigo-on-blue scheme (2026-11-12)
+
+The frontend tokens and the two pi themes were cool indigo/violet on blue-gray
+surfaces. They were coherent but generic, and some foreground values sat below
+4.5:1 on their tinted backgrounds. The palette is now derived from Flexoki
+(MIT, Steph Ango), with Radix's 12-step use-case discipline and Catppuccin's
+"never colour alone" rule:
+
+- **Neutrals** use Flexoki's warm paper/ink ramp: light `paper #FFFCF0` →
+  `base-50 #F2F0E5` → `base-100 #E6E4D9` → `base-150 #DAD8CE`, ink text
+  `#100F0F`; dark `black #100F0F` → `base-950 #1C1B1A` → `base-900 #282726`
+  → `base-850 #343331`, text `#CECDC3`. The old cool blue-gray cast is gone.
+- **One primary accent**: Flexoki blue-600 `#205EA6` in light, blue-300
+  `#66A0C8` in dark. Dark solid buttons pair it with `--text-on-accent
+  #100F0F`; light buttons use paper text. Cyan is reserved for links, active
+  states and the `text` overlay; green success, orange warning, red error,
+  purple/magenta for code and thinking.
+- **Frontend** `styles/theme.css` and `styles/tokens.ts` carry the same values;
+  `MoleculeOverlay`, `OcrOverlay` and the brand SVG now use tokens or the
+  matching accent values instead of their own blue/green/amber literals.
+- **CLI** `agent/themes/mbforge-{dark,light}.json` mirror the same roles:
+  dark bg `#100F0F`, text `#CECDC3`, accent `#66A0C8`, border `#343331`;
+  light bg `#FFFCF0`, text `#100F0F`, accent `#205EA6`, border `#CECDC3`.
+  Code/thinking colours use the extended Flexoki ramp, not ad-hoc hexes.
+- Measured WCAG contrast (normal text target 4.5:1): light text/paper 18.6,
+  secondary 7.1, muted 5.0, accent 6.4, warning 5.7, danger 6.2; dark
+  text/ink 12.0, secondary 9.3, muted 5.2, accent 6.8, success 6.1, info 6.7.
+  Light success/info use the 700 steps for small text (`#536907`, `#1C6C66`)
+  so status text stays above the target on paper and on tinted chips.
+
+References: Flexoki `https://stephango.com/flexoki`, Radix Colors
+`understanding-the-scale`, Catppuccin style guide, and the WCAG contrast
+formula. Verified with `npm --prefix frontend run build`,
+`npm --prefix agent run check`, and `npm --prefix agent test`.
+
+## One question dialog for ask, dev mode, and improvements (2026-11-12)
+
+The agent could only ask through two bespoke paths: `request_dev_mode` called
+`ctx.ui.confirm`, and `suggest_improvement` passed a `confirm` callback into the
+store layer. There was no way to ask a normal multiple-choice question, and the
+two approvals did not share a presentation.
+
+- `agent/src/ask.ts` adds the local `ask` tool with four kinds: `confirm`,
+  `select`, `multi_select`, and `text`. The model supplies a title, optional
+  context (`message`), and options with a stable `value` plus short `label`/
+  `description`; the answer object is `{kind,title,answer,answer_label,
+  confirmed,selected,cancelled}`.
+- The TUI presentation is one card: `⬡ MBForge · <kind>` header, bold question,
+  muted context, one option per row with `❯` (or `[x]`), and a bottom key-hint
+  bar. It is width-adaptive (bordered up to 78 columns), windows more than eight
+  options with `… N above/below`, supports `j/k` and arrow navigation, space to
+  toggle multi-select, number-free selection, and Esc/Ctrl+C cancel. Text uses
+  the same card with a focused input line.
+- `askUser` uses `ctx.ui.custom` in the TUI, and falls back to
+  `ctx.ui.confirm`/`select`/`input` in RPC or headless sessions so the same
+  contract still works; multi-select is explicitly TUI-only.
+- `request_dev_mode` and `suggest_improvement` now pass their question through
+  `askUser` with their own labels (`Enable dev mode` / `Stay in auto`,
+  `Apply improvement` / `Decline`). Their results still mean the same thing:
+  `confirmed` false is a decline, `cancelled` is a dismissed dialog, and the
+  improvement store records the decision exactly as before.
+- `ask` is active in both session modes and is skipped from goal artifacts; the
+  tool-result row summarizes the chosen label or `cancelled` instead of dumping
+  JSON. `APPEND_SYSTEM.md` tells the model to ask one question at a time, to
+  prefer 2–5 options, and not to duplicate the dedicated approvals.
+
+Verified with `npm --prefix agent run check` and the full `npm --prefix agent
+test` suite (including the answer-mapping/fallback tests in `ask.test.ts`); the
+dialog variants (select, confirm, multi-select, text, cancel) were rendered at
+80 and 48 columns with a captured `ctx.ui.custom` factory.
+
+## CLI chrome follows the agent-TUI grammar (2026-11-11)
+
+The pi TUI worked but looked loose: a five-line wordmark, a one-token status
+line, raw `tool_name {json}` rows, and pi's purple `[mbforge-goal-review]` box.
+The chrome now uses the conventions the agent CLIs converged on: a bordered
+welcome only, a borderless transcript, `✓`/`✗` status glyphs, a `└` result
+connector, `·`-separated metadata, bold/default/muted tiers, and a statusline
+whose right column is reserved for model and usage.
+
+- `agent/src/brand.ts`: rounded startup banner (max 78 columns) with identity
+  left and backend health right; below 46 columns it stacks unframed. An
+  offline state adds one remedy row (`backend_control` or `/mbforge reload`).
+  The six-frame, one-cell, 100 ms molecule pulse replaces the four-frame glyph.
+  The banner is the only framed surface.
+- `agent/src/footer.ts`: replaces pi's built-in footer with two dense rows —
+  brand, mode, capability count, repo-tool count and backend health, with the
+  model right-aligned; then path, branch and session name on the left with token
+  totals and context usage on the right. Below 80 columns the model and
+  cache/cost drop, the host degrades to `online`, and the path clips before the
+  usage numbers. Usage totals are cached by leaf id, entry count and model.
+- `agent/src/toolRender.ts`: read capability calls use `⬡`, mutating calls `⬢`
+  in warning colour; results hang under `  └ ` with `✓`/`✗`, a `·` duration and
+  `more at offset N` pointer; expanded items indent six columns. Running calls
+  show a whole-second elapsed badge instead of a bare ellipsis, errors wrap to
+  three lines so the validation tail survives, and built-in repository tools
+  (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) keep pi's result
+  renderers but use the same one-line call grammar. The `suggest_improvement`
+  rows use the same grammar, and a non-executable approval puts
+  `dev mode required` on its own warning line instead of letting the head row
+  clip it.
+- `agent/src/footer.ts`: a `get_worker_status` result caches
+  `queue active/backlog` for the status line (dropped when the backend goes
+  offline).
+- `agent/src/messages.ts`: `mbforge-goal-review` renders as a card (goal id,
+  outcome, wrapped summary, counts, expandable suggestions and warnings), and
+  `mbforge.run` completion notices rebuild their header from `details.runs`
+  (run id, status, document) instead of showing the generic custom-message box.
+- `agent/src/uiText.ts` is the single place where rows are clipped, styled and
+  right-aligned by visible columns. `agent/src/extension.ts` installs the
+  header, footer and terminal title, registers both message renderers, and makes
+  the working row name the tool that is currently running.
+
+Verified with `npm --prefix agent run check`, `npm --prefix agent test` (45
+passed), a live CLI launch at 100 columns, and harness renders at 100/80/60/40/
+32 columns plus offline and dev states. Design references: clig.dev, GitHub
+TUIKit `docs/foundations.md`, the `tui-patterns` Claude Code and design-language
+analyses, and Jens Römer's TUI design notes.
+
+## The agent drives the queue, so the queue reports to the agent (2026-11-11)
+
+With the pi session as the scheduler, the failure modes moved from the UI to
+the session: a failed run told the model to "inspect the failed stage" while
+`get_run` omitted the stage error; a run paused by the model gate looked
+identical to a run that had just been queued; and a resumed session had no way
+to find a run whose completion notice died with the previous CLI.
+
+- `get_run` nodes now carry `updated_at` and the truncated `error`.
+- New read capability `list_runs` groups queue rows by run, newest first, and
+  defaults to runs that have not reached a terminal outcome, so a new or
+  resumed session can discover in-flight work. `status=all` adds history.
+- New read capability `get_worker_status` returns worker online/offline, lock
+  state, active/backlog/total counts and the model gate reason. It is the
+  agent-facing counterpart of `GET /api/v1/pipeline/worker/status` without the
+  process-registry and orphan detail the agent cannot act on.
+- `ensure_queue_worker` now sets a per-root `asyncio.Event`, and `_drain_loop`
+  waits on it instead of sleeping out `_CLAIM_POLL_S`, so an enqueue starts the
+  first stage immediately. Its cleanup uses
+  `asyncio.gather(waiter, return_exceptions=True)`: suppressing the waiter's
+  `CancelledError` also swallowed `asyncio.run`'s shutdown cancellation and
+  hung the worker test.
+- The CLI completion message includes each failed stage's error, so the model
+  can act from the wake message instead of calling `get_run` first.
+
+## The capability surface is consolidated into fewer tools (2026-11-11)
+
+24 capabilities asked the model to choose between near-duplicates. Merged, in
+pairs that share a noun and a mutability class:
+
+| now | absorbed | why |
+| --- | --- | --- |
+| `document_read(part=info\|markdown)` | `get_document`, `get_document_markdown` | both take only `doc_id` |
+| `runs(action=get\|list)` | `get_run`, `list_runs` | one run vs the run list; `get` requires `run_id`, so a missing id is a schema error |
+| `run_control(action=cancel\|retry)` | `cancel_run`, `retry_run` | identical `{run_id}` payload, one queue-row action |
+| `inspect_visual(action=page_text)` | `ocr_page_region` | the text branch of the same "look at this page" tool |
+| `memory(action=ephemeral)` | `memory_ephemeral` | same store; the inspector took no parameters |
+
+Capabilities 24 → 20, CLI-local tools 7 → 6. Nothing was merged across mutability: `Capability.mutating` is static
+and `registry.invoke` rejects mutating calls outside edit mode, so a read/write
+union would either block reads in auto mode or need per-action gating.
+
+Deliberately not merged: `list_evidence` + `search_evidence` (different required
+fields; optional-parameter unions invite calls that supply neither),
+`list_review_queue` + `propose_review` (read vs write), the doc-scoped data
+views (`get_patent_result`, `query_activities`, `verify_structures` — no shared
+fields beyond `doc_id`), and `resolve_document` (the discovery entry point).
+
+Agent-side follow-ups in the same change: the run watcher polls `runs` with
+`action=get`, `DOC_LINK_TOOLS` keys on `document_read`, the goal artifact skip
+list no longer names `memory_ephemeral`, and the prompt text in
+`APPEND_SYSTEM.md` names the new tools. Verified on a fresh backend instance on
+port 18799: the manifest lists 20 capabilities, none of the old names, and
+`runs(action=list)` answers over HTTP; `tests/unit` 435 passed, agent suite 42
+passed.
+
+## The agent can start, stop, and restart the backend (2026-11-11)
+
+The launcher starts the FastAPI backend before pi and stops it on exit, but
+`agent/.pi-agent/MEMORY.md` records the consequence: without `--reload` a Python
+change stays invisible until someone restarts the process by hand. The agent now
+has `backend_control` (`agent/src/backendTool.ts`) with `action=start|stop|restart`.
+
+Ownership is the design problem: pi runs in a child process of the launcher, so
+the extension never sees the launcher's `ChildProcess`. Both sides therefore use
+`agent/src/backendControl.ts` (moved out of `scripts/backend.mjs`, which is
+deleted), and a start records `{pid, host, port, baseUrl, log, startedAt}` in
+`{agent_home}/backend.json`. `stop` kills only that pid's tree; with no record it
+refuses and leaves the listener running, which is what protects a backend
+started by `npm --prefix frontend run dev:all`. A stale record (nothing answers)
+is discarded, a record for another address is discarded rather than applied, and
+a spawn whose child exited before the probe turned ready is reported as a failure
+instead of recording a pid that never served.
+
+Verified against the real app: start on port 18799 took 9.5 s to `ready`, stop
+took 0.25 s to `offline` and removed the record; a stub listener on another port
+keeps serving after `stop`/`restart` refuse it. The launcher and the tool each
+stop what they started (launcher: its child; tool: its child on process exit, and
+the recorded pid otherwise).
+
+## Capability images render inline in the CLI on Windows Terminal (2026-11-11)
+
+`inspect_visual` (`page_image`, `molecule_image`) already attached its PNG to the
+model as image content, but the CLI only ever showed pi's placeholder
+`[Image: [image/png] 1190x1684]`: pi-tui 1.5 speaks Kitty and iTerm2 only and
+maps `WT_SESSION` to `images: null`. omp renders the same images in the same
+terminal because it bundles a fork (`@oh-my-pi/pi-tui`) with a sixel encoder and
+a runtime `CSI ? 2 ; 1 ; 0 S` probe; Windows Terminal 1.22+ answers it.
+
+Decision: encode sixel in our own renderer instead of taking the fork.
+`agent/src/terminalImage.ts` decodes the PNG (all five row filters, colour types
+0/2/3/4/6, alpha composited over white), box-downscales into the 72x24 cell box,
+median-cut quantises to 256 colours and emits one DECSIXEL sequence.
+`toolRender.ts` uses it when `sixelSupported()` accepts the terminal and falls
+back to pi's `Image` otherwise, so Kitty/iTerm2 users see no change.
+
+Two pi-tui constraints drive the output shape, both verified against the
+installed package rather than assumed:
+- `visibleWidth` strips CSI/OSC/APC but not DCS, so a raw sixel line measures
+  thousands of columns and `tui-alt-screen` slices it to the terminal width.
+  Every image line therefore starts with a no-op Kitty APC
+  (`\x1b_Gq=2\x1b\\`), which `isImageLine` matches; image lines are exempt from
+  slicing, search highlight and selection repaint. `terminalImage.test.ts`
+  asserts this against pi's own `isImageLine`/`visibleWidth`.
+- a sixel image moves the cursor by its own height while pi counts rows from the
+  component's lines, so the block writes `rows - 1` blank lines, moves the cursor
+  back up and draws over them.
+
+Measured on `CN119504738A` p122 (1190x1684 render): 34x24 cells, 30 KB of escape
+bytes, 76 ms to encode, cached per image hash and cell box. A region crop (the
+usual `page_image` call) is proportionally sharper. Not done: echoing the
+*input* image of `recognize_structure` (the model authored it) and any overlay
+for `page_molecules`, which returns molecule data and no image.
+
+## Table masking runs before cell OCR, unconditionally (2026-11-11)
+
+Evidence row `b1603718dc46dd6e241fca4082e01530` (doc `31fc2846…`, p122 of
+`CN119504738A`) published a table whose 结构 column held drawing glyphs —
+`CF3 N NH HN N NH O CF3 N` — although the mask → cell-OCR → label-backfill path
+existed. It was behind `layout.mask_table_molecules` (default **off**), so the
+Extract branch never entered it and cell OCR read every atom label and bond
+glyph into the evidence text.
+
+Decision: masking is part of table recognition, not an option. MolDet now always
+runs on the layout render (before it ran only for the R3/R4 merge, so a page
+read with `cross_model=False` had no boxes to mask); `cross_model` gates only
+those merge rules. A table crop hands every molecule box it holds to the cell
+recognizer, which blanks it and writes `[MOL:n]` into that cell, numbered in
+table order, and `mint_evidence` folds in the label the molecule pass read
+(`artifacts/table_molecule_cells.py`) — the one place the two producers meet. A
+drawing whose own label was never read keeps its token instead of an invented
+number. The config field, the flag and `scripts/table_mask_ab.py` are gone; the
+page-read surface (`page_text`) masks too.
+
+Masking alone did not make that table readable, and the same evidence row shows
+the second defect: **SLANet's per-cell boxes are not cell geometry.** Its box
+for each cell hugs the text line it saw, so on a row made tall by a drawing the
+box is one line high (命名 cell 61 px against a ~240 px row) and can drift into
+the neighbouring row (实施例 cell predicted 625–675 while `实施例 42` prints at
+561–585). Cell OCR read inside those boxes, so 实施例编号 was empty and only the
+last row's 526.2/504.2/499.2 were lost (490.1 happened to fall inside its box).
+`table_slanet._ruled_cells` now recovers the cell geometry from the rules the
+table itself draws: when the detected rule count matches the structure model's
+rows × columns, the drawn grid is used for cell OCR (3 px inset, so the rule is
+not read as text); a borderless or merged-cell table keeps the model's boxes.
+
+Measured on that page (no library write, before → after): 实施例编号 empty → 40,
+41, 42, 43; LC-MS only 490.1 → 526.2, 504.2, 499.2, 490.1; 命名 one line → the
+whole 3-line name; 结构 `CF3 N NH HN N NH O CF3 N` → `[MOL:0]`…`[MOL:3]`. The
+page prints no compound number beside those drawings (the row's designation is
+the 实施例 number in column 1), so the four tokens stay — the documented case.
+The recorded mask A/B (265 → 3, 15 → 3, 12 → 0 chemistry-looking cells) is why
+the mask is now mandatory. Re-ingesting `CN119504738A` replaces the stale
+evidence row; no migration is needed because the stage mints it.
+
 ## Agent links into the workbench (2026-11-11)
 
 The CLI answers in the terminal, but a citation is only checkable where the
@@ -40,6 +418,27 @@ literal instead of linking a route that would land on a different item.
 
 Open: the review center has no route for "all items of one document"; a link
 that filters by `doc_id` would need a `doc` query parameter on `/review`.
+
+## Review items show the structure they ask about (2026-11-11)
+
+A `designation_unbound` item asked a human to pick a structure but showed only
+`candidate.name || candidate.mol_id`: the item's own `crop_relpath`, `bbox` and
+`smiles` are null because they describe the *reading*, not a candidate, so
+`ReviewEvidenceComparison` rendered “暂无来源结构图 / 暂无 SMILES” and there was
+nothing to confirm against.
+
+- The candidate payload now carries `page`, `bbox` and `crop_relpath`, taken
+  from the candidate's first detection. `page` is 1-based to match the item's
+  own `page`; `bbox` is PDF points, bottom-left origin; `crop_relpath` uses the
+  same library-relative form as the item-level field.
+- The review center renders one `ReviewCandidateCard` per candidate: the printed
+  crop beside the RDKit rendering of the same SMILES, the radio that selects it,
+  and an “打开原文” that opens that candidate's own page and bbox. The item-level
+  comparison is hidden for this kind because it is empty by construction.
+- Re-running the Patent stage is what refreshes the items: the item id is
+  `stable_id("unbound", doc_id, measurement_id)`, so the publish upserts instead
+  of duplicating, and `insert_review_item`'s conflict update does not touch
+  `status` — a human decision survives the re-run.
 
 ## Dev-mode HTTP bypass is a trust boundary, not a sandbox (2026-11-11)
 
@@ -88,7 +487,7 @@ the import.
 
 The pi extension watches every run id a capability result carries
 (`submit_extraction`, `reingest_document`, `submit_patent_analysis` and
-`import_pdf`) by polling the read-only `get_run` capability, and reports each
+`import_pdf`) by polling the read-only `runs` capability, and reports each
 run once. Delivery never uses pi's `deliverAs` queues, whose queued follow-up
 messages were re-delivered when a session was resumed: a completion that
 arrives while the session is busy is held in process memory and flushed as one
@@ -387,17 +786,15 @@ crop (`name`, else `ocr_labels[0]`); an unlabelled molecule keeps its token
 rather than an invented number. Non-table text evidence is unchanged, and a
 table without embedded molecules behaves exactly as before.
 
-Pending: run the 13-document A/B with the flag on, confirm table/measurement/
-Patent outputs do not regress, then decide whether to default it on.
-`scripts/table_mask_ab.py` runs that comparison over a library's table pages
-(no writes). Measured so far (table pages only, chemistry-looking cells off →
-on): CN121270515A 0 → 0 (8 tables, no table molecules — control),
-KR20250121245A 12 → 0 (26 tables / 126 molecules masked), WO2025002360A1
-15 → 3 (20/218), WO2025223036A1 265 → 3 (56/317), CN119504738A 10 → 0 (3/11,
-rows and cells unchanged). Table structure counts were stable apart from model
-run-to-run nondeterminism (one row on two documents). The full corpus run is
-left to the script: the 400-page JP document makes a serial 13-document pass
-long, and the five documents above cover clean, heavy and control shapes.
+**2026-11-11: enforcement, see “Table masking runs before cell OCR” above.**
+The switch and the A/B script are gone; the mask is unconditional. Measured
+off → on (table pages only, chemistry-looking cells): CN121270515A 0 → 0
+(8 tables, no table molecules — control), KR20250121245A 12 → 0 (26 tables /
+126 molecules masked), WO2025002360A1 15 → 3 (20/218), WO2025223036A1 265 → 3
+(56/317), CN119504738A 10 → 0 (3/11, rows and cells unchanged). Table structure
+counts were stable apart from model run-to-run nondeterminism (one row on two
+documents). The 400-page JP document was never compared; its table pages are the
+remaining blind spot.
 
 ## Activity pair truth (2026-11-06)
 
@@ -463,7 +860,7 @@ Three ordered follow-ups are implemented and measured on the live library
    `method="human"` and marks the reading accepted. A choice outside the
    candidates is refused. Measured: **7 items** for the
    seven unowned readings (1, 11, 14, 17, 23, 32, 33), 4-8 candidates each, and
-   the live queue is 211 rows (204 Markush + 7 unbound).
+   the live queue carries these 7 unbound items (Markush review items were since removed).
 2. **Coverage no longer calls recoverable work undrawn.** `dataset_stats` now
    reads whether the document drew structures whose designation was never read
    and reports `label_not_read` instead of `designation_without_structure`.
@@ -768,9 +1165,9 @@ the cutover, so no skill or schema artifact remains.
 Repository and runtime ports live in the neutral `mbforge/ports/` (implemented
 by `db`), and the cross-layer request/read models they reference in
 `mbforge/contracts/` (re-exported by the `service` DTO modules), so `db`
-implements the ports without importing `service`. The Markush SQL now lives in
-`db/markush_candidates.py` and `db/markush_transitions.py` behind
-`MarkushRepository`, so no `service`/`api` module can obtain a raw connection. `foundation/inference/assets.py` defines the
+implements the ports without importing `service`. The review-queue SQL lives in
+`db/review_store.py` behind `ReviewRepository`, so no `service`/`api` module can
+obtain a raw connection. `foundation/inference/assets.py` defines the
 `ResourceResolver` seam the composition root injects, so the inference backends
 never import `server`.
 
@@ -859,10 +1256,11 @@ never import `server`.
   writers and id-collision scan were removed. `report.json` is written by run
   finalization (`run/checkpoint.write_merged_report` →
   `LibraryLayout.report_json`).
-- Extract now classifies recognized image structures and atomically queues
-  Markush scaffolds, fragments, and uncertain candidates with their canonical
-  source-evidence links. Prose-only Markush definitions still need a separate
-  text-candidate producer; they must not be fabricated as SMILES.
+- Extract classifies recognized image structures and persists their canonical
+  source-evidence links; the `complete`-only gate keeps Markush scaffolds and
+  fragments out of the concrete molecule library. It no longer queues Markush
+  review candidates. Prose-only Markush definitions must not be fabricated as
+  SMILES.
 - The molecule↔evidence association is now persisted in `evidence.evidence_id`
   (pointing at the canonical `source_evidence` row); the legacy
   `text_molecule_links` table was dropped.
@@ -888,10 +1286,11 @@ never import `server`.
   tests were deleted with the sidecar.
 - The frontend locale files were pruned to keys the components reference;
   dynamic-key prefixes (`nav.*`, `mol.status.*`, `errors.*`, …) were preserved.
-- Markush classification and review remain; the unreachable frontend workspace,
-  its HTTP client, and the attachment-site/enumeration API were removed. Extract
-  still queues scaffolds/fragments/candidates, and `markush_link` review items
-  remain in the review center.
+- Markush structure classification remains (the `complete`-only persist gate),
+  but Markush review was removed: the unreachable frontend workspace, its HTTP
+  client, the attachment-site/enumeration API, the `/api/v1/markush` review
+  router, the Extract candidate producer, and the `markush_link` review kind are
+  gone. The review center no longer handles Markush structures.
 - SAR was removed: the fail-closed `/api/v1/sar` stub and
   `frontend/src/components/sar/` are gone. The follow-up molecule analysis
   panel (Analytics/Relations) was also removed: every backend function it called

@@ -10,7 +10,6 @@ from __future__ import annotations
 import collections
 import contextlib
 import contextvars
-import json
 import logging
 import os
 import sys
@@ -143,8 +142,6 @@ def setup_logging(
     log_dir: Path | None = None,
     console: bool = True,
     file: bool = True,
-    *,
-    json_mode: bool = False,
 ) -> None:
     """配置全局日志.
 
@@ -153,7 +150,6 @@ def setup_logging(
         log_dir: 日志文件目录，默认 <GLOBAL_APP_DIR>/logs
         console: 是否输出到控制台
         file: 是否输出到文件
-        json_mode: 文件输出用 JSON 行格式 (结构化聚合; 默认关闭, 沿用人类可读)
     """
     global _logger_initialized, _log_level
     if _logger_initialized:
@@ -239,12 +235,9 @@ def setup_logging(
                 delay=True,  # Delay opening the file until first write to avoid Windows lock issues
             )
             file_handler.setLevel(level)
-            if json_mode:
-                file_handler.setFormatter(JsonFormatter())
-            else:
-                file_handler.setFormatter(
-                    logging.Formatter(_FILE_FORMAT, datefmt=_DATE_FORMAT)
-                )
+            file_handler.setFormatter(
+                logging.Formatter(_FILE_FORMAT, datefmt=_DATE_FORMAT)
+            )
             root_logger.addHandler(file_handler)
         except Exception as e:
             # 文件日志初始化失败不影响运行，但要打一条控制台日志
@@ -265,7 +258,7 @@ def setup_logging(
         logging.getLogger(logger_name).setLevel(logging.ERROR)
     root_logger.info(
         f"Logging initialized | level={logging.getLevelName(level)} | "
-        f"directory={log_dir} | json={json_mode}"
+        f"directory={log_dir}"
     )
 
 
@@ -282,7 +275,7 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-# ---------- 诊断：JSON 格式化器 + 内存环形缓冲 ----------
+# ---------- 诊断：内存环形缓冲 ----------
 
 
 def set_request_path(path: str) -> contextvars.Token:
@@ -298,7 +291,7 @@ def reset_request_path(token: contextvars.Token) -> None:
 
 
 def _record_fields(record: logging.LogRecord) -> dict[str, Any]:
-    """Return the fields shared by the JSON and diagnostic representations."""
+    """Return the fields stored for each diagnostic ring-buffer record."""
     return {
         "level": logging.getLevelName(record.levelno),
         "logger": record.name,
@@ -311,39 +304,6 @@ def _record_fields(record: logging.LogRecord) -> dict[str, Any]:
         "request_path": _request_path_var.get(),
         **_current_trace(),
     }
-
-
-class JsonFormatter(logging.Formatter):
-    """单行 JSON 格式 — 适合 Loki/ELK/grep 聚合.
-
-    输出字段:
-        ts: ISO8601 UTC 时间戳 (毫秒精度)
-        level: 大写级别字符串 (DEBUG/INFO/WARNING/ERROR/CRITICAL)
-        logger: logger 名 (通常即 __name__)
-        message: 格式化后的消息
-        exception: 完整堆栈文本, 没有异常时为 None
-        pid / tid: 进程与线程标识
-        mbforge_error_code / mbforge_status_code / mbforge_severity /
-        mbforge_category / mbforge_context: 由异常处理器显式设置,
-            普通日志记录时为 None
-        request_path: 当前请求路径, 由 request_path middleware 注入
-    """
-
-    def format(self, record: logging.LogRecord) -> str:  # noqa: A003 — stdlib API
-        ts = (
-            datetime.fromtimestamp(record.created, tz=UTC).strftime("%Y-%m-%dT%H:%M:%S")
-            + f".{int(record.msecs):03d}Z"
-        )
-        payload: dict[str, Any] = {
-            "ts": ts,
-            **_record_fields(record),
-            "pid": record.process,
-            "tid": record.threadName,
-            "exception": self.formatException(record.exc_info)
-            if record.exc_info
-            else None,
-        }
-        return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 def _record_to_diagnostic(record: logging.LogRecord) -> dict[str, Any]:

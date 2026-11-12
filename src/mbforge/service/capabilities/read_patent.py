@@ -43,8 +43,6 @@ PatentCollection = Literal[
     "assay_methods",
     "examples",
     "structure_activity",
-    "conflicts",
-    "review_candidates",
 ]
 
 
@@ -252,8 +250,8 @@ register(
             "Read one Patent facts collection, paged. Default collection=summary "
             "returns counts, stats and the run identity only — no sections and no "
             "entries. Pick exactly one of sections/entries/issues/synthesis_steps/"
-            "names/characterizations/assay_methods/examples/structure_activity/"
-            "conflicts/review_candidates; offset/limit page that collection and "
+            "names/characterizations/assay_methods/examples/structure_activity; "
+            "offset/limit page that collection and "
             "total is its unpaginated size. evidence_ids arrays are omitted unless "
             "include_evidence_ids is true. Contains no measurement values; use "
             "query_activities for activity readings."

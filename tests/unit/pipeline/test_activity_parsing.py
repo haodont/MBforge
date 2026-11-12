@@ -14,11 +14,9 @@ from mbforge.domain.evidence_kind import TABLE, TEXT, register_kinds
 from mbforge.service.pipeline.activity.extraction import (
     extract_activity_measurements_from_evidence,
 )
-from mbforge.service.pipeline.activity.parsing import (
+from mbforge.service.pipeline.activity.parsing.tables import (
     _is_activity_table,
     _parse_simple_activity_table,
-)
-from mbforge.service.pipeline.activity.parsing.tables import (
     _simple_activity_table_is_complete,
 )
 from mbforge.service.pipeline.layout.table_html import html_table_to_markdown
@@ -345,7 +343,7 @@ def test_page_split_activity_table_continuation_is_read() -> None:
     assert refusal[0]["evidence_ids"] == [first.evidence_id, unreadable.evidence_id]
 
     # A different table on the next page prints its own header: it is not a tail,
-    # so it is neither read under the borrowed metric nor reported as a refusal
+    # so it is not read under the borrowed metric — it is read under its own
     # (the rat PK table printed beside Table 1 on p125).
     other = _evidence(
         "| 测试化合物 | Cmax (ng/mL) | AUC0-t (h*ng/mL) |\n| --- | --- | --- |\n"
@@ -359,6 +357,14 @@ def test_page_split_activity_table_continuation_is_read() -> None:
     assert [item["value"]["original_value"] for item in other_measurements] == [
         64.6,
         12.8,
+        1207.0,
+        14585.0,
+    ]
+    assert [item["metric"] for item in other_measurements] == [
+        "IC50",
+        "IC50",
+        "Cmax",
+        "AUC0-t",
     ]
     assert other_issues == []
 
@@ -796,3 +802,238 @@ def test_us_published_sar_table_yields_one_reading_per_printed_value() -> None:
     }
     assert [issue["code"] for issue in issues] == ["activity_cells_unattributed"]
     assert "no_designation" in issues[0]["message"]
+
+
+# --- one printed table stored twice in nested regions ---
+
+_NESTED_TABLE_BIG = (
+    "| 化合物编号 | IC50(nM) |\n"
+    "| --- | --- |\n"
+    "| 化合物1 | 60.7 |\n"
+    "| 化合物64 | 23.5 |\n"
+    "| 化合物77 | 37 |"
+)
+_NESTED_TABLE_SMALL = (
+    "| 化合物编号 | IC50(nM) |\n"
+    "| --- | --- |\n"
+    "| 化合物64 | 23.5 |\n"
+    "| 化合物65 | 78.4 |\n"
+    "| 化合物77 | 37 |"
+)
+
+
+def test_nested_table_regions_publish_each_printed_row_once() -> None:
+    """A printed table stored twice in nested regions must not read twice.
+
+    The layout producer can store one printed table twice — once cropped tight,
+    once around it. Both regions are read, so the rows they share become two
+    readings of one printed number. Only the copy from the larger region is
+    kept, and the dropped one is reported.
+    """
+    big = SourceEvidence.create(
+        doc_id=DOC,
+        page=110,
+        bbox=(100.0, 470.0, 310.0, 780.0),
+        raw_text=_NESTED_TABLE_BIG,
+        kind="tab",
+    )
+    small = SourceEvidence.create(
+        doc_id=DOC,
+        page=110,
+        bbox=(111.0, 478.0, 308.0, 600.0),
+        raw_text=_NESTED_TABLE_SMALL,
+        kind="tab",
+    )
+
+    measurements, issues = extract_activity_measurements_from_evidence(
+        [big, small], DOC
+    )
+
+    assert [item["provenance"]["reference_key"] for item in measurements] == [
+        "1",
+        "64",
+        "77",
+        "65",
+    ]
+    # The row the small region alone holds is still published.
+    assert [item["value"]["original_value"] for item in measurements] == [
+        60.7,
+        23.5,
+        37.0,
+        78.4,
+    ]
+    # The shared rows keep the evidence of the larger region.
+    assert measurements[1]["evidence_ids"] == [big.evidence_id]
+    assert measurements[2]["evidence_ids"] == [big.evidence_id]
+    duplicate_issues = [
+        issue for issue in issues if issue["code"] == "duplicate_fragment_reading"
+    ]
+    assert len(duplicate_issues) == 2
+    assert all(issue["severity"] == "info" for issue in duplicate_issues)
+
+
+# --- pharmacokinetic endpoints ---
+
+_PK_CMAX_AUC_TABLE = (
+    "| 化合物 | Cmax (ng/mL) | AUC0-t (h*ng/mL) |\n"
+    "| --- | --- | --- |\n"
+    "| 化合物13 | 1207 | 14585 |"
+)
+_PK_HALF_LIFE_TABLE = (
+    "| 化合物 | 半衰期(T1/2,min) |\n| --- | --- |\n| 化合物27A | 220 |"
+)
+
+
+def test_pk_endpoint_headers_publish_one_reading_per_column() -> None:
+    """A printed PK table is activity data, not a table without a metric.
+
+    The endpoint and its unit live in the header (``Cmax (ng/mL)``,
+    ``AUC0-t (h*ng/mL)``, ``半衰期(T1/2,min)``); the cell holds a bare number.
+    """
+    measurements, _ = extract_activity_measurements_from_evidence(
+        [_evidence(_PK_CMAX_AUC_TABLE, kind="tab")], DOC
+    )
+
+    assert [item["metric"] for item in measurements] == ["Cmax", "AUC0-t"]
+    assert [item["value"]["original_value"] for item in measurements] == [
+        1207.0,
+        14585.0,
+    ]
+    assert [item["value"]["original_unit"] for item in measurements] == [
+        "ng/mL",
+        "h*ng/mL",
+    ]
+    assert [item["provenance"]["reference_key"] for item in measurements] == [
+        "13",
+        "13",
+    ]
+
+    half_life, _ = extract_activity_measurements_from_evidence(
+        [_evidence(_PK_HALF_LIFE_TABLE, kind="tab")], DOC
+    )
+    assert [item["metric"] for item in half_life] == ["T1/2"]
+    assert [item["value"]["original_value"] for item in half_life] == [220.0]
+    assert [item["value"]["original_unit"] for item in half_life] == ["min"]
+
+
+# --- letter bins (A/B/C) printed in a CN activity table ---
+
+_CN_LEGEND_PROSE = (
+    "[0599] 化合物对MRGPRX2拮抗作用的测定在高表达人MRGPRX2的CHO稳定细胞株中进行。"
+    "……其中A表示IC50值≤100nM,B表示100nM<IC50值≤500nM,C表示IC50值大于500nM。"
+)
+_CN_LETTER_BIN_TABLE = (
+    "| 化合物 | IC50(nM) |\n| --- | --- |\n| 化合物22A | B |\n| 化合物28A | A |"
+)
+
+
+def test_letter_bin_table_keeps_its_rows_and_their_definition() -> None:
+    """A printed A/B/C bin is a reading, and the document states its bound.
+
+    The bins are defined in the prose (``A表示IC50值≤100nM``), so the table
+    cell names a scale the document explains. Reading the row as a table row
+    (not as a header band) and taking the definition from the prose is what
+    makes the reading citable.
+    """
+    table = _evidence(_CN_LETTER_BIN_TABLE, kind="tab")
+    prose = _evidence(_CN_LEGEND_PROSE, kind="text")
+
+    measurements, issues = extract_activity_measurements_from_evidence(
+        [table, prose], DOC
+    )
+
+    assert [item["provenance"]["reference_raw"] for item in measurements] == [
+        "化合物22A",
+        "化合物28A",
+    ]
+    assert [item["value"]["qualitative_value"] for item in measurements] == ["B", "A"]
+    # The definition the document prints stays with the reading.
+    assert measurements[0]["value"]["qualitative_label"] == "100nM<IC50值≤500nM"
+    assert measurements[1]["value"]["qualitative_label"] == "IC50值≤100nM"
+    # The legend is a definition, not a measurement of its own.
+    assert issues == []
+
+
+# --- row labels the document prints in a shape of its own ---
+
+_CN_VARIANT_TABLE = (
+    "| 化合物编号 | MRGPRX2 IP-1 IC50(nM) | 化合物编号 | MRGPRX2 IP-1 IC50(nM) |\n"
+    "| --- | --- | --- | --- |\n"
+    "| 化合物 4-P2 or 4-P4 | 15 | 实施例 45-P1 | 14 |\n"
+    "| 化合物 5 | 30 | 实施例 46-P1 | 9.9 |"
+)
+
+
+def test_variant_and_alternative_row_labels_keep_their_readings() -> None:
+    """A printed variant number and a printed choice are both readings.
+
+    ``实施例 45-P1`` is one example of a compound variant, and ``化合物 4-P2 or
+    4-P4`` names two of a kind the document leaves open. Neither row may be
+    dropped: the first keeps its example reference, the second is published
+    with an unresolved reference for a reader to settle.
+    """
+    measurements, _ = extract_activity_measurements_from_evidence(
+        [_evidence(_CN_VARIANT_TABLE, kind="tab")], DOC
+    )
+
+    by_reference = {item["provenance"]["reference_raw"]: item for item in measurements}
+    assert set(by_reference) == {
+        "化合物 4-P2 or 4-P4",
+        "实施例 45-P1",
+        "化合物 5",
+        "实施例 46-P1",
+    }
+    # The choice keeps the printed text and no invented key.
+    choice = by_reference["化合物 4-P2 or 4-P4"]
+    assert choice["value"]["original_value"] == 15.0
+    assert choice["provenance"]["reference_key"] is None
+    assert choice["provenance"]["reference_type"] == "unresolved"
+    # The variant example keeps its variant in the key.
+    variant = by_reference["实施例 45-P1"]
+    assert variant["value"]["original_value"] == 14.0
+    assert variant["provenance"]["reference_key"] == "45-P1"
+    assert variant["provenance"]["reference_type"] == "example"
+
+
+# --- a transposed table: the compound is in the column header ---
+
+_CN_TRANSPOSED_PK_TABLE = (
+    "| 肝微粒体 | T1/2(min) | T1/2(min) | T1/2(min) |\n"
+    "| --- | --- | --- | --- |\n"
+    "| 肝微粒体 | (化合物1) WO2022067094 | 实施例1 | 实施例2 |\n"
+    "| 人 | 27.20 | 92.75 | 49.16 |\n"
+    "| 小鼠 | 26.26 | 99.11 | 56.40 |"
+)
+
+
+def test_transposed_table_reads_the_compound_from_the_column_header() -> None:
+    """Rows can be the condition and columns the compounds.
+
+    The liver-microsome half-life table prints the species down the side and
+    the compounds across the top, so the value belongs to the pair. The
+    compound comes from the column header and the species becomes the target.
+    """
+    measurements, issues = extract_activity_measurements_from_evidence(
+        [_evidence(_CN_TRANSPOSED_PK_TABLE, kind="tab")], DOC
+    )
+
+    assert issues == []
+    assert len(measurements) == 6
+    assert {item["metric"] for item in measurements} == {"T1/2"}
+    assert {item["value"]["original_unit"] for item in measurements} == {"min"}
+    assert [
+        (item["provenance"]["reference_raw"], item["value"]["original_value"])
+        for item in measurements
+    ] == [
+        ("化合物1", 27.2),
+        ("实施例1", 92.75),
+        ("实施例2", 49.16),
+        ("化合物1", 26.26),
+        ("实施例1", 99.11),
+        ("实施例2", 56.4),
+    ]
+    # The row label is the subject of the measurement.
+    assert {item["provenance"]["column_target"] for item in measurements} == {
+        "人",
+        "小鼠",
+    }

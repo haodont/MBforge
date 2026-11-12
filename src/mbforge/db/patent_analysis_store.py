@@ -2,9 +2,9 @@
 
 ``patent_facts.json`` is a rebuildable projection of this row and
 ``source_evidence`` remains the only raw-evidence source. One commit writes the
-snapshot, the accumulated human decisions and the permitted derived rows in a
-single transaction, so the published facts and the derived molecules cannot
-disagree; the caller then refreshes the file projection.
+snapshot and the permitted derived rows in a single transaction, so the
+published facts and the derived molecules cannot disagree; the caller then
+refreshes the file projection.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def load_state(library_root: str | Path, doc_id: str) -> dict[str, Any] | None:
     """Return the committed state for *doc_id*, or ``None`` when absent."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             f"SELECT * FROM {_TABLE} WHERE doc_id = ?", (doc_id,)
         ).fetchone()
@@ -44,7 +44,6 @@ def load_state(library_root: str | Path, doc_id: str) -> dict[str, Any] | None:
         "analysis_status": row["analysis_status"],
         "extraction_mode": row["extraction_mode"],
         "payload": json.loads(row["payload"] or "{}"),
-        "decisions": json.loads(row["decisions"] or "{}"),
         "updated_at": row["updated_at"],
     }
 
@@ -61,8 +60,6 @@ def commit_document_facts(
     activity_updates: Sequence[dict[str, Any]] | None = None,
     measurements: Sequence[Any] = (),
     attributions: Sequence[Any] = (),
-    decisions: dict[str, Any] | None = None,
-    forget_decisions: Sequence[str] = (),
     expected_revision: int | None = None,
 ) -> int:
     """Commit one revision plus its derived rows; return the new revision.
@@ -74,9 +71,9 @@ def commit_document_facts(
     db = DatabaseManager.get(str(library_root))
     db.initialize()
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-    with db.transaction() as (_kb_conn, conn):
+    with db.transaction() as conn:
         row = conn.execute(
-            f"SELECT revision, decisions FROM {_TABLE} WHERE doc_id = ?", (doc_id,)
+            f"SELECT revision FROM {_TABLE} WHERE doc_id = ?", (doc_id,)
         ).fetchone()
         current = int(row["revision"]) if row is not None else 0
         if expected_revision is not None and expected_revision != current:
@@ -85,13 +82,6 @@ def commit_document_facts(
                 f"expected {expected_revision}, found {current}"
             )
         revision = current + 1
-        stored_decisions = (
-            json.loads(row["decisions"] or "{}") if row is not None else {}
-        )
-        if decisions:
-            stored_decisions.update(decisions)
-        for slot_id in forget_decisions:
-            stored_decisions.pop(slot_id, None)
         persist_candidates_in_transaction(
             conn, db, doc_id, candidates, activity_updates
         )
@@ -104,15 +94,14 @@ def commit_document_facts(
             f"""
             INSERT INTO {_TABLE}
                 (doc_id, revision, evidence_signature, analysis_status,
-                 extraction_mode, payload, decisions, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 extraction_mode, payload, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(doc_id) DO UPDATE SET
                 revision = excluded.revision,
                 evidence_signature = excluded.evidence_signature,
                 analysis_status = excluded.analysis_status,
                 extraction_mode = excluded.extraction_mode,
                 payload = excluded.payload,
-                decisions = excluded.decisions,
                 updated_at = excluded.updated_at
             """,
             (
@@ -122,7 +111,6 @@ def commit_document_facts(
                 analysis_status,
                 extraction_mode,
                 json.dumps(payload, ensure_ascii=False),
-                json.dumps(stored_decisions, ensure_ascii=False),
                 now,
             ),
         )
@@ -130,11 +118,11 @@ def commit_document_facts(
 
 
 def clear_payload(library_root: str | Path, doc_id: str) -> int:
-    """Drop the committed facts but keep the human decisions; return the revision."""
+    """Drop the committed facts; return the revision."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-    with db.transaction() as (_kb_conn, conn):
+    with db.transaction() as conn:
         row = conn.execute(
             f"SELECT revision FROM {_TABLE} WHERE doc_id = ?", (doc_id,)
         ).fetchone()
@@ -157,7 +145,7 @@ def delete_document_state(library_root: str | Path, doc_id: str) -> int:
     """Remove the document's state entirely (document deletion)."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(f"DELETE FROM {_TABLE} WHERE doc_id = ?", (doc_id,))
         conn.commit()
         return int(cursor.rowcount or 0)

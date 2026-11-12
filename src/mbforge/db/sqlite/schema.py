@@ -135,108 +135,11 @@ CREATE INDEX IF NOT EXISTS idx_mi_mol ON molecule_images(mol_id);
 CREATE INDEX IF NOT EXISTS idx_md_doc_page ON molecule_detections(doc_id, page);
 CREATE INDEX IF NOT EXISTS idx_md_mol ON molecule_detections(mol_id);
 CREATE INDEX IF NOT EXISTS idx_md_evidence_id ON molecule_detections(evidence_id);
-CREATE TABLE IF NOT EXISTS markush_scaffolds (
-    scaffold_id TEXT PRIMARY KEY,
-    doc_id TEXT NOT NULL,
-    formula_label TEXT DEFAULT '',
-    smiles TEXT NOT NULL,
-    esmiles TEXT,
-    page INTEGER,
-    bbox_x0 REAL, bbox_y0 REAL, bbox_x1 REAL, bbox_y1 REAL,
-    crop_relpath TEXT,
-    confidence REAL,
-    status TEXT DEFAULT 'pending',
-    properties TEXT DEFAULT '{}',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_ms_doc ON markush_scaffolds(doc_id);
-CREATE INDEX IF NOT EXISTS idx_ms_status ON markush_scaffolds(status);
-CREATE TABLE IF NOT EXISTS markush_fragments (
-    fragment_id TEXT PRIMARY KEY,
-    scaffold_id TEXT DEFAULT NULL,
-    doc_id TEXT NOT NULL,
-    label TEXT DEFAULT '',
-    smiles TEXT NOT NULL,
-    esmiles TEXT,
-    page INTEGER,
-    bbox_x0 REAL, bbox_y0 REAL, bbox_x1 REAL, bbox_y1 REAL,
-    crop_relpath TEXT,
-    confidence REAL,
-    status TEXT DEFAULT 'pending',
-    properties TEXT DEFAULT '{}',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (scaffold_id) REFERENCES markush_scaffolds(scaffold_id)
-);
-CREATE INDEX IF NOT EXISTS idx_mf_doc ON markush_fragments(doc_id);
-CREATE INDEX IF NOT EXISTS idx_mf_scaffold ON markush_fragments(scaffold_id);
-CREATE INDEX IF NOT EXISTS idx_mf_status ON markush_fragments(status);
--- Persist ``review_required`` candidates so users can decide
--- scaffold/fragment/complete/reject without losing data on re-import.
--- ``source_key`` is the stable identity for a candidate across
--- re-ingests; ``content_hash`` distinguishes a structurally changed
--- re-occurrence from an unchanged one.
-CREATE TABLE IF NOT EXISTS markush_review_candidates (
-    candidate_id TEXT PRIMARY KEY,
-    source_key TEXT NOT NULL,
-    doc_id TEXT NOT NULL,
-    predicted_role TEXT NOT NULL,
-    smiles TEXT,
-    esmiles TEXT,
-    name TEXT DEFAULT '',
-    raw_label TEXT DEFAULT '',
-    normalized_label TEXT DEFAULT '',
-    label_kind TEXT DEFAULT 'unknown',
-    page INTEGER,
-    bbox_x0 REAL, bbox_y0 REAL, bbox_x1 REAL, bbox_y1 REAL,
-    crop_relpath TEXT,
-    moldet_confidence REAL,
-    scribe_confidence REAL,
-    composite_confidence REAL,
-    reasons TEXT NOT NULL DEFAULT '[]',
-    context_text TEXT DEFAULT '',
-    properties TEXT NOT NULL DEFAULT '{}',
-    recognition_status TEXT NOT NULL DEFAULT 'valid',
-    review_status TEXT NOT NULL DEFAULT 'pending',
-    review_version INTEGER NOT NULL DEFAULT 1,
-    superseded_at TEXT,
-    content_hash TEXT DEFAULT '',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_mrc_doc ON markush_review_candidates(doc_id);
-CREATE INDEX IF NOT EXISTS idx_mrc_review_status ON markush_review_candidates(review_status);
-CREATE INDEX IF NOT EXISTS idx_mrc_predicted_role ON markush_review_candidates(predicted_role);
--- A superseded row keeps its source_key so an auditor can pair the old
--- decision with the replacement; only the *active* row per source_key
--- must be unique, hence a partial index.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_mrc_source_key_active
-    ON markush_review_candidates(source_key)
-    WHERE superseded_at IS NULL;
--- Every detection associated with a review candidate, scaffold,
--- fragment, or generated molecule is recorded here so the review UI can
--- show the full multi-page / multi-bbox evidence chain.
-CREATE TABLE IF NOT EXISTS markush_evidence (
-    evidence_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL,
-    entity_id TEXT NOT NULL,
-    doc_id TEXT NOT NULL,
-    page INTEGER,
-    bbox_x0 REAL, bbox_y0 REAL, bbox_x1 REAL, bbox_y1 REAL,
-    crop_relpath TEXT,
-    context_text TEXT,
-    moldet_confidence REAL,
-    scribe_confidence REAL,
-    composite_confidence REAL,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_me_entity ON markush_evidence(entity_type, entity_id);
-CREATE INDEX IF NOT EXISTS idx_me_doc ON markush_evidence(doc_id);
--- Append-only audit log for review actions (confirm / reject /
--- reopen / update). ``snapshot`` carries the full row state at the time
--- of the action so an auditor can reproduce the decision without joining
--- back to the still-changing main tables.
+-- Append-only audit log for review actions (confirm / reject / reopen).
+-- ``snapshot`` carries the full row state at the time of the action so an
+-- auditor can reproduce the decision without joining back to the
+-- still-changing main tables. The table name is historical: it now records
+-- every ``review_items`` decision.
 CREATE TABLE IF NOT EXISTS markush_decisions (
     decision_id TEXT PRIMARY KEY,
     entity_type TEXT NOT NULL,
@@ -391,7 +294,7 @@ CREATE TABLE IF NOT EXISTS measurement_attribution (
     measurement_id TEXT NOT NULL,
     mol_id TEXT NOT NULL,
     doc_id TEXT NOT NULL,                 -- denormalized for document-scoped cleanup
-    method TEXT NOT NULL DEFAULT 'rule',  -- rule / model / human
+    method TEXT NOT NULL DEFAULT 'rule',  -- rule / model / human / agent
     confidence REAL,
     evidence_id TEXT,
     review_status TEXT NOT NULL DEFAULT 'pending',
@@ -406,15 +309,12 @@ CREATE INDEX IF NOT EXISTS idx_mat_doc ON measurement_attribution(doc_id);
 """
 
 # Committed Patent-analysis state: ONE row per document — the authoritative
-# snapshot of its published patent facts plus the human conflict decisions.
-# ``patent_facts.json`` is a rebuildable projection of this row, and
-# ``source_evidence`` remains the only raw-evidence source; model output is
-# never evidence. ``revision`` increments per successful commit;
-# ``evidence_signature`` records the evidence set the snapshot was computed
-# from, so a re-extract makes the row (and any decision whose stored signature
-# no longer matches) stale instead of silently current. Column set is fixed by
-# P0 of docs/plan-patent-agent-harness.md; document deletion clears the row,
-# clearing the review queue does not.
+# snapshot of its published patent facts. ``patent_facts.json`` is a rebuildable
+# projection of this row, and ``source_evidence`` remains the only raw-evidence
+# source; model output is never evidence. ``revision`` increments per successful
+# commit; ``evidence_signature`` records the evidence set the snapshot was
+# computed from, so a re-extract makes the row stale instead of silently current.
+# Document deletion clears the row; clearing the review queue does not.
 _PATENT_ANALYSIS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS patent_analysis_state (
     doc_id TEXT PRIMARY KEY,
@@ -423,7 +323,6 @@ CREATE TABLE IF NOT EXISTS patent_analysis_state (
     analysis_status TEXT NOT NULL,          -- disabled / succeeded / fallback
     extraction_mode TEXT NOT NULL,          -- deterministic / hybrid
     payload TEXT NOT NULL,                  -- committed fact snapshot (strict contract)
-    decisions TEXT NOT NULL DEFAULT '{}',   -- slot_id -> PatentDecision
     updated_at TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
 );
@@ -434,4 +333,125 @@ _MOL_FTS = """
 CREATE VIRTUAL TABLE IF NOT EXISTS mol_search USING fts5(
     name, notes, smiles, content='molecules', content_rowid='rowid'
 );
+"""
+
+# ADR 0001 relation-pair contract. The canonical unit is a document-local
+# relation pair, not a molecule or a fact row. ``label_anchor`` records a
+# printed designation slot (the fact); ``relation_pair`` records the resolution
+# (the assertion); ``page_geometry`` carries the scanned-page metadata geometry
+# checks need. Structures are referenced by mol_id only — a pair never stores
+# SMILES. The local library is disposable development data, so the canonical
+# schema is updated directly and no migration is written.
+_RELATION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS page_geometry (
+    doc_id        TEXT NOT NULL,
+    page          INTEGER NOT NULL CHECK (page >= 1),
+    width_pt      REAL NOT NULL CHECK (width_pt > 0),
+    height_pt     REAL NOT NULL CHECK (height_pt > 0),
+    render_dpi    REAL NOT NULL CHECK (render_dpi > 0),
+    quality_class TEXT NOT NULL DEFAULT 'clean',
+    skew_deg      REAL,
+    ink_density   REAL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (doc_id, page),
+    CHECK (quality_class IN ('clean', 'degraded', 'unreadable'))
+);
+CREATE TABLE IF NOT EXISTS label_anchor (
+    anchor_id   TEXT PRIMARY KEY,
+    doc_id      TEXT NOT NULL,
+    evidence_id TEXT NOT NULL,
+    page        INTEGER NOT NULL CHECK (page >= 1),
+    bbox_x0     REAL NOT NULL,
+    bbox_y0     REAL NOT NULL,
+    bbox_x1     REAL NOT NULL,
+    bbox_y1     REAL NOT NULL,
+    label_raw   TEXT NOT NULL,
+    label_key   TEXT NOT NULL,
+    key_space   TEXT NOT NULL,
+    anchor_kind TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    occurrence  INTEGER NOT NULL DEFAULT 0,
+    confidence  REAL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (bbox_x0 >= 0 AND bbox_y0 >= 0 AND bbox_x0 <= bbox_x1 AND bbox_y0 <= bbox_y1),
+    CHECK (key_space IN (
+        'example', 'compound', 'claim', 'internal_code',
+        'table_row', 'scheme_node', 'none'
+    )),
+    CHECK (anchor_kind IN (
+        'section_heading', 'table_row_label', 'table_cell', 'caption',
+        'prose', 'scheme_node', 'claim_text', 'title', 'abstract'
+    )),
+    CHECK (source IN (
+        'text_layer', 'ocr_text', 'ocr_label', 'table_cell',
+        'caption', 'heading', 'human', 'imported'
+    ))
+);
+CREATE INDEX IF NOT EXISTS idx_la_doc_key
+    ON label_anchor(doc_id, label_key);
+CREATE INDEX IF NOT EXISTS idx_la_evidence
+    ON label_anchor(evidence_id);
+CREATE INDEX IF NOT EXISTS idx_la_doc_page
+    ON label_anchor(doc_id, page);
+CREATE TABLE IF NOT EXISTS relation_pair (
+    pair_id       TEXT PRIMARY KEY,
+    doc_id        TEXT NOT NULL,
+    anchor_id     TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    subject_slot  TEXT NOT NULL DEFAULT 'primary',
+    subject_mol_id TEXT,
+    object_slot   TEXT,
+    object_mol_id TEXT,
+    object_scaffold_id TEXT,
+    recognition_status  TEXT NOT NULL,
+    verification_status TEXT NOT NULL,
+    commit_status       TEXT NOT NULL,
+    example_status      TEXT,
+    corroboration TEXT NOT NULL DEFAULT '[]',
+    evidence_ids  TEXT NOT NULL DEFAULT '[]',
+    geometry_complete INTEGER NOT NULL DEFAULT 0,
+    abstain_reason TEXT,
+    source        TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    superseded_by TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (relation_type IN (
+        'exemplified_by', 'designated_as', 'reported_as',
+        'member_of_genus', 'claim_scope', 'prepared_from',
+        'salt_of', 'solvate_of', 'stereoisomer_of', 'tautomer_of',
+        'formulated_as'
+    )),
+    CHECK (recognition_status IN (
+        'missing', 'detected', 'parsed', 'ambiguous', 'rejected'
+    )),
+    CHECK (verification_status IN (
+        'insufficient_evidence', 'uncorroborated', 'corroborated', 'contradicted'
+    )),
+    CHECK (commit_status IN ('committed', 'abstained', 'review_pending')),
+    CHECK (example_status IS NULL OR example_status IN (
+        'exemplified', 'prophetic', 'unknown'
+    )),
+    CHECK (geometry_complete IN (0, 1)),
+    CHECK (source IN ('rule', 'llm', 'human', 'imported')),
+    CHECK (abstain_reason IS NULL OR abstain_reason IN (
+        'anchor_ambiguous', 'structure_ambiguous', 'structure_missing',
+        'geometry_incomplete', 'markush_excluded', 'verification_contradicted',
+        'table_incomplete', 'out_of_scope', 'no_relation'
+    )),
+    CHECK (superseded_by IS NULL OR superseded_by <> pair_id),
+    CHECK (commit_status <> 'committed'
+           OR subject_mol_id IS NOT NULL
+           OR object_mol_id IS NOT NULL
+           OR object_scaffold_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_rp_doc_anchor
+    ON relation_pair(doc_id, anchor_id);
+CREATE INDEX IF NOT EXISTS idx_rp_doc_commit
+    ON relation_pair(doc_id, commit_status);
+CREATE INDEX IF NOT EXISTS idx_rp_subject
+    ON relation_pair(subject_mol_id);
+CREATE INDEX IF NOT EXISTS idx_rp_object
+    ON relation_pair(object_mol_id);
+CREATE INDEX IF NOT EXISTS idx_rp_scaffold
+    ON relation_pair(object_scaffold_id);
 """

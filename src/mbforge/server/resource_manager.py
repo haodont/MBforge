@@ -481,26 +481,6 @@ def _record_model_outcome(resource_id: str, error: str | None) -> None:
         logger.debug("Failed to record model outcome", exc_info=True)
 
 
-def _read_resolved_paths() -> dict[str, str]:
-    """Load Rust-side resolved model paths when available.
-
-    Returns an empty mapping if the resolved-paths file is missing or invalid.
-    """
-    try:
-        from mbforge.foundation.files import safe_json_loads
-        from mbforge.foundation.paths import GLOBAL_APP_DIR
-
-        text = (GLOBAL_APP_DIR / "resolved_paths.json").read_text(encoding="utf-8")
-        data = safe_json_loads(text, {})
-        if isinstance(data, dict):
-            return {str(k): str(v) for k, v in data.items()}
-    except Exception as exc:  # noqa: BLE001 — best-effort fallback path
-        # resolved_paths.json is produced by the Rust sidecar; absent or stale
-        # files are normal (paths resolve via the catalog instead).
-        logger.debug("resolved_paths.json unavailable, using catalog defaults: %s", exc)
-    return {}
-
-
 # ---------------------------------------------------------------------------
 # 公开 API
 # ---------------------------------------------------------------------------

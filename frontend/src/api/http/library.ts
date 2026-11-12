@@ -149,36 +149,6 @@ export interface PatentFactsExample {
   evidence_ids: string[]
 }
 
-export interface PatentConflictCandidate {
-  source: 'deterministic' | 'llm'
-  fields: Record<string, unknown> & { value_text?: string }
-  signature: string
-  evidence_ids: string[]
-}
-
-export interface PatentConflict {
-  conflict_id: string
-  slot_id: string
-  kind: 'measurement' | 'assay_method'
-  doc_id: string
-  page: number | null
-  evidence_ids: string[]
-  candidates: PatentConflictCandidate[]
-}
-
-export interface PatentReviewCandidate {
-  review_item_id: string
-  reason: string
-  kind: string
-  page: number | null
-  evidence_ids: string[]
-  deterministic: Array<Record<string, unknown> & { value_text?: string; raw_text?: string }> | null
-  llm: (Record<string, unknown> & { value_text?: string; raw_text?: string })
-    | Array<Record<string, unknown> & { value_text?: string; raw_text?: string }>
-    | null
-  conflict: PatentConflict | null
-}
-
 export interface PatentFactsIssue {
   code?: string
   message?: string
@@ -192,15 +162,6 @@ export interface PatentFactsArtifact {
   run_id: string
   revision?: number
   projection_status?: 'current' | 'pending' | 'legacy' | null
-  coverage?: {
-    total_evidence: number
-    complete_evidence: number
-    partial_evidence: number
-    complete_pages: number[]
-    partial_pages: number[]
-    unread_pages: number[]
-    no_evidence_pages: number[]
-  } | null
   sections: PatentFactsSection[]
   entries: PatentFactsEntry[]
   /** Printed chemistry names for a designation (verbsatim, never derived). */
@@ -216,18 +177,6 @@ export interface PatentFactsArtifact {
   stats: Record<string, unknown>
   analysis_status?: 'disabled' | 'succeeded' | 'fallback'
   extraction_mode?: 'deterministic' | 'hybrid'
-  conflicts?: PatentConflict[]
-  review_candidates?: PatentReviewCandidate[]
-  llm?: {
-    error_code?: string
-    error?: string
-    turns?: number
-    tool_calls?: number
-    tokens?: number | null
-    duration_ms?: number
-    model?: string
-    prompt_version?: string
-  }
 }
 
 export interface LibraryStatus {

@@ -247,24 +247,6 @@ def _designation_keys(text: str) -> list[str]:
     return keys
 
 
-def _candidate_designations(candidate: Any) -> set[str]:
-    """The designations a recognised structure answers to.
-
-    A crop's printed label lives on the candidate's ``name`` and on its OCR label
-    properties; the designation an example heading declares (``化合物8`` -> ``8``)
-    has to match one of them.
-    """
-    from mbforge.service.pipeline.patent.candidate_labels import (
-        candidate_label_keys,
-    )
-
-    keys = set(candidate_label_keys(candidate))
-    name = getattr(candidate, "name", "")
-    if isinstance(name, str) and name.strip():
-        keys.add(name.strip())
-    return keys
-
-
 def _disputed_designations(issues: Sequence[Mapping[str, Any]]) -> set[str]:
     """Designations the association refused to bind to one structure.
 

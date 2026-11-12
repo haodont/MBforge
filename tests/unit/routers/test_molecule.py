@@ -115,7 +115,7 @@ def test_molecule_get_parses_json_text_columns(
         json={"library_root": root, "smiles": "CCO", "mol_id": "CCO"},
     )
     db = DatabaseManager.get(root)
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "UPDATE molecules SET labels = ?, properties = ? WHERE mol_id = ?",
             ('["tag-1"]', '{"mw": 46.07}', "CCO"),
@@ -177,7 +177,7 @@ def test_molecule_list_filters_sorts_backfills_source_doc_and_counts(
     assert "manual" in data["source_types"]
 
     db = DatabaseManager.get(root)
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             """
             INSERT INTO molecule_detections
@@ -329,7 +329,7 @@ def test_molecule_by_location_uses_detection_cache_and_converts_page(
         json={"library_root": root, "mol_id": "m1", "smiles": "CCO", "name": "ethanol"},
     )
     db = DatabaseManager.get(root)
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "UPDATE molecules SET canonical_smiles = ? WHERE mol_id = ?",
             ("CCO", "m1"),

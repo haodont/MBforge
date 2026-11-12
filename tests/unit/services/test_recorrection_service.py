@@ -40,7 +40,7 @@ def sample_molecule(temp_library):
         "label_kind": "formula",
     }
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             """
             INSERT INTO molecules
@@ -88,18 +88,14 @@ def test_rebuild_molecule_restores_rows_and_merges_evidence_context(
     """Rebuilding re-maps the molecule row (approved → pending for the
     corrector) and folds detection context into ``role_contexts``."""
     db = DatabaseManager.get(temp_library)
-    row = db.execute(
-        "SELECT * FROM molecules WHERE mol_id = ?", (sample_molecule,), db="mol"
-    )[0]
+    row = db.execute("SELECT * FROM molecules WHERE mol_id = ?", (sample_molecule,))[0]
     detections = db.execute(
         "SELECT * FROM molecule_detections WHERE mol_id = ?",
         (sample_molecule,),
-        db="mol",
     )
     evidence = db.execute(
         "SELECT * FROM molecule_detections WHERE mol_id = ?",
         (sample_molecule,),
-        db="mol",
     )
 
     nm = _rebuild_molecule(row, detections, evidence)
@@ -131,7 +127,6 @@ def test_recorrect_molecules_dry_run_leaves_rows_then_apply_updates(
     row = db.execute(
         "SELECT review_status FROM molecules WHERE mol_id = ?",
         (sample_molecule,),
-        db="mol",
     )[0]
     assert row["review_status"] == "approved"  # Unchanged
 
@@ -143,7 +138,6 @@ def test_recorrect_molecules_dry_run_leaves_rows_then_apply_updates(
     row = db.execute(
         "SELECT review_status, properties FROM molecules WHERE mol_id = ?",
         (sample_molecule,),
-        db="mol",
     )[0]
     assert row["review_status"] == "pending"  # Reset to pending
 

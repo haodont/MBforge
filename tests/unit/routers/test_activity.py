@@ -38,7 +38,7 @@ def _seed(tmp_library: Path) -> None:
     """One attached reading and one that no structure owns."""
     db = DatabaseManager.get(str(tmp_library))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             """
             INSERT INTO molecules (
@@ -207,7 +207,7 @@ def test_attribution_gap_is_split_by_whether_the_structure_exists(
     """
     db = DatabaseManager.get(str(tmp_library))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             """
             INSERT INTO molecules (mol_id, smiles, name, source_doc,
@@ -356,7 +356,7 @@ def test_an_unread_label_is_reported_as_recoverable_not_as_undrawn(
     )
     db = DatabaseManager.get(str(tmp_library))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, canonical_smiles, name, source_doc) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -480,9 +480,6 @@ def test_export_preserves_readings_stereochemistry_and_citations_and_refuses_sta
             reading("m-conflict", mol_id="C[C@@H](O)F"),
             reading("m-uncitable", evidence_ids=["missing-evidence"]),
         ],
-        review_candidates=[
-            {"reason": "llm_only", "source_quote": "unverified proposal"}
-        ],
     )
     publish_document_facts(
         tmp_library,
@@ -541,7 +538,7 @@ def test_export_preserves_readings_stereochemistry_and_citations_and_refuses_sta
     doc = dataset["documents"][0]
     assert len(doc["rows"]) == 6 and doc["revision"] == 1
     assert doc["rows"][2]["qualitative_raw"] == "+++"
-    assert doc["facts"]["review_candidates"] == artifact.review_candidates
+    assert doc["facts"]["doc_id"] == "doc-export"
     cited = {e["evidence_id"]: e for e in doc["evidence"]}
     assert cited[structure_id]["page"] == 1 and cited[structure_id]["bbox"] == [
         0,

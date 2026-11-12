@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import { getAgentDir } from '@earendil-works/pi-coding-agent'
@@ -8,6 +8,8 @@ import { getAgentDir } from '@earendil-works/pi-coding-agent'
 const MAX_FILES_PER_GOAL = 200
 const MAX_BYTES_PER_GOAL = 50 * 1024 * 1024
 const MAX_ARTIFACT_BYTES = 200_000
+/** Whole-store bound: keep only the newest N goal directories across sessions. */
+export const MAX_GOAL_DIRS = 50
 
 function safe(value: string): string {
   return value.replace(/[^a-zA-Z0-9_.-]/g, '_')
@@ -85,6 +87,47 @@ export async function pruneAllGoalArtifacts(): Promise<number> {
       const after = await readdir(join(root, session, goal)).catch(() => [])
       removed += Math.max(0, before.length - after.length)
     }
+  }
+  return removed
+}
+
+/**
+ * Bound the whole store, not just each goal: per-goal pruning caps files inside
+ * a directory, but completed goal/session directories otherwise accumulate
+ * forever. Keep the newest MAX_GOAL_DIRS goal directories by last activity,
+ * always protect the active goal, and drop session directories left empty.
+ * Returns the number of goal directories removed.
+ */
+export async function pruneOldGoalArtifacts(
+  keep?: { sessionId: string; goalId: string },
+): Promise<number> {
+  const root = goalArtifactRoot()
+  if (!existsSync(root)) return 0
+  const keepPath = keep ? goalArtifactDir(keep.sessionId, keep.goalId) : undefined
+  const dirs: Array<{ path: string; mtime: number }> = []
+  const sessions = await readdir(root).catch(() => [])
+  for (const session of sessions) {
+    const sessionPath = join(root, session)
+    for (const goal of await readdir(sessionPath).catch(() => [])) {
+      const path = join(sessionPath, goal)
+      const info = await stat(path).catch(() => undefined)
+      if (info?.isDirectory()) dirs.push({ path, mtime: info.mtimeMs })
+    }
+  }
+  const excess = dirs.length - MAX_GOAL_DIRS
+  if (excess <= 0) return 0
+  const removable = dirs
+    .filter((dir) => dir.path !== keepPath)
+    .sort((left, right) => left.mtime - right.mtime)
+  let removed = 0
+  for (const dir of removable.slice(0, excess)) {
+    await rm(dir.path, { recursive: true, force: true }).catch(() => {})
+    removed += 1
+  }
+  for (const session of sessions) {
+    const sessionPath = join(root, session)
+    const left = await readdir(sessionPath).catch(() => [])
+    if (left.length === 0) await rm(sessionPath, { recursive: true, force: true }).catch(() => {})
   }
   return removed
 }

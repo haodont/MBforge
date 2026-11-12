@@ -98,11 +98,6 @@ class ProcessRegistry:
                 cls._instances[key] = cls(key)
             return cls._instances[key]
 
-    @property
-    def registry_dir(self) -> Path:
-        self._registry_dir.mkdir(parents=True, exist_ok=True)
-        return self._registry_dir
-
     def register(self, role: str, port: int | None = None) -> ProcessIdentity:
         """Register this process and write its identity file.
 

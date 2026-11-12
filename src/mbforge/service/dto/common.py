@@ -1,12 +1,9 @@
 """Common Pydantic response models.
 
-Shared envelopes for success, error, and paginated responses, plus
-utility schemas reused across multiple MBForge routers.
+Utility schemas reused across multiple MBForge routers.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -22,24 +19,6 @@ class LibraryRootMixin(BaseModel):
         validation_alias=AliasChoices("library_root", "libraryRoot"),
         description="Library root for the request",
     )
-
-
-class SuccessResponse(BaseModel):
-    success: bool = True
-    message: str = ""
-
-
-class ErrorResponse(BaseModel):
-    success: bool = False
-    error: str
-    error_code: str = "internal_error"
-
-
-class PaginatedResponse(BaseModel):
-    items: list[Any]
-    total: int
-    page: int = 1
-    page_size: int = 50
 
 
 class ModelTestRequest(BaseModel):

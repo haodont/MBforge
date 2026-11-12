@@ -1,8 +1,7 @@
 """Unit tests for pipeline/stage_checkpoint.py.
 
-Covers the stage-order helpers, the staging summary read/write guards, the
-run-checkpoint binding/retry lifecycle, last-completed-stage resolution and the
-merged report writer (which must agree with the API reader).
+Covers the staging summary read/write guards and the merged report writer
+(which must agree with the API reader).
 """
 
 from __future__ import annotations
@@ -10,37 +9,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from mbforge.service.pipeline.composition import effective_stage_names
 from mbforge.service.pipeline.run.checkpoint import (
-    INCOMPATIBLE_CHECKPOINT,
-    STAGE_ORDER,
     collect_all_summaries,
-    ensure_run_checkpoint,
-    is_last_stage,
-    last_completed_stage,
-    load_run_checkpoint,
     load_stage_summary,
     merge_report,
-    next_stage,
-    reset_stage_for_retry,
     save_stage_summary,
     write_merged_report,
 )
-
-
-def test_stage_order_helpers_walk_the_registry_order() -> None:
-    """``next_stage`` walks the effective order; unknown stages restart it."""
-    assert next_stage(None) == "extract"
-    assert next_stage("extract") == "markdown"
-    assert next_stage("markdown") == "patent"
-    assert next_stage("patent") is None
-    assert next_stage("bogus") == "extract"
-
-    assert not is_last_stage("extract")
-    assert not is_last_stage("markdown")
-    assert is_last_stage("patent")
 
 
 def test_stage_summaries_round_trip_and_guard_missing_staging(tmp_path: Path) -> None:
@@ -78,61 +54,6 @@ def test_stage_summaries_round_trip_and_guard_missing_staging(tmp_path: Path) ->
     assert load_stage_summary(None, "extract") is None
     save_stage_summary(None, "extract", status="success")  # must not raise
     assert collect_all_summaries(tmp_path / "absent") == {}
-
-
-def test_run_checkpoint_binds_once_guards_legacy_staging_and_recovers(
-    tmp_path: Path,
-) -> None:
-    """One run id per staging dir; legacy staging only yields to a fresh retry."""
-    staging = tmp_path / "attempt"
-    run_id = ensure_run_checkpoint(staging)
-    assert ensure_run_checkpoint(staging) == run_id
-
-    save_stage_summary(staging, "extract", status="running")
-    checkpoint = load_run_checkpoint(staging)
-    assert checkpoint is not None
-    assert checkpoint["run_id"] == run_id
-    assert checkpoint["stages"]["extract"]["status"] == "running"
-
-    # A summary-only (pre-v2) staging dir must not be auto-restarted, but an
-    # explicit fresh retry reclaims it instead of failing again.
-    legacy = tmp_path / "legacy"
-    save_stage_summary(legacy, "extract", status="success")
-
-    with pytest.raises(RuntimeError, match=INCOMPATIBLE_CHECKPOINT):
-        ensure_run_checkpoint(legacy)
-
-    fresh_run = ensure_run_checkpoint(legacy, start_new=True)
-
-    assert load_run_checkpoint(legacy)["run_id"] == fresh_run
-    assert load_stage_summary(legacy, "extract") is None
-
-    # A manual retry after promotion must not leave summary-only staging.
-    retry = tmp_path / "retry"
-    reset_stage_for_retry(retry, "extract")
-
-    checkpoint = load_run_checkpoint(retry)
-    assert checkpoint is not None
-    assert checkpoint["stages"] == {"extract": {"status": "pending"}}
-
-
-def test_last_completed_stage_walks_the_contiguous_success_run(tmp_path: Path) -> None:
-    """Only the unbroken run of successful stages counts as completed."""
-    assert last_completed_stage(tmp_path) is None
-
-    save_stage_summary(tmp_path, "extract", status="success")
-    assert last_completed_stage(tmp_path) == "extract"
-
-    # Gap at markdown → only the contiguous extract run counts.
-    save_stage_summary(tmp_path, "markdown", status="error")
-    assert last_completed_stage(tmp_path) == "extract"
-
-    save_stage_summary(tmp_path, "markdown", status="success")
-    assert last_completed_stage(tmp_path) == "markdown"
-
-    for name in STAGE_ORDER:
-        save_stage_summary(tmp_path, name, status="success")
-    assert last_completed_stage(tmp_path) == "patent"
 
 
 def _populate_all_stages(staging: Path) -> None:

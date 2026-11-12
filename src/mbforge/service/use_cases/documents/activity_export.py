@@ -307,7 +307,7 @@ def export_structure_activity(
             (
                 "structure_activity.csv: matched readings, pending scientific review.\n"
                 "unresolved.csv: every remaining reading, with explicit reasons. No rows are silently dropped.\n"
-                "dataset.json: exact values, committed facts, review candidates/conflicts and SQL source evidence.\n"
+                "dataset.json: exact values, committed facts and SQL source evidence.\n"
                 "doc_id is the imported PDF SHA-256. Match it to your original file. PDFs are not bundled.\n"
                 "Evidence pages are one-based; bboxes use PDF points, bottom-left origin. Table/row/column indexes are zero-based.\n"
                 "original_* and metric retain source scale; canonical_* and operator use the converted scale.\n"

@@ -33,7 +33,7 @@ Use cases obtain persistence through `get_repositories(library_root)` and
 runtime capabilities through `get_runtime()`. The concrete implementations
 are installed once by `create_app()` and by the test composition root.
 
-The repository set contains database, evidence, Markush, review, and artifact
+The repository set contains database, evidence, review, and artifact
 stores. The runtime provider contains model lifecycle, MolDet, MolParser, OCR,
 process, and ingest worker capabilities. This keeps HTTP and service modules
 independent of SQLite and heavyweight model imports.

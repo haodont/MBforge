@@ -132,32 +132,7 @@ class LibraryLayout:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    @staticmethod
-    def _safe_child(parent: Path, filename: str, *, label: str) -> Path:
-        """Resolve *filename* under *parent* with traversal protection."""
-        if (
-            not filename
-            or "/" in filename
-            or "\\" in filename
-            or filename.startswith("..")
-            or filename in (".", "..")
-        ):
-            raise PathTraversalError(f"invalid {label}: {filename!r}")
-        resolved = (parent / filename).resolve()
-        try:
-            resolved.relative_to(parent.resolve())
-        except ValueError as exc:
-            raise PathTraversalError(
-                f"{label} path escapes parent dir: {filename}"
-            ) from exc
-        return resolved
-
     # -- Library-level paths -------------------------------------------
-
-    @property
-    def storage_root(self) -> Path:
-        """``{root}/storage/`` — canonical document artifact root."""
-        return self._root / "storage"
 
     @property
     def write_test_path(self) -> Path:
@@ -319,14 +294,6 @@ class LibraryPathContext:
                 extract_library_root(payload) or None,
                 require_configured=require_configured,
             )
-        )
-
-    @classmethod
-    def from_root(
-        cls, library_root: str | Path, *, require_configured: bool = False
-    ) -> LibraryPathContext:
-        return cls(
-            resolve_library_root(library_root, require_configured=require_configured)
         )
 
     @property

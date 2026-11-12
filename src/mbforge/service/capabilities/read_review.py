@@ -81,6 +81,9 @@ class ReviewQueueEntry(BaseModel):
     status: str
     reasons: list[str] = Field(default_factory=list)
     created_at: str | None = None
+    #: What the reviewer actually decides — the per-kind detail the review
+    #: center renders (a reading's candidates, a proposal's before/after).
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 class ListReviewQueueOutput(BaseModel):
@@ -112,6 +115,9 @@ def _queue_entry(item: dict[str, object]) -> ReviewQueueEntry:
         if isinstance(reasons, list)
         else [],
         created_at=str(item["created_at"]) if item.get("created_at") else None,
+        payload=(
+            dict(item["payload"]) if isinstance(item.get("payload"), dict) else {}
+        ),
     )
 
 
@@ -137,7 +143,7 @@ async def list_review_queue(
         page,
         request.limit,
     )
-    stats = await asyncio.to_thread(stats_summary, context.library_root)
+    stats = await asyncio.to_thread(stats_summary, context.library_root, request.doc_id)
     rows = queue.items[skip:]
     next_offset = (
         request.offset + len(rows) if request.offset + len(rows) < queue.total else None
@@ -160,12 +166,13 @@ register(
         description=(
             "The unified human-review queue: items the pipeline would not "
             "decide on its own (low-confidence or unparsable structures, "
-            "ambiguous designations, disputed patent facts, Markush links, AI "
-            "proposals). Returns pending items by default with their kind, "
+            "ambiguous designations, disputed patent facts, AI proposals). "
+            "Returns pending items by default with their kind, "
             "item_id, document/short_id, page, bbox, name, SMILES and "
             "confidence, plus per-kind counts. Each row is the same item the "
             "review center shows: kind + item_id address it in the web route "
-            "/review?kind=&id=. Read-only; a decision needs the human in the "
+            "/review?kind=&id=, and ``payload`` carries what the reviewer "
+            "actually decides. Read-only; a decision needs the human in the "
             "review center, never a capability call."
         ),
         input_model=ListReviewQueueInput,

@@ -24,7 +24,7 @@ def load_detections(
     db = DatabaseManager.get(str(library_root))
     db.initialize()
     try:
-        with db.mol_conn() as conn:
+        with db.connection() as conn:
             if page is None:
                 rows = conn.execute(
                     "SELECT * FROM molecule_detections WHERE doc_id = ?",
@@ -47,7 +47,7 @@ def save_detections(
     """Insert/replace interactive detection rows (``molecule_detections``)."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         for det in detections:
             mol_id = det.get("mol_id")
             if mol_id:
@@ -84,7 +84,7 @@ def detection_counts(library_root: str | Path) -> tuple[int, int]:
     """Return ``(cached_page_count, cached_doc_count)`` for the detection cache."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS page_count, "
             "COUNT(DISTINCT doc_id) AS doc_count "
@@ -99,7 +99,7 @@ def clear_detections(library_root: str | Path, doc_id: str | None = None) -> int
     """Delete cached detections (one document, or all); return row count."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         if doc_id is None:
             cursor = conn.execute("DELETE FROM molecule_detections")
         else:

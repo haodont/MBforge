@@ -20,11 +20,11 @@ it. Read the table to know what the answer must cover; take the values from
 
 1. Resolve the document with `resolve_document`. Use the exact returned
    `doc_id`; never invent one.
-2. Call `get_document` and check `has_patent_facts`.
+2. Call `document_read` (`part="info"`) and check `has_patent_facts`.
    - If false and the session is read-only, stop and report that Patent facts
      must be produced first. Do not read around the missing facts.
    - If false and writes are allowed, call `submit_patent_analysis`, then poll
-   `get_run` until the Patent stage settles. Report the run id.
+   `runs` (`action="get"`) until the Patent stage settles. Report the run id.
 3. **Find the printed activity table first.** Call `list_evidence` with
    `kind="tab"` and no page: one call returns every printed table in the
    document (follow `next_offset` until it is `null` if there are more than one
@@ -68,12 +68,63 @@ it. Read the table to know what the answer must cover; take the values from
    `unattributed_by_reason`. A document with zero rows has zero stored
    readings, which does not by itself prove the patent reports no activity.
 
+## 用候选材料包做绑定判断（承接工作流第 6 步）
+
+`get_binding_candidates` 把「指代符 → 候选结构」的配对整理好，比逐条读原始
+evidence 高效。它**只读、不决定**：判断仍由你做。
+
+调用 `get_binding_candidates(doc_id)`，返回：
+
+| 字段 | 内容 |
+|---|---|
+| `readings` | 全部读数：指代符、值、单位、页码、`attributed`、`reasons` |
+| `designations` | 每个指代符：`label_raw`/`label_key`、`pages`、`context_types`、`has_reading`、`reading_ids`、`candidates`、`attribution` |
+| `candidates[]` | `label_keys`、`label_sources`（`page_text` > `crop`）、`designation_counts`、`owns`、`page`/`bbox`、`detection_score`、`formula`/`exact_mass`、`mass_check`、`entry` |
+| `review_items` | 待人工复核项（含 `designation_unbound`） |
+| `table_cells` | 表内 `[MOL:n]` token 与页码（token→分子映射未持久化） |
+
+`designations` 按 `has_reading` 排序：有读数要安置的指代符在前，其余是文献
+印了但没有活性的上下文。`label_raw` 以读数先出现者为准。
+
+### 裁决规则（R1–R7）
+
+对每条未归属读数，按顺序：
+
+| 轮 | 条件 | 动作 |
+|---|---|---|
+| R0 | 候选集为空 | 归入 `designation_without_structure` / `label_not_read`，不进裁决 |
+| R1 | 唯一候选 | 记录；仍需最低置信度（`mass_check=match` 或 `label_sources` 含 `page_text`） |
+| R2 | 多候选 canonical SMILES 相同 | 去重 |
+| R3 | 置信度不同 | 取最高（原始 PDF > 命名转化 > OCR） |
+| R4 | 同置信度 | `label_sources`：`page_text` > `crop` |
+| R5 | 仍并列 | `designation_counts` 多数印刷（`owns`） |
+| R6 | 平票 | 用 `inspect_visual`（`page_image` / `page_molecules`）读原始页面再判 |
+| R7 | 仍不定 | 交人工 |
+
+R1–R5 覆盖大多数；R6 才是看图；R7 才落到人。
+
+### 结果写到哪里
+
+**R1–R5 能自动裁决的**：调 `assign_attribution`（mutating，需 edit token）落
+`method=agent`、`review_status=accepted`；载荷 `doc_id` / `measurement_id` /
+`mol_id`（候选的 `mol_id`，即 canonical SMILES）/ `evidence_id` / `confidence`。
+该 capability 会校验读数存在且分子已入库，否则 404。
+
+- **R6 看图后确定的**：同样落 `method=agent`（把 `evidence_id` 指向被看的结构证据）。
+- **R7 仍不定的**：指到 `designation_unbound` 复核项
+  （`[[ui:review:designation_unbound:<item_id>]]`），由人确认后落 `method=human`；
+  agent 链接会被 human 覆盖（优先级 human > agent > rule）。
+- 不要用 `propose_review` 对 measurement 目标落值（record-only）。
+
+> 名称转化（化合物名 → 结构）是已记录的 TODO，当前**不可用**；不要假设它能用。
+> 表内 `[MOL:n]` → 分子的映射未持久化，包只报 token，不指认结构。
+
 ## Read the page before you judge it
 
 Every structural question about a patent is answered by looking, not by
 reasoning from the numbers:
 
-- `ocr_page_region` returns the page's text blocks **with their positions and
+- `inspect_visual` (`action="page_text"`) returns the page's text blocks **with their positions and
   the layout producer's reading order**. Use it to see how the document prints
   its compound numbers and names, and where.
 - `inspect_visual` with `action="page_image"` renders the page. Look at it: a
@@ -178,6 +229,10 @@ document but is not bound in the library.
 
 ## Failure rules
 
+- `get_binding_candidates` is an accelerator, not a prerequisite: if it is not
+  in the active tool list (an older session), read `list_evidence` +
+  `verify_structures` and do the same comparison by hand. Do not use its
+  absence as a reason to skip the binding question.
 - If `query_activities` is not in the active tool list, say the capability is
   unavailable. Do not fall back to OCR, Markdown tables, or evidence search for
   *values*. Reading the printed table for the reference frame is not a fallback

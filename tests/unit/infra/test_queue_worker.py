@@ -37,7 +37,7 @@ def _library(tmp_path: Path, name: str = "library") -> str:
 
 
 def _seed(db: DatabaseManager, rows: list[dict]) -> None:
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         for row in rows:
             conn.execute(
                 "INSERT INTO ingest_queue (id, file_path, status, claimed_by, heartbeat_ts) "
@@ -53,7 +53,7 @@ def _seed(db: DatabaseManager, rows: list[dict]) -> None:
 
 
 def _queue_row(db: DatabaseManager, task_id: str) -> dict:
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT * FROM ingest_queue WHERE id = ?", (task_id,)
         ).fetchone()
@@ -125,7 +125,7 @@ def test_reclaim_orphans_resets_stale_processing_rows(tmp_path: Path) -> None:
 
 
 def _stage_status(db: DatabaseManager, stage: str) -> str:
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT status FROM ingest_queue "
             "WHERE doc_id = 'dag-doc' AND run_id = 'run-1' AND stage = ?",
@@ -135,7 +135,7 @@ def _stage_status(db: DatabaseManager, stage: str) -> str:
 
 
 def _node_id(db: DatabaseManager, stage: str) -> str:
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT id FROM ingest_queue "
             "WHERE doc_id = 'dag-doc' AND run_id = 'run-1' AND stage = ?",
@@ -192,7 +192,7 @@ def test_migration_drops_retired_detection_nodes(tmp_path: Path) -> None:
     db = DatabaseManager(root)
     db.initialize()
 
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO ingest_queue (id, file_path, doc_id, stage, run_id, status) "
             "VALUES ('legacy-detect', 'doc.pdf', 'legacy-doc', 'detection', "
@@ -207,7 +207,7 @@ def test_migration_drops_retired_detection_nodes(tmp_path: Path) -> None:
 
     DatabaseManager(root).initialize()
 
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         nodes = conn.execute(
             "SELECT COUNT(*) FROM ingest_queue WHERE stage = 'detection'"
         ).fetchone()[0]
@@ -475,6 +475,47 @@ def _document_status(root: str, doc_id: str) -> str | None:
 
     row = document_records.get(root, doc_id)
     return None if row is None else row["status"]
+
+
+def test_enqueue_wakes_a_sleeping_worker(tmp_path: Path, monkeypatch) -> None:
+    """An enqueue claims immediately instead of waiting out the poll interval."""
+    root = _library(tmp_path)
+    db = DatabaseManager.get(root)
+    db.initialize()
+    executed: list[str] = []
+
+    def _fake_run(
+        file_path: str,
+        library_root: str,
+        doc_id: str,
+        task_id: str,
+        stage: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        del file_path, library_root, doc_id, stage, run_id
+        executed.append(task_id)
+
+    monkeypatch.setattr(worker, "_run_pipeline_sync", _fake_run)
+    monkeypatch.setattr(worker, "_evaluate_model_gate", lambda: _ready_gate())
+    # Only the enqueue wake can make the assertion pass at this interval.
+    monkeypatch.setattr(worker, "_CLAIM_POLL_S", 60.0)
+
+    async def _scenario() -> None:
+        worker.ensure_queue_worker(root)
+        # Let the first claim pass finish and the loop enter its poll sleep.
+        await asyncio.sleep(0.1)
+        _seed(db, [{"id": "wake-me", "file_path": str(Path(root) / "doc.pdf")}])
+        worker.ensure_queue_worker(root)
+        for _ in range(50):
+            if executed:
+                break
+            await asyncio.sleep(0.02)
+        assert executed == ["wake-me"]
+
+    try:
+        asyncio.run(_scenario())
+    finally:
+        worker.stop_queue_workers()
 
 
 def test_run_pipeline_sync_writes_the_run_outcome_into_document_status(

@@ -17,6 +17,7 @@ from mbforge.contracts.measurement import (
 )
 from mbforge.contracts.molecule import MoleculeListRequest
 from mbforge.domain.evidence import SourceEvidence
+from mbforge.domain.relation import LabelAnchor, PageGeometry
 
 
 @runtime_checkable
@@ -30,15 +31,9 @@ class DatabaseRepository(Protocol):
 
     def initialize(self) -> None: ...
 
-    def readonly_schema(self) -> list[dict[str, Any]]: ...
-
-    def readonly_query(self, sql: str, *, max_rows: int) -> dict[str, Any]: ...
-
     def snapshot_document(self, doc_id: str) -> dict[str, Any]: ...
 
     def record_ingest_event(self, **kwargs: Any) -> None: ...
-
-    def table_counts(self) -> dict[str, int]: ...
 
     def document_status_counts(self) -> dict[str, int]: ...
 
@@ -51,20 +46,6 @@ class EvidenceRepository(Protocol):
     """Canonical SourceEvidence persistence and read contract."""
 
     def persist(self, evidence: Sequence[SourceEvidence] | object) -> int: ...
-
-    def persist_extraction(
-        self,
-        *,
-        doc_id: str,
-        evidence: Sequence[SourceEvidence] | object,
-        candidates: Sequence[Any],
-        recognition_version: int = 1,
-    ) -> tuple[int, int]:
-        """Persist canonical evidence and review candidates in one transaction.
-
-        Returns ``(evidence_count, candidate_count)``.
-        """
-        ...
 
     def get(self, evidence_id: str) -> SourceEvidence | None: ...
 
@@ -93,6 +74,19 @@ class EvidenceRepository(Protocol):
     def update_molecule_raw_text(
         self, evidence_id: str, doc_id: str, raw_text: str
     ) -> int: ...
+
+
+class AnchorRepository(Protocol):
+    """ADR 0001 printed-designation anchor index and page geometry."""
+
+    def persist(
+        self,
+        doc_id: str,
+        anchors: Sequence[LabelAnchor],
+        geometry: Sequence[PageGeometry] = (),
+    ) -> int: ...
+
+    def coverage(self, doc_id: str | None = None) -> dict[str, object]: ...
 
 
 class MoleculeRepository(Protocol):
@@ -202,6 +196,10 @@ class MeasurementRepository(Protocol):
         self, measurement_ids: Sequence[str]
     ) -> dict[str, list[dict[str, Any]]]: ...
 
+    def measurements_for_molecules(
+        self, mol_ids: Sequence[str]
+    ) -> dict[str, list[dict[str, Any]]]: ...
+
     def stats(self, doc_id: str = "") -> MeasurementDatasetStats: ...
 
     def unattributed_readings(self, doc_id: str = "") -> list[dict[str, Any]]: ...
@@ -220,54 +218,16 @@ class MeasurementRepository(Protocol):
         doc_id: str,
         evidence_id: str = "",
         method: str = "human",
+        confidence: float | None = None,
     ) -> str: ...
 
 
-class MarkushRepository(Protocol):
-    """Markush review persistence contract.
-
-    Every method owns its connection; callers never thread one in.
-    """
-
-    # --- Review candidates ---
-    def list_candidates(self, **kwargs: Any) -> Any: ...
-
-    def get_candidate_detail(self, candidate_id: str) -> Any: ...
-
-    def update_candidate(self, **kwargs: Any) -> Any: ...
-
-
 class ReviewRepository(Protocol):
-    """Persistence boundary for native and Markush review records."""
+    """Persistence boundary for the human review queue and its audit trail."""
 
     def insert_review_item(self, **kwargs: Any) -> str: ...
 
     def record_review_decision(self, **kwargs: Any) -> None: ...
-
-    def persist_review_candidates(
-        self,
-        doc_id: str,
-        candidates: Any,
-        recognition_version: int = 1,
-    ) -> int: ...
-
-    def copy_evidence(
-        self, row: Any, entity_type: str, entity_id: str, doc_id: str
-    ) -> None: ...
-
-    def get_review_candidate(self, candidate_id: str) -> Any: ...
-
-    def set_candidate_status(self, candidate_id: str, new_state: str) -> None: ...
-
-    def set_candidate_properties(
-        self, candidate_id: str, properties_json: str
-    ) -> None: ...
-
-    def insert_molecule_from_candidate(self, **kwargs: Any) -> None: ...
-
-    def insert_scaffold_from_candidate(self, **kwargs: Any) -> None: ...
-
-    def insert_fragment_from_candidate(self, **kwargs: Any) -> None: ...
 
     def list_queue(
         self,
@@ -281,11 +241,9 @@ class ReviewRepository(Protocol):
 
     def get_item(self, kind: str, item_id: str) -> dict[str, Any]: ...
 
-    def stats(self) -> dict[str, Any]: ...
+    def stats(self, doc_id: str | None = None) -> dict[str, Any]: ...
 
     def history(self, entity_id: str) -> tuple[str, list[dict[str, Any]]]: ...
-
-    def markush_candidate_version(self, item_id: str) -> int | None: ...
 
     def review_item_status_payload(
         self, item_id: str, kind: str
@@ -343,7 +301,7 @@ class PatentAnalysisRepository(Protocol):
     """Committed Patent-analysis state: one authoritative snapshot per document.
 
     ``patent_facts.json`` is a rebuildable projection of this row. A commit
-    writes the snapshot, the human decisions and the permitted derived rows in a
+    writes the snapshot and the permitted derived rows in a
     single transaction, so the facts and the derived molecules cannot disagree.
     """
 
@@ -363,19 +321,13 @@ class PatentAnalysisRepository(Protocol):
         activity_updates: Sequence[dict[str, Any]] | None = None,
         measurements: Sequence[Any] = (),
         attributions: Sequence[Any] = (),
-        decisions: dict[str, Any] | None = None,
-        forget_decisions: Sequence[str] = (),
         expected_revision: int | None = None,
     ) -> int:
-        """Commit one revision; raises ``ConflictError`` when the caller is stale.
-
-        ``decisions`` merges into the stored map and ``forget_decisions`` removes
-        slots whose decision was withdrawn.
-        """
+        """Commit one revision; raises ``ConflictError`` when the caller is stale."""
         ...
 
     def clear_payload(self, doc_id: str) -> int:
-        """Drop the committed facts but keep the human decisions."""
+        """Drop the committed facts; return the new revision."""
         ...
 
     def delete_document_state(self, doc_id: str) -> int:
@@ -396,13 +348,13 @@ class LibraryRepositories(Protocol):
     def evidence(self) -> EvidenceRepository: ...
 
     @property
+    def anchors(self) -> AnchorRepository: ...
+
+    @property
     def molecules(self) -> MoleculeRepository: ...
 
     @property
     def measurements(self) -> MeasurementRepository: ...
-
-    @property
-    def markush(self) -> MarkushRepository: ...
 
     @property
     def review(self) -> ReviewRepository: ...
@@ -449,11 +401,11 @@ def get_database(library_root: str | Path) -> DatabaseRepository:
 
 __all__ = [
     "DatabaseRepository",
+    "AnchorRepository",
     "ArtifactStore",
     "DocumentRepository",
     "EvidenceRepository",
     "LibraryRepositories",
-    "MarkushRepository",
     "MeasurementRepository",
     "MoleculeRepository",
     "PatentAnalysisRepository",

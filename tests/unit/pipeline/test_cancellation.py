@@ -46,7 +46,7 @@ def _seed_queue_task(
 ) -> None:
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO ingest_queue "
             "(id, file_path, doc_id, run_id, status, created_at) "
@@ -57,7 +57,7 @@ def _seed_queue_task(
 
 def _queue_status(library_root: Path, task_id: str) -> str:
     db = DatabaseManager.get(str(library_root))
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT status FROM ingest_queue WHERE id = ?", (task_id,)
         ).fetchone()
@@ -287,7 +287,7 @@ def test_retry_skips_task_until_active_runner_wrapper_exits(tmp_path: Path) -> N
     library_root.mkdir(parents=True, exist_ok=True)
     _seed_queue_task(library_root, "retry-race")
     db = DatabaseManager.get(str(library_root))
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "UPDATE ingest_queue SET status = 'cancelled' WHERE id = ?",
             ("retry-race",),

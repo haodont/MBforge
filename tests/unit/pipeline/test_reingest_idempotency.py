@@ -33,7 +33,7 @@ def test_clear_pipeline_data_removes_prior_run_state(
     resolver.document_md(doc_id).write_text("# old")
     (resolver.report_json(doc_id)).write_text("{}")
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name, source_doc) VALUES (?, ?, ?, ?)",
             ("mol_1", "CCO", "ethanol", doc_id),
@@ -50,7 +50,7 @@ def test_clear_pipeline_data_removes_prior_run_state(
     store.clear_pipeline_data(doc_id)
 
     # Re-inserting the same detection after cleanup must succeed.
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name, source_doc) VALUES (?, ?, ?, ?)",
             ("mol_1", "CCO", "ethanol", doc_id),

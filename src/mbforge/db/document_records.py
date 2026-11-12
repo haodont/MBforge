@@ -37,7 +37,7 @@ def insert(library_root: str | Path, record: dict[str, Any]) -> None:
             clash is not an error — it means the same bytes are already stored.
     """
     db = DatabaseManager.get(str(library_root))
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         try:
             kb.execute(
                 f"INSERT INTO documents ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)",
@@ -72,7 +72,7 @@ def _raise_conflict(kb: Any, record: dict[str, Any], exc: Exception) -> None:
 def get(library_root: str | Path, doc_id: str) -> dict[str, Any] | None:
     """Return one document row, or ``None`` when it is not registered."""
     db = DatabaseManager.get(str(library_root))
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         row = kb.execute(
             f"SELECT {_COLUMNS} FROM documents WHERE doc_id = ?", (doc_id,)
         ).fetchone()
@@ -82,7 +82,7 @@ def get(library_root: str | Path, doc_id: str) -> dict[str, Any] | None:
 def find_by_filename(library_root: str | Path, file_name: str) -> dict[str, Any] | None:
     """Return the document registered under *file_name*, or ``None``."""
     db = DatabaseManager.get(str(library_root))
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         row = kb.execute(
             f"SELECT {_COLUMNS} FROM documents WHERE file_name = ?", (file_name,)
         ).fetchone()
@@ -99,7 +99,7 @@ def list_rows(
     """
     where, params = _status_clause(statuses)
     db = DatabaseManager.get(str(library_root))
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         rows = kb.execute(
             f"SELECT {_COLUMNS} FROM documents{where} ORDER BY created_at DESC, doc_id",
             params,
@@ -111,7 +111,7 @@ def count(library_root: str | Path, *, statuses: Sequence[str] | None = None) ->
     """Return the number of registered documents, optionally status-filtered."""
     where, params = _status_clause(statuses)
     db = DatabaseManager.get(str(library_root))
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         row = kb.execute(
             f"SELECT COUNT(*) AS cnt FROM documents{where}", params
         ).fetchone()
@@ -121,7 +121,7 @@ def count(library_root: str | Path, *, statuses: Sequence[str] | None = None) ->
 def update_status(library_root: str | Path, doc_id: str, status: str) -> None:
     """Overwrite one document's status (no-op when the row is absent)."""
     db = DatabaseManager.get(str(library_root))
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         kb.execute("UPDATE documents SET status = ? WHERE doc_id = ?", (status, doc_id))
 
 
@@ -138,7 +138,7 @@ def delete_many(library_root: str | Path, doc_ids: Sequence[str]) -> None:
         return
     chunk_size = 500
     db = DatabaseManager.get(str(library_root))
-    with db.transaction() as (kb, _):
+    with db.transaction() as kb:
         for start in range(0, len(ids), chunk_size):
             chunk = ids[start : start + chunk_size]
             placeholders = ",".join("?" for _ in chunk)

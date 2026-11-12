@@ -37,7 +37,7 @@ def list_page(library_root: str | Path, request: Any) -> dict[str, Any]:
     ``source_docs`` so the service layer can assemble the response.
     """
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         where_parts = ["1=1"]
         params: list[Any] = []
         if request.status:
@@ -144,7 +144,7 @@ def list_page(library_root: str | Path, request: Any) -> dict[str, Any]:
 def get_row(library_root: str | Path, mol_id: str) -> dict[str, Any] | None:
     """Return one ``molecules`` row by ``mol_id``, or ``None``."""
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT * FROM molecules WHERE mol_id = ?", (mol_id,)
         ).fetchone()
@@ -154,7 +154,7 @@ def get_row(library_root: str | Path, mol_id: str) -> dict[str, Any] | None:
 def find_row(library_root: str | Path, canonical_smiles: str) -> dict[str, Any] | None:
     """Return one ``molecules`` row by ``mol_id`` or ``canonical_smiles``."""
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT * FROM molecules WHERE mol_id = ? OR canonical_smiles = ?",
             (canonical_smiles, canonical_smiles),
@@ -172,7 +172,7 @@ def create(
 ) -> None:
     """Insert or replace a molecule and refresh its search index."""
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         db.delete_molecule_from_mol_search(conn, mol_id)
         conn.execute(
             "INSERT OR REPLACE INTO molecules "
@@ -191,7 +191,7 @@ def bulk_update_status(
     db = DatabaseManager.get(str(library_root))
     unique_ids = list(dict.fromkeys(mol_ids))
     placeholders = ",".join("?" for _ in unique_ids)
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(
             f"UPDATE molecules SET status = ? WHERE mol_id IN ({placeholders})",
             [status, *unique_ids],
@@ -227,7 +227,7 @@ def update(
             val = json.dumps(val)
         params.append(val)
     params.append(mol_id)
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         previous = conn.execute(
             "SELECT smiles FROM molecules WHERE mol_id = ?", (mol_id,)
         ).fetchone()
@@ -268,7 +268,7 @@ def _canonical_smiles(smiles: str) -> str:
 def list_corrections(library_root: str | Path, mol_id: str) -> list[dict[str, Any]]:
     """Return append-only manual corrections for a molecule."""
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             """
             SELECT correction_id, mol_id, field, old_value, new_value,
@@ -285,14 +285,14 @@ def list_corrections(library_root: str | Path, mol_id: str) -> list[dict[str, An
 def delete(library_root: str | Path, mol_ids: Sequence[str]) -> int:
     """Delete molecules and their owned rows; return the deleted row count."""
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         return DatabaseManager.delete_molecule_records(conn, mol_ids)
 
 
 def stats(library_root: str | Path) -> dict[str, Any]:
     """Return total plus per-status and per-source counts."""
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         total = conn.execute("SELECT COUNT(*) FROM molecules").fetchone()[0]
         by_status = conn.execute(
             "SELECT status, COUNT(*) as cnt FROM molecules GROUP BY status"
@@ -320,7 +320,7 @@ def search_text(
     if doc_id:
         params.append(doc_id)
     params.append(top_k)
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT m.* FROM mol_search ms JOIN molecules m ON ms.rowid = m.rowid "
             f"WHERE mol_search MATCH ? {scope}LIMIT ?",
@@ -337,7 +337,7 @@ def search_substructure(
     if query_mol is None:
         return []
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT * FROM molecules "
             "WHERE fingerprint IS NOT NULL OR smiles IS NOT NULL"
@@ -372,7 +372,7 @@ def search_similarity(
     if query_mol.fingerprint is None:
         return []
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT * FROM molecules WHERE fingerprint IS NOT NULL"
         ).fetchall()
@@ -405,7 +405,7 @@ def detection_cache_matches(
     """
     qx0, qy0, qx1, qy1 = query_box
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             """
             SELECT mol_id, page, bbox_x0, bbox_y0, bbox_x1, bbox_y1,
@@ -461,7 +461,6 @@ def designated_structures(
         "SELECT name, canonical_smiles FROM molecules "
         "WHERE source_doc = ? AND TRIM(COALESCE(canonical_smiles, '')) != ''",
         (doc_id,),
-        db="mol",
     )
     return [
         {
@@ -481,7 +480,7 @@ def identity_fields(
         return {}
     placeholders = ",".join("?" for _ in ids)
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             f"SELECT mol_id, canonical_smiles, name FROM molecules "
             f"WHERE mol_id IN ({placeholders})",
@@ -512,7 +511,7 @@ def molecules_for_recorrection(
     else:
         query = "SELECT * FROM molecules"
         params = ()
-    rows = db.execute(query, params, db="mol")
+    rows = db.execute(query, params)
     return [dict(row) for row in rows]
 
 
@@ -527,7 +526,6 @@ def detections_for_molecules(
     rows = db.execute(
         f"SELECT * FROM molecule_detections WHERE mol_id IN ({placeholders})",
         list(mol_ids),
-        db="mol",
     )
     return [dict(row) for row in rows]
 
@@ -545,7 +543,6 @@ def document_detection_count(library_root: str | Path, doc_id: str) -> int:
     rows = db.execute(
         "SELECT COUNT(*) AS c FROM molecule_detections WHERE doc_id = ?",
         (doc_id,),
-        db="mol",
     )
     return int(rows[0]["c"]) if rows else 0
 
@@ -565,7 +562,6 @@ def document_label_numbers(library_root: str | Path, doc_id: str) -> set[str]:
         "JOIN molecule_detections md ON md.mol_id = m.mol_id "
         "WHERE md.doc_id = ? GROUP BY m.mol_id",
         (doc_id,),
-        db="mol",
     )
     numbers: set[str] = set()
     for row in rows:
@@ -594,16 +590,16 @@ def apply_corrections(
     created_at).
     """
     db = DatabaseManager.get(str(library_root))
-    with db.transaction() as (_kb_conn, mol_conn):
+    with db.transaction() as conn:
         for item in updates:
-            mol_conn.execute(
+            conn.execute(
                 "UPDATE molecules "
                 "SET properties = ?, review_status = ?, reviewed_at = NULL "
                 "WHERE mol_id = ?",
                 (item["properties"], item["review_status"], item["mol_id"]),
             )
             for corr in item["corrections"]:
-                mol_conn.execute(
+                conn.execute(
                     "INSERT INTO molecule_corrections "
                     "(mol_id, field, old_value, new_value, source, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
@@ -656,7 +652,7 @@ def list_molecule_evidence(
         return []
     placeholders = ",".join("?" for _ in canonicals)
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             f"SELECT {_EVIDENCE_COLUMNS} "
             "FROM molecule_detections md "
@@ -688,7 +684,7 @@ def evidence_for_molecules(
     if not clauses:
         return []
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             f"SELECT {_EVIDENCE_COLUMNS} FROM molecule_detections md "
             "LEFT JOIN molecules m ON m.mol_id = md.mol_id "

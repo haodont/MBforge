@@ -121,13 +121,11 @@ const LOADED_SETTINGS = {
     request_timeout: 60,
     language: 'en',
   },
-  vlm: { provider: '', base_url: '', api_key: '', model: '' },
   layout: {
     conf_threshold: 0.4,
     cross_model: true,
     max_pages_per_doc: null,
   },
-  model_server: { host: '127.0.0.1', port: 18791, auto_start: true, startup_timeout: 30 },
   pipeline: {
     batch_size: 16,
     moldet_confidence_threshold: 0.5,

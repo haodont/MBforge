@@ -25,7 +25,6 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from mbforge.foundation.ids import short_id
 from mbforge.foundation.layout import LibraryLayout
 from mbforge.foundation.logger import get_logger
 from mbforge.service.pipeline import stages as _stage_modules  # noqa: F401
@@ -50,16 +49,6 @@ _RUN_FILE = "_run.json"
 _RUN_SCHEMA_VERSION = 2
 INCOMPATIBLE_CHECKPOINT = "INCOMPATIBLE_CHECKPOINT"
 _RUN_CHECKPOINT_LOCK = threading.Lock()
-
-
-def mint_checkpoint_run_id() -> str:
-    """Mint a fresh session run ID for an in-progress (unpublished) run.
-
-    Session/conversational handle used while a run is still being staged;
-    the final published runs directory uses a timestamped id from
-    :func:`mbforge.service.pipeline.run.ids.mint_run_id` instead.
-    """
-    return short_id()
 
 
 def run_checkpoint_path(staging_dir: Path | None) -> Path | None:
@@ -102,53 +91,6 @@ def _write_run_checkpoint(path: Path, data: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def ensure_run_checkpoint(staging_dir: Path | None, *, start_new: bool = False) -> str:
-    """Load the run ID, or start a new run after a completed checkpoint.
-
-    A completed or incompatible checkpoint starts a fresh run only when
-    ``start_new`` is true; incomplete v2 checkpoints remain resumable. A
-    caller explicitly starting a new run may therefore recover legacy or
-    corrupted staging, while normal resume still rejects it.
-    """
-    if staging_dir is None:
-        return mint_checkpoint_run_id()
-
-    try:
-        existing = load_run_checkpoint(staging_dir)
-    except RuntimeError:
-        if not start_new:
-            raise
-        logger.warning("Discarding incompatible staging for fresh run: %s", staging_dir)
-        shutil.rmtree(staging_dir)
-        existing = None
-    if existing is not None:
-        statuses = existing.get("stages", {})
-        complete = all(
-            statuses.get(name, {}).get("status") == "success"
-            for name in effective_stage_names()
-        )
-        if start_new and complete:
-            shutil.rmtree(staging_dir)
-            existing = None
-        else:
-            return existing["run_id"]
-
-    if staging_dir.is_dir() and any(staging_dir.iterdir()):
-        if not start_new:
-            raise RuntimeError(f"{INCOMPATIBLE_CHECKPOINT}: staging has no run_id")
-        logger.warning("Discarding legacy staging for fresh run: %s", staging_dir)
-        shutil.rmtree(staging_dir)
-
-    run_id = mint_checkpoint_run_id()
-    path = run_checkpoint_path(staging_dir)
-    assert path is not None
-    _write_run_checkpoint(
-        path,
-        {"schema_version": _RUN_SCHEMA_VERSION, "run_id": run_id, "stages": {}},
-    )
-    return run_id
-
-
 def _record_run_stage(
     staging_dir: Path | None, stage_name: str, status: str, run_id: str | None = None
 ) -> None:
@@ -175,8 +117,8 @@ def ensure_attempt_run(staging_dir: Path | None, run_id: str) -> None:
     checkpoint is bound once and reused by every node. A checkpoint holding a
     *different* run ID means a new ingestion attempt: stale staging is
     discarded so a previous attempt's artifacts cannot leak into this run. A
-    retry keeps the same run ID and therefore reuses the surviving branch
-    artifact.
+    retry keeps the same run ID and therefore reuses the surviving staging
+    checkpoint.
     """
     if staging_dir is None:
         return
@@ -207,60 +149,6 @@ def ensure_attempt_run(staging_dir: Path | None, run_id: str) -> None:
                 },
             },
         )
-
-
-def latest_stage_run_id(staging_dir: Path | None, stage_name: str) -> str | None:
-    """Return the most recent run ID recorded for *stage_name*.
-
-    Reads ``stages[stage_name].run_id`` from the run checkpoint and falls
-    back to the checkpoint's top-level ``run_id`` for legacy checkpoints
-    that predate per-stage run IDs.
-    """
-    if staging_dir is None:
-        return None
-    data = load_run_checkpoint(staging_dir)
-    if data is None:
-        return None
-    stage_entry = data.get("stages", {}).get(stage_name)
-    if isinstance(stage_entry, dict):
-        recorded = stage_entry.get("run_id")
-        if isinstance(recorded, str) and recorded:
-            return recorded
-    top = data.get("run_id")
-    return top if isinstance(top, str) and top else None
-
-
-def next_stage(current: str | None) -> str | None:
-    """Return the next *enabled* stage after *current*, or ``None`` at the end.
-
-    Walks the composition-root effective order.
-
-    >>> next_stage(None)
-    'extract'
-    >>> next_stage("extract")
-    'markdown'
-    >>> next_stage("patent")
-    None
-    """
-    order = effective_stage_names()
-    if current is None:
-        return order[0] if order else None
-    try:
-        idx = order.index(current)
-    except ValueError:
-        # Unknown checkpoint (including a stage that has since been
-        # disabled): restart from the beginning, mirroring the registry
-        # semantics of ``mbforge.service.pipeline.stage.next_after``.
-        return order[0] if order else None
-    if idx + 1 < len(order):
-        return order[idx + 1]
-    return None
-
-
-def is_last_stage(stage: str) -> bool:
-    """Return True when *stage* is the final stage in the order."""
-    order = effective_stage_names()
-    return bool(order) and stage == order[-1]
 
 
 def summary_path(staging_dir: Path | None, stage_name: str) -> Path | None:
@@ -310,50 +198,6 @@ def save_stage_summary(
     logger.debug("Stage summary saved: %s (%s)", path, status)
 
 
-def reset_stage_for_retry(staging_dir: Path | None, stage_name: str) -> None:
-    """Mark one stage pending so a manual retry is distinguishable from resume."""
-    if staging_dir is None:
-        return
-    try:
-        checkpoint = load_run_checkpoint(staging_dir)
-    except RuntimeError:
-        checkpoint = None
-    if checkpoint is None:
-        # An explicitly requested retry may follow a successful promotion,
-        # which removes the transient staging directory, or an older staging
-        # layout without a run checkpoint. Start a new checkpoint in place;
-        # the runner will mint the claim's real run ID on the next invocation.
-        path = run_checkpoint_path(staging_dir)
-        assert path is not None
-        _write_run_checkpoint(
-            path,
-            {
-                "schema_version": _RUN_SCHEMA_VERSION,
-                "run_id": mint_checkpoint_run_id(),
-                "stages": {},
-            },
-        )
-        for name in effective_stage_names():
-            summary_path(staging_dir, name).unlink(missing_ok=True)
-    summary = load_stage_summary(staging_dir, stage_name) or {"stage": stage_name}
-    summary.update(
-        {
-            "stage": stage_name,
-            "status": "pending",
-            "elapsed_ms": 0,
-            "message": "Waiting for retry",
-        }
-    )
-    summary.pop("error_code", None)
-    summary.pop("context", None)
-    path = summary_path(staging_dir, stage_name)
-    if path is None:
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    _record_run_stage(staging_dir, stage_name, "pending")
-
-
 def load_stage_summary(
     staging_dir: Path | None, stage_name: str
 ) -> dict[str, Any] | None:
@@ -366,23 +210,6 @@ def load_stage_summary(
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to load stage summary %s: %s", path, exc)
         return None
-
-
-def last_completed_stage(staging_dir: Path | None) -> str | None:
-    """Determine the last successfully completed stage from summary files.
-
-    Walks the effective stage order and returns the name of the last stage
-    whose summary file exists with ``status == 'success'``.  Returns
-    ``None`` when no stage has completed yet.
-    """
-    completed: str | None = None
-    for name in effective_stage_names():
-        summary = load_stage_summary(staging_dir, name)
-        if summary is not None and summary.get("status") == "success":
-            completed = name
-        else:
-            break
-    return completed
 
 
 def collect_all_summaries(

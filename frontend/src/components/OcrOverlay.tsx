@@ -20,15 +20,15 @@ interface Props {
 /** 块类型颜色映射 */
 function blockTypeColor(type: string): string {
   switch (type) {
-    case 'text': return '#2563eb'
-    case 'image': return '#16a34a'
-    case 'table': return '#f59e0b'
-    case 'formula': return '#9333ea'
-    case 'chart': return '#dc2626'
-    case 'header': return '#64748b'
-    case 'footer': return '#64748b'
-    case 'seal': return '#0891b2'
-    default: return '#6b7280'
+    case 'text': return 'var(--accent-fg)'
+    case 'image': return 'var(--success-fg)'
+    case 'table': return 'var(--warning-fg)'
+    case 'formula': return 'var(--status-mixed)'
+    case 'chart': return 'var(--danger-fg)'
+    case 'header': return 'var(--text-muted)'
+    case 'footer': return 'var(--text-muted)'
+    case 'seal': return 'var(--info-fg)'
+    default: return 'var(--text-muted)'
   }
 }
 

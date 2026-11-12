@@ -15,10 +15,14 @@ const DEFAULT_INTERVAL_MS = 4_000
 //: ~2 minutes of backend outage at the default interval, then the watcher
 //: gives up; a deleted run (404) stops immediately.
 const DEFAULT_MAX_FAILURES = 30
+//: A poll that never answers must not wedge the watcher: the next poll is only
+//: scheduled after this one settles, so a hung fetch would stop it forever.
+const DEFAULT_TIMEOUT_MS = 10_000
 
 export interface RunWatcherOptions {
   intervalMs?: number
   maxFailures?: number
+  timeoutMs?: number
   fetchImpl?: typeof fetch
 }
 
@@ -46,6 +50,7 @@ interface RunSnapshot {
 interface RunNode {
   stage?: unknown
   status?: unknown
+  error?: unknown
 }
 
 function runCompletion(runId: string, snapshot: RunSnapshot): RunCompletion {
@@ -62,12 +67,20 @@ function runCompletion(runId: string, snapshot: RunSnapshot): RunCompletion {
   const stages = nodes
     .map((node) => `${String(node.stage ?? '?')}=${String(node.status ?? '?')}`)
     .join(', ')
+  const failures = nodes
+    .filter((node) => String(node.status ?? '') === 'failed')
+    .map((node) => {
+      const error = typeof node.error === 'string' ? node.error.trim() : ''
+      const stage = String(node.stage ?? '?')
+      return error === '' ? `${stage}: failed` : `${stage}: ${error.slice(0, 400)}`
+    })
   const lines = [
     `MBForge run ${runId} finished with status "${status}" (document ${docId}).`,
     stages === '' ? '' : `Stages: ${stages}.`,
+    failures.length === 0 ? '' : `Failures: ${failures.join(' | ')}`,
     status === 'done'
-      ? 'Call get_run for the node details, then continue the task; Patent analysis is a separate submit_patent_analysis run.'
-      : 'Call get_run and inspect the failed stage before retrying.',
+      ? 'Call runs with action="get" for the node details, then continue the task; Patent analysis is a separate submit_patent_analysis run.'
+      : 'Inspect the failure, correct the cause, then call run_control with action="retry"; runs(action="get") carries the full node error.',
   ].filter((line) => line !== '')
   return { runId, status, docId, message: lines.join('\n') }
 }
@@ -77,7 +90,7 @@ function runCompletion(runId: string, snapshot: RunSnapshot): RunCompletion {
  *
  * ``submit_extraction``/``reingest_document``/``submit_patent_analysis`` (and
  * ``import_pdf``, which auto-enqueues) return run ids but no completion
- * signal. This watcher polls the read-only ``get_run`` capability; the caller
+ * signal. This watcher polls the read-only ``runs`` capability; the caller
  * decides when and how to surface the completion to the session.
  *
  * Polling is detached from the agent loop: timers are unref'd so they never
@@ -91,6 +104,7 @@ export function createRunWatcher(
 ): RunWatcher {
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS
   const maxFailures = options.maxFailures ?? DEFAULT_MAX_FAILURES
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const fetchImpl = options.fetchImpl ?? fetch
   const timers = new Map<string, NodeJS.Timeout>()
   const failures = new Map<string, number>()
@@ -118,11 +132,12 @@ export function createRunWatcher(
     if (stopped || !active.has(runId)) return
     try {
       const response = await fetchImpl(
-        `${backendBaseUrl()}/api/v1/capabilities/get_run`,
+        `${backendBaseUrl()}/api/v1/capabilities/runs`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ run_id: runId }),
+          body: JSON.stringify({ action: 'get', run_id: runId }),
+          signal: AbortSignal.timeout(timeoutMs),
         },
       )
       if (response.status === 404) {
@@ -131,13 +146,13 @@ export function createRunWatcher(
         return
       }
       if (!response.ok) {
-        throw new Error(`get_run failed (${response.status})`)
+        throw new Error(`runs failed (${response.status})`)
       }
       const payload = (await response.json()) as {
         success?: boolean
         data?: RunSnapshot
       }
-      if (!payload.success) throw new Error('get_run returned an error')
+      if (!payload.success) throw new Error('runs returned an error')
       const status = payload.data?.status
       if (
         typeof status === 'string' &&

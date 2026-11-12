@@ -3,8 +3,8 @@
 ``parse_page_image`` is the public boundary: table regions must carry
 HTML/Markdown content when the SLANet-1M recognizer works, retain unsupported
 HTML for review, stay empty on inference failure, and never break the page.
-Recognition is
-unconditional — there is no switch that turns it off.
+Recognition and structure masking are
+unconditional — there is no switch that turns either off.
 """
 
 from __future__ import annotations
@@ -92,17 +92,18 @@ def test_parse_page_image_keeps_table_empty_without_usable_html(monkeypatch) -> 
         assert page.stats["tables_filled"] == 0
 
 
-def test_masked_table_passes_molecule_boxes_in_crop_coordinates(monkeypatch) -> None:
-    """A table that draws a structure is masked, and its mapping is kept.
+def test_table_drawings_are_masked_before_cell_recognition(monkeypatch) -> None:
+    """A structure drawn inside a table cell never reaches cell OCR.
 
     The molecule box is handed to the recognizer in crop coordinates (the table
     is recognized as text, with a token at the structure's cell), and the
     token → molecule mapping is retained on the region for the evidence layer.
-    Without the flag the table behaves exactly as before.
+    Masking is not optional: any table that draws a structure is read this way.
+    A table holding no drawing keeps its plain reading.
     """
     # normalized bbox → page px (77, 48, 121, 66), inside the table (0, 30, 200, 80)
     runtime = _FakeRuntime(html=_HTML_TABLE, molecules=((0.35, 0.4, 0.55, 0.55),))
-    page = _parse(runtime, monkeypatch, mask_table_molecules=True)
+    page = _parse(runtime, monkeypatch)
 
     cells = runtime.predict_calls[-1]["molecule_cells"]
     assert [cell["token"] for cell in cells] == ["[MOL:0]"]

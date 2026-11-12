@@ -13,6 +13,7 @@ import asyncio
 from fastapi import APIRouter, Query
 
 from mbforge.api.http._path_utils import resolve_library_root
+from mbforge.contracts.molecule import MoleculeListRequest
 from mbforge.foundation.logger import get_logger
 from mbforge.service.dto.molecule import (
     MoleculeBulkDeleteRequest,
@@ -28,7 +29,6 @@ from mbforge.service.dto.molecule import (
     MoleculeEvidenceResponse,
     MoleculeGetRequest,
     MoleculeGetResponse,
-    MoleculeListRequest,
     MoleculeListResponse,
     MoleculeRecorrectRequest,
     MoleculeRecorrectResponse,

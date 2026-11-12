@@ -8,9 +8,8 @@ the ring buffer to a JSON file so diagnostics survive process restarts.
 
 Why a single process-wide ring buffer: errors need to be inspectable while
 the system is still running. Persisting to SQLite would force a migration to
-inspect, defeating the "users-look-at-it-when-stuck" use case. For durable
-sinks, export the buffer on demand (POST /export) or enable JSON file
-logging (setup_logging(json_mode=True)).
+inspect, defeating the "users-look-at-it-when-stuck" use case. For a durable
+sink, export the buffer on demand (POST /export).
 """
 
 from __future__ import annotations

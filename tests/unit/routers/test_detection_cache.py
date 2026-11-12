@@ -13,7 +13,7 @@ from mbforge.service.dto.detection_cache import DetectionInput
 def _seed_detection(library_root: Path, doc_id: str = "doc1", page: int = 1) -> None:
     db = DatabaseManager.get(library_root)
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             """
             INSERT INTO molecule_detections
@@ -76,7 +76,7 @@ def test_detection_save_keeps_known_mol_id_and_nulls_unknown(
     fall back to NULL, while ids present in ``molecules`` are preserved."""
     db = DatabaseManager.get(tmp_library)
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, source_type) "
             "VALUES ('CCO', 'CCO', 'image')"

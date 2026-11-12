@@ -75,6 +75,9 @@ _active_task_ids: dict[str, set[str]] = {}
 _active_run_ids: set[str] = set()
 # per-root worker tasks (event-loop thread only).
 _workers: dict[str, asyncio.Task] = {}
+# Per-root wake signals: an enqueue sets the event so a running drain loop
+# re-checks the queue immediately instead of waiting out the poll interval.
+_wake_events: dict[str, asyncio.Event] = {}
 
 
 def _worker_id() -> str:
@@ -115,13 +118,19 @@ def ensure_queue_worker(library_root: str | Path) -> bool:
     from mbforge.foundation.layout import canonicalize_library_root
 
     root = str(canonicalize_library_root(library_root))
-    if has_worker(root):
-        return True
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         logger.warning("ensure_queue_worker for %s requires a running event loop", root)
         return False
+    event = _wake_events.get(root)
+    if event is None:
+        event = asyncio.Event()
+        _wake_events[root] = event
+    if has_worker(root):
+        # The drain loop is likely sleeping between polls; claim the row now.
+        event.set()
+        return True
     task = loop.create_task(_worker_loop(root))
     _workers[root] = task
     task.add_done_callback(functools.partial(_drop_worker, root=root))
@@ -133,6 +142,7 @@ def _drop_worker(task: asyncio.Task, *, root: str) -> None:
     """Remove a finished worker from the registry (idempotent)."""
     if _workers.get(root) is task:
         _workers.pop(root, None)
+        _wake_events.pop(root, None)
 
 
 def stop_queue_worker(library_root: str | Path) -> None:
@@ -140,6 +150,7 @@ def stop_queue_worker(library_root: str | Path) -> None:
     from mbforge.foundation.layout import canonicalize_library_root
 
     root = str(canonicalize_library_root(library_root))
+    _wake_events.pop(root, None)
     task = _workers.pop(root, None)
     if task is not None and not task.done():
         task.cancel()
@@ -151,6 +162,7 @@ def stop_queue_workers() -> None:
         if not task.done():
             task.cancel()
     _workers.clear()
+    _wake_events.clear()
 
 
 async def _worker_loop(library_root: str) -> None:
@@ -281,9 +293,7 @@ async def _drain_loop(library_root: str, worker: str) -> None:
                         gate_missing = missing
             if running:
                 _heartbeat_rows(library_root, worker)
-                await asyncio.wait(set(running), timeout=_CLAIM_POLL_S)
-            else:
-                await asyncio.sleep(_CLAIM_POLL_S)
+            await _wait_for_work(library_root, running)
     finally:
         # Ask in-flight pipelines to stop before releasing their claims. This
         # prevents a new worker from running the same task while an executor
@@ -300,6 +310,41 @@ async def _drain_loop(library_root: str, worker: str) -> None:
         # Drop this root's tracking without touching any other library's active set.
         active.clear()
         _active_task_ids.pop(library_root, None)
+
+
+async def _wait_for_work(library_root: str, running: set[asyncio.Task]) -> None:
+    """Sleep until the poll interval elapses or an enqueue wakes this worker.
+
+    Enqueue is a human-initiated action when the agent drives the queue, so
+    the first claim must not wait out ``_CLAIM_POLL_S``. The event also wakes
+    the loop while another task is running, which lets a free concurrency slot
+    pick up a new row immediately.
+    """
+    event = _wake_events.get(library_root)
+    if event is None:
+        if running:
+            await asyncio.wait(set(running), timeout=_CLAIM_POLL_S)
+        else:
+            await asyncio.sleep(_CLAIM_POLL_S)
+        return
+    waiter = asyncio.create_task(event.wait())
+    try:
+        await asyncio.wait(
+            {*running, waiter},
+            timeout=_CLAIM_POLL_S,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    finally:
+        if not waiter.done():
+            waiter.cancel()
+        # ``gather(return_exceptions=True)`` absorbs the waiter's own
+        # cancellation; a cancellation of THIS task still propagates, which a
+        # bare suppress(CancelledError) would swallow and hang shutdown.
+        await asyncio.gather(waiter, return_exceptions=True)
+        event.clear()
+        # A zero poll interval is used by tests; yield so the loop cannot
+        # starve the task that drives the scenario.
+        await asyncio.sleep(0)
 
 
 async def _execute_claimed(library_root: str, row: dict[str, Any], worker: str) -> None:
@@ -462,7 +507,7 @@ def _claim_rows(library_root: str, worker: str, limit: int) -> list[dict[str, An
     from mbforge.db.sqlite.database import DatabaseManager
 
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             """
             UPDATE ingest_queue
@@ -503,7 +548,7 @@ def _reclaim_all_processing_on_startup(library_root: str, worker: str) -> None:
           AND claimed_by != ?
     """
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(sql, (worker,))
         if cursor.rowcount:
             logger.info(
@@ -544,7 +589,7 @@ def _release_current_worker_rows(library_root: str, worker: str) -> None:
           AND claimed_by = ?
     """
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(sql, (worker,))
         if cursor.rowcount:
             logger.info(
@@ -585,7 +630,7 @@ def _reclaim_orphans(library_root: str, excluded_ids: set[str] | None = None) ->
         sql += f" AND id NOT IN ({placeholders})"
         params.extend(excluded)
     db = DatabaseManager.get(library_root)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(sql, params)
         if cursor.rowcount:
             logger.warning(
@@ -607,7 +652,7 @@ def _heartbeat_rows(library_root: str, worker: str) -> None:
         return
     db = DatabaseManager.get(library_root)
     placeholders = ",".join("?" for _ in task_ids)
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             f"UPDATE ingest_queue SET heartbeat_ts = datetime('now'), "
             f"updated_at = datetime('now') "

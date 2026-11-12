@@ -31,8 +31,9 @@ DESIGNATION_UNBOUND_KIND = "designation_unbound"
 #: Review lifecycle of a reading or an attribution.
 ReviewStatus = Literal["pending", "accepted", "rejected"]
 
-#: How an attribution was produced.
-AttributionMethod = Literal["rule", "model", "human"]
+#: How an attribution was produced. ``agent`` is the agent's own adjudication,
+#: written through ``assign_attribution``; a human link outranks it.
+AttributionMethod = Literal["rule", "model", "human", "agent"]
 
 #: Linking lifecycle carried over from the Patent stage
 #: (``mbforge.domain.activity`` LINK_*). ``linked`` records that this pass

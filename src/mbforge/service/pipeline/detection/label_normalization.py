@@ -28,7 +28,6 @@ handful of regexes cover every variant observed in the corpus.
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from enum import Enum
 
@@ -163,9 +162,3 @@ __all__ = [
     "NormalizedLabel",
     "normalize_coref_label",
 ]
-
-
-# Re-export the canonical ``unicodedata`` normalisation name even though
-# we don't currently use NFKC; downstream callers may want to apply it
-# to the raw value before passing it in.
-_ = unicodedata  # silence "imported but unused" in IDEs

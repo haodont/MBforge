@@ -36,9 +36,7 @@ def _candidate(smiles: str, *, status: str = "pending") -> Molecule:
 
 
 def _molecule_count(database) -> int:
-    return database.execute("SELECT COUNT(*) AS count FROM molecules", db="mol")[0][
-        "count"
-    ]
+    return database.execute("SELECT COUNT(*) AS count FROM molecules")[0]["count"]
 
 
 def test_direct_molecule_persistence_cannot_bypass_the_role_gate(
@@ -69,7 +67,7 @@ def test_persist_stores_source_evidence_link(database, tmp_path) -> None:
         evidence_id="ev-1",
     )
     persist_molecule_candidates(str(tmp_path), "doc-1", [candidate])
-    with database.mol_conn() as conn:
+    with database.connection() as conn:
         row = conn.execute(
             "SELECT evidence_id, context_text FROM molecule_detections "
             "WHERE mol_id = 'CCO'"
@@ -98,6 +96,6 @@ def test_complete_structures_reach_the_library_without_an_activity(
     persist_molecule_candidates(str(tmp_path), "doc-1", [plain, markush])
 
     assert _molecule_count(database) == 1
-    with database.mol_conn() as conn:
+    with database.connection() as conn:
         row = conn.execute("SELECT mol_id FROM molecules").fetchone()
     assert row["mol_id"] == "CCO"

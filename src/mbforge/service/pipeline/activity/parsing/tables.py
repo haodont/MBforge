@@ -24,6 +24,8 @@ _ACTIVITY_HEADER_RE = re.compile(
     r"(?:IC|EC|ED|GI|AC|CC)\s*\d+|p\s*K[di]|K[di])"
     r"(?![A-Za-z])|%?\s*(?:inhibition|activation|potency|activity|response)\b|"
     r"(?:抑制|活性|抑制率|激动|拮抗)|"
+    # Pharmacokinetic endpoints printed in a header row.
+    r"(?<![A-Za-z])(?:Cmax|AUC0?-?t|T1/2)(?![A-Za-z])|半衰期|"
     r"\+{2,4}|\b(?:active|inactive|weak|moderate|strong|ND|NA|NT)\b",
     re.IGNORECASE,
 )
@@ -38,7 +40,10 @@ _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}")
 _HEADER_UNIT_RE = re.compile(
     # ``%`` is punctuation, so a leading ``\b`` never matches inside ``(%)`` or
     # ``抑制率 (%)`` — the target-qualified CN headers print the unit exactly there.
-    r"%|\b(?:nM|μM|uM|mM|pM|M|fold|x)\b",
+    r"%|\b(?:nM|μM|uM|mM|pM|M|fold|x)\b|"
+    # Pharmacokinetic units are compound (``ng/mL``, ``h*ng/mL``) and must be
+    # read as one unit, not as the ``M`` inside them.
+    r"h\*ng/mL|ng/mL|\bmin\b",
     re.IGNORECASE,
 )
 _QUALITATIVE_CELL_RE = re.compile(
@@ -66,7 +71,7 @@ _DESIGNATION_CJK_RE = re.compile(r"^(?=.*\d)[\w\u4e00-\u9fff\-–.()（）]{1,32
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _STANDALONE_VALUE_RE = re.compile(
     r"^(?:<|>|~|=|≤|≥)?\s*[-+]?\d+(?:\.\d+)?\s*"
-    r"(?:nM|μM|uM|mM|pM|M|%|fold|x)?\s*$|^[+十]{1,4}$",
+    r"(?:nM|μM|uM|mM|pM|M|%|fold|x)?\s*$|^[+十]{1,4}$|^[A-Da-d]$",
     re.IGNORECASE,
 )
 _LABEL_HEADER_RE = re.compile(
@@ -214,81 +219,6 @@ def _fill_spanned_cells(cells: Sequence[str]) -> list[str]:
             carried = text
         filled.append(text or carried)
     return filled
-
-
-def activity_table_excerpts(table_md: str) -> list[tuple[str, list[str]]]:
-    """Keep the printed header bands and a bounded run of data rows per LLM task."""
-    lines = [line for line in table_md.splitlines() if line.strip()]
-    if not lines or not all(_split_pipe_row(line) for line in lines):
-        return [(table_md, [])]
-    separator = next(
-        (i for i, line in enumerate(lines) if _TABLE_SEPARATOR_RE.match(line)), None
-    )
-    if separator is None or separator == 0:
-        return [(table_md, [])]
-    start = separator + 1
-    while start < len(lines) and start <= separator + 2:
-        if not _is_header_band_row(_split_pipe_row(lines[start])):
-            break
-        start += 1
-    data = lines[start:]
-    label_columns = [
-        i
-        for i, cell in enumerate(_split_pipe_row(lines[0]))
-        if _LABEL_HEADER_RE.search(cell)
-    ] or [0]
-    return [
-        (
-            "\n".join([*lines[:start], *data[i : i + TABLE_ROWS_PER_GAP]]),
-            [
-                cells[column]
-                for line in data[i : i + TABLE_ROWS_PER_GAP]
-                for cells in [_split_pipe_row(line)]
-                for column in label_columns
-                if column < len(cells) and _is_row_label(cells[column])
-            ],
-        )
-        for i in range(0, len(data), TABLE_ROWS_PER_GAP)
-    ] or [(table_md, [])]
-
-
-def table_cell_matches(
-    table_md: str,
-    source_quote: str,
-    *,
-    row_label: str,
-    raw_value: str,
-    column: int,
-) -> bool:
-    """Ground a draft in one cell and its own printed designation column."""
-
-    def compact(text: str) -> str:
-        return re.sub(r"\s+", "", text)
-
-    lines = [line for line in table_md.splitlines() if line.strip()]
-    quoted = [line for line in lines if compact(line) == compact(source_quote)]
-    if len(quoted) != 1:
-        return False
-    cells = _split_pipe_row(quoted[0])
-    header_rows = [_split_pipe_row(line) for line in lines[:5]]
-    header = next(
-        (
-            row
-            for row in header_rows
-            if any(_LABEL_HEADER_RE.search(cell) for cell in row)
-        ),
-        header_rows[0],
-    )
-    label_columns = [
-        i for i, cell in enumerate(header) if _LABEL_HEADER_RE.search(cell)
-    ] or [0]
-    label_column = max((i for i in label_columns if i < column), default=-1)
-    return (
-        0 <= label_column < column < len(cells)
-        and _is_row_label(cells[label_column])
-        and compact(cells[label_column]) == compact(row_label)
-        and compact(cells[column]) == compact(raw_value)
-    )
 
 
 def _clean_target(text: str) -> str | None:
@@ -506,7 +436,50 @@ def _is_row_label(value: str) -> bool:
         return True
     if _DESIGNATION_CODE_RE.match(stripped):
         return True
+    if _names_alternatives(stripped):
+        # A cell that names two of a kind (``化合物 4-P2 or 4-P4``) leaves the
+        # compound open. The value beside it is still that row's reading; which
+        # of the two it is stays a reader's decision, so the row is read with
+        # an unresolved reference rather than dropped.
+        return True
     return bool(_DESIGNATION_CJK_RE.match(stripped) and _CJK_RE.search(stripped))
+
+
+#: A printed choice between two of a kind: ``化合物 4-P2 or 4-P4``.
+_ALTERNATIVE_SPLIT_RE = re.compile(r"\s+(?:or|或)\s+", re.IGNORECASE)
+
+#: A compound or example number printed in a *column* header. A transposed
+#: table names the compound there (``WO2022067094（化合物1）``, ``实施例1``) and
+#: the condition in the row label (``人``).
+_COLUMN_REFERENCE_RE = re.compile(
+    r"(?i)(?P<kind>化合物|compound|cmpd|cpd|实施例|制备例|example)\s*#?\s*"
+    r"(?P<token>[0-9]{1,4}[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
+)
+
+
+def _column_reference(text: str) -> str | None:
+    """The designation a column header prints, or ``None``.
+
+    The returned string is the printed designation in its own form
+    (``化合物1`` / ``实施例1``), so the normalizer reads its space.
+    """
+    match = _COLUMN_REFERENCE_RE.search(text or "")
+    if match is None:
+        return None
+    kind = match.group("kind").lower()
+    if kind in {"实施例", "制备例", "example"}:
+        return f"实施例{match.group('token')}"
+    return f"化合物{match.group('token')}"
+
+
+def _names_alternatives(stripped: str) -> bool:
+    """Whether a cell names two compounds the document leaves open."""
+    from mbforge.domain.patent import designation_key
+
+    parts = [part for part in _ALTERNATIVE_SPLIT_RE.split(stripped) if part.strip()]
+    if len(parts) < 2:
+        return False
+    return all(designation_key(part) for part in parts)
 
 
 def _cell_value_count(cell: str) -> int:
@@ -571,8 +544,18 @@ def _classify_cells(table_md: str) -> _CellCoverage:
             if not cell or _MISSING_VALUE_RE.fullmatch(cell):
                 continue
             label = row[label_column].strip() if label_column < len(row) else ""
-            if not _is_row_label(label):
-                # The value names no compound, so it is not a reading yet.
+            if (
+                not _is_row_label(label)
+                and _column_reference(
+                    layout.columns[value_column].text
+                    if value_column < len(layout.columns)
+                    else ""
+                )
+                is None
+            ):
+                # A transposed table names the compound in the column header, so
+                # the cell can still become a reading. Without such a header the
+                # value names no compound, so it is not a reading yet.
                 no_designation += 1
                 continue
             if _cell_value_count(cell) > 1:
@@ -634,10 +617,27 @@ def _parse_simple_activity_table(
                 continue
             # A blank Markdown cell cannot prove a span; OCR may have lost a label.
             label = row[label_column].strip() if label_column < len(row) else ""
+            column_reference = None
             if not _is_row_label(label):
-                continue
+                # A transposed table prints the compound in the column header and
+                # the condition in the row label (``肝微粒体 | T1/2(min)`` over
+                # ``人 | 27.20``). The value belongs to that pair, so the
+                # reference comes from the header and the row label becomes the
+                # assay subject.
+                column_reference = _column_reference(
+                    layout.columns[value_column].text
+                    if value_column < len(layout.columns)
+                    else ""
+                )
+                if column_reference is None:
+                    continue
+                label = column_reference
             column = metrics[value_column]
             target = column.target or default_target
+            if column_reference is not None:
+                # The column header names the compound, not the assay.
+                target = row[label_column].strip() if label_column < len(row) else ""
+                target = target or default_target
             label_header = (
                 layout.columns[label_column].text
                 if label_column < len(layout.columns)
@@ -659,9 +659,13 @@ def _parse_simple_activity_table(
                     # ``2``. They are different designations throughout this pipeline,
                     # so the header has to decide.
                     "label_space": (
-                        "example"
-                        if _EXAMPLE_LABEL_HEADER_RE.search(label_header)
-                        else "compound"
+                        ""
+                        if column_reference is not None
+                        else (
+                            "example"
+                            if _EXAMPLE_LABEL_HEADER_RE.search(label_header)
+                            else "compound"
+                        )
                     ),
                 },
                 table_idx=table_idx,

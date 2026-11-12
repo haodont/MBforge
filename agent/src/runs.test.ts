@@ -76,6 +76,45 @@ test('a run watcher reports a terminal run once', async () => {
   assert.match(completed[0].message, /markdown=done/)
 })
 
+test('a failed run completion carries the stage error', async () => {
+  const completed: RunCompletion[] = []
+  let resolveCompleted: (() => void) | undefined
+  const reported = new Promise<void>((resolve) => {
+    resolveCompleted = resolve
+  })
+  const watcher = createRunWatcher(
+    (result) => {
+      completed.push(result)
+      resolveCompleted?.()
+    },
+    {
+      intervalMs: 5,
+      fetchImpl: (async () =>
+        jsonResponse({
+          run_id: 'run-failed',
+          doc_id: 'doc-1',
+          status: 'failed',
+          nodes: [
+            {
+              stage: 'extract',
+              status: 'failed',
+              error: 'layout model missing',
+            },
+            { stage: 'markdown', status: 'failed' },
+          ],
+        })) as unknown as typeof fetch,
+    },
+  )
+
+  watcher.watch('run-failed')
+  await reported
+  watcher.stopAll()
+
+  assert.equal(completed.length, 1)
+  assert.match(completed[0].message, /extract: layout model missing/)
+  assert.match(completed[0].message, /run_control/)
+})
+
 test('completions are batched while busy and delivered once when idle', () => {
   const { sent, notifier } = fakeCompletions()
 
@@ -113,4 +152,44 @@ test('an idle completion is delivered immediately and only once', () => {
   assert.match(String(sent[0].message.content), /run-3/)
   assert.deepEqual(sent[0].options, { triggerTurn: true })
   notifier.stop()
+})
+
+test('a stalled poll times out and the watcher polls again', async () => {
+  const completed: RunCompletion[] = []
+  let resolveCompleted: (() => void) | undefined
+  const reported = new Promise<void>((resolve) => {
+    resolveCompleted = resolve
+  })
+  let polls = 0
+  const watcher = createRunWatcher(
+    (result) => {
+      completed.push(result)
+      resolveCompleted?.()
+    },
+    {
+      intervalMs: 5,
+      timeoutMs: 30,
+      fetchImpl: ((_input: RequestInfo | URL, init?: RequestInit) => {
+        polls += 1
+        if (polls === 1) {
+          // A backend that accepts the connection but never answers.
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new Error('poll aborted')),
+            )
+          })
+        }
+        return Promise.resolve(
+          jsonResponse({ run_id: 'run-stall', doc_id: 'doc-1', status: 'done', nodes: [] }),
+        )
+      }) as unknown as typeof fetch,
+    },
+  )
+
+  watcher.watch('run-stall')
+  await reported
+  watcher.stopAll()
+
+  assert.equal(completed.length, 1)
+  assert.ok(polls >= 2, 'a hung request must not stop the watcher from retrying')
 })

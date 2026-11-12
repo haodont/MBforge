@@ -1,4 +1,4 @@
-// @tested-functions runReview, parseReviewReport, collectTranscript
+// @tested-functions runReview, parseReviewReport, collectTranscript, buildReviewerArgs
 import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -7,7 +7,9 @@ import test from 'node:test'
 
 import { listMemory } from './memory.js'
 import {
+  buildReviewerArgs,
   collectTranscript,
+  finalAssistantText,
   parseReviewReport,
   runReview,
 } from './review.js'
@@ -120,4 +122,81 @@ test('malformed reviewer output stays visible and writes no lessons', () => {
   assert.equal(report.improvements.length, 0)
   assert.match(report.summary, /interrupted/)
   assert.match(report.warnings[0] ?? '', /not a JSON object/)
+})
+
+test('the reviewer inherits the active session model', () => {
+  const base = { cwd: 'C:/repo', systemPrompt: 'sys', prompt: 'review this' }
+
+  const withModel = buildReviewerArgs({ ...base, model: 'custom/gpt-x' })
+  const modelIndex = withModel.indexOf('--model')
+  assert.ok(modelIndex >= 0, 'the active model must reach the child session')
+  assert.equal(withModel[modelIndex + 1], 'custom/gpt-x')
+  assert.equal(
+    withModel[withModel.indexOf('--mode') + 1],
+    'json',
+    'JSON mode supplies the stall signal and the final message',
+  )
+  assert.equal(
+    withModel.includes('review this'),
+    false,
+    'the prompt must travel over stdin, not argv',
+  )
+
+  const withoutModel = buildReviewerArgs(base)
+  assert.equal(withoutModel.includes('--model'), false)
+  assert.equal(withoutModel.includes('review this'), false)
+})
+
+test('a long reviewer prompt stays off the command line', () => {
+  const prompt = 'x'.repeat(40_000)
+  const args = buildReviewerArgs({
+    cwd: 'C:/repo',
+    systemPrompt: 'sys',
+    prompt,
+  })
+  assert.equal(
+    args.some((arg) => arg.includes(prompt)),
+    false,
+    'Windows rejects argv over ~32k with ENAMETOOLONG',
+  )
+})
+
+test('the reviewer extracts the final assistant text from JSON events', () => {
+  const raw = [
+    JSON.stringify({ type: 'session', id: 'child' }),
+    JSON.stringify({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'toolCall', name: 'read' }],
+        stopReason: 'toolUse',
+      },
+    }),
+    JSON.stringify({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '{"summary":"ok"}' }],
+        stopReason: 'stop',
+      },
+    }),
+  ].join('\n')
+
+  assert.equal(finalAssistantText(raw), '{"summary":"ok"}')
+  assert.throws(
+    () =>
+      finalAssistantText(
+        JSON.stringify({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'error',
+            errorMessage: 'provider failed',
+          },
+        }),
+      ),
+    /provider failed/,
+  )
+  assert.throws(() => finalAssistantText(''), /no assistant message/)
 })

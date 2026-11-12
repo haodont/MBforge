@@ -26,6 +26,9 @@ FRAGMENT_SINGLE_ATTACH_BONUS = 6
 EXTENDED_FRAGMENT_MAX_HEAVY = FRAGMENT_MAX_HEAVY + FRAGMENT_SINGLE_ATTACH_BONUS
 PROPERTY_KEY = "structure_role"
 REASONS_KEY = "structure_role_reasons"
+#: Where a designation came from when the page itself printed it. A number
+#: agreed on by two drawings of the same compound is the page's statement too.
+_PAGE_TEXT_SOURCES = frozenset({"page_text", "repeated_print"})
 REVIEW_REQUIRED = "review_required"
 
 # These markers are intentionally narrow.  A lone capital ``R`` is too noisy
@@ -181,6 +184,9 @@ def _named_by_page_text(molecule: Molecule) -> bool:
     a designation is the document's own statement about the drawing, and the
     prose *next to* the crop on such a page is often the generic formula's
     R-group definitions — which say nothing about this drawing.
+
+    ``repeated_print`` counts too: the number was read off the page (twice, on
+    two drawings of the same compound) rather than guessed from a crop window.
     """
     properties = getattr(molecule, "properties", {})
     if not isinstance(properties, dict):
@@ -191,7 +197,7 @@ def _named_by_page_text(molecule: Molecule) -> bool:
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
-        if candidate.get("source") != "page_text":
+        if candidate.get("source") not in _PAGE_TEXT_SOURCES:
             continue
         name = candidate.get("name")
         if not isinstance(name, str) or not name.strip():

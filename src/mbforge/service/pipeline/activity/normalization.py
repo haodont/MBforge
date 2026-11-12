@@ -9,7 +9,6 @@ when their prefix is unambiguous.
 
 from __future__ import annotations
 
-import math
 import re
 import unicodedata
 from collections.abc import Mapping
@@ -32,7 +31,13 @@ METRIC_TOKEN_RE = re.compile(
     r"(?:ic|ec|ed|gi|ac|cc)\s*\d+|p\s*k[di]|k[di])"
     r"(?![A-Za-z])|"
     r"抑制率|抑制活性|激动活性|拮抗活性|结合活性|抑制|激动|拮抗|活性|"
-    r"(?<![A-Za-z])(?:inhibition|activation|potency|activity|response)(?![A-Za-z])",
+    r"(?<![A-Za-z])(?:inhibition|activation|potency|activity|response)(?![A-Za-z])|"
+    # Pharmacokinetic endpoints. A published PK table names its endpoint in the
+    # header (``Cmax (ng/mL)``, ``AUC0-t (h*ng/mL)``, ``半衰期(T1/2,min)``);
+    # without these tokens the table carries no activity signal at all and is
+    # never read.
+    r"(?<![A-Za-z])(?:Cmax|AUC0?-?t|T1/2)(?![A-Za-z])|"
+    r"半衰期\s*\(?\s*T1/2|半衰期",
     re.IGNORECASE,
 )
 
@@ -86,6 +91,17 @@ def normalize_activity_metric(value: object) -> str:
     if match:
         return f"{match.group(1)}K{match.group(2)}"
 
+    # Pharmacokinetic endpoints keep one name each, however the header spells
+    # them (``Cmax``, ``AUC0-t``, ``AUC``, ``半衰期(T1/2,min)``).
+    if compact.startswith("半衰期") or compact.startswith("t1/2"):
+        return "T1/2"
+    if compact.startswith("auc0"):
+        return "AUC0-t"
+    if compact == "auc":
+        return "AUC"
+    if compact == "cmax":
+        return "Cmax"
+
     lowered = re.sub(r"\s+", " ", raw.lower())
     aliases = {
         "% inhibition": "inhibition_pct",
@@ -130,6 +146,9 @@ def _normalize_unit(value: object) -> str:
         "percent": "%",
         "fold": "fold",
         "x": "fold",
+        "ng/ml": "ng/mL",
+        "h*ng/ml": "h*ng/mL",
+        "min": "min",
     }
     return aliases.get(compact, unit)
 
@@ -160,7 +179,7 @@ def _extract_numeric(value: object) -> tuple[float | None, str, str]:
 
 
 def extract_qualitative_legend(text: str) -> dict[str, str]:
-    """Extract explicit ``A = ...``/``+++ : ...`` legend entries.
+    """Extract explicit ``A = ...``/``A表示...``/``+++ : ...`` legend entries.
 
     The function intentionally requires an explicit separator.  It will not
     invent an ordering for ``A/B/C/D`` merely because those letters occur in a
@@ -169,9 +188,11 @@ def extract_qualitative_legend(text: str) -> dict[str, str]:
     legend: dict[str, str] = {}
     # Published legends quote their bin symbol and separate it with a full-width
     # colon (``注：“+”：IC50>1μM``), so quotes are optional noise around the key.
+    # A CN patent also states its bins in prose (``其中A表示IC50值≤100nM``), where
+    # the word ``表示`` plays the separator's part.
     pattern = re.compile(
         r"[“\"'(\[]?\s*(?<![A-Za-z])([A-D]|\+{1,4}|[十]{1,4})\s*[”\"')\]]?\s*"
-        r"(?:=|＝|:|：|[-–—])\s*"
+        r"(?:=|＝|:|：|[-–—]|表示)\s*"
         r"([^,;，；|\n]+)",
         re.IGNORECASE,
     )
@@ -399,10 +420,17 @@ def normalize_reference_label(value: object) -> ReferenceLabel:
     cleaned = re.sub(r"\s+", " ", cleaned).rstrip(".。 ")
 
     example_match = re.fullmatch(
-        r"(?i)(?:example\s*#?\s*|实施例\s*|制备例\s*|对比例\s*)(E?\d+[A-Za-z]?)",
+        r"(?i)(?:example\s*#?\s*|实施例\s*|制备例\s*|对比例\s*)"
+        r"(E?\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
+        r"(?:\s*组分\s*(\d+))?",
         cleaned,
     )
     if example_match:
+        component = example_match.group(2)
+        if component:
+            return ReferenceLabel(
+                raw, f"{example_match.group(1)}组分{component}", "example"
+            )
         return ReferenceLabel(raw, example_match.group(1), "example")
 
     key = compound_label_key(cleaned)
@@ -424,21 +452,3 @@ def normalize_reference_label(value: object) -> ReferenceLabel:
         )
 
     return ReferenceLabel(raw, None, "unresolved", True)
-
-
-def canonical_value_for_legacy(record: object) -> float | None:
-    """Return the comparable activity value for a record.
-
-    This is the single canonical accessor shared by the persistence chain
-    (``persist/molecules.py``); it must NOT be
-    removed as "dead code". ``value_canonical`` is the canonical field
-    produced by :func:`normalize_activity_measurement`; the ``value``
-    fallback covers records that only populate the raw comparable field
-    (normal extraction sets ``value`` to the same canonical nM as
-    ``value_canonical``).
-    """
-    value = getattr(record, "value_canonical", None)
-    if value is not None:
-        return float(value)
-    value = getattr(record, "value", None)
-    return float(value) if value is not None and math.isfinite(float(value)) else None

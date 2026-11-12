@@ -191,7 +191,7 @@ class LibraryStore:
         for doc_id in ids:
             db.delete_document_molecule_data(doc_id)
             # The committed analysis snapshot goes with the document; a review
-            # queue clear, by contrast, keeps its human decisions.
+            # queue clear, by contrast, leaves the committed facts intact.
             repositories.patent_analysis.delete_document_state(doc_id)
         get_repositories(self._root).documents.delete_many(ids)
         logger.info("Documents deleted: %s", ids)
@@ -280,8 +280,7 @@ class LibraryStore:
                     )
 
         self.update_document_status(doc_id, "pending")
-        # Discard the committed facts with the rest of this run's outputs, but
-        # keep the human decisions so a re-run can still reuse them.
+        # Discard the committed facts with the rest of this run's outputs.
         get_repositories(self._root).patent_analysis.clear_payload(doc_id)
         logger.info("Pipeline data cleared: %s (backup=%s)", doc_id, backup_path)
 

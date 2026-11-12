@@ -7,13 +7,10 @@ reference-label key used for activity↔molecule attribution.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from mbforge.domain.patent import label_key_for
 from mbforge.service.pipeline.activity.normalization import (
-    canonical_value_for_legacy,
     extract_qualitative_legend,
     normalize_activity_measurement,
     normalize_activity_metric,
@@ -197,21 +194,49 @@ def test_metric_and_reference_labels_share_one_normalized_key() -> None:
     assert normalize_reference_label("制备例3").key == "3"
 
 
-def test_canonical_value_for_legacy_prefers_normalized_over_legacy_value() -> None:
-    """The comparable value wins; missing/non-finite legacy values yield None."""
-    normalized = normalize_activity_measurement("IC50", 1.5, "μM", "=")
+def test_designation_key_accepts_suffixed_series_numbers() -> None:
+    """A CN compound series prints a suffix group and a stereochemical prefix.
 
-    assert canonical_value_for_legacy(normalized) == 1500.0
-    assert (
-        canonical_value_for_legacy(SimpleNamespace(value_canonical=10.0, value=99.0))
-        == 10.0
+    ``I-256-A`` and ``cis-I-278`` are printed compound numbers; without them in
+    the key space every activity table row that names one loses its reading.
+    The keys that already existed must not move.
+    """
+    from mbforge.domain.patent import designation_key
+
+    assert designation_key("I-256-A") == "I-256-A"
+    assert designation_key("I-273-B") == "I-273-B"
+    assert designation_key("cis-I-278") == "cis-I-278"
+    assert designation_key("trans-I-278") == "trans-I-278"
+    # A printed component of an example is its own designation.
+    assert designation_key("实施例15 组分 1") == "@example:15组分1"
+    assert designation_key("实施例15组分2") == "@example:15组分2"
+
+    # The keys that already existed stay where they were.
+    assert designation_key("I-2") == "I-2"
+    assert designation_key("1-280") == "1-280"
+    assert designation_key("A-1") == "A-1"
+    assert designation_key("B-40") == "B-40"
+    assert designation_key("化合物77") == "77"
+    assert designation_key("实施例 30") == "@example:30"
+    assert designation_key("Example 30") == "@example:30"
+    # A cell that names nothing stays outside the key space.
+    assert designation_key("阳参化合物") == ""
+
+
+def test_example_reference_keeps_a_printed_variant_suffix() -> None:
+    """``实施例 45-P1`` is not the example ``45``.
+
+    A variant suffix is part of the printed designation: dropping it would
+    merge two different rows of the activity table into one key.
+    """
+    from mbforge.service.pipeline.activity.normalization import (
+        normalize_reference_label,
     )
-    assert canonical_value_for_legacy(SimpleNamespace(value=2.5)) == 2.5
 
-    qualitative = normalize_activity_measurement("activity", "+++", "")
+    variant = normalize_reference_label("实施例 45-P1")
+    assert variant.key == "45-P1"
+    assert variant.reference_type == "example"
 
-    assert canonical_value_for_legacy(qualitative) is None
-    assert canonical_value_for_legacy(SimpleNamespace(value=None)) is None
-    assert canonical_value_for_legacy(SimpleNamespace(value=float("nan"))) is None
-    assert canonical_value_for_legacy(SimpleNamespace(value=float("inf"))) is None
-    assert canonical_value_for_legacy(SimpleNamespace()) is None
+    plain = normalize_reference_label("实施例 45")
+    assert plain.key == "45"
+    assert variant.key != plain.key

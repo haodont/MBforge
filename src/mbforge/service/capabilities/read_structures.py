@@ -70,6 +70,10 @@ class VerifiedStructure(BaseModel):
     smiles: str = ""
     esmiles: str = ""
     canonical_smiles: str = ""
+    #: The printed designation that won this structure's name, if any.
+    name: str = ""
+    #: Every designation this structure's drawings carry.
+    labels: list[str] = Field(default_factory=list)
     formula: str = ""
     main_formula: str = ""
     molar_mass: float | None = None
@@ -80,6 +84,12 @@ class VerifiedStructure(BaseModel):
     bbox: list[float] | None = None
     printed_labels: list[str] = Field(default_factory=list)
     label_keys: list[str] = Field(default_factory=list)
+    #: Where each printed designation came from: ``page_text`` (the page's own
+    #: text) outranks ``crop`` (a guess from the crop window).
+    label_sources: list[str] = Field(default_factory=list)
+    #: How many of this structure's drawings carry each designation; the
+    #: majority printing is the compound, a minority one is a misreading.
+    designation_counts: dict[str, int] = Field(default_factory=dict)
     entry: CompoundEntryRef | None = None
     printed_ms: list[PrintedMassCheck] = Field(default_factory=list)
     mass_check: Literal["match", "mismatch", "not_comparable", "no_printed_mass"] = (

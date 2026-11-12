@@ -15,51 +15,25 @@ export interface LlmConfig {
   language?: string
 }
 
-export interface VlmConfig {
-  provider?: string
-  base_url?: string
-  api_key?: string
-  model?: string
-}
-
 export interface LayoutConfig {
   conf_threshold?: number
   cross_model?: boolean
-  /** Mask structures drawn inside table cells before cell text recognition. */
-  mask_table_molecules?: boolean
   max_pages_per_doc?: number | null
-}
-
-export interface ModelServerConfig {
-  host?: string
-  port?: number
-  auto_start?: boolean
-  startup_timeout?: number
-  health_check_interval?: number
 }
 
 export interface AppSettings {
   theme?: string
   language?: string
   llm?: LlmConfig
-  vlm?: VlmConfig
   layout?: LayoutConfig
-  model_server?: ModelServerConfig
   model_cache_dir?: string
-  pdf_parse?: PdfParseConfig
   moldet?: MoldetConfig
   ingest?: IngestConfig
-}
-
-export interface PdfParseConfig {
-  chunk_size?: number
-  chunk_overlap?: number
 }
 
 export interface MoldetConfig {
   device?: string
   molparser_dir?: string
-  auto_moldet_on_import?: boolean
   detection_dpi?: number
   detection_batch_size?: number
   molparser_batch_size?: number

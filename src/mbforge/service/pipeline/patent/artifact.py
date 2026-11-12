@@ -28,20 +28,6 @@ class PatentSectionModel(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list)
 
 
-class EvidenceReadCoverage(BaseModel):
-    """Tool-return coverage; never a claim of semantic verification."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    total_evidence: int = Field(ge=0)
-    complete_evidence: int = Field(ge=0)
-    partial_evidence: int = Field(ge=0)
-    complete_pages: list[int]
-    partial_pages: list[int]
-    unread_pages: list[int]
-    no_evidence_pages: list[int]
-
-
 class PatentFactsArtifact(BaseModel):
     """``patent_facts.json`` — entries survive even when structure
     recognition fails."""
@@ -54,7 +40,6 @@ class PatentFactsArtifact(BaseModel):
     """Committed snapshot revision this projection was written for (0 = legacy)."""
     projection_status: Literal["current", "pending", "legacy"] | None = None
     """Read-time observation, excluded from SQL and the file projection."""
-    coverage: EvidenceReadCoverage | None = None
     sections: list[PatentSectionModel] = Field(default_factory=list)
     entries: list[dict[str, Any]] = Field(default_factory=list)
     """CompoundEntry dicts (mbforge.domain.patent.CompoundEntry.to_dict())."""
@@ -92,14 +77,8 @@ class PatentFactsArtifact(BaseModel):
     issues: list[dict[str, Any]] = Field(default_factory=list)
     """Review issues: code/message/severity/evidence_ids/related_fact_id."""
     analysis_status: AnalysisStatus = "disabled"
-    """disabled | succeeded | fallback — how the LLM pass ended for this run."""
+    """Terminal outcome of the analysis attempt for this run."""
     extraction_mode: ExtractionMode = "deterministic"
-    """deterministic | hybrid — hybrid means the valid set merged LLM readings."""
-    conflicts: list[dict[str, Any]] = Field(default_factory=list)
-    """PatentConflict dumps: one per contested slot; neither reading is adopted."""
-    review_candidates: list[dict[str, Any]] = Field(default_factory=list)
-    """Candidates awaiting review; never part of the valid ``measurements``."""
-    llm: dict[str, Any] = Field(default_factory=dict)
-    """Run metadata: turns, tool calls, tokens (null when unreported), errors."""
+    """How the published facts were produced; the live pass is deterministic."""
     stats: dict[str, Any] = Field(default_factory=dict)
     """Parse result and review counts only, not progress or raw text."""

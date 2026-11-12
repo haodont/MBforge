@@ -10,10 +10,6 @@ vi.mock('@/components/settings/ModelsTab', () => ({
   default: () => <div>models-tab</div>,
 }))
 
-vi.mock('@/components/settings/ModelServiceSection', () => ({
-  default: () => <div>model-service-tab</div>,
-}))
-
 vi.mock('@/components/settings/ReadinessTab', () => ({
   default: ({ libraryRoot }: { libraryRoot: string }) => <div>readiness:{libraryRoot}</div>,
 }))
@@ -21,7 +17,7 @@ vi.mock('@/components/settings/ReadinessTab', () => ({
 import ModelsAndEnvironmentSection from '../ModelsAndEnvironmentSection'
 
 describe('ModelsAndEnvironmentSection', () => {
-  it('mounts the models tab by default and switches to the service and readiness tabs', () => {
+  it('mounts the models tab by default and switches to the readiness tab', () => {
     render(
       <ModelsAndEnvironmentSection
         settings={DEFAULT_SETTINGS}
@@ -32,10 +28,6 @@ describe('ModelsAndEnvironmentSection', () => {
 
     expect(screen.getByText('models-tab')).toBeTruthy()
     expect(screen.queryByText('readiness:C:/lib')).toBeNull()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'settings.tabs.modelService' }))
-    expect(screen.getByText('model-service-tab')).toBeTruthy()
-    expect(screen.queryByText('models-tab')).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: 'settings.tabs.readiness' }))
     expect(screen.getByText('readiness:C:/lib')).toBeTruthy()

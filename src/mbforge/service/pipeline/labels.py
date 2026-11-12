@@ -17,16 +17,6 @@ _EXPLICIT_COMPOUND_LABEL_RE = re.compile(
 )
 
 
-def _label_token(name: str) -> str:
-    """Return the bare compound token used for distant context lookup."""
-    return re.sub(
-        r"^(?:compound|example|molecule|化合物|实施例)\s*",
-        "",
-        name.strip(),
-        flags=re.IGNORECASE,
-    ).strip()
-
-
 def _explicit_compound_labels(text: str) -> list[str]:
     """Return unique explicit compound labels from prose outside ESMILES."""
     labels: list[str] = []

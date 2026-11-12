@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto'
 import {
   defineTool,
   type ExtensionAPI,
+  type ExtensionContext,
 } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 
 import { collectTranscript } from './review.js'
+import { toolRenderers } from './toolRender.js'
 
 export const GOAL_TOOL_NAME = 'goal'
 export const GOAL_TOOL_NAMES = [GOAL_TOOL_NAME] as const
@@ -50,7 +52,11 @@ export interface GoalToolOptions {
   appendEntry: (data: GoalEventData) => void
   enqueueReview: (job: GoalReviewJob) => Promise<void> | void
   getActiveGoal: () => string | undefined
-  setActiveGoal: (id: string | undefined) => void
+  setActiveGoal: (id: string | undefined, ctx: ExtensionContext) => void
+  /** Mirror the active goal into the durable cross-session work ledger. */
+  persistActive?: (goal: GoalDefinition | null) => void
+  /** Freeze the completed goal's tool trajectory as a regression eval fixture. */
+  archiveTrajectory?: (goalId: string, branch: readonly unknown[]) => void
 }
 
 function text(value: unknown): string {
@@ -142,12 +148,8 @@ export function goalStateFromBranch(
   return { goal, startIndex }
 }
 
-export function goalTranscript(
-  goal: GoalDefinition,
-  branch: readonly unknown[],
-  startIndex: number,
-): string {
-  const definition = [
+function goalDefinitionText(goal: GoalDefinition): string {
+  return [
     `Goal ${goal.id}: ${goal.title}`,
     `Objective: ${goal.objective}`,
     goal.requirements.length > 0
@@ -165,6 +167,26 @@ export function goalTranscript(
   ]
     .filter((line) => line !== '')
     .join('\n')
+}
+
+/**
+ * Compact active-goal contract re-injected on every turn. Custom branch entries
+ * are never model-visible and compaction summarizes away the original tool
+ * result, so this keeps the acceptance criteria in context for the whole task.
+ */
+export function goalContractPrompt(goal: GoalDefinition): string {
+  return (
+    `## Active goal contract\n\n${goalDefinitionText(goal)}\n\n` +
+    'These requirements and acceptance criteria still apply; do not call goal complete until they are satisfied.'
+  )
+}
+
+export function goalTranscript(
+  goal: GoalDefinition,
+  branch: readonly unknown[],
+  startIndex: number,
+): string {
+  const definition = goalDefinitionText(goal)
   const tools = branch
     .slice(startIndex + 1)
     .map((entry) => customGoal(entry))
@@ -333,6 +355,7 @@ export function goalTool(options: GoalToolOptions) {
       'Call action="complete" only when the requirements and acceptance checks are actually satisfied, with a short summary, verification commands, and residual risks. Completion queues a background review; do not wait for it or call review_task for the same goal.',
     ],
     parameters: goalParameters,
+    ...toolRenderers(GOAL_TOOL_NAME),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const branch = ctx.sessionManager.getBranch()
       const now = new Date().toISOString()
@@ -346,7 +369,8 @@ export function goalTool(options: GoalToolOptions) {
         const id = `goal-${randomUUID().slice(0, 8)}`
         const goal = normalizeGoal(params, id, now)
         options.appendEntry({ action: 'begin', goal_id: id, goal, at: now })
-        options.setActiveGoal(id)
+        options.setActiveGoal(id, ctx)
+        options.persistActive?.(goal)
         return {
           content: [{ type: 'text', text: JSON.stringify({ action: 'begin', goal }) }],
           details: { action: 'begin', goal },
@@ -370,6 +394,10 @@ export function goalTool(options: GoalToolOptions) {
           state.goal.created_at,
         )
         options.appendEntry({ action: 'update', goal_id: id, goal: update, at: now })
+        if (id === options.getActiveGoal()) {
+          options.setActiveGoal(id, ctx)
+          options.persistActive?.(update)
+        }
         return {
           content: [{ type: 'text', text: JSON.stringify({ action: 'update', goal: update }) }],
           details: { action: 'update', goal: update },
@@ -384,7 +412,8 @@ export function goalTool(options: GoalToolOptions) {
           reason: params.reason?.trim() ?? '',
           at: now,
         })
-        options.setActiveGoal(undefined)
+        options.setActiveGoal(undefined, ctx)
+        options.persistActive?.(null)
         return {
           content: [{ type: 'text', text: JSON.stringify({ action: 'cancel', goal_id: id }) }],
           details: { action: 'cancel', goal_id: id },
@@ -420,7 +449,9 @@ export function goalTool(options: GoalToolOptions) {
         at: now,
       })
       await options.enqueueReview({ goalId: id, cwd: ctx.cwd, transcript })
-      options.setActiveGoal(undefined)
+      options.setActiveGoal(undefined, ctx)
+      options.persistActive?.(null)
+      options.archiveTrajectory?.(id, branch)
       return {
         content: [
           {

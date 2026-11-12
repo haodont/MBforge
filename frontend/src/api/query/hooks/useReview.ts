@@ -69,10 +69,11 @@ export function useReviewDecide() {
     }) => reviewDecide(args.libraryRoot, args.items, args.action, args.reason ?? ''),
     onSuccess: (_data, variables) => {
       void qc.invalidateQueries({ queryKey: queryKeys.review.all })
-      if (variables.items.some(item => item.kind === 'patent_fact_review')) {
-        void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
-        void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
-      }
+      // A decision on any kind can rewrite the molecule and document
+      // projections (a corrected structure, a bound reading, an AI proposal),
+      // so both caches are refreshed uniformly.
+      void qc.invalidateQueries({ queryKey: queryKeys.documents.all })
+      void qc.invalidateQueries({ queryKey: queryKeys.molecules.all })
       for (const item of variables.items) {
         void qc.invalidateQueries({
           queryKey: queryKeys.review.history(variables.libraryRoot, item.id),

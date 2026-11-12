@@ -37,7 +37,13 @@ STATUS_FAILED = "failed"
 _COMPOUND_TOKEN = (
     # A series-letter prefix is how a US application numbers its compounds
     # (``A-1``, ``B-40``, ``C-67``); the bare number space stays as it was.
-    r"(?:E\d+|[A-Z]{1,2}-\d+[A-Za-z]?|\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
+    # A CN application numbers the same series with a suffix group
+    # (``I-256-A``, ``I-273-B``), and a stereochemical prefix states which
+    # isomer (``cis-I-278``) — the key keeps that prefix, because ``cis-I-278``
+    # and ``I-278`` are different compounds.
+    r"(?:(?i:cis|trans)-)?"
+    r"(?:E\d+|[A-Z]{1,2}-\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?"
+    r"|\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
 )
 _COMPOUND_PREFIX_RE = re.compile(
     rf"^(?:化合物|compound|cmpd|cpd)\s*#?\s*(?P<token>{_COMPOUND_TOKEN})$",
@@ -99,10 +105,17 @@ def designation_key(label_raw: str) -> str:
     """
     cleaned = unicodedata.normalize("NFKC", str(label_raw or "")).strip()
     example_match = re.fullmatch(
-        r"(?i)(?:example\s*#?\s*|实施例\s*|実施例\s*|制备例\s*|对比例\s*)(E?\d+[A-Za-z]?)",
+        r"(?i)(?:example\s*#?\s*|实施例\s*|実施例\s*|制备例\s*|对比例\s*)"
+        r"(E?\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
+        r"(?:\s*组分\s*(\d+))?",
         re.sub(r"^[#\s>*•·-]+", "", cleaned).strip(),
     )
     if example_match:
+        component = example_match.group(2)
+        if component:
+            # A printed component of an example designates its own thing:
+            # ``实施例15 组分 1`` and ``实施例15 组分 2`` are two preparations.
+            return example_label_key(f"{example_match.group(1)}组分{component}")
         return example_label_key(example_match.group(1))
     key = compound_label_key(cleaned)
     return key or ""

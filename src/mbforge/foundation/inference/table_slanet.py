@@ -9,7 +9,8 @@ Converts a Hiro-Layout ``table`` region crop into an HTML table:
 3. TableLabelDecode — argmax token sequence → HTML skeleton, collecting the
    ``<td …>``-opener boxes as cell boxes (scaled back to the input image)
 4. cell text — the local RapidOCR reader (``ocr.page_text.read_text_in_boxes``)
-   recognizes each cell box on the original crop
+   recognizes each cell on the original crop, at the grid the table draws when
+   it matches the structure model's rows/columns, else at the model's boxes
 5. assemble — cell text is inserted before each ``</td>``, yielding the final
    HTML table consumed by ``layout.table_html.html_table_to_markdown``
 
@@ -87,6 +88,14 @@ _TD_TOKENS = frozenset({"<td>", "<td", "<td></td>"})
 _INPUT_SIZE = 488
 _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+#: A drawn table rule is a nearly continuous dark run across the crop; no text
+#: line reaches this coverage. Used to recover the cell geometry the structure
+#: model only approximates (``_ruled_cells``).
+_RULE_COVERAGE = 0.8
+_RULE_MAX_GRAY = 200
+#: Keep the OCR box off the rule itself, so the line is not read as text.
+_RULE_INSET_PX = 3
 
 _SESSION: Any = None
 _AVAILABLE: bool = False
@@ -286,6 +295,84 @@ def _clip_box(
     return int(x0), int(y0), int(np.ceil(x1)), int(np.ceil(y1))
 
 
+def _cell_rows(tokens: Sequence[str]) -> list[int]:
+    """Row index of each decoded cell, in cell-box order (``-1`` before a row)."""
+    rows: list[int] = []
+    row = -1
+    for token in tokens:
+        if token == "<tr>":
+            row += 1
+        elif token in _TD_TOKENS:
+            rows.append(row)
+    return rows
+
+
+def _rule_positions(flags: np.ndarray) -> list[float]:
+    """Centre of each run of ``True`` in *flags* (a printed rule may be 2 px)."""
+    positions: list[float] = []
+    start: int | None = None
+    for index, flag in enumerate(flags):
+        if flag and start is None:
+            start = index
+        elif not flag and start is not None:
+            positions.append((start + index - 1) / 2)
+            start = None
+    if start is not None:
+        positions.append((start + len(flags) - 1) / 2)
+    return positions
+
+
+def _ruled_cells(image: np.ndarray, rows: Sequence[int]) -> list[list[float]] | None:
+    """Cell rectangles from the lines the table itself draws, or ``None``.
+
+    SLANet predicts one box per cell, but each box hugs the text it saw: a row
+    made tall by a structure drawing gets a one-line-high box, sometimes
+    displaced into the neighbouring row, so the row's printed number and
+    measured value fall outside it and are never read. A ruled table prints its
+    own grid, so when the drawn rules match the structure model's rows and
+    columns, the grid is the cell geometry.
+
+    Returns ``None`` for a table without a complete matching grid (borderless,
+    or merged cells a regular grid cannot represent); the caller then keeps the
+    model's boxes.
+    """
+    if not rows or rows[0] < 0:
+        return None
+    row_count = max(rows) + 1
+    if len(rows) % row_count:
+        return None
+    column_count = len(rows) // row_count
+    if column_count < 1:
+        return None
+    per_row = [0] * row_count
+    for row in rows:
+        if row < 0:
+            return None
+        per_row[row] += 1
+    if any(count != column_count for count in per_row):
+        return None
+
+    gray = image.mean(axis=2) if image.ndim == 3 else image.astype(np.float32)
+    dark = gray < _RULE_MAX_GRAY
+    height, width = dark.shape[:2]
+    if height == 0 or width == 0:
+        return None
+    horizontal = _rule_positions(dark.mean(axis=1) >= _RULE_COVERAGE)
+    vertical = _rule_positions(dark.mean(axis=0) >= _RULE_COVERAGE)
+    if len(horizontal) != row_count + 1 or len(vertical) != column_count + 1:
+        return None
+
+    cells: list[list[float]] = []
+    for row in range(row_count):
+        y0 = horizontal[row] + _RULE_INSET_PX
+        y1 = horizontal[row + 1] - _RULE_INSET_PX
+        for column in range(column_count):
+            x0 = vertical[column] + _RULE_INSET_PX
+            x1 = vertical[column + 1] - _RULE_INSET_PX
+            cells.append([x0, y0, x1, y1])
+    return cells
+
+
 def _mask_molecule_areas(
     image: np.ndarray, boxes: Sequence[Sequence[float]]
 ) -> np.ndarray:
@@ -410,9 +497,7 @@ def _cell_texts(
     return {index_of[key]: (text or "").strip() for key, text in recognized.items()}
 
 
-def _assemble_html(
-    tokens: list[str], cell_boxes: list[np.ndarray], texts: dict[int, str]
-) -> str:
+def _assemble_html(tokens: list[str], texts: dict[int, str]) -> str:
     """Insert cell text before each ``</td>`` and wrap the HTML skeleton.
 
     Cell text ``texts[i]`` belongs to the ``i``-th ``<td …>`` opener in token
@@ -470,15 +555,19 @@ def predict_table(
             return ""
         bbox_preds, struct_probs = outputs[:2]
         height, width = image.shape[:2]
-        tokens, cell_boxes = _decode(
+        tokens, model_boxes = _decode(
             struct_probs, bbox_preds, height=height, width=width
         )
         if not tokens:
             return ""
+        # A ruled table draws its own grid: use it when it matches the
+        # structure model's shape, because the model's per-cell boxes hug one
+        # text line and lose a tall row's number and value (see _ruled_cells).
+        cell_boxes = _ruled_cells(image, _cell_rows(tokens)) or model_boxes
         mask_boxes = [item["bbox"] for item in molecule_cells if item.get("bbox")]
         texts = _cell_texts(image, cell_boxes, mask_boxes)
         texts = _inject_molecule_tokens(texts, cell_boxes, molecule_cells)
-        return _assemble_html(tokens, cell_boxes, texts)
+        return _assemble_html(tokens, texts)
     except Exception as exc:  # noqa: BLE001 — enrichment must never break a run
         logger.warning("SLANet-1M predict failed: %s", exc)
         return ""

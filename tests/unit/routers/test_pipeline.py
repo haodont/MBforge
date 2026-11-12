@@ -71,7 +71,7 @@ def test_pipeline_events_stream_returns_log_rows(
     db.initialize()
 
     run_id = "run-sse-1"
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO ingest_queue (id, file_path, doc_id, run_id, status) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -127,7 +127,7 @@ def test_pipeline_queue_logs_returns_rows_for_doc(
     db.initialize()
     doc_id = "527916f6-e0d0-4f99-8a45-d9d0fa14f37f"
     task_id = "task-1"
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO ingest_queue (id, file_path, status) VALUES (?, ?, ?)",
             (task_id, str(root / "doc.pdf"), "done"),
@@ -192,7 +192,7 @@ def test_pipeline_worker_status_reports_queue_snapshot_and_model_gate(
     root.mkdir(parents=True, exist_ok=True)
     db = DatabaseManager.get(str(root))
     db.initialize()
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         for task_id, status in (
             ("pending-task", "pending"),
             ("processing-task", "processing"),
@@ -265,7 +265,7 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
     """Queue consumers receive the real fork statuses from the run checkpoint."""
     from mbforge.service.pipeline.artifacts.staging import staging_dir
     from mbforge.service.pipeline.run.checkpoint import (
-        ensure_run_checkpoint,
+        ensure_attempt_run,
         save_stage_summary,
     )
 
@@ -275,10 +275,10 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
     db.initialize()
     doc_id = "doc-with-checkpoint"
     staging = staging_dir(root, doc_id)
-    ensure_run_checkpoint(staging)
+    ensure_attempt_run(staging, "run-checkpoint")
     save_stage_summary(staging, "extract", status="success")
     save_stage_summary(staging, "markdown", status="running")
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO ingest_queue (id, file_path, doc_id, status) "
             "VALUES (?, ?, ?, ?)",
@@ -291,6 +291,7 @@ def test_pipeline_queue_includes_checkpoint_stage_statuses(
     assert response.json()["tasks"][0]["stage_statuses"] == {
         "extract": "success",
         "markdown": "running",
+        "patent": "pending",
     }
 
 
@@ -301,7 +302,7 @@ def test_pipeline_bulk_queue_actions_update_only_eligible_tasks(
     root.mkdir(parents=True, exist_ok=True)
     db = DatabaseManager.get(str(root))
     db.initialize()
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         for node_id, run_id, status in (
             ("pending-node", "run-pending", "pending"),
             ("failed-node", "run-failed", "failed"),
@@ -349,7 +350,7 @@ def test_pipeline_delete_task_resets_document_and_keeps_source(
 
     # Seed a finished run for the document, independent of auto-enqueue.
     db = DatabaseManager.get(str(root))
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO ingest_queue (id, file_path, doc_id, stage, run_id, status) "
             "VALUES ('node-1', ?, ?, 'extract', 'run-delete', 'done')",
@@ -400,7 +401,7 @@ def test_pipeline_enqueue_reuses_inflight_run_and_force_supersedes(
     assert forced and forced != first
 
     db = DatabaseManager.get(str(root))
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         runs = [
             row["run_id"]
             for row in conn.execute(

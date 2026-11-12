@@ -13,9 +13,6 @@ Self-contained coref computation for a Markush scaffold:
 These helpers are pure functions: no DB I/O, no Pydantic. The HTTP router
 wraps them and converts to Pydantic responses via :func:`parse_response` /
 :func:`check_response`.
-
-The attachment-site persistence rules that need the database live in
-:mod:`mbforge.service.use_cases.markush.sites`.
 """
 
 from __future__ import annotations
@@ -38,14 +35,11 @@ class MarkushSite:
 
     ``site_label`` is the R-group name from the SMILES (R1, R2, ...).
     ``atom_map_num`` is the explicit ``[*:N]`` integer used as the
-    canonical identity. ``attachment_count`` records how many bond
-    positions the site consumes (defaults to 1).
+    canonical identity.
     """
 
     site_label: str
     atom_map_num: int
-    attachment_count: int = 1
-    bond_type: str | None = None
 
 
 @dataclass
@@ -58,7 +52,6 @@ class MarkushRGroupDefinition:
 
     label: str
     definition: str = ""
-    allowed_smiles: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -85,10 +78,6 @@ class ParsedMarkush:
     abstract_rings: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     raw: str = ""
-
-    @property
-    def site_labels(self) -> list[str]:
-        return [s.site_label for s in self.sites]
 
 
 def parse_markush(

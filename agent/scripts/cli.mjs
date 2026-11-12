@@ -4,12 +4,6 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import {
-  backendAddress,
-  startBackend,
-  stopBackend,
-} from './backend.mjs'
-
 // Launch pi with a project-owned config directory. Pointing
 // PI_CODING_AGENT_DIR at agent/.pi-agent keeps ~/.pi/agent settings, packages,
 // extensions, skills, prompts, themes and system-prompt files out of the
@@ -45,6 +39,12 @@ for (const [label, path] of [
   }
 }
 
+// The lifecycle module is compiled with the extension; this launcher only runs
+// from a built checkout, so a dynamic import keeps the friendly missing-build
+// message above intact.
+const { backendAddress, clearBackendRecord, startBackend, stopBackend } =
+  await import('../dist/backendControl.js')
+
 mkdirSync(sessionDir, { recursive: true })
 
 const passthrough = process.argv.slice(2)
@@ -66,7 +66,11 @@ try {
 }
 
 let backendChild = null
-process.once('exit', () => stopBackend(backendChild))
+let startedHere = false
+process.once('exit', () => {
+  stopBackend(backendChild)
+  if (startedHere) clearBackendRecord(agentHome)
+})
 
 if (startBackendEnabled && !backendMetadataOnly) {
   try {
@@ -79,6 +83,7 @@ if (startBackendEnabled && !backendMetadataOnly) {
       },
     })
     if (result.started) {
+      startedHere = true
       console.log(
         `MBForge backend started at http://${result.host}:${result.port} (log: ${result.logPath})`,
       )

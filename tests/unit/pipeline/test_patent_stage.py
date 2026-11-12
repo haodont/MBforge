@@ -3,9 +3,8 @@
 Protects the whole deterministic (zero-token) pipeline in one place: entry
 identity from titles and body prose, document-local example identity, assay
 method extraction, synthesis routes, printed characterization data, printed
-chemistry names, mass cross-checks, and the model's gap links — then the stage
-itself: publish at the document root, evidence rebuild, persistence and
-republish.
+chemistry names, and mass cross-checks — then the stage itself: publish at the
+document root, evidence rebuild, persistence and republish.
 
 Functions under test: ``PatentStage.execute``
 (``mbforge.service.pipeline.stages.patent_stage``); the rule extractors
@@ -14,9 +13,9 @@ Functions under test: ``PatentStage.execute``
 ``extract_assay_method_from_title`` (``...patent.rules.assay``),
 ``extract_synthesis_routes`` / ``extract_characterization`` /
 ``find_mass_mismatches`` (``...patent.rules.characterization``) and
-``extract_compound_names`` (``...patent.rules.names``); ``associate_facts`` /
-``apply_gap_links`` (``mbforge.service.pipeline.patent.association``) and the
-artifact store (``mbforge.service.use_cases.documents.patent_facts``).
+``extract_compound_names`` (``...patent.rules.names``); ``associate_facts``
+(``mbforge.service.pipeline.patent.association``) and the artifact store
+(``mbforge.service.use_cases.documents.patent_facts``).
 """
 
 from __future__ import annotations
@@ -34,10 +33,7 @@ from mbforge.domain.evidence import SourceEvidence
 from mbforge.domain.molecule import Molecule
 from mbforge.domain.types import DetectionSource
 from mbforge.service.pipeline.extract.text import ExtractedDocument, PageContent
-from mbforge.service.pipeline.patent.association import (
-    apply_gap_links,
-    associate_facts,
-)
+from mbforge.service.pipeline.patent.association import associate_facts
 from mbforge.service.pipeline.patent.rules.assay import (
     extract_assay_method_from_title,
     extract_assay_methods_from_body,
@@ -671,102 +667,6 @@ def test_a_printed_mass_is_checked_against_the_structure() -> None:
 # ── the model's associations are consumed here (never a reading) ─────
 
 
-def test_an_association_resolves_the_designation_and_binds_its_reading() -> None:
-    """Everything one association does, in the key space Python owns.
-
-    A designation the document prints is resolved in place and keeps both evidence
-    rows; a designation no section declared becomes the entry the model declared, so
-    the reading that cites it finally has something to join; the structure is stored
-    in the identity persistence reads (canonical SMILES) even though the link named
-    the ``mol_id``; an example keeps its own key space; a match the rules already
-    made is never overwritten by a suggestion; and the reading that cites the
-    resolved designation carries the structure afterwards.
-    """
-    entries = [
-        {
-            "entry_id": "en-7",
-            "label_key": "@example:7",
-            "evidence_ids": ["ev-a"],
-            "entity_id": None,
-            "structure_status": "missing",
-            "linking_status": "unlinked",
-        },
-        {
-            "entry_id": "en-77",
-            "label_key": "77",
-            "evidence_ids": ["ev-c"],
-            "entity_id": "CCO",
-            "structure_status": "resolved",
-            "linking_status": "linked",
-        },
-    ]
-    measurements = [
-        {
-            "measurement_id": "m-999",
-            "mol_id": None,
-            "linking_status": "failed",
-            "provenance": {"reference_raw": "化合物999"},
-        },
-        {
-            "measurement_id": "m-77",
-            "mol_id": None,
-            "linking_status": "failed",
-            "provenance": {"reference_raw": "化合物77"},
-        },
-    ]
-    section = ParsedSection(
-        section_id="sec-1",
-        title="实施例7：化合物77的制备",
-        kind="example",
-        page_start=1,
-        page_end=1,
-        raw_text="",
-        labels=[],
-        esmiles_candidate_ids=[],
-        evidence_ids=["ev-b"],
-        title_evidence_ids=["ev-b"],
-        heading_line="实施例7：化合物77的制备",
-    )
-
-    applied = apply_gap_links(
-        entries,
-        [
-            {"label_raw": "实施例7", "mol_id": "MOL-7", "evidence_ids": ["ev-b"]},
-            {"label_raw": "化合物999", "mol_id": "MOL-999", "evidence_ids": ["ev-b"]},
-            {"label_raw": "化合物77", "mol_id": "CCN", "evidence_ids": ["ev-d"]},
-        ],
-        doc_id="doc1",
-        sections=[section],
-        candidates=[
-            Molecule(mol_id="MOL-999", canonical_smiles="CCO999"),
-            Molecule(mol_id="MOL-7", canonical_smiles="CCO7"),
-        ],
-        measurements=measurements,
-    )
-
-    # The printed entry and the declared designation: two links applied.
-    assert applied == 2
-    assert entries[0]["entity_id"] == "CCO7"  # the mol_id resolved to its SMILES
-    assert entries[0]["linking_status"] == "linked"
-    assert entries[0]["evidence_ids"] == ["ev-a", "ev-b"]
-    # A designation the rules already resolved is not overwritten by a suggestion.
-    assert entries[1]["entity_id"] == "CCO"
-    # The declared designation exists as an entry of its own, awaiting review.
-    declared = entries[2]
-    assert declared["label_raw"] == "化合物999"
-    assert declared["label_key"] == "999"
-    assert declared["entity_id"] == "CCO999"
-    assert declared["section_id"] == "sec-1"
-    assert declared["structure_status"] == "resolved"
-    assert declared["linking_status"] == "linked"
-    assert declared["review_status"] == "pending"
-    assert declared["evidence_ids"] == ["ev-b"]
-    # The reading that cites the resolved designation carries its structure.
-    assert measurements[0]["mol_id"] == "CCO999"
-    assert measurements[0]["linking_status"] == "linked"
-    assert measurements[1]["mol_id"] is None
-
-
 # ── stage execution + publication ───────────────────────────────────
 
 
@@ -931,7 +831,7 @@ def test_patent_stage_publishes_entries_assays_and_structure_free_facts(
     assert molecule_evidence.evidence_id in linked_entry["evidence_ids"]
     assert link_facts.issues == []
     assert link_result.context["molecule_count"] == 1
-    with DatabaseManager.get(str(link_root)).mol_conn() as conn:
+    with DatabaseManager.get(str(link_root)).connection() as conn:
         molecule = conn.execute(
             "SELECT mol_id, smiles, activity, activity_type, units FROM molecules"
         ).fetchone()
@@ -981,7 +881,7 @@ def test_patent_stage_publishes_entries_assays_and_structure_free_facts(
 
     assert bare_result.status == "success"
     assert bare_result.context["molecule_count"] == 0
-    with DatabaseManager.get(str(bare_root)).mol_conn() as conn:
+    with DatabaseManager.get(str(bare_root)).connection() as conn:
         assert conn.execute("SELECT 1 FROM molecules").fetchone() is None
 
 
@@ -1089,7 +989,7 @@ def test_patent_stage_does_not_invent_activity_pairs_from_mass_alone(
         )
     ]
     _seed_evidence(tmp_path, pages)
-    with DatabaseManager.get(str(tmp_path)).mol_conn() as conn:
+    with DatabaseManager.get(str(tmp_path)).connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, canonical_smiles, source_doc) "
             "VALUES (?, ?, ?, ?)",
@@ -1119,7 +1019,7 @@ def test_a_disputed_designation_publishes_no_activity_pair(tmp_path: Path) -> No
     evidence = _seed_evidence(
         tmp_path, [FakePage(1, "实施例1：2-羟基乙烷(化合物1)的制备")]
     )
-    with DatabaseManager.get(str(tmp_path)).mol_conn() as conn:
+    with DatabaseManager.get(str(tmp_path)).connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, canonical_smiles, name, source_doc) "
             "VALUES (?, ?, ?, ?, ?)",

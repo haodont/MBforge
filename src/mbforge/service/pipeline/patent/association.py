@@ -119,172 +119,117 @@ def _candidate_evidence_ids(candidate: Any, valid_ids: set[str]) -> list[str]:
     )
 
 
-def apply_gap_links(
-    entries: list[dict],
-    links: Sequence[Mapping[str, Any]],
-    *,
-    doc_id: str = "",
-    sections: Sequence[DocumentSection] = (),
-    candidates: Sequence[Any] = (),
-    measurements: Sequence[dict[str, Any]] = (),
-    attributions: Sequence[dict[str, Any]] = (),
-) -> int:
-    """Attach the structures the model linked to the designations they name.
+def _ocr_confusable_forms(text: str) -> set[str]:
+    """The spellings a ``1``/``I``/``l`` confusion can turn a printed token into.
 
-    The model names a structure for a designation it read; Python derives the key
-    space (``designation_key``), so a link can only ever meet a designation in the
-    space Python owns. It never rewrites a rule fact and never states a reading —
-    association is the model's whole job here, and this is where that job is
-    consumed.
-
-    A designation is met in one of two ways, and the second one is the point of the
-    gap path: the designations the rules dropped are exactly the ones the model was
-    asked about.
-
-    * an entry that already prints the designation is resolved in place — unless the
-      rules already resolved it, because a deterministic match is not silently
-      overwritten by a suggestion;
-    * a designation no section declared (a table row label, a prose mention, an
-      example nothing prepares) is already declared by the rule pass from the print
-      itself, and the link resolves that entry. Minting stays for the case where
-      even the print is ambiguous, and the record is the existing
-      :class:`CompoundEntry`, marked as still awaiting review, so a declared
-      designation is visible as one instead of a silent alias.
-
-    ``measurements`` are then stamped with the structure their own provenance
-    cites: that field, not the entry, is what the persisted activity reads.
-
-    ``attributions`` are the printed passages that name their owner in words the
-    rules did not read — a spectrum, a printed name, a preparation route. The same
-    link answers them: the model read those evidence rows and named the designation
-    they print. One link settles exactly one unattributed passage whose own evidence
-    is the one the link cites, and only when nothing else claims that row; anything
-    else stays unattributed rather than being paired by guesswork.
+    The confusion lives in the first character: a series letter (``I-256-A``)
+    is read as a digit (``1-256-A``). Only that position is varied, so a digit
+    inside the number is never touched.
     """
-    by_key = {
-        str(entry.get("label_key") or ""): entry
-        for entry in entries
-        if entry.get("label_key")
-    }
-    # Both identity spaces: the document names a candidate by ``mol_id`` in a gap
-    # payload and by canonical SMILES everywhere persistence looks, so a link's
-    # reference is translated when the pair is known, never copied blind.
-    by_ref: dict[str, str] = {}
-    for candidate in candidates:
-        smiles = getattr(candidate, "canonical_smiles", "")
-        smiles = smiles.strip() if isinstance(smiles, str) else ""
-        if not smiles:
-            continue
-        by_ref[smiles] = smiles
-        mol_ref = str(getattr(candidate, "mol_id", "") or "").strip()
-        if mol_ref:
-            by_ref.setdefault(mol_ref, smiles)
-    section_by_evidence = {
-        evidence_id: section.section_id
-        for section in sections
-        for evidence_id in section.evidence_ids
+    if not text:
+        return set()
+    head = text[0]
+    return {
+        replacement + text[1:] for replacement in ("1", "i", "l") if replacement != head
     }
 
-    applied = 0
-    resolved: dict[str, str] = {}
-    for link in links:
-        key = designation_key(str(link.get("label_raw") or ""))
-        mol_id = str(link.get("mol_id") or "")
-        if not key or not mol_id:
+
+def _candidate_printed_names(candidate: Any) -> list[str]:
+    """Every designation a candidate's drawings printed."""
+    properties = getattr(candidate, "properties", {})
+    properties = properties if isinstance(properties, dict) else {}
+    names: list[str] = []
+    name = getattr(candidate, "name", "")
+    if isinstance(name, str) and name.strip():
+        names.append(name)
+    for key in ("detection_names", "name_candidates"):
+        values = properties.get(key)
+        if not isinstance(values, list):
             continue
-        entity = by_ref.get(mol_id, mol_id)
-        evidence_ids = [
-            evidence_id
-            for evidence_id in (link.get("evidence_ids") or [])
-            if isinstance(evidence_id, str)
+        for value in values:
+            text = value.get("name") if isinstance(value, dict) else value
+            if isinstance(text, str) and text.strip():
+                names.append(text)
+    return list(dict.fromkeys(names))
+
+
+def _rename_candidate(candidate: Any, old: str, new: str) -> None:
+    """Give a candidate the spelling the document prints."""
+    name = getattr(candidate, "name", "")
+    if isinstance(name, str) and name.strip() == old:
+        candidate.name = new
+    properties = getattr(candidate, "properties", None)
+    if not isinstance(properties, dict):
+        return
+    names = properties.get("detection_names")
+    if isinstance(names, list):
+        properties["detection_names"] = [
+            new if isinstance(item, str) and item == old else item for item in names
         ]
-        entry = by_key.get(key)
-        if entry is not None:
-            if entry.get("structure_status") == STRUCTURE_RESOLVED:
-                continue
-            entry["entity_id"] = entity
-            entry["structure_status"] = STRUCTURE_RESOLVED
-            entry["linking_status"] = "linked"
-            entry["evidence_ids"] = list(
-                dict.fromkeys(list(entry.get("evidence_ids") or []) + evidence_ids)
-            )[:50]
-        elif doc_id:
-            section_id = next(
-                (
-                    section_by_evidence[evidence_id]
-                    for evidence_id in evidence_ids
-                    if evidence_id in section_by_evidence
-                ),
-                "",
-            )
-            entry = CompoundEntry(
-                entry_id=entry_id(doc_id, section_id, key),
-                doc_id=doc_id,
-                label_raw=str(link.get("label_raw") or ""),
-                label_key=key,
-                entry_role=ROLE_COMPOUND,
-                section_id=section_id,
-                entity_id=entity,
-                structure_status=STRUCTURE_RESOLVED,
-                linking_status="linked",
-                review_status=STATUS_PENDING,
-                evidence_ids=list(dict.fromkeys(evidence_ids))[:50],
-            ).to_dict()
-            entries.append(entry)
-            by_key[key] = entry
-        else:
-            continue
-        resolved[key] = entity
-        applied += 1
+    candidates = properties.get("name_candidates")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if isinstance(candidate, dict) and candidate.get("name") == old:
+                candidate["name"] = new
 
+
+def _reconcile_ocr_designations(
+    candidates: Sequence[Any],
+    entries: Sequence[Mapping[str, Any]],
+    measurements: Sequence[Mapping[str, Any]],
+    issues: list[dict[str, Any]],
+) -> int:
+    """Rewrite a misread designation to the spelling the document prints.
+
+    A capital ``I`` is read as a digit ``1`` often enough that a whole series
+    of compounds (``I-32``…``I-66``) reaches the library as ``1-32``…``1-66``
+    and no longer matches the activity table that prints ``I-…``. The
+    document's own designations settle it: when exactly one spelling of the
+    read token is printed by this document, that spelling is the compound's.
+    """
+
+    printed: dict[str, str] = {}
+    for entry in entries:
+        raw = str(entry.get("label_raw") or "").strip()
+        if raw:
+            printed.setdefault(raw.lower(), raw)
     for measurement in measurements:
-        if not isinstance(measurement, dict) or measurement.get("mol_id"):
+        if not isinstance(measurement, Mapping):
             continue
         provenance = measurement.get("provenance")
-        provenance = provenance if isinstance(provenance, dict) else {}
-        key = designation_key(
-            provenance.get("reference_raw") or provenance.get("reference_key") or ""
-        )
-        entity = resolved.get(key)
-        if not entity:
-            continue
-        measurement["mol_id"] = entity
-        measurement["linking_status"] = "linked"
+        provenance = provenance if isinstance(provenance, Mapping) else {}
+        raw = str(provenance.get("reference_raw") or "").strip()
+        if raw:
+            printed.setdefault(raw.lower(), raw)
+    if not printed:
+        return 0
 
-    if attributions and links:
-        # A passage names its owner in words the rules did not read. The link that
-        # answers it carries the evidence the model read, so the passage on that row
-        # is the one it spoke about — but only when exactly one unattributed passage
-        # sits there and exactly one link cites that row. A row printing two spectra,
-        # or two links over the same row, is a pairing nobody decided.
-        unattributed: dict[str, list[dict[str, Any]]] = {}
-        for item in attributions:
-            if not isinstance(item, dict) or item.get("label_key"):
+    reconciled = 0
+    for candidate in candidates:
+        for name in _candidate_printed_names(candidate):
+            normalized = name.strip().lower()
+            if not normalized or normalized in printed:
                 continue
-            for evidence_id in item.get("evidence_ids") or []:
-                if isinstance(evidence_id, str):
-                    unattributed.setdefault(evidence_id, []).append(item)
-        claimed: dict[str, int] = {}
-        for link in links:
-            for evidence_id in link.get("evidence_ids") or []:
-                if isinstance(evidence_id, str):
-                    claimed[evidence_id] = claimed.get(evidence_id, 0) + 1
-        for link in links:
-            key = designation_key(str(link.get("label_raw") or ""))
-            cited = [
-                evidence_id
-                for evidence_id in (link.get("evidence_ids") or [])
-                if isinstance(evidence_id, str)
+            hits = [
+                variant
+                for variant in _ocr_confusable_forms(normalized)
+                if variant in printed
             ]
-            if not key or len(cited) != 1 or claimed.get(cited[0], 0) != 1:
+            if len(hits) != 1:
+                # The document prints more than one spelling of this token, or
+                # none: the read stays as it is.
                 continue
-            pending = unattributed.get(cited[0], [])
-            if len(pending) != 1:
-                continue
-            pending[0]["label_key"] = key
-            pending[0]["attribution"] = "resolved"
-
-    return applied
+            corrected = printed[hits[0]]
+            _rename_candidate(candidate, name, corrected)
+            _append_issue(
+                issues,
+                "designation_ocr_reconciled",
+                f"designation {name} read as {corrected}",
+                [],
+                None,
+            )
+            reconciled += 1
+    return reconciled
 
 
 def _declare_entry(
@@ -302,11 +247,10 @@ def _declare_entry(
     reading existed, so the entry is minted here instead of the reading being
     reported as ownerless. ``review_status`` stays pending, because only the printed
     label vouches for it. Structure resolution is unchanged — the entry pass below
-    still has to find a candidate, and an accepted model link can do the same job.
+    still has to find a candidate.
     """
     doc_id = str(measurement.get("doc_id") or "")
     printed = str(provenance.get("reference_raw") or reference.raw or "")
-    # The key comes from the printed designation, exactly as in ``apply_gap_links``:
     # ``实施例23`` declares ``@example:23``, never the compound ``23``.
     label_key = designation_key(printed) or reference.key
     minted = CompoundEntry(
@@ -348,6 +292,7 @@ def associate_facts(
     _clear_relation_issues(issues)
     sections_by_id = {section.section_id: section for section in sections}
     entries_by_label = _group_by_label(entries)
+    _reconcile_ocr_designations(candidates, entries, measurements, issues)
 
     entries_by_section: dict[str, list[dict[str, Any]]] = {}
     for entry in entries:

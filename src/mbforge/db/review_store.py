@@ -1,10 +1,9 @@
 """SQLite data access for the unified review queue.
 
-Owns the ``review_items`` view that UNIONs native and Markush review candidates,
-the review-decision audit trail, and the queue-clearing deletes.  Connection
-ownership stays with the caller (the service/repository layer opens one
-connection and threads it through), matching the existing review repository
-boundary.
+Owns the ``review_items`` queue reads, the review-decision audit trail, and the
+queue-clearing deletes.  Connection ownership stays with the caller (the
+service/repository layer opens one connection and threads it through), matching
+the existing review repository boundary.
 """
 
 from __future__ import annotations
@@ -20,15 +19,6 @@ SELECT item_id AS id, kind, doc_id, page,
        smiles, name, confidence, reasons, context_text, status,
        payload, created_at, resolved_at
 FROM review_items
-UNION ALL
-SELECT candidate_id AS id, 'markush_link' AS kind, doc_id,
-       CASE WHEN page IS NULL THEN NULL ELSE page + 1 END AS page,
-       bbox_x0, bbox_y0, bbox_x1, bbox_y1, crop_relpath,
-       smiles, name, composite_confidence AS confidence, reasons,
-       context_text, review_status AS status, properties AS payload,
-       created_at, superseded_at AS resolved_at
-FROM markush_review_candidates
-WHERE superseded_at IS NULL
 """
 
 
@@ -101,14 +91,26 @@ def get_item(conn: Any, kind: str, item_id: str) -> dict[str, Any]:
     raise ReviewNotFoundError(item_id)
 
 
-def stats(conn: Any) -> dict[str, Any]:
+def stats(conn: Any, doc_id: str | None = None) -> dict[str, Any]:
+    """Count the unified queue, optionally scoped to one document.
+
+    ``doc_id`` uses the same filter as :func:`list_queue`, so a caller that
+    pages one document's queue can report that document's counts instead of
+    the library-wide ones.
+    """
+    params: list[Any] = []
+    where = ""
+    if doc_id:
+        where = " WHERE doc_id = ?"
+        params.append(doc_id)
     rows = conn.execute(
         f"""
         SELECT kind, status, COUNT(*) AS count
-        FROM ({_QUEUE_SQL}) AS unified
+        FROM ({_QUEUE_SQL}) AS unified{where}
         GROUP BY kind, status
         ORDER BY kind, status
-        """
+        """,
+        params,
     ).fetchall()
     return {
         "items": [
@@ -142,15 +144,6 @@ def history(conn: Any, entity_id: str) -> tuple[str, list[dict[str, Any]]]:
         payload["snapshot"] = _decode_json(payload["snapshot"], {})
         result.append(payload)
     return entity_type, result
-
-
-def markush_candidate_version(conn: Any, item_id: str) -> int | None:
-    """Return the review version of a Markush review candidate, or ``None``."""
-    row = conn.execute(
-        "SELECT review_version FROM markush_review_candidates WHERE candidate_id = ?",
-        (item_id,),
-    ).fetchone()
-    return int(row[0]) if row is not None else None
 
 
 def review_item_status_payload(
@@ -193,28 +186,15 @@ def clear_all(conn: Any) -> dict[str, int]:
     item_ids = [
         row[0] for row in conn.execute("SELECT item_id FROM review_items").fetchall()
     ]
-    candidate_ids = [
-        row[0]
-        for row in conn.execute(
-            "SELECT candidate_id FROM markush_review_candidates"
-        ).fetchall()
-    ]
-
-    def _delete_audit(entity_type: str, entity_ids: list[str]) -> None:
-        if not entity_ids:
-            return
-        placeholders = ",".join("?" for _ in entity_ids)
-        conn.execute(
-            "DELETE FROM markush_decisions WHERE entity_type = ? "
-            f"AND entity_id IN ({placeholders})",
-            [entity_type, *entity_ids],
-        )
-
     conn.execute("DELETE FROM review_items")
-    _delete_audit("review_item", item_ids)
-    conn.execute("DELETE FROM markush_review_candidates")
-    _delete_audit("review_candidate", candidate_ids)
-    return {"deleted_items": len(item_ids), "deleted_candidates": len(candidate_ids)}
+    if item_ids:
+        placeholders = ",".join("?" for _ in item_ids)
+        conn.execute(
+            "DELETE FROM markush_decisions WHERE entity_type = 'review_item' "
+            f"AND entity_id IN ({placeholders})",
+            item_ids,
+        )
+    return {"deleted_items": len(item_ids)}
 
 
 __all__ = [
@@ -222,7 +202,6 @@ __all__ = [
     "get_item",
     "history",
     "list_queue",
-    "markush_candidate_version",
     "review_item_status_payload",
     "set_molecule_name",
     "set_molecule_review_status",

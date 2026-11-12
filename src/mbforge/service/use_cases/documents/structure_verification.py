@@ -60,6 +60,29 @@ def _printed_labels(candidate: Any) -> list[str]:
     return labels
 
 
+def _label_sources(candidate: Any) -> list[str]:
+    """Where the candidate's designations came from (page text vs crop).
+
+    ``name_candidates`` records the source of every name the drawings
+    supplied; ``label_source`` is the merged source. Both are read because a
+    candidate can carry a name from each channel.
+    """
+    properties = getattr(candidate, "properties", None)
+    properties = properties if isinstance(properties, dict) else {}
+    sources: list[str] = []
+    candidates = properties.get("name_candidates")
+    if isinstance(candidates, list):
+        for item in candidates:
+            if isinstance(item, dict):
+                source = item.get("source")
+                if isinstance(source, str) and source and source not in sources:
+                    sources.append(source)
+    source = properties.get("label_source")
+    if isinstance(source, str) and source and source not in sources:
+        sources.append(source)
+    return sources
+
+
 def _chemistry(smiles: str) -> dict[str, Any]:
     """Formula and masses of a structure.
 
@@ -206,7 +229,10 @@ def _structure_row(
     tolerance: float,
 ) -> dict[str, Any]:
     """One structure's verification row."""
-    from mbforge.service.pipeline.patent.candidate_labels import candidate_label_keys
+    from mbforge.service.pipeline.patent.candidate_labels import (
+        candidate_designation_counts,
+        candidate_label_keys,
+    )
     from mbforge.service.pipeline.patent.rules.characterization import (
         adduct_mass_delta,
         printed_ms_mz,
@@ -290,6 +316,12 @@ def _structure_row(
         "smiles": str(getattr(candidate, "smiles", "") or ""),
         "esmiles": str(getattr(candidate, "esmiles", "") or ""),
         "canonical_smiles": canonical,
+        "name": str(getattr(candidate, "name", "") or ""),
+        "labels": [
+            item
+            for item in (getattr(candidate, "labels", None) or [])
+            if isinstance(item, str)
+        ],
         "formula": chemistry["formula"],
         "main_formula": chemistry["main_formula"],
         "molar_mass": chemistry["molar_mass"],
@@ -300,6 +332,8 @@ def _structure_row(
         "bbox": list(bbox) if bbox else None,
         "printed_labels": _printed_labels(candidate),
         "label_keys": sorted(label_keys),
+        "label_sources": _label_sources(candidate),
+        "designation_counts": candidate_designation_counts(candidate),
         "entry": entry,
         "printed_ms": checks,
         "mass_check": mass_check,

@@ -2,7 +2,7 @@
 
 Covers ``mbforge.db.sqlite.database`` (``DatabaseManager`` and
 ``record_ingest_event``): the initialized schema + indexes, transaction
-commit/rollback across both databases, the shared-connection unified layout,
+commit/rollback across the unified database, nested connection scopes,
 threaded access, and the bulk-deletion cleanup paths.
 """
 
@@ -21,61 +21,50 @@ from mbforge.db.sqlite.database import (
 
 
 def test_database_initializes_schema_and_indices(tmp_path: Path) -> None:
-    """Initializing a DatabaseManager creates both SQLite files, the expected
-    tables, and the Markush lookup indexes."""
+    """Initializing a DatabaseManager creates the database file, the expected
+    tables, and the molecule lookup indexes."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
 
-    assert db.kb_path.exists()
-    assert db.mol_path.exists()
+    assert db.db_path.exists()
 
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         tables = {
             r[0]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
         assert "ingest_queue" in tables
         assert "tasks" not in tables
-
-    with db.mol_conn() as conn:
-        tables = {
-            r[0]
-            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
         assert "molecules" in tables
         assert "molecule_detections" in tables
         assert "evidence" not in tables
         assert "source_evidence" in tables
-        assert "markush_scaffolds" in tables
-        assert "markush_fragments" in tables
 
         indices = {
             row[0]
             for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'index' "
-                "AND (name LIKE 'idx_ms_%' OR name LIKE 'idx_mf_%')"
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
             )
         }
     assert {
-        "idx_ms_doc",
-        "idx_ms_status",
-        "idx_mf_doc",
-        "idx_mf_scaffold",
-        "idx_mf_status",
+        "idx_m_smiles",
+        "idx_m_source",
+        "idx_m_status",
+        "idx_m_canonical",
     } <= indices
 
 
-def test_transaction_commits_both_databases(tmp_path: Path) -> None:
-    """A successful transaction() commits writes to both databases."""
+def test_transaction_commits_queue_and_molecule_writes(tmp_path: Path) -> None:
+    """A successful transaction() commits writes to both table families."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
 
-    with db.transaction() as (kb_conn, mol_conn):
-        kb_conn.execute(
+    with db.transaction() as conn:
+        conn.execute(
             "INSERT INTO ingest_queue (id, file_path) VALUES (?, ?)",
             ("task-1", "/tmp/test.pdf"),
         )
-        mol_conn.execute(
+        conn.execute(
             "INSERT INTO molecules (mol_id, smiles) VALUES (?, ?)",
             ("mol-1", "CCO"),
         )
@@ -84,32 +73,32 @@ def test_transaction_commits_both_databases(tmp_path: Path) -> None:
     assert db.count_molecules() == 1
 
 
-def test_transaction_rolls_back_both_databases_on_failure(tmp_path: Path) -> None:
-    """A failure on either side of the transaction rolls back both, leaving no
+def test_transaction_rolls_back_all_writes_on_failure(tmp_path: Path) -> None:
+    """A failure inside the transaction rolls back every write, leaving no
     partial state."""
-    for fail_kb in (True, False):
-        root = tmp_path / f"rollback-{fail_kb}"
+    for fail_early in (True, False):
+        root = tmp_path / f"rollback-{fail_early}"
         root.mkdir()
         db = DatabaseManager(str(root))
         db.initialize()
 
-        exc = "Simulated KB failure" if fail_kb else "Simulated mol failure"
+        exc = "Simulated early failure" if fail_early else "Simulated late failure"
         with (
             pytest.raises(Exception, match=exc),
-            db.transaction() as (kb_conn, mol_conn),
+            db.transaction() as conn,
         ):
-            kb_conn.execute(
+            conn.execute(
                 "INSERT INTO ingest_queue (id, file_path) VALUES (?, ?)",
                 ("task-1", "/tmp/test.pdf"),
             )
-            mol_conn.execute(
+            conn.execute(
                 "INSERT INTO molecules (mol_id, smiles) VALUES (?, ?)",
                 ("mol-1", "CCO"),
             )
             raise Exception(exc)
 
-        assert db.count_documents() == 0, f"fail_kb={fail_kb}"
-        assert db.count_molecules() == 0, f"fail_kb={fail_kb}"
+        assert db.count_documents() == 0, f"fail_early={fail_early}"
+        assert db.count_molecules() == 0, f"fail_early={fail_early}"
 
 
 def test_cached_instance_per_project_root(tmp_path: Path) -> None:
@@ -124,7 +113,7 @@ def test_record_ingest_event_writes_log_and_swallows_failure(tmp_path: Path) -> 
     matching ingest_queue row (node status stays with the worker); a broken
     database must not raise to the caller."""
     db = DatabaseManager(str(tmp_path))
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO ingest_queue (id, file_path, status) VALUES (?, ?, ?)",
             ("task-2", "/tmp/test.pdf", "pending"),
@@ -145,7 +134,6 @@ def test_record_ingest_event_writes_log_and_swallows_failure(tmp_path: Path) -> 
         "SELECT doc_id, stage, level, message, task_id, data "
         "FROM ingest_logs WHERE task_id=?",
         ("task-2",),
-        db="kb",
     )
     assert len(log_rows) == 1
     log_row = log_rows[0]
@@ -159,7 +147,6 @@ def test_record_ingest_event_writes_log_and_swallows_failure(tmp_path: Path) -> 
     queue_rows = db.execute(
         "SELECT status, stage FROM ingest_queue WHERE id=?",
         ("task-2",),
-        db="kb",
     )
     assert len(queue_rows) == 1
     queue_row = queue_rows[0]
@@ -171,7 +158,7 @@ def test_record_ingest_event_writes_log_and_swallows_failure(tmp_path: Path) -> 
     (tmp_path / "broken").mkdir()
     broken = DatabaseManager(str(tmp_path / "broken"))
     broken.initialize()
-    broken._kb_path.unlink()
+    broken._db_path.unlink()
     record_ingest_event(
         broken,
         task_id="task-3",
@@ -183,37 +170,37 @@ def test_record_ingest_event_writes_log_and_swallows_failure(tmp_path: Path) -> 
     )
 
 
-def test_unified_layout_shares_one_connection(tmp_path: Path) -> None:
-    """In the single-DB layout kb_conn, mol_conn and transaction() all reuse
-    the one shared connection."""
+def test_nested_scopes_share_one_connection(tmp_path: Path) -> None:
+    """Nested connection()/transaction() scopes reuse the one per-thread
+    connection, and the outermost exit closes it."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
-    with db.kb_conn() as kb, db.mol_conn() as mol:
-        assert kb is mol
-    with db.transaction() as (kb, mol):
-        assert kb is mol
+    with db.connection() as outer, db.connection() as inner:
+        assert outer is inner
+    with db.transaction() as conn, db.connection() as nested:
+        assert conn is nested
 
 
 @pytest.mark.asyncio
 async def test_connection_is_usable_from_worker_threads(tmp_path: Path) -> None:
-    """kb_conn works through asyncio.to_thread, including concurrently — the
+    """connection() works through asyncio.to_thread, including concurrently — the
     pattern ``pipeline_queue`` uses from the event loop."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
 
     def _fetch() -> int:
-        with db.kb_conn() as conn:
+        with db.connection() as conn:
             return conn.execute("SELECT COUNT(*) FROM ingest_queue").fetchone()[0]
 
     # Pre-warm a connection on the main thread, mirroring real usage.
-    with db.kb_conn():
+    with db.connection():
         pass
 
     assert await asyncio.to_thread(_fetch) == 0
 
     async def _insert(name: str) -> None:
         def _work() -> None:
-            with db.kb_conn() as conn:
+            with db.connection() as conn:
                 conn.execute(
                     "INSERT INTO ingest_queue (id, file_path) VALUES (?, ?)",
                     (name, name),
@@ -223,7 +210,7 @@ async def test_connection_is_usable_from_worker_threads(tmp_path: Path) -> None:
 
     await asyncio.gather(*[_insert(f"task-{i}") for i in range(10)])
 
-    rows = db.execute("SELECT id FROM ingest_queue ORDER BY id", db="kb")
+    rows = db.execute("SELECT id FROM ingest_queue ORDER BY id")
     assert {r["id"] for r in rows} == {f"task-{i}" for i in range(10)}
 
 
@@ -231,51 +218,37 @@ def test_deletion_paths_clean_related_rows_without_binding_limits(
     tmp_path: Path,
 ) -> None:
     """Bulk molecule deletion must not bind every id in one IN() clause
-    (SQLITE_MAX_VARIABLE_NUMBER), and document deletion must remove the review
-    candidates plus their markush_decisions audit rows."""
+    (SQLITE_MAX_VARIABLE_NUMBER), and document deletion must remove the
+    document's pipeline-generated review items."""
     db = DatabaseManager(str(tmp_path))
     db.initialize()
 
     mol_ids = [f"mol-{i:04d}" for i in range(1500)]
 
-    with db.transaction() as (_, mol_conn):
-        mol_conn.executemany(
+    with db.transaction() as conn:
+        conn.executemany(
             "INSERT INTO molecules (mol_id, smiles) VALUES (?, ?)",
             [(mol_id, "CCO") for mol_id in mol_ids],
         )
         # Include ids that do not exist plus duplicates to exercise the
         # filtered SELECT path across chunk boundaries.
         extra_ids = ["missing-1", "missing-2"] + mol_ids[:10]
-        deleted = DatabaseManager.delete_molecule_records(mol_conn, mol_ids + extra_ids)
+        deleted = DatabaseManager.delete_molecule_records(conn, mol_ids + extra_ids)
 
     assert deleted == len(mol_ids)
     assert db.count_molecules() == 0
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
-            "INSERT INTO markush_review_candidates "
-            "(candidate_id, source_key, doc_id, predicted_role) "
-            "VALUES (?, ?, ?, ?)",
-            ("cand-1", "src-1", "doc-1", "review"),
-        )
-        conn.execute(
-            "INSERT INTO markush_decisions "
-            "(decision_id, entity_type, entity_id, action, snapshot) "
-            "VALUES (?, 'review_candidate', 'cand-1', 'approve', '{}')",
-            ("dec-1",),
+            "INSERT INTO review_items (item_id, kind, doc_id) VALUES (?, ?, ?)",
+            ("rev-1", "low_conf_molecule", "doc-1"),
         )
         deleted = DatabaseManager.delete_document_molecule_data(conn, "doc-1")
 
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         assert (
             conn.execute(
-                "SELECT 1 FROM markush_review_candidates WHERE candidate_id = 'cand-1'"
-            ).fetchone()
-            is None
-        )
-        assert (
-            conn.execute(
-                "SELECT 1 FROM markush_decisions WHERE decision_id = 'dec-1'"
+                "SELECT 1 FROM review_items WHERE item_id = 'rev-1'"
             ).fetchone()
             is None
         )

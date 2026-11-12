@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import LlmConfigSection from './model/LlmConfigSection'
-import VlmConfigSection from './model/VlmConfigSection'
 import LayoutConfigSection from './model/LayoutConfigSection'
 import type { SettingsState } from './types'
 
-type ModelType = 'llm' | 'vlm' | 'ocr'
+type ModelType = 'llm' | 'ocr'
 
 interface Props {
   modelType: ModelType
@@ -56,7 +55,6 @@ export default function ModelConfigCard({
       </div>
 
       {modelType === 'llm' && <LlmConfigSection {...sectionProps} />}
-      {modelType === 'vlm' && <VlmConfigSection {...sectionProps} />}
       {modelType === 'ocr' && <LayoutConfigSection {...sectionProps} />}
     </div>
   )

@@ -17,10 +17,8 @@ from typing import Any
 
 from mbforge.foundation.ids import stable_id
 
-#: Linking lifecycle values (strings — round-trip through JSON).
+#: Linking lifecycle value (string — round-trips through JSON).
 LINK_PENDING = "pending"
-LINK_LINKED = "linked"
-LINK_FAILED = "failed"
 
 
 def is_log_potency_metric(metric: str) -> bool:

@@ -26,16 +26,30 @@ DOC = "doc1"
 
 
 class _Detection:
-    def __init__(self, page: int) -> None:
+    def __init__(
+        self,
+        page: int,
+        bbox: tuple[float, float, float, float] | None = None,
+        image_path: str | None = None,
+    ) -> None:
         self.page = page
+        self.bbox = bbox
+        self.image_path = image_path
 
 
 class _Candidate:
-    def __init__(self, smiles: str, name: str, page0: int) -> None:
+    def __init__(
+        self,
+        smiles: str,
+        name: str,
+        page0: int,
+        bbox: tuple[float, float, float, float] | None = None,
+        image_path: str | None = None,
+    ) -> None:
         self.canonical_smiles = smiles
         self.smiles = smiles
         self.name = name
-        self.detections = [_Detection(page0)]
+        self.detections = [_Detection(page0, bbox, image_path)]
 
 
 class _Decision:
@@ -80,7 +94,13 @@ def test_a_reading_with_drawn_candidates_becomes_a_review_item(tmp_path: Path) -
         DOC,
         _artifact(),
         [
-            _Candidate("CCOc1ccccc1", "11", page0=2),
+            _Candidate(
+                "CCOc1ccccc1",
+                "11",
+                page0=2,
+                bbox=(10, 20, 30, 40),
+                image_path="storage/doc1/crops/mol-11.png",
+            ),
             _Candidate("CCNc1ccccc1", "", page0=2),
         ],
     )
@@ -97,6 +117,12 @@ def test_a_reading_with_drawn_candidates_becomes_a_review_item(tmp_path: Path) -
         "CCOc1ccccc1",
         "CCNc1ccccc1",
     ]
+    # A reviewer can only confirm a structure they can see, so each candidate
+    # must carry the location of its own drawing.
+    first = item["payload"]["candidates"][0]
+    assert first["page"] == 3  # 1-based, from page0=2
+    assert first["bbox"] == [10.0, 20.0, 30.0, 40.0]
+    assert first["crop_relpath"] == "storage/doc1/crops/mol-11.png"
 
 
 def test_a_reading_with_no_drawn_structure_is_not_queued(tmp_path: Path) -> None:

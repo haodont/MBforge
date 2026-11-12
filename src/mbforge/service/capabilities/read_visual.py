@@ -135,6 +135,14 @@ class PageMoleculesAction(BaseModel):
     max_molecules: int = Field(10, ge=1, le=20)
 
 
+class PageTextAction(BaseModel):
+    action: Literal["page_text"]
+    doc_id: str = doc_id_field()
+    page: int = Field(1, ge=1)
+    region: list[float] | None = Field(None, min_length=4, max_length=4)
+    max_blocks: int = Field(50, ge=1, le=100)
+
+
 class MoleculeImageAction(BaseModel):
     action: Literal["molecule_image"]
     smiles: str = Field(..., min_length=1, max_length=1024)
@@ -149,6 +157,7 @@ class RecognizeStructureAction(BaseModel):
 
 VisualAction = Annotated[
     PageImageAction
+    | PageTextAction
     | PageMoleculesAction
     | MoleculeImageAction
     | RecognizeStructureAction,
@@ -157,7 +166,7 @@ VisualAction = Annotated[
 
 
 class VisualInput(RootModel[VisualAction]):
-    """One tool, four actions, each declaring its own required parameters.
+    """One tool, five page/structure actions, each declaring its own required parameters.
 
     The discriminated union resolves the branch from ``action``, so a missing
     ``doc_id``/``page`` (or a ``smiles`` sent to a page action) is a schema
@@ -177,7 +186,11 @@ class VisualInput(RootModel[VisualAction]):
 
 class VisualOutput(BaseModel):
     action: Literal[
-        "page_image", "page_molecules", "molecule_image", "recognize_structure"
+        "page_image",
+        "page_text",
+        "page_molecules",
+        "molecule_image",
+        "recognize_structure",
     ]
     doc_id: str | None = None
     page: int | None = None
@@ -189,6 +202,8 @@ class VisualOutput(BaseModel):
     height: int | None = None
     count: int | None = None
     truncated: bool | None = None
+    text: str | None = None
+    blocks: list[PageTextBlock] = Field(default_factory=list)
     molecules: list[RecognizedMolecule] = Field(default_factory=list)
     smiles: str | None = None
     esmiles: str | None = None
@@ -366,6 +381,16 @@ async def inspect_visual(
                 dpi=action.dpi,
             ),
         )
+    elif isinstance(action, PageTextAction):
+        result = await ocr_page_region_capability(
+            context,
+            OcrPageRegionInput(
+                doc_id=action.doc_id,
+                page=action.page,
+                region=action.region,
+                max_blocks=action.max_blocks,
+            ),
+        )
     elif isinstance(action, PageMoleculesAction):
         result = await recognize_molecules_capability(
             context,
@@ -400,23 +425,13 @@ async def inspect_visual(
 
 register(
     Capability(
-        name="ocr_page_region",
-        description="Read layout-guided local text from one page of a stored document, optionally one PDF-point region; returns text blocks and bboxes without persisting.",
-        input_model=OcrPageRegionInput,
-        output_model=OcrPageRegionOutput,
-        mutating=False,
-        handler=ocr_page_region_capability,
-    )
-)
-
-
-register(
-    Capability(
         name="inspect_visual",
         description=(
             "One visual tool whose input is a discriminated union on action: "
             "action=page_image requires doc_id+page and renders a stored page/"
-            "PDF-point region as PNG; action=page_molecules requires doc_id+page "
+            "PDF-point region as PNG; action=page_text requires doc_id (page "
+            "defaults to 1) and returns layout text blocks plus bboxes without "
+            "persisting; action=page_molecules requires doc_id+page "
             "and runs MolDet + MolParser on it; action=molecule_image requires "
             "smiles (concrete or Markush) and renders a PNG; "
             "action=recognize_structure requires image_base64 and runs MolParser "

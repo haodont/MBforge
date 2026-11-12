@@ -135,8 +135,6 @@ export default function PdfSidebar({
             )}
             {sidePaneTab === 'analysis' && (
               <PatentAnalysisPane
-                docId={docId}
-                libraryRoot={libraryRoot}
                 facts={patentFacts}
                 loadError={patentFactsLoadError}
                 onOpenEvidence={onOpenEvidence}

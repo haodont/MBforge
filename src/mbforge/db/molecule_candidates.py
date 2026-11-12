@@ -168,7 +168,7 @@ def persist_candidates(
     """Upsert the given candidates and their detection/evidence rows."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.mol_conn() as active_conn:
+    with db.connection() as active_conn:
         return _persist_loop(active_conn, db, doc_id, candidates)
 
 
@@ -241,7 +241,7 @@ def replace_document_candidates(
     """
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.transaction() as (_kb_conn, active_conn):
+    with db.transaction() as active_conn:
         return persist_candidates_in_transaction(
             active_conn, db, doc_id, candidates, activity_updates
         )

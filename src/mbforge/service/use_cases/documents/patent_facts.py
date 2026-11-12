@@ -10,13 +10,12 @@ date when it is missing or behind.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from mbforge.contracts.measurement import DESIGNATION_UNBOUND_KIND
-from mbforge.contracts.patent import PATENT_FACT_REVIEW_KIND, PatentConflict
 from mbforge.foundation.ids import stable_id
 from mbforge.foundation.layout import LibraryLayout
 from mbforge.foundation.logger import get_logger
@@ -25,7 +24,6 @@ from mbforge.service.pipeline.artifacts.json_io import (
     write_json_atomic,
 )
 from mbforge.service.pipeline.patent.artifact import PatentFactsArtifact
-from mbforge.service.pipeline.patent.decisions import apply_decisions
 from mbforge.service.ports import get_repositories
 
 logger = get_logger("mbforge.service.use_cases.documents.patent_facts")
@@ -53,26 +51,18 @@ def publish_document_facts(
     artifact: PatentFactsArtifact,
     evidence_signature: str,
     candidates: Sequence[Any] = (),
-    decisions: dict[str, Any] | None = None,
-    forget_decisions: Sequence[str] = (),
     expected_revision: int | None = None,
 ) -> PublicationResult:
     """Commit *artifact* and its derived rows, then refresh the file projection.
 
-    The commit is a single transaction (snapshot + derived rows). Pending facts
-    are queued for review by item id, so a re-run upserts the same items instead
-    of duplicating them. A failed *file* write is reported as a projection that
+    The commit is a single transaction (snapshot + derived rows). Review items
+    are queued by item id, so a re-run upserts the same items instead of
+    duplicating them. A failed *file* write is reported as a projection that
     needs repair — the committed facts are already authoritative and are never
     rolled back for it.
     """
     root = Path(library_root)
     artifact = artifact.model_copy(update={"projection_status": None})
-    stored = _live_decisions(root, doc_id, decisions=decisions, forget=forget_decisions)
-    artifact, stale = _with_decisions(
-        artifact, stored=stored, doc_id=doc_id, evidence_signature=evidence_signature
-    )
-    for slot_id in stale:
-        stored.pop(slot_id, None)
     eligible, activity_updates = _derived_rows(artifact, candidates)
     readings, attributions = _reading_rows(artifact, candidates)
     revision = get_repositories(root).patent_analysis.commit(
@@ -85,13 +75,9 @@ def publish_document_facts(
         activity_updates=activity_updates,
         measurements=readings,
         attributions=attributions,
-        decisions=stored,
-        forget_decisions=stale,
         expected_revision=expected_revision,
     )
-    review_items = _queue_review_items(
-        root, doc_id, artifact, revision, candidates=eligible
-    )
+    review_items = _queue_review_items(root, doc_id, artifact, candidates=eligible)
     projection = LibraryLayout(root).patent_facts_json(doc_id)
     try:
         write_json_atomic(
@@ -125,95 +111,22 @@ def publish_document_facts(
     )
 
 
-def _live_decisions(
-    library_root: Path,
-    doc_id: str,
-    *,
-    decisions: dict[str, Any] | None,
-    forget: Sequence[str],
-) -> dict[str, Any]:
-    """The stored decisions plus this publication's update, minus withdrawn slots."""
-    state = get_repositories(library_root).patent_analysis.load(doc_id)
-    stored = dict((state or {}).get("decisions") or {})
-    if decisions:
-        stored.update(decisions)
-    for slot_id in forget:
-        stored.pop(slot_id, None)
-    return stored
-
-
-def _with_decisions(
-    artifact: PatentFactsArtifact,
-    *,
-    stored: Mapping[str, Any],
-    doc_id: str,
-    evidence_signature: str,
-) -> tuple[PatentFactsArtifact, list[str]]:
-    """Fold the still-valid decisions into the pending facts.
-
-    Returns the artifact to publish and the slots whose decision no longer
-    matches the facts (a re-extract invalidates them; they must be reviewed
-    again rather than applied to different readings).
-    """
-    if not artifact.conflicts and not stored:
-        return artifact, []
-    conflicts = [PatentConflict.model_validate(raw) for raw in artifact.conflicts]
-    application = apply_decisions(
-        doc_id=doc_id,
-        measurements=artifact.measurements,
-        candidates=artifact.review_candidates,
-        conflicts=conflicts,
-        decisions=stored,
-        evidence_signature=evidence_signature,
-    )
-    resolved = artifact.model_copy(
-        update={
-            "measurements": application.measurements,
-            "review_candidates": application.candidates,
-            "conflicts": [item.model_dump() for item in application.conflicts],
-        }
-    )
-    return resolved, application.stale
-
-
 def _queue_review_items(
     library_root: Path,
     doc_id: str,
     artifact: PatentFactsArtifact,
-    revision: int,
     *,
     candidates: Sequence[Any] = (),
 ) -> int:
-    """Queue one review item per pending fact (idempotent per item id).
+    """Queue one review item per deterministic finding (idempotent per item id).
 
-    A publication must never re-open a decision a human already made: the item
-    id is derived from the candidate set itself (slot plus the signatures of
-    both readings), so a changed candidate set is a new item, and an unchanged
-    one keeps whatever status it reached. Nothing here writes ``status``.
+    A publication must never re-open a decision a human already made: each item
+    id is derived from the finding itself, so a re-run upserts the same item and
+    a changed finding is a new one, while an unchanged item keeps whatever
+    status it reached. Nothing here writes ``status``.
     """
     review = get_repositories(library_root).review
     queued = 0
-    for candidate in artifact.review_candidates:
-        item_id = str(candidate.get("review_item_id") or "")
-        if not item_id:
-            continue
-        review.insert_review_item(
-            item_id=item_id,
-            kind=PATENT_FACT_REVIEW_KIND,
-            doc_id=doc_id,
-            page=candidate.get("page"),
-            reasons=[str(candidate.get("reason") or "")],
-            context_text=_candidate_context(candidate),
-            payload={
-                "doc_id": doc_id,
-                "slot_id": candidate.get("slot_id"),
-                "revision": revision,
-                "deterministic": candidate.get("deterministic"),
-                "llm": candidate.get("llm"),
-                "conflict": candidate.get("conflict"),
-            },
-        )
-        queued += 1
     queued += _queue_mass_mismatches(review, doc_id, artifact)
     queued += _queue_unbound_readings(
         review, doc_id, artifact, candidates, library_root=library_root
@@ -278,6 +191,10 @@ def _designation_scope(artifact: PatentFactsArtifact) -> dict[str, set[int]]:
     A table reading cites ``化合物11``; the compound is drawn in the example
     section titled ``实施例11：目标化合物11制备``. The section title is the
     document telling us where to look, without guessing a page.
+
+    The section's own text counts too: a reading printed at the end of the
+    document is dozens of pages from the example that prepares its compound,
+    and the section that *mentions* the designation is the one that draws it.
     """
     import re
 
@@ -292,10 +209,12 @@ def _designation_scope(artifact: PatentFactsArtifact) -> dict[str, set[int]]:
         if not isinstance(start, int) or not isinstance(end, int):
             continue
         title = str(section.get("title") or "")
-        for match in re.finditer(
-            r"化合物\s*([0-9]{1,4}[A-Za-z]?(?:-[A-Za-z])?)", title
-        ):
-            scope.setdefault(match.group(1), set()).update(range(start, end + 1))
+        text = str(section.get("raw_text") or "")
+        for source in (title, text):
+            for match in re.finditer(
+                r"化合物\s*([0-9]{1,4}[A-Za-z]?(?:-[A-Za-z])?)", source
+            ):
+                scope.setdefault(match.group(1), set()).update(range(start, end + 1))
     return scope
 
 
@@ -336,7 +255,7 @@ def _queue_unbound_readings(
             loaded = None
         if loaded:
             candidates = list(loaded[0])
-    drawn: list[tuple[set[int], dict[str, str]]] = []
+    drawn: list[tuple[set[int], dict[str, Any]]] = []
     seen: set[str] = set()
     for candidate in candidates:
         detections = list(getattr(candidate, "detections", []) or [])
@@ -350,6 +269,8 @@ def _queue_unbound_readings(
         # Page bases differ across producers; accepting both neighbours keeps the
         # scope right without a page-basis assumption that is easy to get wrong.
         pages = {raw_page - 1, raw_page, raw_page + 1}
+        detection = detections[0]
+        bbox = detection.bbox
         drawn.append(
             (
                 pages,
@@ -357,6 +278,13 @@ def _queue_unbound_readings(
                     "mol_id": smiles,
                     "smiles": smiles,
                     "name": str(getattr(candidate, "name", "") or ""),
+                    # The review item's own ``page`` is 1-based, so the candidate
+                    # carries the same base; the scope set above stays raw.
+                    "page": raw_page + 1,
+                    "bbox": [float(value) for value in bbox] if bbox else None,
+                    "crop_relpath": (
+                        str(detection.image_path) if detection.image_path else None
+                    ),
                 },
             )
         )
@@ -430,24 +358,6 @@ def _queue_unbound_readings(
     return queued
 
 
-def _candidate_context(candidate: Mapping[str, Any]) -> str:
-    """One-line summary of the readings a reviewer has to compare."""
-
-    def _value_text(fields: Any) -> str:
-        if isinstance(fields, Mapping):
-            return str(fields.get("value_text") or "")
-        if isinstance(fields, list) and fields and isinstance(fields[0], Mapping):
-            return str(fields[0].get("value_text") or "")
-        return ""
-
-    deterministic = _value_text(candidate.get("deterministic"))
-    llm = _value_text(candidate.get("llm"))
-    parts = [f"deterministic: {deterministic}"] if deterministic else []
-    if llm:
-        parts.append(f"llm: {llm}")
-    return " | ".join(parts)[:500]
-
-
 def _reading_rows(
     artifact: PatentFactsArtifact, candidates: Sequence[Any]
 ) -> tuple[list[Any], list[Any]]:
@@ -493,8 +403,8 @@ def _derived_rows(
         and candidate.canonical_smiles.strip()
     }
     # A candidate answers to two names: canonical SMILES, which is what gets
-    # persisted, and ``mol_id``, which is what a gap payload and the model's link
-    # carry. Both resolve here, so a link that named the ``mol_id`` is not lost.
+    # persisted, and ``mol_id``, which is what a measurement's structure link
+    # carries. Both resolve here, so a link that named the ``mol_id`` is not lost.
     by_ref: dict[str, Any] = {**candidates_by_smiles}
     for candidate in candidates_by_smiles.values():
         mol_ref = str(getattr(candidate, "mol_id", "") or "").strip()
@@ -516,7 +426,8 @@ def _derived_rows(
             None,
         )
         # The designation's structure, however it was resolved: a declared entry
-        # carries it, and a reading the model bound to one carries it on itself.
+        # carries it, and a reading the association bound to one carries it on
+        # itself (``measurement.mol_id``).
         ref = entry.get("entity_id") if isinstance(entry, dict) else None
         if not (isinstance(ref, str) and ref.strip()):
             ref = measurement.get("mol_id")
@@ -556,8 +467,9 @@ def _measurement_has_activity(measurement: dict[str, Any]) -> bool:
     """Return whether a Patent measurement has a reading and a named owner.
 
     The owner is the entry the reading cites, or the structure it resolved to
-    directly: a reading the model bound to a recognized structure names one too,
-    and both are checked against this document's candidates later.
+    directly: a reading the deterministic association bound to a recognized
+    structure names one too, and both are checked against this document's
+    candidates later.
     """
     owner = measurement.get("compound_entry_id") or measurement.get("mol_id")
     if not isinstance(owner, str) or not owner.strip():

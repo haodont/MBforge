@@ -6,7 +6,6 @@ Replaces the Tauri/Rust shell with a standard web application.
 
 # Tests:
 #   tests/conftest.py
-#   tests/unit/routers/test_markush_routers.py
 #   tests/unit/routers/test_pipeline.py
 #   tests/unit/test_app.py
 #   tests/unit/test_frontend_fallback.py
@@ -357,7 +356,7 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.middleware("http")(_request_path_middleware)
 
     # Register all routers
-    from mbforge.api.http import capabilities, markush, review
+    from mbforge.api.http import capabilities, review
     from mbforge.api.http.api_surface import FastApiSurfaceProvider
     from mbforge.api.http.documents import (
         activity,
@@ -408,7 +407,6 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     app.include_router(resource.router, prefix="/api/v1", tags=["resource"])
     app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
     app.include_router(pdf.router, prefix="/api/v1/pdf", tags=["pdf"])
-    app.include_router(markush.router, prefix="/api/v1/markush", tags=["markush"])
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
     app.include_router(
         capabilities.router, prefix="/api/v1/capabilities", tags=["capabilities"]

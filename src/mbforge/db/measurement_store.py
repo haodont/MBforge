@@ -149,7 +149,7 @@ def replace_document_measurements(
     """Replace one document's readings and attributions in one transaction."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.transaction() as (_kb_conn, conn):
+    with db.transaction() as conn:
         delete_document_measurements(conn, doc_id)
         written = insert_measurements_in_transaction(conn, records)
         insert_attributions_in_transaction(conn, attributions)
@@ -194,7 +194,7 @@ def list_measurements(
         "LIMIT ? OFFSET ?"
     )
     params.extend((query.limit, query.offset))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(sql, params).fetchall()
     return [_row_to_measurement(row) for row in rows]
 
@@ -208,7 +208,7 @@ def list_attributions_for(
         return {}
     db = DatabaseManager.get(str(library_root))
     result: dict[str, list[dict[str, Any]]] = {}
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         for start in range(0, len(ids), 500):
             chunk = ids[start : start + 500]
             placeholders = ",".join("?" for _ in chunk)
@@ -219,6 +219,47 @@ def list_attributions_for(
             ).fetchall()
             for row in rows:
                 result.setdefault(row["measurement_id"], []).append(dict(row))
+    return result
+
+
+def measurements_for_molecules(
+    library_root: str | Path, mol_ids: Sequence[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """Return ``mol_id -> attributed readings`` for a set of structures.
+
+    The molecule-centric inverse of :func:`list_attributions_for`: each reading
+    is joined to the structure links naming one of *mol_ids*, so a SAR series
+    can be assembled without scanning every document reading. Rejected links are
+    excluded; the link's own method/confidence/review_status ride along on each
+    reading as ``attribution_*``. A reading linked to several requested molecules
+    appears under each, and several links to one molecule yield duplicate
+    ``measurement_id`` rows the caller resolves by precedence.
+    """
+    ids = [item for item in mol_ids if item]
+    if not ids:
+        return {}
+    db = DatabaseManager.get(str(library_root))
+    result: dict[str, list[dict[str, Any]]] = {}
+    with db.connection() as conn:
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = conn.execute(
+                "SELECT m.*, a.mol_id AS attributed_mol_id, "
+                "a.method AS attribution_method, "
+                "a.confidence AS attribution_confidence, "
+                "a.review_status AS attribution_review_status, "
+                "a.evidence_id AS attribution_evidence_id "
+                "FROM measurements m "
+                "JOIN measurement_attribution a ON a.measurement_id = m.measurement_id "
+                f"WHERE a.mol_id IN ({placeholders}) AND a.review_status != 'rejected' "
+                "ORDER BY m.page_num, m.table_idx, m.row_idx, m.col_idx, m.measurement_id",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                data = _row_to_measurement(row)
+                mol_id = data.pop("attributed_mol_id")
+                result.setdefault(mol_id, []).append(data)
     return result
 
 
@@ -235,7 +276,7 @@ def dataset_stats(
         if doc_id
         else "WHERE review_status = 'pending'"
     )
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         total = conn.execute(
             f"SELECT COUNT(*) AS c FROM measurements {scope}", params
         ).fetchone()["c"]
@@ -286,7 +327,7 @@ def unattributed_readings(
     db = DatabaseManager.get(str(library_root))
     scope = "WHERE m.doc_id = ?" if doc_id else ""
     params: tuple[Any, ...] = (doc_id,) if doc_id else ()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT m.measurement_id, m.doc_id, m.entry_id, m.reference_key, "
             "a.measurement_id AS attributed_id "
@@ -306,28 +347,32 @@ def bind_attribution(
     doc_id: str,
     evidence_id: str = "",
     method: str = "human",
+    confidence: float | None = None,
 ) -> str:
     """Record one accepted reading -> structure link and return its id.
 
-    This is the human decision path: a review item names the reading and the
-    chosen structure, and the attribution row is written here with the method that
-    produced it, so a human link is never indistinguishable from a rule link.
+    This is the accepted-decision path: a review item names the reading and the
+    chosen structure, and the attribution row is written here with the method
+    that produced it, so a human link is never indistinguishable from a rule
+    link. ``method="agent"`` is the agent's own adjudication, written through
+    the ``assign_attribution`` capability.
     """
     db = DatabaseManager.get(str(library_root))
     db.initialize()
     attribution_id = stable_id("attr", measurement_id, mol_id, method)
-    with db.transaction() as (_kb_conn, conn):
+    with db.transaction() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO measurement_attribution "
             "(attribution_id, measurement_id, mol_id, doc_id, method, "
             " confidence, evidence_id, review_status) "
-            "VALUES (?, ?, ?, ?, ?, NULL, ?, 'accepted')",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'accepted')",
             (
                 attribution_id,
                 measurement_id,
                 mol_id,
                 doc_id,
                 method,
+                confidence,
                 evidence_id or None,
             ),
         )
@@ -352,7 +397,6 @@ def unlabeled_structure_count(library_root: str | Path, doc_id: str) -> int:
         "SELECT COUNT(*) AS c FROM molecules "
         "WHERE source_doc = ? AND TRIM(COALESCE(name, '')) = ''",
         (doc_id,),
-        db="mol",
     )
     return int(rows[0]["c"]) if rows else 0
 

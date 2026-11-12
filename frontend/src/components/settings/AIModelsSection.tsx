@@ -1,4 +1,4 @@
-// AI & recognition section — LLM / VLM / OCR tabs.
+// AI & recognition section — LLM / OCR tabs.
 // All sub-pages share ModelConfigCard: consistent style, all editable.
 
 import { useState } from 'react'
@@ -8,7 +8,7 @@ import ModelConfigCard from './ModelConfigCard'
 import SectionTitle from '@/components/ui/SectionTitle'
 import type { SettingsState } from './types'
 
-type Tab = 'llm' | 'vlm' | 'ocr'
+type Tab = 'llm' | 'ocr'
 
 interface TabConfig {
   key: Tab
@@ -23,7 +23,6 @@ interface Props {
 
 const TABS: TabConfig[] = [
   { key: 'llm', titleKey: 'settings.tabLlm', descKey: 'settings.tabLlmDesc' },
-  { key: 'vlm', titleKey: 'settings.tabVlm', descKey: 'settings.tabVlmDesc' },
   { key: 'ocr', titleKey: 'settings.tabOcr', descKey: 'settings.tabOcrDesc' },
 ]
 

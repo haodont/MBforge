@@ -7,9 +7,9 @@ sibling ``read_patent``, ``read_molecules`` and ``read_visual`` modules.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, get_args
+from typing import Annotated, Any, Literal, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
 
 from mbforge.contracts.measurement import ReviewStatus as MeasurementReviewStatus
 from mbforge.domain.evidence_kind import CATEGORIES
@@ -114,6 +114,42 @@ class GetDocumentMarkdownOutput(BaseModel):
     next_offset: int | None
 
 
+class DocumentReadInput(BaseModel):
+    """One document: its metadata, or a chunk of the assembled Markdown."""
+
+    part: Literal["info", "markdown"] = Field(
+        "info",
+        description=(
+            "`info` returns metadata and which artifacts exist; `markdown` "
+            "returns a body chunk and ignores the paging fields on `info`."
+        ),
+    )
+    doc_id: str = doc_id_field()
+    offset: int = Field(0, ge=0, description="Character offset into document.md.")
+    max_chars: int = Field(
+        20000,
+        ge=1000,
+        le=200000,
+        description="Maximum characters to return in this page.",
+    )
+
+
+class DocumentReadOutput(BaseModel):
+    part: Literal["info", "markdown"]
+    doc_id: str
+    short_id: str
+    title: str | None = None
+    file_name: str | None = None
+    page_count: int | None = None
+    status: str | None = None
+    created_at: str | None = None
+    has_markdown: bool | None = None
+    has_patent_facts: bool | None = None
+    content: str | None = None
+    offset: int | None = None
+    next_offset: int | None = None
+
+
 class ListEvidenceInput(BaseModel):
     doc_id: str = doc_id_field()
     page: int | None = Field(
@@ -160,6 +196,12 @@ class GetRunInput(BaseModel):
 class RunNode(BaseModel):
     stage: str
     status: str
+    updated_at: str | None = Field(
+        None, description="Last queue-row update; compare it to detect a stalled stage."
+    )
+    error: str | None = Field(
+        None, description="Failure message when this stage failed, truncated."
+    )
 
 
 class GetRunOutput(BaseModel):
@@ -168,6 +210,126 @@ class GetRunOutput(BaseModel):
     short_id: str | None = None
     status: str
     nodes: list[RunNode]
+
+
+class ListRunsInput(BaseModel):
+    status: Literal["active", "all"] = Field(
+        "active",
+        description=(
+            "`active` returns runs that have not reached a terminal outcome; "
+            "`all` returns recent runs including finished ones."
+        ),
+    )
+    doc_id: str = Field(
+        "",
+        max_length=128,
+        description=f"{DOC_ID_DESCRIPTION} Empty means every document.",
+    )
+    limit: int = Field(20, ge=1, le=50, description="Maximum runs to return.")
+
+
+class RunSummary(BaseModel):
+    run_id: str
+    doc_id: str | None
+    short_id: str | None = None
+    status: str
+    created_at: str | None = None
+    updated_at: str | None = None
+    nodes: list[RunNode]
+
+
+class ListRunsOutput(BaseModel):
+    items: list[RunSummary]
+
+
+class RunsGetAction(BaseModel):
+    action: Literal["get"]
+    run_id: str = Field(
+        ..., min_length=1, max_length=128, description="Pipeline run id."
+    )
+
+
+class RunsListAction(BaseModel):
+    action: Literal["list"]
+    status: Literal["active", "all"] = Field(
+        "active",
+        description=(
+            "`active` returns runs that have not reached a terminal outcome; "
+            "`all` returns recent runs including finished ones."
+        ),
+    )
+    doc_id: str = Field(
+        "",
+        max_length=128,
+        description=f"{DOC_ID_DESCRIPTION} Empty means every document.",
+    )
+    limit: int = Field(20, ge=1, le=50, description="Maximum runs to return.")
+
+
+RunsAction = Annotated[RunsGetAction | RunsListAction, Field(discriminator="action")]
+
+
+class RunsInput(RootModel[RunsAction]):
+    """One tool, two actions, each declaring its own parameters.
+
+    `get` needs a ``run_id`` and `list` does not, so the discriminator makes a
+    missing id a schema error instead of a runtime guess. The published schema
+    keeps ``type: object`` at its root because agent tool parameters require an
+    object root.
+    """
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, schema: Any, handler: Any) -> Any:
+        json_schema = handler(schema)
+        json_schema["type"] = "object"
+        return json_schema
+
+
+class RunsOutput(BaseModel):
+    action: Literal["get", "list"]
+    run_id: str | None = None
+    doc_id: str | None = None
+    short_id: str | None = None
+    status: str | None = None
+    nodes: list[RunNode] = Field(default_factory=list)
+    items: list[RunSummary] = Field(default_factory=list)
+
+
+class GetWorkerStatusInput(BaseModel):
+    """No parameters: the worker status is per active library."""
+
+
+class GetWorkerStatusOutput(BaseModel):
+    status: str = Field(..., description="`online` when a worker task is registered.")
+    locked: bool = Field(
+        ..., description="True when another process holds the library queue lock."
+    )
+    active: int = Field(..., description="Queue rows currently processing.")
+    backlog: int = Field(..., description="Queue rows waiting to be claimed.")
+    total: int = Field(..., description="All queue rows in the library.")
+    by_status: dict[str, int]
+    model_gate: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Why claiming is paused when required model weights are missing; "
+            "null when the gate is ready or cannot be probed."
+        ),
+    )
+
+
+#: Failure text is a preview; the full message stays in ``ingest_logs``.
+_ERROR_PREVIEW_CHARS = 600
+
+
+def _run_node(row: dict[str, Any]) -> RunNode:
+    error = row.get("error")
+    updated_at = row.get("updated_at")
+    return RunNode(
+        stage=str(row.get("stage") or ""),
+        status=str(row.get("status") or ""),
+        updated_at=str(updated_at) if updated_at else None,
+        error=str(error)[:_ERROR_PREVIEW_CHARS] if error else None,
+    )
 
 
 class SearchEvidenceInput(BaseModel):
@@ -292,6 +454,30 @@ async def get_document_markdown(
     )
 
 
+async def document_read(
+    context: CapabilityContext, request: DocumentReadInput
+) -> CapabilityResult:
+    """Dispatch the two document reads through one agent-facing tool."""
+    if request.part == "markdown":
+        result = await get_document_markdown(
+            context,
+            GetDocumentMarkdownInput(
+                doc_id=request.doc_id,
+                offset=request.offset,
+                max_chars=request.max_chars,
+            ),
+        )
+        return CapabilityResult(
+            data=DocumentReadOutput(part="markdown", **result.data.model_dump()),
+            truncated=result.truncated,
+            next_offset=result.next_offset,
+        )
+    result = await get_document(context, GetDocumentInput(doc_id=request.doc_id))
+    return CapabilityResult(
+        data=DocumentReadOutput(part="info", **result.data.model_dump())
+    )
+
+
 def _require_known_kind(kind: str) -> None:
     """Reject a ``kind`` no producer mints instead of answering with an empty page."""
     vocabulary = kind_vocab()
@@ -350,13 +536,71 @@ async def get_run(context: CapabilityContext, request: GetRunInput) -> Capabilit
             doc_id=doc_id,
             short_id=short_doc_id(str(doc_id)) if doc_id else None,
             status=status or "unknown",
-            nodes=[
-                RunNode(
-                    stage=str(row.get("stage") or ""),
-                    status=str(row.get("status") or ""),
+            nodes=[_run_node(row) for row in rows],
+        )
+    )
+
+
+async def list_runs(
+    context: CapabilityContext, request: ListRunsInput
+) -> CapabilityResult:
+    rows = await ingest.list_runs(
+        context.library_root,
+        doc_id=request.doc_id,
+        active_only=request.status == "active",
+        limit=request.limit,
+    )
+    return CapabilityResult(
+        data=ListRunsOutput(
+            items=[
+                RunSummary(
+                    run_id=str(row["run_id"]),
+                    doc_id=row.get("doc_id"),
+                    short_id=(
+                        short_doc_id(str(row["doc_id"])) if row.get("doc_id") else None
+                    ),
+                    status=str(row.get("status") or "unknown"),
+                    created_at=row.get("created_at"),
+                    updated_at=row.get("updated_at"),
+                    nodes=[_run_node(node) for node in row.get("nodes") or []],
                 )
                 for row in rows
-            ],
+            ]
+        )
+    )
+
+
+async def runs(context: CapabilityContext, request: RunsInput) -> CapabilityResult:
+    """Dispatch a single-run read and the run list through one tool."""
+    action = request.root
+    if isinstance(action, RunsGetAction):
+        result = await get_run(context, GetRunInput(run_id=action.run_id))
+        return CapabilityResult(
+            data=RunsOutput(action="get", **result.data.model_dump())
+        )
+    result = await list_runs(
+        context,
+        ListRunsInput(status=action.status, doc_id=action.doc_id, limit=action.limit),
+    )
+    return CapabilityResult(data=RunsOutput(action="list", **result.data.model_dump()))
+
+
+async def get_worker_status(
+    context: CapabilityContext, _request: GetWorkerStatusInput
+) -> CapabilityResult:
+    payload = await ingest.worker_health_payload(context.library_root)
+    return CapabilityResult(
+        data=GetWorkerStatusOutput(
+            status=str(payload["status"]),
+            locked=bool(payload["locked"]),
+            active=int(payload["active"]),
+            backlog=int(payload["backlog"]),
+            total=int(payload["total"]),
+            by_status={
+                str(key): int(value)
+                for key, value in (payload.get("by_status") or {}).items()
+            },
+            model_gate=payload.get("model_gate"),
         )
     )
 
@@ -434,24 +678,17 @@ register(
 
 register(
     Capability(
-        name="get_document",
-        description="Return one document's metadata and whether Markdown/Patent facts exist.",
-        input_model=GetDocumentInput,
-        output_model=GetDocumentOutput,
+        name="document_read",
+        description=(
+            "Read one document: part=info returns metadata and whether "
+            "Markdown/Patent facts exist; part=markdown returns a chunk of the "
+            "assembled Markdown (narrative text only; use query_activities for "
+            "structured readings)."
+        ),
+        input_model=DocumentReadInput,
+        output_model=DocumentReadOutput,
         mutating=False,
-        handler=get_document,
-    )
-)
-
-
-register(
-    Capability(
-        name="get_document_markdown",
-        description="Read a chunk of the assembled document Markdown. Narrative text only; use query_activities for structured activity readings.",
-        input_model=GetDocumentMarkdownInput,
-        output_model=GetDocumentMarkdownOutput,
-        mutating=False,
-        handler=get_document_markdown,
+        handler=document_read,
     )
 )
 
@@ -501,11 +738,34 @@ register(
 
 register(
     Capability(
-        name="get_run",
-        description="Return one pipeline run's aggregated status and stage nodes.",
-        input_model=GetRunInput,
-        output_model=GetRunOutput,
+        name="runs",
+        description=(
+            "Read pipeline runs. action=get returns one run's aggregated status "
+            "and stage nodes (each with updated_at and, after a failure, the "
+            "stage error); action=list returns runs newest first, defaulting to "
+            "pending/processing/blocked, so call it after resuming a session or "
+            "when asked what is running."
+        ),
+        input_model=RunsInput,
+        output_model=RunsOutput,
         mutating=False,
-        handler=get_run,
+        handler=runs,
+    )
+)
+
+
+register(
+    Capability(
+        name="get_worker_status",
+        description=(
+            "Return queue health: worker online/offline, library lock state, "
+            "active/backlog counts, and the model gate. Call it when a run "
+            "stays pending to report whether the worker is absent, another "
+            "process owns the library, or required model weights are missing."
+        ),
+        input_model=GetWorkerStatusInput,
+        output_model=GetWorkerStatusOutput,
+        mutating=False,
+        handler=get_worker_status,
     )
 )

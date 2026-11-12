@@ -64,7 +64,7 @@ test('improvement approval gates storage and only approved items complete', asyn
   })
   assert.equal(blocked.approved, true)
   assert.equal(blocked.executable, false)
-  assert.match(blocked.message, /switch to dev mode/)
+  assert.match(blocked.message, /request_dev_mode/)
 
   const listed = await listImprovements()
   assert.equal(listed.path, path)

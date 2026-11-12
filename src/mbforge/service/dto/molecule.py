@@ -10,12 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from mbforge.contracts.molecule import MoleculeListRequest  # noqa: F401
-
 # ---- Request models ----
-
-# ``MoleculeListRequest`` lives in the neutral contracts layer because the
-# repository port references it; re-exported above for API/use-case callers.
 
 
 class MoleculeSearchRequest(BaseModel):

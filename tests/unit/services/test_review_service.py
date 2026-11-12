@@ -1,9 +1,8 @@
 """Tests for the unified review queue.
 
-Covers ``service.use_cases.review_queue.decide`` (native vs Markush entity
-lifecycles, ambiguous coreference, structure corrections) and the
-``repositories.review`` contract (queue listing/stats, re-import stability,
-``clear_all``).
+Covers ``service.use_cases.review_queue.decide`` (native review lifecycle,
+ambiguous coreference, structure corrections) and the ``repositories.review``
+contract (queue listing/stats, re-import stability, ``clear_all``).
 """
 
 from __future__ import annotations
@@ -13,16 +12,15 @@ from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.review_queue import decide
 
 
-def test_unified_queue_maps_kinds_and_reimport_preserves_human_decision(
+def test_queue_lists_native_items_and_reimport_preserves_human_decision(
     tmp_path,
 ) -> None:
-    """The queue projects native and Markush rows into one listing, and a
-    re-import of a resolved item refreshes its fields without losing the
-    reviewer's decision."""
+    """The queue projects review_items rows, and a re-import of a resolved
+    item refreshes its fields without losing the reviewer's decision."""
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
     repo = get_repositories(str(tmp_path)).review
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         repo.insert_review_item(
             item_id="low-1",
             kind="low_conf_molecule",
@@ -34,20 +32,11 @@ def test_unified_queue_maps_kinds_and_reimport_preserves_human_decision(
             reasons=["below_threshold"],
             payload={"mol_id": "m1"},
         )
-        conn.execute(
-            """
-            INSERT INTO markush_review_candidates
-                (candidate_id, source_key, doc_id, predicted_role, smiles, page,
-                 reasons, properties)
-            VALUES ('mark-1', 'source-1', 'doc-markush', 'review_required',
-                    '*CCO', 0, '["markush_context"]', '{"x": 1}')
-            """
-        )
         items, total = repo.list_queue(page=1, page_size=10)
-        assert total == 2
-        assert {item["kind"] for item in items} == {"low_conf_molecule", "markush_link"}
-        assert next(item for item in items if item["id"] == "mark-1")["page"] == 1
-        assert repo.stats()["pending"] == 2
+        assert total == 1
+        assert {item["kind"] for item in items} == {"low_conf_molecule"}
+        assert items[0]["page"] == 2
+        assert repo.stats()["pending"] == 1
 
         decide(repo, kind="low_conf_molecule", item_id="low-1", action="reject")
 
@@ -66,15 +55,15 @@ def test_unified_queue_maps_kinds_and_reimport_preserves_human_decision(
         assert tuple(row) == ("rejected", "CCN", 0.3)
 
 
-def test_decide_routes_native_and_markush_entities_to_their_lifecycles(
+def test_decide_flips_native_review_item_status_and_writes_audit(
     tmp_path,
 ) -> None:
-    """Native review items flip their own status and audit row; Markush link
-    decisions go through the candidate state machine."""
+    """A native review decision flips the item's own status and appends an
+    audit row keyed on the review item."""
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
     repo = get_repositories(str(tmp_path)).review
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         repo.insert_review_item(
             item_id="activity-1",
             kind="smiles_correction",
@@ -99,30 +88,6 @@ def test_decide_routes_native_and_markush_entities_to_their_lifecycles(
         ).fetchone()
         assert tuple(audit) == ("review_item", "reject", "not enough context")
 
-        conn.execute(
-            """
-            INSERT INTO markush_review_candidates
-                (candidate_id, source_key, doc_id, predicted_role, smiles)
-            VALUES ('mark-1', 'source-1', 'doc-1', 'review_required', '*CCO')
-            """
-        )
-
-        rejected = decide(
-            repo,
-            kind="markush_link",
-            item_id="mark-1",
-            action="reject",
-        )
-        reopened = decide(
-            repo,
-            kind="markush_link",
-            item_id="mark-1",
-            action="reopen",
-        )
-
-    assert rejected["new_state"] == "rejected"
-    assert reopened["new_state"] == "pending"
-
 
 def test_ambiguous_coref_confirm_adopts_choice_and_reject_only_resolves(
     tmp_path,
@@ -132,7 +97,7 @@ def test_ambiguous_coref_confirm_adopts_choice_and_reject_only_resolves(
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
     repo = get_repositories(str(tmp_path)).review
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         for mol_id in ("mol-1", "mol-2", "mol-3"):
             conn.execute(
                 "INSERT INTO molecules (mol_id, smiles, name) VALUES (?, 'CCO', '')",
@@ -205,13 +170,13 @@ def test_ambiguous_coref_confirm_adopts_choice_and_reject_only_resolves(
 
 
 def test_clear_all_empties_the_queue_and_keeps_promoted_artifacts(tmp_path) -> None:
-    """Clear-all removes every queue row (any status, superseded included)
-    and the audit rows keyed on those entities, leaving no orphans — but it
-    must not delete confirmed molecules/scaffolds."""
+    """Clear-all removes every queue row (any status) and the audit rows keyed
+    on those review items, leaving no orphans — but it must not delete
+    confirmed molecules."""
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
     repo = get_repositories(str(tmp_path)).review
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         repo.insert_review_item(
             item_id="pending-1",
             kind="low_conf_molecule",
@@ -228,57 +193,24 @@ def test_clear_all_empties_the_queue_and_keeps_promoted_artifacts(tmp_path) -> N
             "WHERE item_id = 'resolved-1'"
         )
         conn.execute(
-            """
-            INSERT INTO markush_review_candidates
-                (candidate_id, source_key, doc_id, predicted_role, smiles,
-                 review_status)
-            VALUES ('mark-active', 'src-1', 'doc-1', 'review_required', '*CCO',
-                    'confirmed')
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO markush_review_candidates
-                (candidate_id, source_key, doc_id, predicted_role, smiles,
-                 review_status, superseded_at)
-            VALUES ('mark-superseded', 'src-2', 'doc-1', 'review_required', '*CCN',
-                    'rejected', datetime('now'))
-            """
-        )
-        conn.execute(
             "INSERT INTO markush_decisions "
             "(decision_id, entity_type, entity_id, action, snapshot) "
             "VALUES ('dec-native', 'review_item', 'pending-1', 'confirm', '{}')"
         )
-        conn.execute(
-            "INSERT INTO markush_decisions "
-            "(decision_id, entity_type, entity_id, action, snapshot) "
-            "VALUES ('dec-mark', 'review_candidate', 'mark-active', 'approve', '{}')"
-        )
 
         result = repo.clear_all()
 
-        assert result == {"deleted_items": 2, "deleted_candidates": 2}
+        assert result == {"deleted_items": 2}
         assert conn.execute("SELECT COUNT(*) FROM review_items").fetchone()[0] == 0
         assert (
-            conn.execute("SELECT COUNT(*) FROM markush_review_candidates").fetchone()[0]
-            == 0
-        )
-        assert (
             conn.execute(
-                "SELECT COUNT(*) FROM markush_decisions "
-                "WHERE entity_id IN ('pending-1', 'mark-active')"
+                "SELECT COUNT(*) FROM markush_decisions WHERE entity_id = 'pending-1'"
             ).fetchone()[0]
             == 0
         )
 
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name) VALUES ('mol-1', 'CCO', 'x')"
-        )
-        conn.execute(
-            "INSERT INTO markush_review_candidates "
-            "(candidate_id, source_key, doc_id, predicted_role, smiles) "
-            "VALUES ('mark-1', 'src-1', 'doc-1', 'scaffold', '*CCO')"
         )
         repo.clear_all()
 
@@ -297,7 +229,7 @@ def test_structure_correction_confirm_rewrites_and_reject_leaves_structure(
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
     repo = get_repositories(str(tmp_path)).review
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, canonical_smiles, name) "
             "VALUES ('mol-fix', 'CCO', 'CCO', '77')"

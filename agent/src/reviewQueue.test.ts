@@ -73,7 +73,10 @@ test('a failed review remains visible for inspection', async (t) => {
   assert.equal(listed[0]?.error, 'reviewer timed out')
   assert.equal(await claimNextReview(), undefined)
 
-  assert.equal(await retryReviewJob(claimed?.id ?? ''), true)
+  const retriedByGoal = await retryReviewJob(claimed?.goalId ?? '')
+  assert.equal(retriedByGoal?.id, claimed?.id)
+  assert.equal(retriedByGoal?.status, 'queued')
+  assert.equal(await retryReviewJob('missing-review'), undefined)
   const retried = await listReviewJobs()
   assert.equal(retried[0]?.status, 'queued')
   assert.equal(retried[0]?.attempts, 0)

@@ -25,7 +25,6 @@ export {
   useBuildInfo,
   useExportSettings,
 } from './useSettings'
-export { useSidecarStatus } from './useSidecar'
 export { useCommonDirs } from './useCommonDirs'
 export { useDocsIndex, useDocsPage } from './useDocs'
 export {

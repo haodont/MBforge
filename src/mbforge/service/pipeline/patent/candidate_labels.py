@@ -48,6 +48,15 @@ def candidate_label_keys(candidate: Any) -> set[str]:
     if isinstance(name, str) and name.strip():
         values.append(name)
 
+    # ``labels`` holds every designation this molecule's drawings printed. A
+    # drawing whose printed number never won the name (the same compound is
+    # printed twice and the label stayed with neither copy) is still a drawing
+    # of that compound, and reading this channel is what makes the structure
+    # answer to its own designation.
+    labels = getattr(candidate, "labels", None)
+    if isinstance(labels, (list, tuple)):
+        values.extend(item for item in labels if isinstance(item, str))
+
     keys: set[str] = set()
     for value in values:
         normalized = normalize_coref_label(value)

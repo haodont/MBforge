@@ -29,7 +29,6 @@ class MoldetConfig(BaseModel):
 
     device: str = "auto"
     molparser_dir: str = ""
-    auto_moldet_on_import: bool = True
     #: Page render DPI for the molecule pass. 200 is the measured optimum, and the
     #: measurement is a warning rather than a tuning knob: raising it to 300 read
     #: compound numbers for 32% of boxes instead of 20%, but produced 31 labels
@@ -96,18 +95,6 @@ class LayoutConfig(BaseModel):
     #: several molecules as a container. Without it the layout path emits
     #: geometry only and molecule recognition stays the molecule pass' job.
     cross_model: bool = True
-    #: Table recognizer backend id (reserved for backend switching).
-    table_recognizer: str = "slanet"
-    #: Mask MolDet molecule boxes inside a table crop before its cell text is
-    #: recognized, and write a ``[MOL:n]`` placeholder into the cell that holds
-    #: the drawing. A structure drawn in a table column otherwise leaks its atom
-    #: labels and bond glyphs into the cell text (measured on the dev corpus: up
-    #: to 260 chemistry-looking cells in one document). The placeholder keeps the
-    #: molecule's row/column position and is replaced by the printed label the
-    #: molecule pass reads from the crop. Off by default: it changes table
-    #: evidence text, so it stays opt-in until the corpus review records the
-    #: comparison (see TODO/INDEX.md).
-    mask_table_molecules: bool = False
     max_pages_per_doc: int | None = None
 
 
@@ -130,38 +117,6 @@ class IngestConfig(BaseModel):
     )
 
 
-class PdfParseConfig(BaseModel):
-    """PDF text parsing / chunking settings."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
-
-
-class VLMConfig(BaseModel):
-    """Visual LLM settings (reserved for future visual pipeline use)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    provider: str = "openai_compatible"
-    model: str = ""
-    api_key: str = ""
-    base_url: str = ""
-
-
-class ModelServerConfig(BaseModel):
-    """Local model server settings (reserved for future model-server process)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    host: str = "127.0.0.1"
-    port: int = 18792
-    auto_start: bool = False
-    startup_timeout: int = 30
-    health_check_interval: int = 5
-
-
 class ProcessConfig(BaseModel):
     """Process governance and executor settings."""
 
@@ -182,12 +137,9 @@ class AppConfig(BaseModel):
     model_cache_dir: str = ""
     theme: str = "dark"
     language: str = "zh"
-    vlm: VLMConfig = Field(default_factory=VLMConfig)
-    model_server: ModelServerConfig = Field(default_factory=ModelServerConfig)
     library_root: str | None = Field(
         default=None, description="Unified library data directory"
     )
-    pdf_parse: PdfParseConfig = Field(default_factory=PdfParseConfig)
     moldet: MoldetConfig = Field(default_factory=MoldetConfig)
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)

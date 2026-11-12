@@ -1,4 +1,4 @@
-// PDF parse section — text chunking.
+// PDF processing section — MoldDet detection and ingest parameters.
 
 import { useTranslation } from 'react-i18next'
 import SettingSection, { SettingGroup } from '@/components/ui/SettingSection'
@@ -13,33 +13,7 @@ export default function PdfParseSection({ settings, setSettings }: Props) {
   const { t } = useTranslation()
   return (
     <SettingSection>
-      <SettingGroup title={t('settings.pdfParse')}>
-        <NumberField
-          label={t('settings.pdfChunkSize')}
-          description={t('settings.pdfChunkSizeDesc')}
-          value={settings.pdf_chunk_size}
-          onChange={v => setSettings(s => ({ ...s, pdf_chunk_size: v }))}
-          min={128}
-          max={4096}
-          step={64}
-        />
-        <NumberField
-          label={t('settings.pdfChunkOverlap')}
-          description={t('settings.pdfChunkOverlapDesc')}
-          value={settings.pdf_chunk_overlap}
-          onChange={v => setSettings(s => ({ ...s, pdf_chunk_overlap: v }))}
-          min={0}
-          max={512}
-          step={16}
-        />
-      </SettingGroup>
       <SettingGroup title={t('settings.moldet')}>
-        <ToggleField
-          label={t('settings.autoMoldetOnImport')}
-          description={t('settings.autoMoldetOnImportDesc')}
-          value={settings.auto_moldet_on_import}
-          onChange={v => setSettings(s => ({ ...s, auto_moldet_on_import: v }))}
-        />
         <NumberField
           label={t('settings.moldetBatchSize')}
           description={t('settings.moldetBatchSizeDesc')}

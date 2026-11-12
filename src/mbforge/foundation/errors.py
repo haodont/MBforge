@@ -77,8 +77,3 @@ class PathTraversalError(MBForgeError):
 class ConflictError(MBForgeError):
     status_code = 409
     error_code = "conflict"
-
-
-class ResourceNotAvailableError(MBForgeError):
-    status_code = 503
-    error_code = "resource_not_available"

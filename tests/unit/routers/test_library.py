@@ -139,7 +139,7 @@ def test_library_import_registers_and_enqueues_processing_run(
 
     # One DAG node per stage, all owned by the run reported to the caller.
     db = DatabaseManager.get(str(tmp_library))
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT doc_id, run_id, status FROM ingest_queue WHERE doc_id = ?",
             (doc_id,),
@@ -165,7 +165,7 @@ def test_library_import_respects_disabled_auto_enqueue(
     assert body["run_id"] is None
 
     db = DatabaseManager.get(str(tmp_library))
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         count = conn.execute(
             "SELECT COUNT(*) FROM ingest_queue WHERE doc_id = ?",
             (body["document"]["doc_id"],),

@@ -101,7 +101,7 @@ def test_documents_patent_analysis_queues_patent_only_run(
     from mbforge.db.sqlite.database import DatabaseManager
 
     db = DatabaseManager.get(str(tmp_library))
-    with db.kb_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "UPDATE ingest_queue SET status = 'done' WHERE doc_id = ?", (doc_id,)
         )

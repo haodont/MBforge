@@ -65,6 +65,7 @@ test('custom endpoint saves provider metadata separately from the key and stays 
       modelName: 'Acme Chat',
       contextWindow: 200_000,
       maxTokens: 16_384,
+      reasoning: true,
       apiKey: 'sk-custom',
     },
     agentDir,
@@ -91,14 +92,16 @@ test('custom endpoint saves provider metadata separately from the key and stays 
         name: string
         contextWindow: number
         maxTokens: number
+        reasoning?: boolean
       }>
     ).map((model) => [
       model.id,
       model.name,
       model.contextWindow,
       model.maxTokens,
+      model.reasoning,
     ]),
-    [['acme-chat', 'Acme Chat', 200_000, 16_384]],
+    [['acme-chat', 'Acme Chat', 200_000, 16_384, true]],
   )
   assert.equal(auth.existing.key, 'existing-key')
   assert.deepEqual(auth.custom, { type: 'api_key', key: 'sk-custom' })
@@ -110,6 +113,7 @@ test('custom endpoint saves provider metadata separately from the key and stays 
   assert.equal(current.modelName, 'Acme Chat')
   assert.equal(current.contextWindow, 200_000)
   assert.equal(current.maxTokens, 16_384)
+  assert.equal(current.reasoning, true)
   assert.equal(current.hasKey, true)
 
   saveCustomEndpoint(
@@ -125,11 +129,12 @@ test('custom endpoint saves provider metadata separately from the key and stays 
   const updated = JSON.parse(readFileSync(modelsPath, 'utf8')) as {
     providers: Record<
       string,
-      { models: Array<{ contextWindow: number; maxTokens: number }> }
+      { models: Array<{ contextWindow: number; maxTokens: number; reasoning?: boolean }> }
     >
   }
   assert.equal(updated.providers.custom.models[0].contextWindow, 256_000)
   assert.equal(updated.providers.custom.models[0].maxTokens, 32_768)
+  assert.equal(updated.providers.custom.models[0].reasoning, true)
   const kept = JSON.parse(readFileSync(authPath, 'utf8')) as {
     custom: { type: string; key: string }
   }
@@ -159,6 +164,7 @@ test('custom endpoint saves provider metadata separately from the key and stays 
   assert.equal(runtime.getError(), undefined)
   const model = runtime.getModel(CUSTOM_PROVIDER_ID, 'acme-chat')
   assert.ok(model)
+  assert.equal(model.reasoning, true)
   const resolved = await runtime.getAuth(model)
   assert.equal(resolved?.auth.apiKey, 'sk-custom')
 })
@@ -182,11 +188,13 @@ test('model discovery reads /v1/models, carries auth, and extracts context limit
             id: 'acme-small',
             context_window: 32_000,
             max_output_tokens: 4_096,
+            capabilities: { reasoning: true },
           },
           {
             id: 'acme-large',
             context_length: 200_000,
             max_completion_tokens: 16_384,
+            supported_parameters: ['temperature', 'reasoning'],
           },
         ],
       }),
@@ -213,8 +221,8 @@ test('model discovery reads /v1/models, carries auth, and extracts context limit
   assert.deepEqual(requested, ['/models', '/v1/models'])
   assert.equal(authorization, 'Bearer sk-test')
   assert.deepEqual(models, [
-    { id: 'acme-small', contextWindow: 32_000, maxTokens: 4_096 },
-    { id: 'acme-large', contextWindow: 200_000, maxTokens: 16_384 },
+    { id: 'acme-small', contextWindow: 32_000, maxTokens: 4_096, reasoning: true },
+    { id: 'acme-large', contextWindow: 200_000, maxTokens: 16_384, reasoning: true },
   ])
 })
 
@@ -242,7 +250,11 @@ test('model discovery fills missing limits from /v1/models/{model}', async (t) =
     if (url === '/v1/models/acme-small') {
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(
-        JSON.stringify({ context_length: 200_000, max_tokens: 16_384 }),
+        JSON.stringify({
+          context_length: 200_000,
+          max_tokens: 16_384,
+          supports_reasoning: true,
+        }),
       )
       return
     }
@@ -250,7 +262,11 @@ test('model discovery fills missing limits from /v1/models/{model}', async (t) =
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(
         JSON.stringify({
-          data: { context_window: 128_000, max_completion_tokens: 8_192 },
+          data: {
+            context_window: 128_000,
+            max_completion_tokens: 8_192,
+            capabilities: ['completion', 'thinking'],
+          },
         }),
       )
       return
@@ -287,8 +303,8 @@ test('model discovery fills missing limits from /v1/models/{model}', async (t) =
   )
   assert.ok(requests.every((request) => request.authorization === 'Bearer sk-test'))
   assert.deepEqual(models, [
-    { id: 'acme-small', contextWindow: 200_000, maxTokens: 16_384 },
-    { id: 'acme-large', contextWindow: 128_000, maxTokens: 8_192 },
+    { id: 'acme-small', contextWindow: 200_000, maxTokens: 16_384, reasoning: true },
+    { id: 'acme-large', contextWindow: 128_000, maxTokens: 8_192, reasoning: true },
     { id: 'acme-missing' },
   ])
 })

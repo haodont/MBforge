@@ -75,7 +75,7 @@ def persist_source_evidence(
     items = list(evidence)
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    connection = nullcontext(conn) if conn is not None else db.mol_conn()
+    connection = nullcontext(conn) if conn is not None else db.connection()
     count = 0
     refreshed = 0
     with connection as active_conn:
@@ -193,7 +193,7 @@ def get_source_evidence(
 ) -> SourceEvidence | None:
     """Return one canonical evidence row, or ``None`` when it is absent."""
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             f"SELECT {_COLUMNS} FROM source_evidence WHERE evidence_id = ?",
             (evidence_id,),
@@ -227,7 +227,7 @@ def list_source_evidence(
         query += " LIMIT ? OFFSET ?"
         params.extend([limit, offset])
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(query, params).fetchall()
     return [_row_to_evidence(row) for row in rows]
 
@@ -248,7 +248,7 @@ def search_source_evidence(
         clauses.append("e.doc_id = ?")
         params.append(doc_id)
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             "SELECT e.evidence_id, e.doc_id, e.page, e.kind, d.title, d.file_name, "
             "substr(e.raw_text, max(1, instr(lower(e.raw_text), ?) - 200), 2000) AS snippet, "
@@ -270,7 +270,7 @@ def source_evidence_at(
     """Return evidence rows whose bbox intersects *bbox* on *page*."""
     x0, y0, x1, y1 = bbox
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         rows = conn.execute(
             f"SELECT {_COLUMNS} FROM source_evidence "
             "WHERE doc_id = ? AND page = ? "
@@ -288,7 +288,7 @@ def molecule_metadata(
     """Return ``(kind, raw_text)`` for an evidence row, or ``None`` if absent."""
     db = DatabaseManager.get(str(library_root))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         row = conn.execute(
             "SELECT kind, raw_text FROM source_evidence "
             "WHERE evidence_id = ? AND doc_id = ?",
@@ -304,7 +304,7 @@ def update_molecule_raw_text(
 ) -> int:
     """Update a molecule evidence row's payload; return the affected row count."""
     db = DatabaseManager.get(str(library_root))
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         cursor = conn.execute(
             "UPDATE source_evidence SET raw_text = ? "
             "WHERE evidence_id = ? AND doc_id = ? AND kind = 'molecule'",

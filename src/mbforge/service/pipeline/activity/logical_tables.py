@@ -72,13 +72,6 @@ class LogicalTable:
     def first(self) -> TableFragment:
         return self.fragments[0]
 
-    @property
-    def header_fragment(self) -> TableFragment | None:
-        for fragment in self.fragments:
-            if fragment.has_header:
-                return fragment
-        return None
-
 
 def _x_aligned(
     previous: TableFragment, current: TableFragment, tolerance: float

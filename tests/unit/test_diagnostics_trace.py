@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from mbforge.foundation.logger import (
-    JsonFormatter,
+    _record_to_diagnostic,
     reset_trace,
     set_trace,
 )
@@ -36,31 +36,27 @@ def _log_record(
     )
 
 
-def test_json_formatter_emits_single_line_trace_fields_and_restores_context() -> None:
-    """Rendered lines carry the structured schema + trace correlation, and
-    ``reset_trace`` restores the previous (empty) correlation."""
-    formatter = JsonFormatter()
+def test_trace_correlation_flows_into_diagnostic_records() -> None:
+    """Diagnostic records carry the active trace doc_id, and ``reset_trace``
+    restores the previous (empty) correlation."""
     token = set_trace(doc_id="doc-42")
     try:
-        rendered = formatter.format(_log_record())
-        assert json.loads(rendered)["doc_id"] == "doc-42"
+        rec = _record_to_diagnostic(_log_record())
+        assert rec["doc_id"] == "doc-42"
     finally:
         reset_trace(token)
 
-    # Single-line JSON must carry the structured schema + trace correlation.
-    payload = json.loads(rendered)
-    assert payload["doc_id"] == "doc-42"
-    assert payload["level"] == "ERROR"
-    assert payload["logger"] == "mbforge.test.trace"
-    assert payload["message"] == "boom"
+    assert rec["level"] == "ERROR"
+    assert rec["logger"] == "mbforge.test.trace"
+    assert rec["message"] == "boom"
 
     # A second trace is visible while set, and gone after reset.
     token = set_trace(doc_id="doc-1")
     try:
-        assert json.loads(formatter.format(_log_record()))["doc_id"] == "doc-1"
+        assert _record_to_diagnostic(_log_record())["doc_id"] == "doc-1"
     finally:
         reset_trace(token)
-    assert json.loads(formatter.format(_log_record()))["doc_id"] is None
+    assert _record_to_diagnostic(_log_record())["doc_id"] is None
 
 
 def test_push_diagnostic_preserves_trace_fields(tmp_path: Path) -> None:

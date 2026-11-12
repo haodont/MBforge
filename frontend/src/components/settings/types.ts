@@ -25,34 +25,16 @@ export interface SettingsState {
   /** Advanced: language passed to provider (default 'en'). */
   llm_language: string
 
-  // —— VLM ——
-  vlm_provider: string
-  vlm_base_url: string
-  vlm_api_key: string
-  vlm_model: string
-
   // —— Local layout producer (text + regions) ——
   /** Detector confidence threshold for layout regions. */
   layout_conf_threshold: number
   /** Run MolDet on the same render so a figure region can be typed as one molecule. */
   layout_cross_model: boolean
 
-  // —— Model Service ——
-  server_host: string
-  server_port: number
-  server_auto_start: boolean
-  server_startup_timeout: number
-  server_health_check_interval: number
-
   // —— Models ——
   model_cache_dir: string
 
-  // —— PDF parsing ——
-  pdf_chunk_size: number
-  pdf_chunk_overlap: number
-
   // —— MoldDet ——
-  auto_moldet_on_import: boolean
   detection_batch_size: number
   /** Advanced: 'auto' lets MBForge pick (default); 'cpu' / 'cuda' override. */
   moldet_device: string
@@ -93,26 +75,11 @@ export const DEFAULT_SETTINGS: SettingsState = {
   llm_request_timeout: 60,
   llm_language: 'en',
 
-  vlm_provider: 'none',
-  vlm_base_url: '',
-  vlm_api_key: '',
-  vlm_model: '',
-
   layout_conf_threshold: 0.4,
   layout_cross_model: true,
 
-  server_host: '127.0.0.1',
-  server_port: 18792,
-  server_auto_start: true,
-  server_startup_timeout: 120,
-  server_health_check_interval: 5,
-
   model_cache_dir: '',
 
-  pdf_chunk_size: 512,
-  pdf_chunk_overlap: 50,
-
-  auto_moldet_on_import: true,
   detection_batch_size: 0,
   moldet_device: 'auto',
   moldet_molparser_dir: '',
@@ -139,16 +106,14 @@ export const DEFAULT_SETTINGS: SettingsState = {
  * SettingsState snake_case; the explicit mapping is safer than relying on
  * serde rename.
  *
- * Note: auto_* booleans (auto_moldet_on_import / auto_enqueue_on_import)
- * default to True (matching backend `IngestConfig` / `MoldetConfig` defaults),
- * expressed as `!== false` rather than `=== true`.
+ * Note: the auto_enqueue_on_import boolean defaults to True (matching the
+ * backend `IngestConfig` default), expressed as `!== false` rather than
+ * `=== true`.
  */
 export function flattenSettings(raw: AppSettings | null | undefined): SettingsState {
   const s: AppSettings = raw ?? {}
   const llm = s.llm ?? {}
-  const vlm = s.vlm ?? {}
   const layout = s.layout ?? {}
-  const ms = s.model_server ?? {}
   return {
     theme: (s.theme as SettingsState['theme'] | undefined) || DEFAULT_SETTINGS.theme,
     // Backend used to default to "zh-CN"; the frontend/i18n only speaks "zh"/"en".
@@ -167,30 +132,14 @@ export function flattenSettings(raw: AppSettings | null | undefined): SettingsSt
     llm_request_timeout: llm.request_timeout || DEFAULT_SETTINGS.llm_request_timeout,
     llm_language: llm.language || DEFAULT_SETTINGS.llm_language,
 
-    vlm_provider: vlm.provider || DEFAULT_SETTINGS.vlm_provider,
-    vlm_base_url: vlm.base_url || DEFAULT_SETTINGS.vlm_base_url,
-    vlm_api_key: vlm.api_key || DEFAULT_SETTINGS.vlm_api_key,
-    vlm_model: vlm.model || DEFAULT_SETTINGS.vlm_model,
-
     layout_conf_threshold:
       typeof layout.conf_threshold === 'number'
         ? layout.conf_threshold
         : DEFAULT_SETTINGS.layout_conf_threshold,
     layout_cross_model: layout.cross_model !== false,
 
-    server_host: ms.host || DEFAULT_SETTINGS.server_host,
-    server_port: ms.port || DEFAULT_SETTINGS.server_port,
-    server_auto_start: ms.auto_start !== false,
-    server_startup_timeout: ms.startup_timeout || DEFAULT_SETTINGS.server_startup_timeout,
-    server_health_check_interval:
-      ms.health_check_interval || DEFAULT_SETTINGS.server_health_check_interval,
-
     model_cache_dir: s.model_cache_dir || DEFAULT_SETTINGS.model_cache_dir,
 
-    pdf_chunk_size: s.pdf_parse?.chunk_size || DEFAULT_SETTINGS.pdf_chunk_size,
-    pdf_chunk_overlap: s.pdf_parse?.chunk_overlap || DEFAULT_SETTINGS.pdf_chunk_overlap,
-
-    auto_moldet_on_import: s.moldet?.auto_moldet_on_import !== false,
     detection_batch_size:
       typeof s.moldet?.detection_batch_size === 'number'
         ? s.moldet.detection_batch_size
@@ -247,30 +196,12 @@ export function toBackendPayload(s: SettingsState): Record<string, unknown> {
       request_timeout: s.llm_request_timeout,
       language: s.llm_language,
     },
-    vlm: {
-      provider: s.vlm_provider,
-      base_url: s.vlm_base_url,
-      api_key: s.vlm_api_key,
-      model: s.vlm_model,
-    },
     layout: {
       conf_threshold: s.layout_conf_threshold,
       cross_model: s.layout_cross_model,
     },
-    model_server: {
-      host: s.server_host,
-      port: s.server_port,
-      auto_start: s.server_auto_start,
-      startup_timeout: s.server_startup_timeout,
-      health_check_interval: s.server_health_check_interval,
-    },
     model_cache_dir: s.model_cache_dir,
-    pdf_parse: {
-      chunk_size: s.pdf_chunk_size,
-      chunk_overlap: s.pdf_chunk_overlap,
-    },
     moldet: {
-      auto_moldet_on_import: s.auto_moldet_on_import,
       detection_batch_size: s.detection_batch_size,
       molparser_batch_size: s.moldet_molparser_batch_size,
       device: s.moldet_device,

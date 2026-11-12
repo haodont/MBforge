@@ -2,7 +2,6 @@
 
 import { httpGet, httpPost, invokeWithError } from './_utils'
 import { ErrorCode } from '@/utils/errors'
-import type { PatentConflict } from './library'
 
 export type ReviewKind =
   | 'low_conf_molecule'
@@ -10,8 +9,6 @@ export type ReviewKind =
   | 'unparsable_smiles'
   | 'missing_evidence'
   | 'ambiguous_coref'
-  | 'markush_link'
-  | 'patent_fact_review'
   | 'smiles_correction'
   | 'ai_review'
   | 'designation_unbound'
@@ -20,11 +17,30 @@ export type ReviewAction = 'confirm' | 'reject' | 'reopen'
 
 export type ReviewBbox = [number | null, number | null, number | null, number | null]
 
-export interface PatentFactReviewPayload {
-  slot_id?: string
-  doc_id?: string
-  revision?: number
-  conflict?: PatentConflict
+/** One drawn structure a reviewer can bind a printed reading to. */
+export interface DesignationUnboundCandidate {
+  mol_id: string
+  smiles: string
+  name: string
+  /** 1-based, matching the review item's own ``page``. */
+  page: number | null
+  /** PDF points, bottom-left origin. */
+  bbox: ReviewBbox | null
+  crop_relpath: string | null
+}
+
+/** A printed reading with no bound structure: the reviewer picks one candidate. */
+export interface DesignationUnboundPayload {
+  kind: 'designation_unbound'
+  doc_id: string
+  measurement_id: string
+  designation: string
+  metric: string | null
+  value: unknown
+  page: number | null
+  section_id: string | null
+  evidence_ids: string[]
+  candidates: DesignationUnboundCandidate[]
 }
 
 /** Payload keyed by review kind — add/refine per kind as backend fields stabilize. */
@@ -34,8 +50,7 @@ export type ReviewPayload =
   | { kind: 'unparsable_smiles'; smiles?: string }
   | { kind: 'missing_evidence'; notes?: string }
   | { kind: 'ambiguous_coref'; mol_id?: string; ocr_labels?: string[]; coref_primary?: string }
-  | { kind: 'markush_link'; markush?: unknown }
-  | ({ kind: 'patent_fact_review' } & PatentFactReviewPayload)
+  | DesignationUnboundPayload
 
 export interface ReviewQueueItem {
   id: string
@@ -106,7 +121,6 @@ export interface ReviewDecisionResponse {
 
 export interface ReviewClearResponse {
   deleted_items: number
-  deleted_candidates: number
 }
 
 function query(params: Record<string, string | number | undefined>): string {

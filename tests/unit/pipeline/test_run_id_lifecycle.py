@@ -19,7 +19,6 @@ from mbforge.foundation.layout import LibraryLayout
 from mbforge.service.pipeline.run import ids as run_ids_module
 from mbforge.service.pipeline.run.checkpoint import (
     ensure_attempt_run,
-    latest_stage_run_id,
     load_run_checkpoint,
     save_stage_summary,
 )
@@ -94,23 +93,3 @@ def test_ensure_attempt_run_binds_once_and_discards_stale_staging(
     checkpoint = load_run_checkpoint(staging)
     assert checkpoint is not None
     assert checkpoint["run_id"] == newer_run
-
-
-def test_latest_stage_run_id_resolves_per_stage_and_falls_back_to_run_id(
-    tmp_path: Path,
-) -> None:
-    """Per-stage summary run ids win; unrecorded stages fall back to the run id."""
-    staging = LibraryLayout(tmp_path).storage_dir(DOC) / ".staging"
-    attempt = "20260909123456"
-    ensure_attempt_run(staging, attempt)
-
-    save_stage_summary(staging, "patent", status="success", run_id=attempt)
-    assert latest_stage_run_id(staging, "patent") == attempt
-
-    # A later summary for the same stage records the newer run id.
-    newer = "20260909123457"
-    save_stage_summary(staging, "patent", status="success", run_id=newer)
-    assert latest_stage_run_id(staging, "patent") == newer
-
-    # A stage with no recorded run id falls back to the checkpoint's run id.
-    assert latest_stage_run_id(staging, "markdown") == attempt

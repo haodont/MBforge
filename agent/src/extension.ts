@@ -1,20 +1,29 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { createHash } from 'node:crypto'
-import { setTimeout as sleep } from 'node:timers/promises'
 
+import {
+  BACKEND_TOOL_NAMES,
+  registerBackendTool,
+} from './backendTool.js'
 import {
   backendLabel,
   brandHeader,
-  brandStatus,
   brandThemePaths,
   brandWorkingFrames,
   type BrandState,
 } from './brand.js'
+import { brandFooter } from './footer.js'
+import {
+  GOAL_REVIEW_MESSAGE_TYPE,
+  RUN_MESSAGE_TYPE,
+  goalReviewRenderer,
+  runNoticeRenderer,
+} from './messages.js'
+import { builtinToolRenderers } from './toolRender.js'
 import {
   backendBaseUrl,
-  loadCapabilityToolset,
+  createCapabilityToolsetManager,
   type CapabilityTool,
-  type CapabilityToolset,
 } from './capabilities.js'
 import {
   parseSessionMode,
@@ -53,6 +62,8 @@ import {
   GOAL_ENTRY_TYPE,
   GOAL_TOOL_NAMES,
   GOAL_TOOL_NAME,
+  goalContractPrompt,
+  goalStateFromBranch,
   registerGoalTool,
   type GoalReviewJob,
 } from './goal.js'
@@ -65,17 +76,36 @@ import {
   retryReviewJob,
 } from './reviewQueue.js'
 import {
+  ReviewNoticeQueue,
+  type ReviewNotice,
+} from './reviewNotices.js'
+import {
   goalArtifactRoot,
   pruneAllGoalArtifacts,
+  pruneOldGoalArtifacts,
   writeGoalArtifact,
 } from './goalArtifacts.js'
 import { createRunNotifier, createRunWatcher } from './runs.js'
 import { DEV_MODE_TOOL_NAMES, registerDevModeTool } from './devMode.js'
+import { ASK_TOOL_NAME, ASK_TOOL_NAMES, registerAskTool } from './ask.js'
+import { DRAFT_TOOL_NAME, DRAFT_TOOL_NAMES, registerDraftTool } from './draft.js'
+import {
+  RESEARCH_TOOL_NAME,
+  RESEARCH_TOOL_NAMES,
+  registerResearchChild,
+  registerResearchTools,
+} from './research.js'
+import { goalWidget } from './goalWidget.js'
+import {
+  registerWorkStateTools,
+  setActiveWorkGoal,
+  WORK_STATE_TOOL_NAMES,
+  workStateSystemPrompt,
+} from './workState.js'
+import { detectNoProgress } from './behaviorEval.js'
+import { exportGoalFixture } from './evalFixtures.js'
+import type { TrajectoryStep } from './trajectory.js'
 
-// Bound worst-case startup: a few short attempts tolerate a backend that is
-// still coming up, then degrade to zero tools so pi opens promptly.
-const MANIFEST_ATTEMPTS = 3
-const MANIFEST_RETRY_DELAY_MS = 400
 const BUILTIN_TOOL_NAMES = [
   'read',
   'bash',
@@ -86,21 +116,27 @@ const BUILTIN_TOOL_NAMES = [
   'ls',
 ] as const
 
-async function loadCapabilityToolsetWithRetry(
-  onRunEnqueued?: (runId: string) => void,
-): Promise<CapabilityToolset> {
-  let lastError: unknown
-  for (let attempt = 1; attempt <= MANIFEST_ATTEMPTS; attempt += 1) {
-    try {
-      return await loadCapabilityToolset(onRunEnqueued)
-    } catch (error) {
-      lastError = error
-      if (attempt < MANIFEST_ATTEMPTS) {
-        await sleep(MANIFEST_RETRY_DELAY_MS)
-      }
-    }
+/**
+ * Pi throws from every ctx accessor once the session is replaced (`newSession`,
+ * `fork`, `switchSession`) or reloaded. Background work can outlive that, so it
+ * must ask before touching a captured ctx: an uncaught throw here takes pi down.
+ */
+function isLive(ctx: ExtensionContext): boolean {
+  try {
+    void ctx.ui
+    return true
+  } catch {
+    return false
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
+/** `ctx.ui.notify` for work that may be holding a ctx pi already invalidated. */
+function notifyLive(
+  ctx: ExtensionContext,
+  message: string,
+  type: 'info' | 'warning' | 'error',
+): void {
+  if (isLive(ctx)) ctx.ui.notify(message, type)
 }
 
 /** Rebuild the citation cache from the active branch so resumed sessions linkify. */
@@ -139,7 +175,9 @@ function capabilityContext(
     return (
       'MBForge backend capabilities are unavailable because the backend could ' +
       `not be reached: ${loadError}.${localNote} Do not query the capability ` +
-      'manifest; report the backend status and its log location instead.'
+      'manifest; report the backend status and its log location instead. ' +
+      'backend_control can start the backend; capabilities reload automatically ' +
+      'after a successful start, and /mbforge reload refreshes them on demand.'
     )
   }
   const mutating = new Set(mutatingNames)
@@ -147,20 +185,20 @@ function capabilityContext(
   const writeNames = tools.filter((tool) => mutating.has(tool.name)).map((tool) => tool.name)
   const localNote =
     localTools.length > 0
-      ? ` Local tools (${localTools.join(', ')}) only touch local agent state, not library data.`
+      ? ` Local tools (${localTools.join(', ')}) manage agent-local state, not library data; work_state action=check additionally reads linked run/review/document status read-only to reconcile follow-ups.`
       : ''
   const scope =
     mode === 'auto'
-      ? 'Mode auto exposes every registered MBForge capability; mutating calls need the capability token and return 403 without it. Repository tools are inactive.'
+      ? 'Mode auto exposes every registered MBForge capability; mutating calls need the capability token and return 403 without it. Repository/code tools are inactive: when a task needs them, call request_dev_mode and let the user approve or decline. Do not answer that the user must request dev mode themselves, and do not print commands for them to run instead.'
       : 'Mode dev exposes every registered MBForge capability plus built-in repository tools; mutating calls need the capability token.'
   return [
     `MBForge session mode (${mode}).`,
     `Read capabilities (${readNames.length}): ${readNames.length > 0 ? readNames.join(', ') : 'none'}.`,
     `Mutating capabilities (${writeNames.length}): ${writeNames.length > 0 ? writeNames.join(', ') : 'none'}.`,
     `${scope}${localNote}`,
-    'The active tool list is authoritative. Do not query /api/v1/capabilities, do not print a curl command to discover capabilities, and do not guess that an inactive tool exists. If an action has no active tool, say it is unavailable in this session.',
+    'The active tool list is authoritative. Do not query /api/v1/capabilities, do not print a curl command to discover capabilities, and do not guess that an inactive tool exists. If no active tool can perform the action, call a local escalation tool when one exists (request_dev_mode for repository work); otherwise say it is unavailable in this session.',
     'Document-scoped capabilities accept a document reference, not only the full doc_id: the exact title, the exact file name, a doc_id prefix of 8 hex characters or more, or the 12-character short_id. Prefer the title or the short_id returned by resolve_document when quoting a document.',
-    'Do not infer HTTP route prefixes, request field formats, or stored file names; check get_api_surface or get_document before using them.',
+    'Do not infer HTTP route prefixes, request field formats, or stored file names; check get_api_surface or document_read before using them.',
   ].join(' ')
 }
 
@@ -181,6 +219,10 @@ function capabilityContext(
  * offline state.
  */
 export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> {
+  if (process.env.MBFORGE_RESEARCH_CHILD === '1') {
+    await registerResearchChild(pi)
+    return
+  }
   let sessionMode = resolveSessionMode()
   let memoryError: string | undefined
   try {
@@ -189,48 +231,107 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     memoryError = error instanceof Error ? error.message : String(error)
   }
 
-  let tools: CapabilityTool[] = []
-  let mutatingNames: string[] = []
-  let loadError: string | undefined
   const runNotifier = createRunNotifier(pi)
   const runWatcher = createRunWatcher((completion) =>
     runNotifier.notify(completion),
   )
-  try {
-    const toolset = await loadCapabilityToolsetWithRetry((runId) =>
-      runWatcher.watch(runId),
-    )
-    tools = toolset.tools
-    mutatingNames = toolset.mutatingNames
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : String(error)
-  }
+  const capabilityToolset = createCapabilityToolsetManager(
+    (tool) => pi.registerTool(tool),
+    (runId) => runWatcher.watch(runId),
+  )
+  await capabilityToolset.load()
 
   let activeGoal: string | undefined
   let reviewRunning = false
+  const reviewNotices = new ReviewNoticeQueue()
+  let activeToolCalls = 0
+  let tpsStart: number | undefined
+  let tpsChars = 0
   const pendingTools = new Map<
     string,
-    { goalId: string; toolName: string; input: string }
+    { goalId: string | undefined; toolName: string; input: string }
   >()
+  const WORKING_MESSAGE = 'MBForge · working'
+
+  // Lightweight no-progress guard: a tight run of identical calls is surfaced
+  // once as a hint, never hard-blocked. Detection reuses the offline grader.
+  const LOOP_WINDOW = 12
+  const LOOP_THRESHOLD = 3
+  let loopTail: TrajectoryStep[] = []
+  let loopNotifiedKey = ''
+  const trackLoop = (
+    tool: string,
+    inputDigest: string,
+    isError: boolean,
+    ctx: ExtensionContext,
+  ): void => {
+    loopTail.push({ tool, inputDigest, status: isError ? 'error' : 'ok', at: '' })
+    if (loopTail.length > LOOP_WINDOW) loopTail = loopTail.slice(-LOOP_WINDOW)
+    const loop = detectNoProgress(loopTail, LOOP_THRESHOLD)
+    if (!loop) {
+      loopNotifiedKey = ''
+      return
+    }
+    const key = `${loop.tool}:${loop.inputDigest}`
+    if (loopNotifiedKey === key) return
+    loopNotifiedKey = key
+    ctx.ui.notify(
+      `MBForge: ${loop.tool} repeated ${loop.count} identical calls without progress; change approach or stop.`,
+      'warning',
+    )
+  }
 
   const state: BrandState = {
     mode: sessionMode,
     backend: backendLabel(backendBaseUrl()),
-    online: loadError === undefined,
-    toolCount: tools.length,
+    online: capabilityToolset.loadError === undefined,
+    toolCount: capabilityToolset.tools.length,
+    localToolCount: usesBuiltinTools(sessionMode) ? BUILTIN_TOOL_NAMES.length : 0,
   }
 
-  for (const tool of tools) {
-    pi.registerTool(tool)
-  }
+  pi.registerMessageRenderer(GOAL_REVIEW_MESSAGE_TYPE, goalReviewRenderer)
+  pi.registerMessageRenderer(RUN_MESSAGE_TYPE, runNoticeRenderer)
+  registerAskTool(pi)
+  registerDraftTool(pi)
+  registerResearchTools(pi, {
+    getReadTools: () => {
+      const mutating = new Set(capabilityToolset.mutatingNames)
+      return capabilityToolset.tools
+        .filter((tool) => !mutating.has(tool.name))
+        .map((tool) => tool.name)
+    },
+  })
+  const builtinRenderNames = new Set<string>(BUILTIN_TOOL_NAMES)
+  pi.registerToolRenderer((name, next) => {
+    const base = next()
+    if (!base || !builtinRenderNames.has(name)) return base
+    return builtinToolRenderers(name, base)
+  })
   registerMemoryTools(pi)
   registerImprovementTools(pi)
+  registerWorkStateTools(pi)
+  registerBackendTool(pi, {
+    onBackendRunning: (ctx) => reloadCapabilities(ctx),
+  })
   registerReviewTools(pi)
   registerGoalTool(pi, {
     enqueueReview: (job) => enqueueReviewJob(job),
     getActiveGoal: () => activeGoal,
-    setActiveGoal: (id) => {
+    setActiveGoal: (id, ctx) => {
       activeGoal = id
+      refreshGoalWidget(ctx)
+    },
+    persistActive: (goal) => {
+      void setActiveWorkGoal(
+        goal ? { id: goal.id, title: goal.title, objective: goal.objective } : null,
+      ).catch(() => {
+        // The ledger is best-effort; the session goal still works without it.
+      })
+    },
+    archiveTrajectory: (goalId, branch) => {
+      void exportGoalFixture(goalId, branch, sessionMode).catch(() => {
+        // Fixture export is best-effort; never block goal completion.
+      })
     },
   })
   registerDevModeTool(pi, {
@@ -249,18 +350,39 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   }
 
   function applyActiveTools(): void {
-    const capability = tools.map((tool) => tool.name)
+    const capability = capabilityToolset.tools.map((tool) => tool.name)
     const next = new Set([
       ...capability,
       ...(memoryError ? [] : [...MEMORY_TOOL_NAMES]),
       ...IMPROVEMENT_TOOL_NAMES,
+      ...WORK_STATE_TOOL_NAMES,
       ...REVIEW_TOOL_NAMES,
       ...GOAL_TOOL_NAMES,
+      ...BACKEND_TOOL_NAMES,
       ...DEV_MODE_TOOL_NAMES,
+      ...ASK_TOOL_NAMES,
+      ...DRAFT_TOOL_NAMES,
+      ...RESEARCH_TOOL_NAMES,
       ...(usesBuiltinTools(sessionMode) ? [...BUILTIN_TOOL_NAMES] : []),
     ])
     pi.setActiveTools([...next])
     state.toolCount = capability.length
+    state.online = capabilityToolset.loadError === undefined
+    state.localToolCount = usesBuiltinTools(sessionMode) ? BUILTIN_TOOL_NAMES.length : 0
+    if (!state.online) state.queue = undefined
+  }
+
+  /** Re-fetch the capability manifest and re-apply the active tool set. */
+  async function reloadCapabilities(ctx: ExtensionContext): Promise<void> {
+    const result = await capabilityToolset.reload()
+    if (!isLive(ctx)) return
+    applyActiveTools()
+    refreshBrand(ctx)
+    if (result.ok) {
+      notifyLive(ctx, `MBForge capabilities reloaded (${result.count} tools)`, 'info')
+    } else {
+      notifyLive(ctx, `MBForge capability reload failed: ${result.error}`, 'warning')
+    }
   }
 
   function formatReviewNotice(job: GoalReviewJob, result: Awaited<ReturnType<typeof runReview>>): string {
@@ -280,42 +402,79 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       .join('\n')
   }
 
+  function deliverReviewNotice(notice: ReviewNotice, ctx: ExtensionContext): void {
+    pi.sendMessage(
+      {
+        customType: GOAL_REVIEW_MESSAGE_TYPE,
+        content: notice.content,
+        display: true,
+        details: notice.details,
+      },
+      { triggerTurn: false },
+    )
+    if (notice.warning) ctx.ui.notify(notice.warning, 'warning')
+  }
+
+  function publishReviewNotice(notice: ReviewNotice, ctx: ExtensionContext): void {
+    // A review outlives its turn: when the session behind `ctx` was replaced or
+    // reloaded, hold the notice for the next settled point instead of writing to
+    // a dead ctx.
+    if (activeGoal !== undefined || !isLive(ctx)) {
+      reviewNotices.enqueue(notice)
+      return
+    }
+    deliverReviewNotice(notice, ctx)
+  }
+
+  function flushReviewNotices(ctx: ExtensionContext): void {
+    for (const notice of reviewNotices.drain(activeGoal !== undefined)) {
+      deliverReviewNotice(notice, ctx)
+    }
+  }
+
   async function drainReviewQueue(ctx: ExtensionContext): Promise<void> {
     if (reviewRunning) return
     reviewRunning = true
+    // Read the model off the ctx once, before the first await: a review runs for
+    // minutes and its ctx is stale by the time the next job is claimed.
+    const model = ctx.model
+    const modelRegistry = ctx.modelRegistry
     try {
       for (;;) {
         const job = await claimNextReview()
         if (!job) break
         try {
-          setMemoryRuntime(ctx.model, ctx.modelRegistry)
+          setMemoryRuntime(model, modelRegistry)
           const result = await runReview({
             cwd: job.cwd,
             transcript: job.transcript,
+            model: model ? `${model.provider}/${model.id}` : undefined,
           })
           await finishReviewJob(job.id)
-          pi.sendMessage(
+          publishReviewNotice(
             {
-              customType: 'mbforge-goal-review',
+              reviewId: job.id,
               content: formatReviewNotice(job, result),
-              display: true,
-              details: { goalId: job.goalId, ...result },
+              details: { reviewId: job.id, goalId: job.goalId, ...result },
             },
-            { triggerTurn: false },
+            ctx,
           )
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           await failReviewJob(job.id, message)
-          pi.sendMessage(
+          publishReviewNotice(
             {
-              customType: 'mbforge-goal-review',
-              content: `Goal review failed · ${job.goalId}\n${message}`,
-              display: true,
-              details: { goalId: job.goalId, error: message },
+              reviewId: job.id,
+              content: `Goal review failed · ${job.id} (${job.goalId})\n${message}`,
+              details: {
+                reviewId: job.id,
+                goalId: job.goalId,
+                error: message,
+              },
+              warning: `Goal review failed (${job.id}): ${message}`,
             },
-            { triggerTurn: false },
+            ctx,
           )
-          ctx.ui.notify(`Goal review failed: ${message}`, 'warning')
         }
       }
     } finally {
@@ -325,7 +484,25 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
 
   function refreshBrand(ctx: ExtensionContext): void {
     ctx.ui.setHeader((_tui, theme) => brandHeader(theme, state))
-    ctx.ui.setStatus('mbforge', brandStatus(state))
+    ctx.ui.setFooter((_tui, theme, footerData) => brandFooter(theme, state, ctx, footerData))
+    ctx.ui.setTitle(`MBForge · ${state.mode}`)
+    refreshGoalWidget(ctx)
+  }
+
+  /**
+   * Show the active goal below the editor, at the bottom of the screen. The
+   * widget is removed rather than left stale when the goal is completed,
+   * cancelled, or the branch changes. `ctx` must be the caller's live context;
+   * caching one here would outlive the session it belongs to.
+   */
+  function refreshGoalWidget(ctx: ExtensionContext): void {
+    if (!isLive(ctx) || typeof ctx.ui.setWidget !== 'function') return
+    const id = activeGoal
+    ctx.ui.setWidget(
+      'mbforge-goal',
+      id ? (_tui, theme) => goalWidget(theme, ctx, id) : undefined,
+      { placement: 'belowEditor' },
+    )
   }
 
   // Display-only: turn the model's [[ev:id]] citation markers and [[ui:...]]
@@ -341,7 +518,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   // script's `--theme` flag.
   pi.on('resources_discover', () => ({ themePaths: brandThemePaths() }))
 
-  pi.on('before_agent_start', async (event) => {
+  pi.on('before_agent_start', async (event, ctx) => {
     let memory = ''
     if (!memoryError) {
       try {
@@ -350,22 +527,44 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         // A memory read failure must not block the agent.
       }
     }
+    let workState = ''
+    try {
+      workState = await workStateSystemPrompt()
+    } catch {
+      // The work ledger is best-effort context; never block the agent on it.
+    }
+    let goalContract = ''
+    try {
+      const branch = ctx.sessionManager.getBranch()
+      const id = activeGoalFromBranch(branch)
+      const state = id ? goalStateFromBranch(branch, id) : undefined
+      if (state) goalContract = goalContractPrompt(state.goal)
+    } catch {
+      // The goal contract is best-effort context; never block the agent on it.
+    }
     const sections = [
       event.systemPrompt,
       capabilityContext(
         sessionMode,
-        tools,
-        mutatingNames,
-        loadError,
+        capabilityToolset.tools,
+        capabilityToolset.mutatingNames,
+        capabilityToolset.loadError,
         [
           ...(memoryError ? [] : MEMORY_TOOL_NAMES),
           ...IMPROVEMENT_TOOL_NAMES,
+          ...WORK_STATE_TOOL_NAMES,
           ...REVIEW_TOOL_NAMES,
           ...GOAL_TOOL_NAMES,
+          ...BACKEND_TOOL_NAMES,
           ...DEV_MODE_TOOL_NAMES,
+          ...ASK_TOOL_NAMES,
+          ...DRAFT_TOOL_NAMES,
+          ...RESEARCH_TOOL_NAMES,
         ],
       ),
       memory,
+      workState,
+      goalContract,
     ].filter((section) => section.length > 0)
     return { systemPrompt: sections.join('\n\n') }
   })
@@ -373,13 +572,17 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   const skippedArtifactTools = new Set([
     GOAL_TOOL_NAME,
     REVIEW_TOOL_NAME,
+    ASK_TOOL_NAME,
+    DRAFT_TOOL_NAME,
+    RESEARCH_TOOL_NAME,
     'memory',
-    'memory_ephemeral',
+    'work_state',
     'suggest_improvement',
   ])
 
-  pi.on('tool_execution_start', (event) => {
-    if (!activeGoal || skippedArtifactTools.has(event.toolName)) return
+  pi.on('tool_execution_start', (event, ctx) => {
+    activeToolCalls += 1
+    ctx.ui.setWorkingMessage(`MBForge · ${event.toolName.replaceAll('_', ' ')}`)
     pendingTools.set(event.toolCallId, {
       goalId: activeGoal,
       toolName: event.toolName,
@@ -388,16 +591,39 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   })
 
   pi.on('tool_execution_end', async (event, ctx) => {
+    activeToolCalls = Math.max(0, activeToolCalls - 1)
+    if (activeToolCalls === 0) ctx.ui.setWorkingMessage(WORKING_MESSAGE)
+    if (event.toolName === 'get_worker_status' && !event.isError) {
+      const result = event.result as
+        | { details?: { data?: unknown } }
+        | undefined
+      const data = result?.details?.data
+      if (typeof data === 'object' && data !== null) {
+        const record = data as Record<string, unknown>
+        if (
+          typeof record.status === 'string' &&
+          typeof record.active === 'number' &&
+          typeof record.backlog === 'number'
+        ) {
+          state.queue = {
+            status: record.status,
+            active: record.active,
+            backlog: record.backlog,
+          }
+        }
+      }
+    }
     const pending = pendingTools.get(event.toolCallId)
     pendingTools.delete(event.toolCallId)
-    const goalId = pending?.goalId ?? activeGoal
-    if (!goalId || skippedArtifactTools.has(event.toolName)) return
-
     const serializedInput = pending?.input ?? '{}'
     const inputDigest = createHash('sha256')
       .update(serializedInput)
       .digest('hex')
       .slice(0, 16)
+    trackLoop(event.toolName, inputDigest, Boolean(event.isError), ctx)
+    const goalId = pending?.goalId ?? activeGoal
+    if (!goalId || skippedArtifactTools.has(event.toolName)) return
+
     const result = event.result as
       | { content?: Array<{ type?: string; text?: string }> }
       | undefined
@@ -438,21 +664,35 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
 
   pi.on('session_start', async (_event, ctx) => {
     reconstructEvidence(ctx)
+    loopTail = []
+    loopNotifiedKey = ''
     activeGoal = activeGoalFromBranch(ctx.sessionManager.getBranch())
+    state.tps = undefined
+    state.tpsLive = false
+    tpsStart = undefined
+    tpsChars = 0
     applyActiveTools()
+    void pruneOldGoalArtifacts(
+      activeGoal
+        ? { sessionId: ctx.sessionManager.getSessionId() ?? 'session', goalId: activeGoal }
+        : undefined,
+    ).catch(() => {
+      // Artifact retention is best-effort housekeeping; never block the session.
+    })
+    flushReviewNotices(ctx)
     void drainReviewQueue(ctx).catch((error) => {
       const message = error instanceof Error ? error.message : String(error)
-      ctx.ui.notify(`Goal review queue failed: ${message}`, 'error')
+      notifyLive(ctx, `Goal review queue failed: ${message}`, 'error')
     })
     refreshBrand(ctx)
     ctx.ui.setWorkingIndicator({
       frames: brandWorkingFrames(ctx.ui.theme),
       intervalMs: 160,
     })
-    ctx.ui.setWorkingMessage('MBForge · working')
-    if (loadError) {
+    ctx.ui.setWorkingMessage(WORKING_MESSAGE)
+    if (capabilityToolset.loadError) {
       ctx.ui.notify(
-        `MBForge backend unavailable: ${loadError}. Start the backend and relaunch.`,
+        `MBForge backend unavailable: ${capabilityToolset.loadError}. Use backend_control to start it, then /mbforge reload.`,
         'warning',
       )
     }
@@ -464,6 +704,56 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   pi.on('session_tree', async (_event, ctx) => {
     reconstructEvidence(ctx)
     activeGoal = activeGoalFromBranch(ctx.sessionManager.getBranch())
+    state.tps = undefined
+    state.tpsLive = false
+    tpsStart = undefined
+    tpsChars = 0
+    refreshGoalWidget(ctx)
+    flushReviewNotices(ctx)
+  })
+
+  pi.on('message_start', (event) => {
+    if (event.message.role !== 'assistant') return
+    tpsStart =
+      typeof event.message.timestamp === 'number'
+        ? event.message.timestamp
+        : Date.now()
+    tpsChars = 0
+    state.tpsLive = true
+  })
+
+  pi.on('message_update', (event) => {
+    if (event.message.role !== 'assistant') return
+    const update = event.assistantMessageEvent
+    if (
+      update.type !== 'text_delta' &&
+      update.type !== 'thinking_delta' &&
+      update.type !== 'toolcall_delta'
+    ) {
+      return
+    }
+    tpsChars += update.delta.length
+    const start = tpsStart ?? Date.now()
+    const seconds = (Date.now() - start) / 1000
+    if (seconds >= 0.25) {
+      state.tps = (tpsChars / 4) / seconds
+      state.tpsLive = true
+    }
+  })
+
+  pi.on('message_end', (event) => {
+    if (event.message.role !== 'assistant') return
+    const output = event.message.usage?.output ?? 0
+    const duration = event.message.durationMs
+    if (typeof duration === 'number' && duration > 0 && output > 0) {
+      state.tps = output / (duration / 1000)
+    } else if (tpsStart !== undefined && tpsChars > 0) {
+      const seconds = (Date.now() - tpsStart) / 1000
+      if (seconds > 0) state.tps = (tpsChars / 4) / seconds
+    }
+    state.tpsLive = false
+    tpsStart = undefined
+    tpsChars = 0
   })
 
   pi.on('agent_start', () => {
@@ -476,6 +766,9 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   })
 
   pi.on('agent_settled', async (event, ctx) => {
+    activeToolCalls = 0
+    state.tpsLive = false
+    ctx.ui.setWorkingMessage(WORKING_MESSAGE)
     runNotifier.markIdle()
     if (event.aborted && activeGoal) {
       const id = activeGoal
@@ -486,21 +779,23 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         at: new Date().toISOString(),
       })
       activeGoal = undefined
+      refreshGoalWidget(ctx)
     }
     void drainReviewQueue(ctx).catch((error) => {
       const message = error instanceof Error ? error.message : String(error)
-      ctx.ui.notify(`Goal review queue failed: ${message}`, 'error')
+      notifyLive(ctx, `Goal review queue failed: ${message}`, 'error')
     })
+    flushReviewNotices(ctx)
   })
 
   pi.registerCommand('mbforge', {
-    description: 'Show or switch MBForge mode (auto|dev)',
+    description: 'Show or switch MBForge mode (auto|dev), or reload capabilities',
     handler: async (args, ctx) => {
       const [action, value] = args.trim().split(/\s+/)
       if (action === 'mode') {
         const next = parseSessionMode(value ?? '')
         if (next === undefined) {
-          ctx.ui.notify('Usage: /mbforge mode auto|dev', 'warning')
+          ctx.ui.notify('Usage: /mbforge mode auto|dev | /mbforge reload', 'warning')
           return
         }
         enterMode(next, ctx)
@@ -512,20 +807,24 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         )
         return
       }
-      if (action) {
-        ctx.ui.notify('Usage: /mbforge mode auto|dev', 'warning')
+      if (action === 'reload') {
+        await reloadCapabilities(ctx)
         return
       }
-      if (loadError) {
+      if (action) {
+        ctx.ui.notify('Usage: /mbforge mode auto|dev | /mbforge reload', 'warning')
+        return
+      }
+      if (capabilityToolset.loadError) {
         ctx.ui.notify(
-          `MBForge backend unavailable: ${loadError}. Start the backend and relaunch.`,
+          `MBForge backend unavailable: ${capabilityToolset.loadError}. Use backend_control to start it, then /mbforge reload.`,
           'warning',
         )
         return
       }
-      const mutating = new Set(mutatingNames)
-      const readNames = tools.filter((tool) => !mutating.has(tool.name)).map((tool) => tool.name)
-      const writeNames = tools.filter((tool) => mutating.has(tool.name)).map((tool) => tool.name)
+      const mutating = new Set(capabilityToolset.mutatingNames)
+      const readNames = capabilityToolset.tools.filter((tool) => !mutating.has(tool.name)).map((tool) => tool.name)
+      const writeNames = capabilityToolset.tools.filter((tool) => mutating.has(tool.name)).map((tool) => tool.name)
       ctx.ui.notify(
         [
           `⬡ MBForge · mode: ${sessionMode}`,
@@ -537,7 +836,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
           `read     ${readNames.length}: ${readNames.join(', ')}`,
           `mutating ${writeNames.length}: ${writeNames.join(', ')} (token-gated)`,
           `backend  ${state.backend}`,
-          `local    ${[...MEMORY_TOOL_NAMES, ...IMPROVEMENT_TOOL_NAMES, ...REVIEW_TOOL_NAMES, ...GOAL_TOOL_NAMES].join(', ')} (${memoryError ? 'memory unavailable' : 'memory layers + IMPROVEMENTS.json'})`,
+          `local    ${[...MEMORY_TOOL_NAMES, ...IMPROVEMENT_TOOL_NAMES, ...WORK_STATE_TOOL_NAMES, ...REVIEW_TOOL_NAMES, ...GOAL_TOOL_NAMES, ...BACKEND_TOOL_NAMES].join(', ')} (${memoryError ? 'memory unavailable' : 'memory layers + IMPROVEMENTS.json'})`,
         ].join('\n'),
         'info',
       )
@@ -545,26 +844,43 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   })
 
   pi.registerCommand('goal-reviews', {
-    description: 'Show or retry background goal reviews',
+    description: 'Show, retry, or drain background goal reviews',
     handler: async (args, ctx) => {
       const [action, id] = args.trim().split(/\s+/)
       try {
         if (action === 'retry') {
           if (!id) {
-            ctx.ui.notify('Usage: /goal-reviews retry <review-id>', 'warning')
+            ctx.ui.notify('Usage: /goal-reviews retry <review-id|goal-id>', 'warning')
             return
           }
-          const ok = await retryReviewJob(id)
-          ctx.ui.notify(
-            ok ? `Review ${id} requeued` : `No failed review with id ${id}`,
-            ok ? 'info' : 'warning',
-          )
-          if (ok) {
-            void drainReviewQueue(ctx).catch((error) => {
-              const message = error instanceof Error ? error.message : String(error)
-              ctx.ui.notify(`Goal review queue failed: ${message}`, 'error')
-            })
+          let review = await retryReviewJob(id)
+          if (!review) {
+            const existing = (await listReviewJobs()).find(
+              (job) => job.id === id || job.goalId === id,
+            )
+            if (!existing) {
+              ctx.ui.notify(
+                `No goal review with review id or goal id ${id}`,
+                'warning',
+              )
+              return
+            }
+            review = existing
+            ctx.ui.notify(
+              `Review ${review.id} (${review.goalId}) is already queued; the queue will run it`,
+              'info',
+            )
+          } else {
+            reviewNotices.remove(review.id)
+            ctx.ui.notify(
+              `Review ${review.id} (${review.goalId}) requeued`,
+              'info',
+            )
           }
+          void drainReviewQueue(ctx).catch((error) => {
+            const message = error instanceof Error ? error.message : String(error)
+            notifyLive(ctx, `Goal review queue failed: ${message}`, 'error')
+          })
           return
         }
         if (action === 'prune') {
@@ -574,14 +890,20 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         }
         if (action) {
           ctx.ui.notify(
-            'Usage: /goal-reviews | /goal-reviews retry <id> | /goal-reviews prune',
+            'Usage: /goal-reviews | /goal-reviews retry <review-id|goal-id> | /goal-reviews prune',
             'warning',
           )
           return
         }
         const jobs = await listReviewJobs()
+        const held = reviewNotices.size
+        const heldLabel =
+          held > 0 ? `${held} held until the active goal ends` : ''
         if (jobs.length === 0) {
-          ctx.ui.notify(`No goal reviews queued. Artifacts: ${goalArtifactRoot()}`, 'info')
+          ctx.ui.notify(
+            `No goal reviews queued.${heldLabel ? ` ${heldLabel}.` : ''} Artifacts: ${goalArtifactRoot()}`,
+            'info',
+          )
           return
         }
         const lines = jobs.slice(0, 12).map((job) => {
@@ -590,7 +912,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         })
         ctx.ui.notify(
           [
-            `Goal reviews (${jobs.length}) · artifacts: ${goalArtifactRoot()}`,
+            `Goal reviews (${jobs.length})${heldLabel ? ` · ${heldLabel}` : ''} · artifacts: ${goalArtifactRoot()}`,
             ...lines,
           ].join('\n'),
           'info',

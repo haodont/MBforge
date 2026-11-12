@@ -17,13 +17,13 @@
  * 注意：内联样式无法随主题切换，新组件应优先使用 CSS 变量而非本表。
  */
 export const PALETTE = {
-  success: '#16a34a',
-  warning: '#d97706',
-  danger:  '#dc2626',
-  error:   '#dc2626',
-  info:    '#2563eb',
-  neutral: '#545963',
-  muted:   '#767c88',
+  success: '#536907',
+  warning: '#9D4310',
+  danger:  '#AF3029',
+  error:   '#AF3029',
+  info:    '#1C6C66',
+  neutral: '#575653',
+  muted:   '#6F6E69',
 } as const
 
 // ============================================================================
@@ -79,5 +79,5 @@ export const TONE_COLORS: Record<StatusTone, { color: string; bg: string; border
   danger:  { color: PALETTE.danger,  bg: ALPHA.danger[10],  border: ALPHA.danger[30]  },
   error:   { color: PALETTE.error,   bg: ALPHA.error[10],   border: ALPHA.error[30]   },
   info:    { color: PALETTE.info,    bg: ALPHA.info[10],    border: ALPHA.info[30]    },
-  neutral: { color: PALETTE.neutral, bg: '#eff0f4',         border: '#d3d5dc'         },
+  neutral: { color: PALETTE.neutral, bg: '#E6E4D9',         border: '#DAD8CE'         },
 }

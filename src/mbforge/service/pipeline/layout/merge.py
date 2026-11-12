@@ -29,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from mbforge.service.pipeline.detection.bbox_filter import bbox_area, bbox_iou
 from mbforge.service.pipeline.layout.regions import px_box_to_pdf
 
 #: R5 scope = every label the text-recognition step will consume as text.
@@ -84,22 +85,6 @@ DEFAULTS: dict[str, Any] = {
     "inline_child_labels": None,  # None = HIRO_INLINE_CHILD_LABELS
     "r2_parent_labels": None,  # None = HIRO_R2_PARENT_LABELS
 }
-
-
-def bbox_area(box: Sequence[float]) -> float:
-    return max(0.0, float(box[2]) - float(box[0])) * max(
-        0.0, float(box[3]) - float(box[1])
-    )
-
-
-def bbox_iou(a: Sequence[float], b: Sequence[float]) -> float:
-    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
-    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
-    inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
-    if inter <= 0:
-        return 0.0
-    union = bbox_area(a) + bbox_area(b) - inter
-    return inter / union if union > 0 else 0.0
 
 
 def coverage(inner: Sequence[float], outer: Sequence[float]) -> float:
@@ -384,8 +369,6 @@ __all__ = [
     "HIRO_INLINE_CHILD_LABELS",
     "HIRO_R2_PARENT_LABELS",
     "HIRO_TEXTY_LABELS",
-    "bbox_area",
-    "bbox_iou",
     "coverage",
     "merge",
     "union_box",

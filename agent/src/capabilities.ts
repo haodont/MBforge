@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 import { Type } from 'typebox'
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent'
@@ -9,7 +10,8 @@ import {
   harvestEvidence,
   rememberEvidence,
 } from './citations.js'
-import { capabilityRenderers } from './toolRender.js'
+import { backendAddress } from './backendControl.js'
+import { toolRenderers } from './toolRender.js'
 import { uiGuidelines } from './uiLinks.js'
 
 interface CapabilityInfo {
@@ -83,17 +85,50 @@ function parseCapabilityError(body: string): CapabilityErrorBody | undefined {
   }
 }
 
+/** One actionable next step for a known failure, so the model recovers instead of retrying blindly. */
+function recoveryHint(status: number, errorCode: string | null): string | undefined {
+  switch (errorCode) {
+    case 'capability_forbidden':
+      return 'this write is gated by the capability token; report that it is blocked in this session instead of retrying'
+    case 'not_found':
+      return 'resolve the document or record first (resolve_document) and use an id from a tool result, not a guess'
+    case 'validation_error':
+      return 'fix the listed field errors and retry once'
+    case 'model_not_available':
+    case 'resource_not_available':
+      return 'required model weights or resources are not ready; check get_worker_status before retrying'
+    case 'conflict':
+      return 'the record changed or a decision conflicts; re-read it before retrying'
+    case 'path_traversal':
+      return 'the path is outside the library; use a library-local path'
+    default:
+      break
+  }
+  if (status === 403) {
+    return 'this call is not permitted in the current session; report it instead of retrying'
+  }
+  if (status === 404) {
+    return 'the referenced item was not found; resolve it from a tool result instead of guessing'
+  }
+  if (status >= 500) {
+    return 'the backend failed unexpectedly; report it and check the backend log rather than retrying in a loop'
+  }
+  return undefined
+}
+
 function capabilityFailure(name: string, status: number, body: string): Error {
   const parsed = parseCapabilityError(body)
+  const hint = recoveryHint(status, parsed?.errorCode ?? null)
+  const suffix = hint ? `; next: ${hint}` : ''
   if (parsed === undefined) {
-    return new Error(`capability ${name} failed (${status}): ${body.slice(0, 400)}`)
+    return new Error(`capability ${name} failed (${status}): ${body.slice(0, 400)}${suffix}`)
   }
   const parts = [
     parsed.errorCode ? `${parsed.errorCode}: ${parsed.error}` : parsed.error,
     parsed.detail,
     ...parsed.validation,
   ].filter((part): part is string => Boolean(part))
-  return new Error(`capability ${name} failed (${status}): ${parts.join('; ')}`)
+  return new Error(`capability ${name} failed (${status}): ${parts.join('; ')}${suffix}`)
 }
 
 /** Detect a capability result that carries an inspectable image. */
@@ -146,9 +181,8 @@ function toolGuidelines(name: string): string[] | undefined {
 // fast when the backend accepts connections but stalls.
 const MANIFEST_TIMEOUT_MS = 2_000
 
-export const backendBaseUrl = (): string =>
-  process.env.MBFORGE_BACKEND_URL ??
-  `http://${process.env.MBFORGE_BACKEND_HOST ?? '127.0.0.1'}:${process.env.MBFORGE_BACKEND_PORT ?? '18792'}`
+/** Backend API base URL; the single resolver lives in backendControl. */
+export const backendBaseUrl = (): string => backendAddress().baseUrl
 
 /**
  * Read the capability token, or return nothing when it is not configured.
@@ -189,7 +223,7 @@ export async function loadCapabilityToolset(
       description: capability.description,
       promptGuidelines: toolGuidelines(capability.name),
       parameters: Type.Unsafe<Record<string, unknown>>(capability.input_schema),
-      ...capabilityRenderers(capability.name),
+      ...toolRenderers(capability.name, capability.mutating),
       async execute(_toolCallId, params, signal) {
         const headers: Record<string, string> = {
           'content-type': 'application/json',
@@ -273,5 +307,102 @@ export async function loadCapabilityToolset(
     mutatingNames: manifest.capabilities
       .filter((capability) => capability.mutating)
       .map((capability) => capability.name),
+  }
+}
+
+// Bound worst-case startup: a few short attempts tolerate a backend that is
+// still coming up, then degrade to zero tools so pi opens promptly.
+const MANIFEST_ATTEMPTS = 3
+const MANIFEST_RETRY_DELAY_MS = 400
+
+async function loadToolsetWithRetry(
+  loadToolset: typeof loadCapabilityToolset,
+  onRunEnqueued?: (runId: string) => void,
+): Promise<CapabilityToolset> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= MANIFEST_ATTEMPTS; attempt += 1) {
+    try {
+      return await loadToolset(onRunEnqueued)
+    } catch (error) {
+      lastError = error
+      if (attempt < MANIFEST_ATTEMPTS) {
+        await sleep(MANIFEST_RETRY_DELAY_MS)
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
+export type CapabilityReloadResult =
+  | { ok: true; count: number }
+  | { ok: false; error: string }
+
+export interface CapabilityToolsetManager {
+  readonly tools: CapabilityTool[]
+  readonly mutatingNames: string[]
+  readonly loadError: string | undefined
+  /** Initial load; failure degrades to zero tools and records the reason. */
+  load(): Promise<void>
+  /** Refresh the manifest; on failure the previous toolset stays active. */
+  reload(): Promise<CapabilityReloadResult>
+}
+
+/**
+ * The session's capability toolset, reloadable while pi runs.
+ *
+ * The backend lifecycle is dynamic (`backend_control` can start or restart it
+ * mid-session), so the manifest cannot be a startup-only snapshot. `reload`
+ * re-fetches and re-registers every capability — pi replaces a tool registered
+ * under the same name — and the caller re-applies the active set from `tools`,
+ * which drops capabilities the new manifest no longer lists. A failed reload
+ * keeps the previous toolset: a running session must not lose its tools
+ * because one refresh could not reach the backend.
+ */
+export function createCapabilityToolsetManager(
+  registerTool: (tool: CapabilityTool) => void,
+  onRunEnqueued?: (runId: string) => void,
+  loadToolset: typeof loadCapabilityToolset = loadCapabilityToolset,
+): CapabilityToolsetManager {
+  let tools: CapabilityTool[] = []
+  let mutatingNames: string[] = []
+  let loadError: string | undefined
+
+  async function fetchAndRegister(): Promise<number> {
+    const toolset = await loadToolsetWithRetry(loadToolset, onRunEnqueued)
+    for (const tool of toolset.tools) registerTool(tool)
+    tools = toolset.tools
+    mutatingNames = toolset.mutatingNames
+    loadError = undefined
+    return tools.length
+  }
+
+  return {
+    get tools(): CapabilityTool[] {
+      return tools
+    },
+    get mutatingNames(): string[] {
+      return mutatingNames
+    },
+    get loadError(): string | undefined {
+      return loadError
+    },
+    /** Initial load; failure degrades to zero tools and records the reason. */
+    async load(): Promise<void> {
+      try {
+        await fetchAndRegister()
+      } catch (error) {
+        loadError = error instanceof Error ? error.message : String(error)
+      }
+    },
+    /** Refresh the manifest; on failure the previous toolset stays active. */
+    async reload(): Promise<CapabilityReloadResult> {
+      try {
+        return { ok: true, count: await fetchAndRegister() }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (tools.length === 0) loadError = message
+        return { ok: false, error: message }
+      }
+    },
   }
 }

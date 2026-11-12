@@ -37,7 +37,7 @@ class _Decision:
 def _seed_molecule(root: Path, name: str = "6") -> None:
     db = DatabaseManager.get(str(root))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, canonical_smiles, name, source_doc) "
             "VALUES (?, ?, ?, ?, ?)",

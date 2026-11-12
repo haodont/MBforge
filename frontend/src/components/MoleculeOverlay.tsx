@@ -39,10 +39,10 @@ function moleculeLabel(d: ExtractionResult | undefined): string {
 
 /** 置信度颜色；0 表示没有置信度数据（当前 source_evidence 只带框），用中性色 */
 function confColor(conf: number): string {
-  if (!(conf > 0)) return '#6b7280'
-  if (conf >= 0.8) return 'var(--success)'
-  if (conf >= 0.5) return 'var(--warning)'
-  return 'var(--danger)'
+  if (!(conf > 0)) return 'var(--text-muted)'
+  if (conf >= 0.8) return 'var(--success-fg)'
+  if (conf >= 0.5) return 'var(--warning-fg)'
+  return 'var(--danger-fg)'
 }
 
 const MoleculeOverlay = memo(function MoleculeOverlay({
@@ -104,7 +104,7 @@ const MoleculeOverlay = memo(function MoleculeOverlay({
               height: boxH,
               border: `2px ${isQuickScan ? 'dashed' : 'solid'} ${color}`,
               borderRadius: '3px',
-              background: isSelected ? 'rgba(59,130,246,0.1)' : 'transparent',
+              background: isSelected ? 'var(--accent-muted)' : 'transparent',
               cursor: isRecognizing ? 'wait' : 'pointer',
               pointerEvents: isRecognizing ? 'none' : 'auto',
               opacity: isQuickScan ? 0.85 : 1,

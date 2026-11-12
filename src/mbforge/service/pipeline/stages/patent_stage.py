@@ -87,8 +87,8 @@ class ExtractionOutcome:
     #: Readings joined to the structure their example heading declares. Each entry
     #: carries whether the example's printed product mass reproduces the structure.
     structure_activity: list[dict] = field(default_factory=list)
-    #: The evidence rows this pass read; the LLM path needs their pages and a
-    #: signature of the exact set it analyzed.
+    #: The evidence rows this pass read, with a signature of the exact set
+    #: analyzed so a re-extract can detect changed inputs.
     evidence: list[SourceEvidence] = field(default_factory=list)
 
 
@@ -146,10 +146,6 @@ class PatentStage:
                 issues=issues,
                 analysis_status="disabled",
                 extraction_mode="deterministic",
-                conflicts=[],
-                review_candidates=[],
-                llm={},
-                coverage=None,
                 stats={
                     "section_count": len(outcome.sections),
                     "entry_count": len(outcome.entries),
@@ -172,10 +168,8 @@ class PatentStage:
                         if item["attribution"] == "unresolved"
                     ),
                     "issue_count": len(issues),
-                    "llm_links_applied": 0,
                     "analysis_status": "disabled",
                     "extraction_mode": "deterministic",
-                    "llm_merge": {},
                 },
             )
             publication = patent_facts.publish_document_facts(
@@ -248,8 +242,6 @@ class PatentStage:
                 "projection_ok": publication.projection_ok,
                 "analysis_status": "disabled",
                 "extraction_mode": "deterministic",
-                "conflict_count": 0,
-                "review_candidate_count": 0,
                 "run_id": ctx.run_id,
                 "artifact_path": str(publication.projection_path),
             },
@@ -373,7 +365,6 @@ class PatentStage:
         # names recorded are the ones a heading happened to state.
         names.extend(extract_prose_compound_names(source_evidence, ctx.doc_id))
         _backfill_entry_names(all_entries, names)
-        characterizations = extract_characterization(source_evidence, ctx.doc_id)
         issues.extend(_family_issues(characterizations, names, routes))
         # The document declares its own structure-activity mapping in each example
         # heading; joining through that declaration is what turns a reading into

@@ -135,13 +135,6 @@ class EsTag(BaseModel):
     value: str = ""
 
 
-class EsTagRequest(BaseModel):
-    """Request body for the SMILES-to-E-SMILES endpoint."""
-
-    smiles: str = Field(..., description="Base SMILES string")
-    tags: list[EsTag] = Field(default_factory=list, description="E-SMILES tags")
-
-
 class EsTagParseResponse(BaseModel):
     """Response body for ``/api/v1/chem/parse-esmiles-tags``."""
 
@@ -278,13 +271,3 @@ class AtomMappingResponse(BaseModel):
     mapping_a: list[int | None] = Field(default_factory=list)
     mapping_b: list[int | None] = Field(default_factory=list)
     error: str | None = None
-
-
-class RGroupNameRequest(BaseModel):
-    """Request body for ``/api/v1/chem/preprocess-rgroup-name``."""
-
-    name: str = Field(
-        ...,
-        validation_alias=AliasChoices("name", "smiles"),
-        description="R-group name to preprocess",
-    )

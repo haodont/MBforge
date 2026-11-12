@@ -100,7 +100,10 @@ def _name_source(result: ExtractionResult) -> str:
     outweighs which.
     """
     metadata = result.properties if isinstance(result.properties, dict) else {}
-    return "page_text" if metadata.get("label_source") == "page_text" else "crop"
+    # ``repeated_print`` is the page's own text too: the number was read off
+    # the page on two drawings of the same compound, not guessed from a crop.
+    source = metadata.get("label_source")
+    return "page_text" if source in {"page_text", "repeated_print"} else "crop"
 
 
 def _append_detection_metadata(
@@ -288,6 +291,82 @@ def select_molecule_name(
         "rule": rule,
         "confidence": candidate.get("confidence", 0.0),
     }
+
+
+def resolve_repeated_print_labels(results: list[ExtractionResult]) -> int:
+    """Give a printed number back to the drawings that all show one compound.
+
+    A patent prints the same compound more than once on a page — the product in
+    a scheme and the product again as the figure it belongs to. The geometry
+    then cannot settle which drawing owns the number, so the number is left
+    unassigned: the structure keeps no name, no rule can bind it to its
+    compound, and every reading that cites it stays unowned.
+
+    When every drawing that read the same number resolves to the same
+    structure, the number is that compound's, and it is assigned to them. Two
+    drawings that disagree about the structure stay unassigned: that is a
+    genuine ambiguity a reader must settle.
+    """
+    from mbforge.service.pipeline.detection.label_normalization import (
+        LabelKind,
+        normalize_coref_label,
+    )
+
+    def _canonical(result: ExtractionResult) -> str:
+        try:
+            molecule = Chem.MolFromSmiles(result.smiles)
+        except Exception:  # noqa: BLE001 - one bad SMILES must not stop the page
+            return ""
+        if molecule is None:
+            return ""
+        try:
+            return Chem.MolToSmiles(molecule, canonical=True, isomericSmiles=True)
+        except Exception:  # noqa: BLE001
+            return ""
+
+    groups: dict[tuple[int, str], list[ExtractionResult]] = {}
+    for result in results:
+        if str(result.name or "").strip():
+            continue
+        properties = result.properties if isinstance(result.properties, dict) else {}
+        labels = properties.get("ocr_labels_unassigned")
+        if not isinstance(labels, list) or not labels:
+            continue
+        for text in labels:
+            if not isinstance(text, str) or not text.strip():
+                continue
+            normalized = normalize_coref_label(text)
+            if normalized is None or normalized.kind is not LabelKind.COMPOUND:
+                continue
+            page = -1 if result.page_idx is None else int(result.page_idx)
+            groups.setdefault((page, normalized.normalized), []).append(result)
+            break
+
+    resolved = 0
+    for (_page, label), drawings in groups.items():
+        if len(drawings) < 2:
+            continue
+        canonical = {_canonical(drawing) for drawing in drawings}
+        canonical.discard("")
+        if len(canonical) != 1:
+            # The drawings disagree about the structure: still ambiguous.
+            continue
+        (only,) = canonical
+        if "*" in only:
+            # A Markush scaffold names a scheme, not a finished compound.
+            continue
+        for drawing in drawings:
+            drawing.name = label
+            properties = drawing.properties
+            properties.pop("ocr_labels_unassigned", None)
+            properties.pop("ocr_labels_unassigned_primary", None)
+            assigned = properties.setdefault("ocr_labels", [])
+            if isinstance(assigned, list) and label not in assigned:
+                assigned.append(label)
+            properties["ocr_labels_primary"] = label
+            properties["label_source"] = "repeated_print"
+            resolved += 1
+    return resolved
 
 
 def _merge_detection(existing: Molecule, r: ExtractionResult) -> None:

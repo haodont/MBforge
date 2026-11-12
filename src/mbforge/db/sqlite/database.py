@@ -22,6 +22,7 @@ from mbforge.db.sqlite.schema import (
     _MOL_FTS,
     _MOL_SCHEMA,
     _PATENT_ANALYSIS_SCHEMA,
+    _RELATION_SCHEMA,
     _REVIEW_V12_SCHEMA,
     _SOURCE_EVIDENCE_SCHEMA,
 )
@@ -58,8 +59,6 @@ class DatabaseManager:
         self._layout = LibraryLayout(library_root)
         self._layout.ensure_library_root()
         self._db_path = self._layout.database_path
-        self._kb_path = self._db_path
-        self._mol_path = self._db_path
         self._lock = threading.Lock()
         # threading.Event gives a clearer double-checked-locking pattern than
         # a plain bool and avoids the (theoretical) re-ordering issues of a
@@ -80,6 +79,7 @@ class DatabaseManager:
             + _REVIEW_V12_SCHEMA
             + _MEASUREMENTS_SCHEMA
             + _PATENT_ANALYSIS_SCHEMA
+            + _RELATION_SCHEMA
             + _MOL_FTS
         )
 
@@ -210,30 +210,6 @@ class DatabaseManager:
 
         conn.execute("DELETE FROM source_evidence WHERE doc_id = ?", (doc_id,))
         conn.execute("DELETE FROM molecule_detections WHERE doc_id = ?", (doc_id,))
-        # Capture the document's review candidate IDs before deleting the
-        # candidates: the decisions table is keyed on those IDs, so deleting
-        # candidates first would make the audit cleanup no-op and leave
-        # orphaned decision rows behind.
-        review_candidate_ids = [
-            row[0]
-            for row in conn.execute(
-                "SELECT candidate_id FROM markush_review_candidates WHERE doc_id = ?",
-                (doc_id,),
-            ).fetchall()
-        ]
-        conn.execute("DELETE FROM markush_fragments WHERE doc_id = ?", (doc_id,))
-        conn.execute("DELETE FROM markush_scaffolds WHERE doc_id = ?", (doc_id,))
-        conn.execute("DELETE FROM markush_evidence WHERE doc_id = ?", (doc_id,))
-        if review_candidate_ids:
-            placeholders = ",".join("?" for _ in review_candidate_ids)
-            conn.execute(
-                "DELETE FROM markush_decisions WHERE entity_type = 'review_candidate' "
-                f"AND entity_id IN ({placeholders})",
-                review_candidate_ids,
-            )
-        conn.execute(
-            "DELETE FROM markush_review_candidates WHERE doc_id = ?", (doc_id,)
-        )
         # Printed readings are document-scoped and have no molecule FK, so they
         # are cleared here explicitly: a deleted document must not leave
         # citable readings behind.
@@ -275,7 +251,7 @@ class DatabaseManager:
         with self._lock:
             if self._initialized.is_set():
                 return
-            conn = sqlite3.connect(str(self._kb_path))
+            conn = sqlite3.connect(str(self._db_path))
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA foreign_keys=ON")
@@ -291,14 +267,6 @@ class DatabaseManager:
                     "DROP TABLE IF EXISTS collections;"
                 )
                 self._migrate_ingest_dag(conn)
-                conn.commit()
-            finally:
-                conn.close()
-            conn = sqlite3.connect(str(self._mol_path))
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA foreign_keys=ON")
-                conn.execute("PRAGMA temp_store=MEMORY")
                 conn.executescript(DatabaseManager.molecule_schema())
                 self._migrate_molecule_schema(conn)
                 conn.commit()
@@ -387,7 +355,7 @@ class DatabaseManager:
         """Return a per-thread SQLite connection for the unified database.
 
         Connections are lazily created and bound to the calling thread so that
-        ``kb_conn()`` / ``mol_conn()`` / ``transaction()`` can safely be used
+        ``connection()`` / ``transaction()`` can safely be used
         across ``asyncio.to_thread`` or other thread-pool boundaries. A
         per-thread refcount keeps the connection open during nested context
         manager entries and closes it once the outermost one exits.
@@ -408,9 +376,9 @@ class DatabaseManager:
     def _shared_connection(self) -> Iterator[sqlite3.Connection]:
         """Yield the current thread's connection for the unified database.
 
-        In the unified single-DB layout ``kb_conn()`` and ``mol_conn()`` share
-        the same physical connection *within* the calling thread, matching the
-        previous refcounted behavior without pinning a connection to one thread.
+        Nested entries share the same physical connection *within* the calling
+        thread, matching the previous refcounted behavior without pinning a
+        connection to one thread.
         """
         conn = self._thread_connection()
         self._local.refcount += 1
@@ -427,35 +395,27 @@ class DatabaseManager:
                 self._local.conn = None
 
     @contextmanager
-    def kb_conn(self):
+    def connection(self) -> Iterator[sqlite3.Connection]:
+        """One committed-or-rolled-back scope on the unified database."""
         self.initialize()
         with self._shared_connection() as conn:
             yield conn
 
     @contextmanager
-    def mol_conn(self):
-        self.initialize()
-        with self._shared_connection() as conn:
-            yield conn
-
-    @contextmanager
-    def transaction(self):
+    def transaction(self) -> Iterator[sqlite3.Connection]:
         """Transaction over the unified library database.
 
-        Yields a tuple ``(kb_conn, mol_conn)``; both entries are the same
-        physical connection to the single unified database, so a failure
-        anywhere rolls back every write made inside the block.
+        Yields the one physical connection, so a failure anywhere rolls back
+        every write made inside the block.
         """
         self.initialize()
-        with self._shared_connection() as kb_conn:
-            yield kb_conn, kb_conn
+        with self._shared_connection() as conn:
+            yield conn
 
     def execute(
         self,
         sql: str,
         parameters: tuple | list | dict | None = None,
-        *,
-        db: str = "kb",
     ) -> list[sqlite3.Row]:
         """Execute a single statement and return all rows.
 
@@ -463,27 +423,22 @@ class DatabaseManager:
         transactions prefer ``transaction()``.
         """
         parameters = parameters or ()
-        conn_manager = self.kb_conn if db == "kb" else self.mol_conn
-        with conn_manager() as conn:
+        with self.connection() as conn:
             return conn.execute(sql, parameters).fetchall()
 
     def count_documents(self) -> int:
         """Return the number of documents currently tracked in the ingest queue."""
-        rows = self.execute("SELECT COUNT(*) as cnt FROM ingest_queue", db="kb")
+        rows = self.execute("SELECT COUNT(*) as cnt FROM ingest_queue")
         return rows[0]["cnt"] if rows else 0
 
     def count_molecules(self) -> int:
         """Return the number of molecules currently persisted."""
-        rows = self.execute("SELECT COUNT(*) as cnt FROM molecules", db="mol")
+        rows = self.execute("SELECT COUNT(*) as cnt FROM molecules")
         return rows[0]["cnt"] if rows else 0
 
     @property
-    def kb_path(self) -> Path:
-        return self._kb_path
-
-    @property
-    def mol_path(self) -> Path:
-        return self._mol_path
+    def db_path(self) -> Path:
+        return self._db_path
 
 
 def record_ingest_event(
@@ -516,7 +471,7 @@ def record_ingest_event(
 
     db.initialize()
     try:
-        with db.kb_conn() as conn:
+        with db.connection() as conn:
             data_json = json.dumps(data, ensure_ascii=False) if data else None
             conn.execute(
                 """

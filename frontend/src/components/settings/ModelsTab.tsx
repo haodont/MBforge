@@ -12,6 +12,9 @@ import {
 } from '@/api/query/hooks'
 import ModelCard from '@/components/settings/ModelCard'
 import Button from '@/components/ui/Button'
+import SettingSection, { SettingGroup } from '@/components/ui/SettingSection'
+import { TextField } from './SettingRow'
+import type { SettingsState } from './types'
 import { showToast } from '@/hooks/useToast'
 import { getUserFacingError } from '@/utils/errors'
 
@@ -27,7 +30,12 @@ export interface DownloadState {
   } | undefined
 }
 
-export default function ModelsTab() {
+interface Props {
+  settings: SettingsState
+  setSettings: React.Dispatch<React.SetStateAction<SettingsState>>
+}
+
+export default function ModelsTab({ settings, setSettings }: Props) {
   const { t } = useTranslation()
   const [downloadState, setDownloadState] = useState<DownloadState>({})
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
@@ -234,6 +242,18 @@ export default function ModelsTab() {
 
   return (
     <div className="settings-section">
+      <SettingSection>
+        <SettingGroup title={t('settings.modelCache')}>
+          <TextField
+            label={t('settings.modelCacheDir')}
+            description={t('settings.modelCacheDirDesc')}
+            value={settings.model_cache_dir}
+            onChange={v => setSettings(s => ({ ...s, model_cache_dir: v }))}
+            placeholder={t('settings.modelCacheDirPlaceholder')}
+            monospace
+          />
+        </SettingGroup>
+      </SettingSection>
       <div className="settings-group">
         {/* Path hint: users should place model files under cacheDir — prominent */}
         {cacheDir && (

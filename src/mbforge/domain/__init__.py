@@ -2,7 +2,7 @@
 
 Convenience re-export of the stable public domain surface so callers can
 ``from mbforge.domain import Molecule, SourceEvidence``.  Function-heavy
-helpers (parser, coverage, provenance, stage runner) stay in
+helpers (parser, coverage, stage runner) stay in
 their own modules and are NOT re-exported here to avoid widening the
 public namespace with generic names.
 """
@@ -18,12 +18,7 @@ from mbforge.domain.activity import (
 )
 from mbforge.domain.document import Document
 from mbforge.domain.evidence import SourceEvidence
-from mbforge.domain.molecule import (
-    MarkushFragment,
-    MarkushScaffold,
-    Molecule,
-    molecule_id,
-)
+from mbforge.domain.molecule import Molecule, molecule_id
 from mbforge.domain.patent import CompoundEntry, entry_id
 from mbforge.domain.review import ReviewDecision, ReviewState
 from mbforge.domain.types import DetectionSource, ExtractionResult
@@ -35,8 +30,6 @@ __all__ = [
     "DetectionSource",
     "Document",
     "ExtractionResult",
-    "MarkushFragment",
-    "MarkushScaffold",
     "MeasurementValue",
     "Molecule",
     "ReviewDecision",

@@ -1,8 +1,7 @@
 """Pydantic models for the unified human-review queue.
 
 Schemas for listing review items, submitting confirm/reject decisions,
-and surfacing per-entity review history across detection, Markush, and
-activity sources.
+and surfacing per-entity review history across detection and activity sources.
 """
 
 from __future__ import annotations
@@ -17,8 +16,6 @@ ReviewKind = Literal[
     "unparsable_smiles",
     "missing_evidence",
     "ambiguous_coref",
-    "markush_link",
-    "patent_fact_review",
     "smiles_correction",
     "ai_review",
     "designation_unbound",
@@ -67,8 +64,8 @@ class ReviewDecisionItem(BaseModel):
     id: str
     # ambiguous_coref only: the reviewer-chosen compound identifier
     choice: str | None = None
-    # patent_fact_review only: the revision the reviewer decided against, so a
-    # stale decision is refused instead of overwriting newer facts.
+    # Optional optimistic-concurrency hint: the revision the reviewer decided
+    # against, so a stale decision is refused instead of overwriting newer facts.
     expected_revision: int | None = None
 
 
@@ -91,7 +88,6 @@ class ReviewClearRequest(BaseModel):
 
 class ReviewClearResponse(BaseModel):
     deleted_items: int = 0
-    deleted_candidates: int = 0
 
 
 class ReviewFilterDecisionRequest(BaseModel):

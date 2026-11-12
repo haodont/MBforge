@@ -14,11 +14,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from mbforge.contracts.molecule import MoleculeListRequest
 from mbforge.domain.molecule import Molecule, molecule_id
 from mbforge.foundation.errors import NotFoundError, ValidationError
 from mbforge.foundation.ids import short_id
 from mbforge.foundation.logger import get_logger
-from mbforge.service.dto.molecule import MoleculeListRequest, MoleculeListResponse
+from mbforge.service.dto.molecule import MoleculeListResponse
 from mbforge.service.pipeline.persist.molecules import filter_persistable_candidates
 from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.documents.pdf_layout import load_document_bboxes

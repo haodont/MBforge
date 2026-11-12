@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -95,12 +96,20 @@ class ReingestDocumentOutput(BaseModel):
 
 
 class RunActionInput(BaseModel):
+    action: Literal["cancel", "retry"] = Field(
+        ...,
+        description=(
+            "`cancel` stops an active run; `retry` re-queues its failed or "
+            "cancelled nodes."
+        ),
+    )
     run_id: str = Field(
         ..., min_length=1, max_length=128, description="Pipeline run id."
     )
 
 
 class RunActionOutput(BaseModel):
+    action: Literal["cancel", "retry"]
     run_id: str
     updated: int
 
@@ -247,25 +256,18 @@ async def reingest_document(
     )
 
 
-async def cancel_run(
+async def run_control(
     context: CapabilityContext, request: RunActionInput
 ) -> CapabilityResult:
-    result = await ingest.cancel_batch(context.library_root, [request.run_id])
+    """Cancel or retry one run; both act on the same queue rows."""
+    batch = ingest.cancel_batch if request.action == "cancel" else ingest.retry_batch
+    result = await batch(context.library_root, [request.run_id])
     if result.updated == 0:
         raise NotFoundError("run not found", detail=request.run_id)
     return CapabilityResult(
-        data=RunActionOutput(run_id=request.run_id, updated=result.updated)
-    )
-
-
-async def retry_run(
-    context: CapabilityContext, request: RunActionInput
-) -> CapabilityResult:
-    result = await ingest.retry_batch(context.library_root, [request.run_id])
-    if result.updated == 0:
-        raise NotFoundError("run not found", detail=request.run_id)
-    return CapabilityResult(
-        data=RunActionOutput(run_id=request.run_id, updated=result.updated)
+        data=RunActionOutput(
+            action=request.action, run_id=request.run_id, updated=result.updated
+        )
     )
 
 
@@ -337,22 +339,15 @@ register(
 )
 register(
     Capability(
-        name="cancel_run",
-        description="Cancel an active pipeline run.",
+        name="run_control",
+        description=(
+            "Act on one pipeline run: action=cancel stops an active run, "
+            "action=retry re-queues its failed or cancelled nodes."
+        ),
         input_model=RunActionInput,
         output_model=RunActionOutput,
         mutating=True,
-        handler=cancel_run,
-    )
-)
-register(
-    Capability(
-        name="retry_run",
-        description="Retry failed or cancelled nodes of a pipeline run.",
-        input_model=RunActionInput,
-        output_model=RunActionOutput,
-        mutating=True,
-        handler=retry_run,
+        handler=run_control,
     )
 )
 register(

@@ -41,7 +41,7 @@ def _insert_evidence_row(
         raw_text = json.dumps({"mol_img_path": mol_img_path})
     db = DatabaseManager.get(str(tmp_path))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             """
             INSERT INTO source_evidence

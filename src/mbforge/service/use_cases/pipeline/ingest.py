@@ -67,6 +67,7 @@ __all__ = [
     "fetch_doc_logs",
     "fetch_logs_since",
     "fetch_run_status",
+    "list_runs",
     "list_tasks",
     "queue_snapshot",
     "retry_batch",
@@ -326,6 +327,27 @@ async def list_run_tasks(library_root: str, run_id: str) -> list[dict]:
     return await asyncio.to_thread(_queue().list_run_tasks, library_root, run_id)
 
 
+async def list_runs(
+    library_root: str,
+    *,
+    doc_id: str = "",
+    active_only: bool = True,
+    limit: int = 20,
+) -> list[dict]:
+    """Return runs grouped from their queue nodes, newest first.
+
+    ``active_only`` keeps runs that have not reached a terminal outcome, so an
+    agent can answer "what is running" without loading the whole history.
+    """
+    return await asyncio.to_thread(
+        _queue().list_runs,
+        library_root,
+        doc_id=doc_id or None,
+        active_only=active_only,
+        limit=limit,
+    )
+
+
 def queue_snapshot(library_root: str) -> dict:
     """Return total + per-status counts for ``ingest_queue`` (blocking)."""
     return _queue().queue_snapshot(library_root)
@@ -564,6 +586,36 @@ async def worker_status_payload(raw_library_root: str | None) -> dict[str, Any]:
         "registered_processes": registered,
         "model_gate": model_gate,
     }
+
+
+async def worker_health_payload(raw_library_root: str | None) -> dict[str, Any]:
+    """Return the agent-facing queue health: worker, counts and model gate.
+
+    Unlike :func:`worker_status_payload`, this omits process-registry and
+    orphan detail the agent cannot act on, and it is cheap enough to call
+    on demand when a run looks stuck in ``pending``.
+    """
+    from mbforge.foundation.layout import LibraryLayout, resolve_library_root
+
+    root_str = str(resolve_library_root(raw_library_root or None))
+    payload: dict[str, Any] = {
+        "status": "online" if _worker().has_worker(root_str) else "offline",
+        "locked": _worker().is_library_locked(root_str),
+        "active": 0,
+        "backlog": 0,
+        "total": 0,
+        "by_status": {},
+        "model_gate": await asyncio.to_thread(_model_gate_payload),
+        "library_root": root_str,
+    }
+    if not LibraryLayout(root_str).database_path.is_file():
+        return payload
+    snapshot = await asyncio.to_thread(queue_snapshot, root_str)
+    payload["total"] = snapshot["total"]
+    payload["by_status"] = snapshot["by_status"]
+    payload["active"] = snapshot["by_status"].get("processing", 0)
+    payload["backlog"] = snapshot["by_status"].get("pending", 0)
+    return payload
 
 
 async def stream_run_events(

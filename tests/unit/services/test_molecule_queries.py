@@ -95,7 +95,7 @@ def test_by_location_reads_published_run_with_cache_union(tmp_path: Path) -> Non
 
     db = DatabaseManager.get(str(rich_root))
     db.initialize()
-    with db.mol_conn() as conn:
+    with db.connection() as conn:
         conn.execute(
             "INSERT INTO molecules (mol_id, smiles, name, canonical_smiles) "
             "VALUES ('CCO', 'CCO', 'ethanol', 'CCO')"
