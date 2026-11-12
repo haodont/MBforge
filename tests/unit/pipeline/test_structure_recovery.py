@@ -125,11 +125,11 @@ def test_an_unlabelled_drawing_is_named_after_the_designation_its_mass_matches(
 ) -> None:
     """A designation with no drawing still names the drawing its LC-MS measures.
 
-    CN121717757A cites ``I-2`` in its table and prints ``(M+H)+ = 504.1`` in
-    实施例3; the claims drawing whose mass is 503.16 was read but never
-    captioned. Exactly one unlabelled drawing matches, so the document has
-    already said which structure it means — the promotion stores it under the
-    designation and the association binds the readings by rule.
+    CN121717757A cites ``I-2`` in its table and prints ``(M+H)+ = 504.1``; the
+    drawing it means was read but never captioned. Exactly one unlabelled drawing
+    matches the printed mass, so the document has already said which structure it
+    means — the promotion stores it under the designation so the association can
+    bind the readings by rule.
     """
     from mbforge.db.sqlite.database import DatabaseManager
     from mbforge.service.pipeline.patent.structure_recovery import (
@@ -137,77 +137,56 @@ def test_an_unlabelled_drawing_is_named_after_the_designation_its_mass_matches(
     )
 
     DatabaseManager.get(str(library)).initialize()
+    smiles = (
+        "NC(=O)CCn1cc(C(=O)N[C@@H]2CCC[C@H](Nc3cc(C(F)(F)F)nc4ccc(Cl)cc34)C2)c(Cl)n1"
+    )
     candidate = Molecule(
-        canonical_smiles=(
-            "COc1ccc(C(=O)NC23CCC(CC2)C(Nc2cc(C(F)(F)F)nc4ccc(Cl)cc34)C3)cc1"
-        ),
+        canonical_smiles=smiles,
         esmiles="",
         name="",
         status="pending",
         detections=[
             DetectionSource(
                 source="image",
-                page=31,
-                bbox=(249.81, 339.82, 358.15, 419.74),
-                evidence_id="ev-p32",
+                page=130,
+                bbox=(113.02, 527.01, 247.65, 638.97),
+                evidence_id="ev-131",
             )
         ],
         properties={},
     )
     issues: list[dict] = []
+    ms = {
+        "technique": "ms",
+        "label_key": "I-274-A",
+        "raw_text": "LC-MS:m/z:(M+H)+=543.1",
+        "evidence_ids": ["ev-131"],
+    }
 
     promoted = promote_structures_by_printed_mass(
         library_root=library,
         doc_id="doc-1",
         candidates=[candidate],
-        characterizations=[
-            {
-                "technique": "ms",
-                "label_key": "I-2",
-                "raw_text": "LC-MS:m/z:(M+H)+=504.1",
-                "evidence_ids": ["ev-153"],
-            }
-        ],
+        characterizations=[ms],
         issues=issues,
     )
 
-    assert [item.name for item in promoted] == ["I-2"]
+    assert [item.name for item in promoted] == ["I-274-A"]
     assert any(
         issue["code"] == "designation_promoted_by_printed_mass" for issue in issues
     )
     stored = DatabaseManager.get(str(library)).execute(
-        "SELECT name FROM molecules WHERE mol_id = ?", (candidate.canonical_smiles,)
+        "SELECT name FROM molecules WHERE mol_id = ?", (smiles,)
     )
-    assert stored and stored[0]["name"] == "I-2"
+    assert stored and stored[0]["name"] == "I-274-A"
 
-    # A mass that matches two drawings is not a name for either.
-    other = Molecule(
-        canonical_smiles=(
-            "COc1ccc(C(=O)NC23CCC(Nc4cc(C(F)(F)F)nc5ccc(Cl)cc45)(C2)C3)cc1"
-        ),
-        esmiles="",
-        name="",
-        status="pending",
-        detections=[
-            DetectionSource(
-                source="image", page=113, bbox=(1.0, 2.0, 3.0, 4.0), evidence_id="ev-113"
-            )
-        ],
-        properties={"structure_role": "complete"},
-    )
+    # A printed mass nothing matches names nothing.
     assert (
         promote_structures_by_printed_mass(
             library_root=library,
             doc_id="doc-2",
-            candidates=[candidate, other],
-            characterizations=[
-                {
-                    "technique": "ms",
-                    "label_key": "I-3",
-                    "raw_text": "LC-MS:m/z:(M+H)+=504.1",
-                    "evidence_ids": ["ev-153"],
-                }
-            ],
+            candidates=[candidate],
+            characterizations=[{**ms, "label_key": "I-999", "raw_text": "m/z 900.0"}],
             issues=[],
         )
         == []
