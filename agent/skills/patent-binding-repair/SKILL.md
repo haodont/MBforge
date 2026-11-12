@@ -70,6 +70,42 @@ Do not re-run Extract to fix a withheld drawing: the role gate would withhold it
 again unless the document prints the same number on two or more drawings of it
 (which `classify_structure_role` already treats as the document's own naming).
 
+## 同号多次印刷不是歧义
+
+一份专利把同一个化合物印在很多地方（权利要求清单、实施例方案、活性表引用），
+这是常态，不是冲突。看到同一编号有多张图时：
+
+- 先确认它们是不是**同一个实例**：同一结构的多次印刷在库里是一个 molecule，
+  两张图都指向它即可，不要按"候选太多"处理；
+- 如果两张图的结构式不同，那么"哪一张是这个编号"由**制备它的那个实施例所印的
+  LC-MS** 决定（实测 CN121717757A：`I-266-A` 权利要求图 572.2、实施例图 558.16，
+  实施例26 印 `(M+H)+ = 558.0` → 取 558.16 那张）。这条已经写进 association
+  （`designation_settled_by_printed_mass`），所以先看它有没有替你判；
+- 只有"没有 MS、或两者都在容差内"才轮到人。
+
+## 先确认管线已经能做什么
+
+下面这些以前需要人工补，现在由确定性规则处理，遇到时先重跑而不是先动手：
+
+| 症状 | 现在的处理 |
+| --- | --- |
+| 图注被读成 `1-2` / `1-273-A`（首字符 1/I 混淆、无字母） | `figno` 图注按指代接受，`1`/`I` 用系列字母还原 |
+| 图注印在图的**上方**（p32 那种网格） | 居中的图注上下皆可，第一遍仍按惯例优先 |
+| 编号只在同一结构的多张图上出现、周围散文是 R 基定义 | 角色门放行（印两次 = 文档自己的命名） |
+| 一编号两结构 | 印刷 MS 定夺（见上） |
+
+重跑 Extract 只在**标签规则**是原因时才值得（它要几分钟到十几分钟，且会重新
+OCR 整篇）。归属/结构判断一律用能力写入，不靠重跑。
+
+## 复核队列是工作清单，不是历史
+
+- 某个读数被后续 pass 判断上之后，它的 `designation_unbound` 项会被自动关闭；
+  **不要**再去解释或"重新打开"已关闭的项。
+- `review_required` 项是**角色门扣下的图**：这正是 `promote_structure` 的对象，
+  不是"没有结构"。先看图与证据，再提升，再 `assign_attributions`。
+- human/agent 的归属在重跑后保留（只要读数还在），所以不必重复写；重复写只会
+  产生同样的 `method=agent` 行。
+
 ## Reading the reason correctly
 
 `unattributed_by_reason` tells you which playbook applies. Misreading it is the
@@ -159,6 +195,7 @@ Strongest first. Stop at the first rung that settles it.
 | `search_evidence` | find where a designation is printed |
 | `assign_attributions` | write a batch of accepted decisions |
 | `promote_structure` | store one withheld drawing as a concrete molecule (with its reason) |
+| `list_review_queue` | `review_required` items are the promotion worklist; `designation_unbound` items are decisions |
 | `propose_review` | file a gap a human must settle (never a value the pipeline could have written) |
 | `list_review_queue` | items already waiting; hand them over with `[[ui:review:<kind>:<item_id>]]` |
 
