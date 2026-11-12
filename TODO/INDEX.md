@@ -1696,3 +1696,20 @@ Rule worth having in the pipeline: when several candidates claim one
 designation, the printed MS of the section that prepares it already decides —
 `find_mass_mismatches` computes the same comparison today, so the association
 could use it as a tie-break instead of leaving an ambiguity.
+
+## I-2: one compound, two printings — and the drawing is withheld (2026-11-12)
+
+Repeated printing is normal, so the fix for `I-2` is one instance, not an
+ambiguity. The example's own statement names it: 实施例3 (p153)
+`LC-MS:m/z:(M+H)+=504.1` with a para-anisyl NMR — that is
+`C26H25ClF3N3O2` (503.16), the claims-list drawing at p32
+(`COc1ccc(C(=O)NC23CCC(CC2)C(Nc2…Cl)…C3)cc1`, bbox 249.81–358.15 × 339.82–419.74).
+The other `1-2` printing (p114) is `C25H23…` (490.1) and does not match.
+
+That drawing is **not a stored molecule** (`assign_attributions` → molecule not
+found): it is a concrete drawing on a claims page whose neighbouring prose is the
+R-group definition, so the role gate withheld it. The repair is
+`promote_structure(smiles=…, reason="I-2, 实施例3 p153 MS 504.1")` and then the
+two readings (39.43, 8.3). That capability exists in the backend but not in the
+session that ran this pass, so `I-2` stays open with everything needed written
+down.
