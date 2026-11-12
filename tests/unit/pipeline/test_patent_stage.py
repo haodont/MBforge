@@ -1493,3 +1493,32 @@ def test_the_printed_mass_settles_a_designation_two_drawings_claim() -> None:
     assert any(
         issue["code"] == "designation_settled_by_printed_mass" for issue in issues
     )
+
+
+def test_a_printed_mass_is_read_after_its_adduct_expression() -> None:
+    """The value follows the adduct; the digits inside it are not the mass.
+
+    CN121717757A prints ``(M+H-100)†=128.0`` and ``(M+H-t-Bu)+=249.1``. Reading
+    the first number after ``m/z`` took ``100`` out of the adduct and invented a
+    128 Da mismatch against a correct structure. An adduct whose fragment is
+    unknown must also be unreadable, because it cannot decide a mass check.
+    """
+    from mbforge.service.pipeline.patent.rules.characterization import (
+        adduct_mass_delta,
+        printed_ms_mz,
+    )
+
+    mz, adduct = printed_ms_mz("LC-MS:m/z: (M+H-100) †=128.0.")
+    assert (mz, adduct) == (128.0, "+H-100")
+    assert adduct_mass_delta(adduct) == pytest.approx(-98.99272)
+
+    mz, adduct = printed_ms_mz("LC-MS:m/z:(M+H-t-Bu)+=249.1.")
+    assert mz == 249.1
+    assert adduct_mass_delta(adduct) == pytest.approx(-55.05532)
+
+    # Both print orders of a plain ion still read the value, not the adduct.
+    assert printed_ms_mz("LC-MS:m/z:(M+H)+=558.0") == (558.0, "+H")
+    assert printed_ms_mz("MS (ESI) m/z: 456.2 [M+H]+") == (456.2, "+H")
+
+    # An unknown fragment makes the expression unreadable rather than wrong.
+    assert adduct_mass_delta("+H-Xy3") is None

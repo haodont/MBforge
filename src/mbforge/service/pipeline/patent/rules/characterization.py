@@ -93,9 +93,27 @@ _CHARACTERIZATION_HEADING_LOOKBACK = 24
 
 
 #: ``MS (ESI) m/z: 456.2 [M+H]+`` — the printed mass and the adduct it names.
-_MS_MZ_RE = re.compile(
-    r"m/z[^0-9]{0,12}(?P<mz>\d+(?:\.\d+)?)\s*(?:\[\s*M\s*(?P<sign>[+-])\s*(?P<adduct>[A-Za-z0-9]+)\s*\]?)?",
+#: ``m/z: (M+H)+=558.0`` / ``m/z: (M+H-t-Bu)†=249.1`` — the value is printed
+#: after the adduct, never inside it. Reading the first digits after ``m/z``
+#: picked ``100`` out of ``(M+H-100)``, which invented a 128 Da mismatch.
+_MS_MZ_PAREN_RE = re.compile(
+    r"m/z\s*[:：]?\s*[（(]\s*M\s*(?P<expr>[^)）]*?)\s*[)）]\s*[†*+]?\s*=\s*"
+    r"(?P<mz>\d+(?:\.\d+)?)",
     re.IGNORECASE,
+)
+#: ``[M+H]+ 456.2`` / ``[M-H]- 455.2`` — bracketed adduct, value after it.
+_MS_MZ_BRACKET_RE = re.compile(
+    r"\[\s*M\s*(?P<expr>[^\]]*?)\s*\][^0-9]{0,12}(?P<mz>\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+#: ``MS (ESI) m/z: 456.2 [M+H]+`` — the value first, the adduct after it.
+_MS_MZ_VALUE_FIRST_RE = re.compile(
+    r"m/z[^0-9]{0,12}(?P<mz>\d+(?:\.\d+)?)\s*\[?[（(]?\s*M\s*(?P<expr>[^\])）]*?)\s*[\])）]",
+    re.IGNORECASE,
+)
+#: A bare ``m/z 456.2`` line with no adduct.
+_MS_MZ_PLAIN_RE = re.compile(
+    r"m/z[^0-9]{0,12}(?P<mz>\d+(?:\.\d+)?)", re.IGNORECASE
 )
 #: Proton/electron-accurate adduct corrections (monoisotopic masses + electron).
 ADDUCT_DELTA = {
@@ -104,6 +122,24 @@ ADDUCT_DELTA = {
     "+K": 38.96316,
     "+NH4": 18.03383,
     "-H": -1.00728,
+}
+#: Fragments a printed adduct expression may add or lose, by monoisotopic mass.
+#: ``(M+H-t-Bu)`` and ``(M+H-100)`` are the corpus's two ways of printing a
+#: protecting-group loss; a fragment that is not listed makes the expression
+#: unreadable, and an unreadable adduct must not drive a mass check.
+ADDUCT_FRAGMENT_MASS = {
+    "H": 1.00728,
+    "Na": 22.98922,
+    "K": 38.96316,
+    "NH4": 18.03383,
+    "H2O": 18.01056,
+    "CH3": 15.02347,
+    "CH2": 14.01565,
+    "C2H4": 28.03130,
+    "t-Bu": 56.06260,
+    "tBu": 56.06260,
+    "Boc": 100.05243,
+    "TFA": 113.99286,
 }
 #: Tolerance the dormant matcher in ``detection/label_recovery`` already uses.
 MASS_TOLERANCE_DA = 0.6
@@ -415,19 +451,63 @@ def extract_characterization(
 def printed_ms_mz(raw_text: str) -> tuple[float, str] | None:
     """The printed m/z and the adduct it names, or ``None`` for a line with neither.
 
-    One parser for the whole codebase: the mass check and the read surface
-    must read a printed mass the same way, or they disagree about the same line.
+    One parser for the whole codebase: the mass check and the read surface must
+    read a printed mass the same way, or they disagree about the same line. The
+    value always follows the adduct (``(M+H)+=558.0``, ``(M+H-t-Bu)†=249.1``,
+    ``[M-H]- 455.2``, ``m/z 456.2``), so the adduct is read first and the number
+    after it — never the first number after ``m/z``, which lives inside the
+    adduct expression.
     """
-    match = _MS_MZ_RE.search(raw_text or "")
+    text = raw_text or ""
+    match = (
+        _MS_MZ_PAREN_RE.search(text)
+        or _MS_MZ_BRACKET_RE.search(text)
+        or _MS_MZ_VALUE_FIRST_RE.search(text)
+    )
+    if match is not None:
+        return float(match.group("mz")), match.group("expr").strip()
+    match = _MS_MZ_PLAIN_RE.search(text)
     if match is None:
         return None
-    adduct = f"{match.group('sign') or '+'}{match.group('adduct') or 'H'}"
-    return float(match.group("mz")), adduct
+    return float(match.group("mz")), ""
 
 
 def adduct_mass_delta(adduct: str) -> float | None:
-    """The monoisotopic mass a printed adduct adds to the neutral structure."""
-    return ADDUCT_DELTA.get(adduct)
+    """The monoisotopic mass a printed adduct expression adds to the structure.
+
+    ``H``, ``+H``, ``H-100``, ``H-t-Bu``, ``+Na``. ``None`` when any fragment is
+    unknown, because an unreadable adduct cannot decide whether a printed mass
+    agrees with a structure.
+    """
+    expression = str(adduct or "").strip()
+    if not expression:
+        return None
+    if expression in ADDUCT_DELTA:
+        return ADDUCT_DELTA[expression]
+    # Fragments are matched longest first so ``t-Bu`` is one fragment and
+    # ``H2O`` is not read as ``H`` + ``2O``.
+    known = sorted(ADDUCT_FRAGMENT_MASS, key=len, reverse=True)
+    total = 0.0
+    index = 0
+    while index < len(expression):
+        sign = 1.0
+        if expression[index] in "+-":
+            sign = -1.0 if expression[index] == "-" else 1.0
+            index += 1
+            if index >= len(expression):
+                return None
+        for fragment in known:
+            if expression.startswith(fragment, index):
+                total += sign * ADDUCT_FRAGMENT_MASS[fragment]
+                index += len(fragment)
+                break
+        else:
+            match = re.match(r"\d+(?:\.\d+)?", expression[index:])
+            if match is None:
+                return None
+            total += sign * float(match.group(0))
+            index += len(match.group(0))
+    return total
 
 
 def find_mass_mismatches(
