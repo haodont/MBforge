@@ -72,6 +72,19 @@ def _candidate_labels(candidate: Any) -> str:
     return json.dumps(names, ensure_ascii=False)
 
 
+def _candidate_properties(candidate: Any) -> str:
+    """Serialize the candidate's own annotations for the molecule row.
+
+    The role classification and an agent promotion are decisions about this
+    structure; without them the row cannot say why a drawing the prose around
+    it looked generic still entered the concrete library.
+    """
+    properties = getattr(candidate, "properties", {})
+    if not isinstance(properties, dict):
+        return "{}"
+    return json.dumps(properties, ensure_ascii=False, default=str)
+
+
 def _persist_loop(
     active_conn: Any, db: Any, doc_id: str, candidates: Sequence[Any]
 ) -> int:
@@ -93,8 +106,8 @@ def _persist_loop(
             """
             INSERT INTO molecules
                 (mol_id, smiles, esmiles, name, labels, source_doc, source_type,
-                 status, canonical_smiles)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                 status, canonical_smiles, properties)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
             ON CONFLICT(mol_id) DO UPDATE SET
                 canonical_smiles = COALESCE(molecules.canonical_smiles, excluded.canonical_smiles),
                 source_doc = COALESCE(NULLIF(molecules.source_doc, ''), excluded.source_doc),
@@ -102,7 +115,12 @@ def _persist_loop(
                     WHEN TRIM(COALESCE(molecules.name, '')) = '' THEN excluded.name
                     ELSE molecules.name
                 END,
-                labels = excluded.labels
+                labels = excluded.labels,
+                properties = CASE
+                    WHEN COALESCE(molecules.properties, '') IN ('', '{}')
+                        THEN excluded.properties
+                    ELSE molecules.properties
+                END
             """,
             (
                 canonical_smiles,
@@ -113,6 +131,7 @@ def _persist_loop(
                 doc_id,
                 evidence_source,
                 canonical_smiles,
+                _candidate_properties(c),
             ),
         )
         db.sync_molecule_to_mol_search(active_conn, canonical_smiles)

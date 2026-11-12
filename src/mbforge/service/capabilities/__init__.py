@@ -24,6 +24,9 @@ from . import write as _write  # noqa: F401 - registers write capabilities
 from . import (
     write_binding as _write_binding,  # noqa: F401 — registers write capabilities
 )
+from . import (
+    write_structure as _write_structure,  # noqa: F401 — registers write capabilities
+)
 from .registry import (
     Capability,
     CapabilityContext,
