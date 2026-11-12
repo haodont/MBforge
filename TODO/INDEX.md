@@ -1477,3 +1477,30 @@ One correction from running the loop: `unlabeled_structures` for CN121717757A wa
 1133 rows of Markush scaffolds, which buries the handful of concrete drawings a
 `label_not_read` decision actually compares against. The packet now publishes
 only concrete, designation-less structures (no `*` in the SMILES).
+
+## The remaining binding backlog is mostly a role gate, not a decision (2026-11-12)
+
+Running the repair loop on CN120118069A (41 unattributed of 69) showed where the
+readings actually die. The activity tables cite `化合物30A`, `50A`…`53A`; every
+one of those designations *has* a drawing that owns it (`owns: true`,
+`designation_counts` 2–4) — but the drawing is not in `molecules`, so
+`assign_attribution` cannot reference it and the packet's `entry` reports
+`structure_status: missing`. `search_molecules("30A")` returns only the
+intermediates `30A-1` / `30A-5`.
+
+Cause: `classify_structure_role` withholds a closed, labelled drawing as
+`review_required` when the *prose around it* matches a Markush marker
+(`R1`-style groups, `A1`-style abstract labels, mixture/isomer wording). Persist
+drops anything whose role is not `complete`, so a final compound whose example
+section also prints R-group definitions never becomes a molecule. The gate is
+right to refuse silent promotion; what is missing is the other half — a way to
+promote a specific drawing to a concrete structure with the evidence that
+vouches for it, which is exactly the agent/human adjudication this workflow
+assumes.
+
+Consequence for the loop: `structure_detected_unmatched` and `label_not_read`
+are not one class. Some are decisions (settled by the evidence ladder in
+`patent-binding-repair`), and some are *promotions* the write path does not
+offer yet. The next capability to build is that promotion (drawing + evidence →
+concrete molecule), before another adjudication pass over the remaining 90
+readings.
