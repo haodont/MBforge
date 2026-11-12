@@ -39,7 +39,10 @@ _MASS_SUFFIX_RE = re.compile(
 #: How a document prints a designation anywhere in a passage.
 _DESIGNATION_MENTION_RE = re.compile(
     r"(?:化合物|实施例|実施例|制备例|compound|example)\s*[#:：]?\s*"
-    r"(\d+[A-Za-z]?(?:-[A-Za-z0-9]+)?)",
+    # A series designation (``I-50-2``, ``I-233-A``) starts with its letter, not
+    # a digit: the corpus numbers hundreds of compounds that way, and a
+    # digit-only token left every one of them unreadable in prose.
+    r"(\d+[A-Za-z]?(?:-[A-Za-z0-9]+)?|[A-Za-z]-\d+[A-Za-z]?(?:-[A-Za-z0-9]+)*)",
     re.IGNORECASE,
 )
 

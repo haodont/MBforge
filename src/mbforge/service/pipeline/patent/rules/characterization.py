@@ -328,6 +328,21 @@ def _characterization_owner(
     return ""
 
 
+def _product_phrase_keys(text: str) -> list[str]:
+    """Designations the passage names after a product verb (得/得到/制得).
+
+    Used only to break a tie: a preparation sentence that prints two
+    designations still says which one it *obtained*, and that is the compound
+    whose printed mass the line carries.
+    """
+    last = None
+    for match in re.finditer(r"(?:制得|得到|得)", text or ""):
+        last = match
+    if last is None:
+        return []
+    return _designation_keys((text or "")[last.end() :])
+
+
 def extract_characterization(
     evidence: Sequence[SourceEvidence], doc_id: str
 ) -> list[dict]:
@@ -365,6 +380,14 @@ def extract_characterization(
             stripped = line.strip()
             line_keys = _designation_keys(stripped) or row_keys
             label_key = line_keys[0] if len(line_keys) == 1 else ""
+            if not label_key and len(line_keys) > 1:
+                # A preparation paragraph names its reagents and its product, so
+                # the line carries several designations. The product is the one
+                # the sentence says it obtained (``…得化合物I-50-2(150mg)。
+                # LC-MS:…``), which is the designation this mass belongs to.
+                product_keys = _product_phrase_keys(stripped)
+                if len(product_keys) == 1:
+                    label_key = product_keys[0]
             if not label_key:
                 label_key = _characterization_owner(evidence, row, order)
             characterization_id = stable_id(
