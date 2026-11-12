@@ -1645,3 +1645,31 @@ designations remain, and each was checked on the page:
 So "cannot be found" splits into two truths: seven designations are never drawn
 at all, and two name one member of a pair the document prints under a shared
 caption. Neither is a label-reading or binding bug.
+
+## Corrected: CN121717757A does draw I-2, I-109, I-273-A/​B (2026-11-12)
+
+The user pointed at the pages and was right — those drawings exist. Two label
+rules were losing them, and both are now fixed and measured (94dd: 26/42 → 30/42):
+
+- a `figno` caption is a designation even when its head reads as a digit
+  (`1-2`, `1-109`, `1-273-A`), and a 1/I head is answered with the series letter;
+- a caption centred *over* a drawing names it too (p32 prints one column's
+  caption under its structure and the middle column's 7 pt above it), applied as
+  a recovery pass so it cannot displace a pairing the page convention settled.
+
+Newly bound: I-273-A, I-273-B, I-274-A (both assays each).
+
+What still cannot be placed, after the fixes (12 readings over 7 designations):
+
+| designation | readings | page fact |
+| --- | --- | --- |
+| `I-2` | 39.43, 8.3 | p32 prints the caption (`1-2`) but the same recognized SMILES also carries `1-1` (p114) and `7-1`, so three numbers claim one structure — a structure check is needed, not a label |
+| `I-109` | 14.60, 8.11 | two drawings are named `1-109`: p38 (C25H26Cl2F3N5O2, also labelled 1-146/1-288) and p169 (C26H28…); one of the two printings is a misread |
+| `I-266-A` | 8.52, 3.76 | same shape: p57 (claims, C26H30…) and p139 (example, C25H28…) both carry the caption |
+| `实施例15 组分1/2` | 16.2 / 129.7, 6.23 / 34.88 | p161 heads 实施例15 as `化合物I-233-A, I-233-B, I-233-C, I-233-D`; `组分1/2` is printed nowhere beside a structure |
+| `实施例52 组分2` | 11.83 | the same pattern |
+| `I-298-A` | 55.06 | no drawing carries it |
+
+So the residue is now two decisions a reader must make (which of two drawings
+owns `I-109` / `I-266-A` / `I-2`) and five designations the document never ties to
+a structure.
