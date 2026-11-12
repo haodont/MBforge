@@ -1531,3 +1531,34 @@ restarted from its own launcher:
 `submit_extraction(6f7496525086)` → `submit_patent_analysis(...)` →
 `query_activities(doc 6f7496525086)`; expected movement is the 29 readings of
 23A/30A/49A/50A/51A/52A/53A.
+
+## Measured after the role fix: CN120118069A 28/69 → 68/69 (2026-11-12)
+
+Re-ingesting CN120118069A with the printed-twice role rule, the stderr-tolerant
+MolParser load, and the example-label fallback moved its scoreboard:
+
+| stage | attributed | remaining |
+| --- | --- | --- |
+| before | 28/69 | 29 `label_not_read`, 11 `structure_detected_unmatched` |
+| after role fix + example fallback | **68/69** | 1 `no_printed_designation` (对照化合物1, no compound) |
+
+`label_not_read` reached zero: those readings were never a label problem, they
+were the seven withheld final compounds. The example rows (`Example 27A` …
+`Example 53A`) bound once the example label could cite the compound the document
+actually drew.
+
+Two classes remain in the other documents, and neither is a code gap:
+
+- **Stereoisomer pairs printed under one number** (CN120943813A p72:
+  `19-P1 or 19-P2` over each drawing, `19` between them). The table cites
+  `化合物19`; the drawings are its two enantiomers. Reading the labels alone
+  cannot settle which structure a racemate reading belongs to, and there is a
+  second reading-level question (does 19 mean the pair or one member). This is a
+  review-queue decision, not a rule.
+- **Suffix-bearing designations** (`化合物1-P4`, `化合物6-P2`, `化合物7-P1` …):
+  the cited token never appears on any drawing; the drawings carry the pair
+  labels above. Same decision.
+
+Also verified in this round: `promote_structure` is now a live capability, so a
+withheld drawing can be promoted one at a time when the printed-twice rule does
+not reach it.
