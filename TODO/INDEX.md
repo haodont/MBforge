@@ -1504,3 +1504,30 @@ are not one class. Some are decisions (settled by the evidence ladder in
 offer yet. The next capability to build is that promotion (drawing + evidence →
 concrete molecule), before another adjudication pass over the remaining 90
 readings.
+
+## A withheld drawing can be promoted, and the role rule learns the printed-twice case (2026-11-12)
+
+Two changes answer the gap the previous section recorded:
+
+- `promote_structure` (use case `structure_promotion`, mutating capability)
+  stores exactly one drawing a caller names by structure evidence or canonical
+  SMILES, with the reason recorded in `molecules.properties`. It refuses a
+  scaffold, a dummy-atom fragment and a rejected structure, and is idempotent.
+  Molecule persistence now writes `properties` at all (it previously discarded
+  them), so `structure_role` and the promotion record are durable.
+- `classify_structure_role` treats the same compound number read on two or more
+  drawings of one structure as the document's own naming, exactly as it already
+  treated a number the page text prints. A single crop read stays a guess. On
+  CN120118069A this is what withheld the finalized compounds: the example
+  sections print R-group definitions beside them, and each of those numbers is
+  printed 2–4 times.
+
+Verification status: `uv run pytest tests/unit` 458 passed (promotion contract
+and the printed-twice case have their own tests). The CN120118069A re-ingest
+that would show the scoreboard move could not be run: port 18792 is served by a
+`dev:all` backend this CLI does not own (its recorded pid is dead), so
+`backend_control restart` refuses. Re-run the measurement after that backend is
+restarted from its own launcher:
+`submit_extraction(6f7496525086)` → `submit_patent_analysis(...)` →
+`query_activities(doc 6f7496525086)`; expected movement is the 29 readings of
+23A/30A/49A/50A/51A/52A/53A.

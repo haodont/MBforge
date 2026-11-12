@@ -44,6 +44,32 @@ Run this loop until the remaining readings are proven to have no structure:
 7. **Record**: the scoreboard before/after, the designations still open and why,
    and the evidence ids you relied on, in `work_state` (a `decision` thread).
 
+## When the structure itself is missing
+
+`label_not_read` and `structure_detected_unmatched` can both mean the same
+thing: the drawing was recognized, the designation was printed, and no
+`molecules` row exists because the Markush role gate withheld the drawing (its
+neighbouring prose mentions R-groups or a generic formula, which is normal in a
+CN example section). `get_binding_candidates` shows it as `entry:
+structure_status: missing` with `owns: true`, and `search_molecules` finds only
+the intermediates.
+
+That is not a decision to make — it is a promotion:
+
+1. Read the drawing's evidence (`verify_structures`, `inspect_visual`) and
+   confirm it is a closed structure with a printed designation, not a generic
+   scaffold. A scaffold, a fragment with a dummy atom, or a rejected structure
+   must never be promoted.
+2. `promote_structure(doc_id, smiles=… | evidence_id=…, reason=…)` stores that
+   one drawing as a concrete molecule and records the reason on it. It is
+   idempotent.
+3. `assign_attributions` the readings (or re-run Patent: the entry now binds by
+   rule, which is cheaper for many readings on one compound).
+
+Do not re-run Extract to fix a withheld drawing: the role gate would withhold it
+again unless the document prints the same number on two or more drawings of it
+(which `classify_structure_role` already treats as the document's own naming).
+
 ## Reading the reason correctly
 
 `unattributed_by_reason` tells you which playbook applies. Misreading it is the
@@ -132,6 +158,7 @@ Strongest first. Stop at the first rung that settles it.
 | `inspect_visual` | `page_text` (captions), `page_image` (look), `page_molecules` (re-read one page) |
 | `search_evidence` | find where a designation is printed |
 | `assign_attributions` | write a batch of accepted decisions |
+| `promote_structure` | store one withheld drawing as a concrete molecule (with its reason) |
 | `propose_review` | file a gap a human must settle (never a value the pipeline could have written) |
 | `list_review_queue` | items already waiting; hand them over with `[[ui:review:<kind>:<item_id>]]` |
 
