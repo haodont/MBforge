@@ -1673,3 +1673,26 @@ What still cannot be placed, after the fixes (12 readings over 7 designations):
 So the residue is now two decisions a reader must make (which of two drawings
 owns `I-109` / `I-266-A` / `I-2`) and five designations the document never ties to
 a structure.
+
+## MS decides a contested number (2026-11-12)
+
+Three designations had two drawings each. The example section that prepares the
+compound prints its own `LC-MS`, which settles it — the filing's own statement,
+not a guess:
+
+| designation | printed MS | structure that matches | other candidate |
+| --- | --- | --- | --- |
+| `I-266-A` | 实施例26, p171: `(M+H)+ = 558.0` | p139 `C25H28Cl2F3N5O2` (558.16) | p57 `C26H30…` (572.2) |
+| `I-109` | 实施例23, p169: `(M+H) = 570.2` | p169 `C26H28Cl2F3N5O2` (570.16) | p38 `C25H26…` (556.15) |
+
+Both were written with `method=agent` (2 readings each), taking the document to
+34/42. `I-2` is the same shape and the last of the trio: 实施例3 opens on p152
+with the product captioned `1-2`, while the claims list (p32) captions another
+drawing `1-2`; the example's MS on p153 decides it. The remaining 8 readings are
+`I-2` (2), `实施例15 组分1/2` (4), `实施例52 组分2` (1) and `I-298-A` (1) — the
+last three groups are designations the document never ties to a structure.
+
+Rule worth having in the pipeline: when several candidates claim one
+designation, the printed MS of the section that prepares it already decides —
+`find_mass_mismatches` computes the same comparison today, so the association
+could use it as a tie-break instead of leaving an ambiguity.
