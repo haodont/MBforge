@@ -1713,3 +1713,24 @@ R-group definition, so the role gate withheld it. The repair is
 two readings (39.43, 8.3). That capability exists in the backend but not in the
 session that ran this pass, so `I-2` stays open with everything needed written
 down.
+
+## The mass tie-break is in the pipeline (2026-11-12)
+
+`associate_facts` now receives the document's characterizations and, when more
+than one drawing claims a designation, keeps the structure whose calculated ion
+mass matches every `LC-MS` printed for it (`mass_consistent_structures`), with
+an `info` issue `designation_settled_by_printed_mass`. No mass line, or two
+structures both matching, leaves the ambiguity to the review queue exactly as
+before. Covered by `test_the_printed_mass_settles_a_designation_two_drawings_claim`
+(CN121717757A I-266-A: 558.0 picks `C25H28…`, not the `C26H30…` claims drawing).
+
+Still open, in order of value:
+
+1. **A withheld drawing is invisible.** `classify_structure_role` returns
+   `review_required` and nothing queues it: 6f74 had 40 `designation_unbound`
+   items and zero `review_required` ones, and I-2's p32 drawing is exactly such a
+   case (matching the example's MS but never stored, so `promote_structure` is
+   the only path). Queueing those structures at publication, with their smiles,
+   page and role reasons, would turn the gate's refusals into a worklist.
+2. **`promote_structure` needs to be reachable from the pass that finds the
+   gap.** The capability exists; the session that discovered I-2 predates it.
