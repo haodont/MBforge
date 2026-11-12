@@ -75,23 +75,29 @@ def test_only_a_bare_token_names_a_drawing() -> None:
     assert bare_designation("") is None
 
 
-def test_a_figure_number_without_a_letter_names_its_drawing() -> None:
-    """A CN patent numbers a compound with a bare figure number.
+def test_a_figure_caption_names_its_drawing_without_a_letter_rule() -> None:
+    """A ``figno`` caption is a designation whatever its head looks like.
 
-    ``14`` carries no letter, so the text rule alone rejects it — but the
-    layout producer printed it as ``figno``, its own statement that the number
-    belongs to a drawing. The kind decides for a pure number; a bare number in
-    prose is still not a designation, so the prose token is dropped.
+    CN121717757A numbers its claims-list drawings ``I-1``…``I-9``; the layout
+    read the capital ``I`` as a digit and the activity table cites ``I-2``, so
+    without this rule the drawing carried no designation at all and the reading
+    stayed unowned. A caption with no letter (``14``) and a claims-list entry
+    (``1-2``) both name a drawing; the same token read as prose still does not.
     """
     regions = [
         {"kind": "figno", "bbox": (146.63, 640.83, 160.56, 649.51), "text": "14"},
+        {"kind": "figno", "bbox": (288.81, 425.85, 302.08, 435.10), "text": "1-2"},
+        {"kind": "figno", "bbox": (439.81, 518.99, 505.68, 528.62), "text": "1-273-A"},
         {"kind": "text", "bbox": (61.31, 233.23, 99.48, 250.18), "text": "14"},
+        {"kind": "text", "bbox": (61.31, 433.23, 99.48, 450.18), "text": "1-2"},
     ]
 
     reads = page_designations(regions, _PAGE_HEIGHT)
 
-    assert [read.text for read in reads] == ["14"]
-    assert reads[0].bbox[0] == 146.63
+    # ``1-273-A`` keeps the series letter the page prints; the association
+    # reconciles the spelling against the table.
+    assert [read.text for read in reads] == ["14", "1-2", "I-273-A"]
+    assert reads[1].bbox[0] == 288.81
 
 
 def test_page_reads_carry_only_the_numbers_the_page_prints() -> None:

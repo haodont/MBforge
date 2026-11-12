@@ -167,21 +167,32 @@ def _embedded_tokens(text: str) -> list[str]:
     )
 
 
-def _figure_number_designation(text: str) -> str | None:
-    """Return a figure number that numbers a drawing without carrying a letter.
+def _figure_caption(text: str) -> str | None:
+    """Return the designation a ``figno`` caption prints, letter or not.
 
-    ``bare_designation`` rejects a pure number because a bare number in prose is
-    a step or a paragraph marker. The layout producer already separates the two
-    cases: a region it classified as ``figno`` is a number printed beside a
-    drawing, which is exactly what the letter rule approximates. When the kind
-    says so and the token is a designation key, the number names a drawing.
+    ``bare_designation`` rejects a token without a letter because in prose a
+    bare number is a step or a paragraph marker. The layout producer already
+    separates the two cases: a region it classified as ``figno`` is something
+    printed beside a drawing, which is what the letter rule approximates. So a
+    caption that names a compound is a designation whatever its head looks
+    like — ``14`` (a bare figure number), ``1-2`` (a claims-list entry whose
+    series letter ``I`` was read as a digit) or ``1-273-A``.
+
+    A head that is the ``1``/``I`` confusion is answered with the series letter
+    when that spelling is itself a designation key; the association's
+    reconciliation then gives the token the spelling the document prints.
     """
     cleaned = str(text or "").strip().strip(_TRIM)
     if not cleaned or len(cleaned) > _MAX_TOKEN:
         return None
-    if not cleaned.isdigit():
+    if any(char.isspace() for char in cleaned):
         return None
-    return cleaned if designation_key(cleaned) else None
+    if designation_key(cleaned):
+        return cleaned
+    for variant in _ocr_confusable_forms(cleaned):
+        if designation_key(variant):
+            return variant
+    return None
 
 
 def page_designations(
@@ -206,7 +217,7 @@ def page_designations(
         raw = str(region.get("text") or "").strip()
         token = bare_designation(raw)
         if token is None and str(region.get("kind") or "text") == "figno":
-            token = _figure_number_designation(raw)
+            token = _figure_caption(raw)
         if token is None:
             # A caption the OCR read with the wrong letter is not a designation
             # yet; the page's own spelling may make it one.
