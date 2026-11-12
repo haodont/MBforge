@@ -140,7 +140,7 @@ def insert_attributions_in_transaction(
     return written
 
 
-def _kept_attributions(
+def kept_adjudications(
     conn: Any, doc_id: str, measured_ids: set[str]
 ) -> list[MeasurementAttribution]:
     """The human and agent links a re-run must not throw away.
@@ -181,7 +181,7 @@ def replace_document_measurements(
     db = DatabaseManager.get(str(library_root))
     db.initialize()
     with db.transaction() as conn:
-        kept = _kept_attributions(
+        kept = kept_adjudications(
             conn, doc_id, {record.measurement_id for record in records}
         )
         delete_document_measurements(conn, doc_id)
@@ -446,6 +446,7 @@ __all__ = [
     "dataset_stats",
     "delete_document_measurements",
     "insert_attributions_in_transaction",
+    "kept_adjudications",
     "insert_measurements_in_transaction",
     "list_attributions_for",
     "list_measurements",

@@ -240,3 +240,53 @@ def test_records_keep_every_reading_and_attributions_only_the_resolved() -> None
     assert [item.measurement_id for item in attributions] == ["m-1"]
     assert attributions[0].mol_id == "CCO"
     assert all(record.evidence_grade == "measured" for record in records)
+
+
+def test_republishing_keeps_an_agent_adjudication(tmp_library: Path) -> None:
+    """A decision made from the page outlives every later Patent re-run.
+
+    A run recomputes its own rule links, but deleting the readings took a human
+    or agent link with them whenever the reading survived — CN119504738A lost
+    its two agent-decided links on every re-run and they had to be written
+    again.
+    """
+    from mbforge.db.measurement_store import replace_document_measurements
+    from mbforge.db.molecule_store import create as create_molecule
+
+    create_molecule(tmp_library, "CCO", "CCO", "CCO", "compound-1", "image")
+    artifact = PatentFactsArtifact(
+        doc_id="doc-1",
+        run_id="run-1",
+        measurements=[_measurement("m-1", entry_id=None, metric="IC50", value=5.0)],
+    )
+    publish_document_facts(
+        tmp_library,
+        doc_id="doc-1",
+        artifact=artifact,
+        evidence_signature="sig-1",
+    )
+    repositories = get_repositories(str(tmp_library))
+    repositories.measurements.bind_attribution(
+        measurement_id="m-1",
+        mol_id="CCO",
+        doc_id="doc-1",
+        evidence_id="ev-1",
+        method="agent",
+        confidence=0.9,
+    )
+
+    publish_document_facts(
+        tmp_library,
+        doc_id="doc-1",
+        artifact=artifact,
+        evidence_signature="sig-1",
+    )
+
+    links = repositories.measurements.attributions_for(["m-1"])
+    assert [link["method"] for link in links["m-1"]] == ["agent"]
+    assert repositories.measurements.stats("doc-1").attributed == 1
+
+    # A link whose reading no longer exists is dropped instead of orphaned.
+    replace_document_measurements(tmp_library, "doc-1", [])
+    assert repositories.measurements.stats("doc-1").total == 0
+    assert not repositories.measurements.attributions_for(["m-1"]).get("m-1")

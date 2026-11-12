@@ -19,6 +19,7 @@ from mbforge.db.measurement_store import (
     delete_document_measurements,
     insert_attributions_in_transaction,
     insert_measurements_in_transaction,
+    kept_adjudications,
 )
 from mbforge.db.molecule_candidates import persist_candidates_in_transaction
 from mbforge.db.sqlite.database import DatabaseManager
@@ -87,9 +88,14 @@ def commit_document_facts(
         )
         # Readings are stored independently of structure: the measured facts the
         # document printed must survive an association that could not resolve.
+        # A human or agent link outlives a re-run; only the rule links this
+        # pass derives are recomputed (see kept_adjudications).
+        kept = kept_adjudications(
+            conn, doc_id, {record.measurement_id for record in measurements}
+        )
         delete_document_measurements(conn, doc_id)
         insert_measurements_in_transaction(conn, measurements)
-        insert_attributions_in_transaction(conn, attributions)
+        insert_attributions_in_transaction(conn, [*kept, *attributions])
         conn.execute(
             f"""
             INSERT INTO {_TABLE}
