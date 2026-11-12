@@ -1625,3 +1625,23 @@ positive control. The page text says what it is, so the fix is a scope rule: a
 drawing introduced by a comparator/positive-control caption is not a candidate
 for a compound designation. Not implemented yet; the page evidence is recorded
 here so the rule is written against the printed caption rather than a heuristic.
+
+## CN121717757A: which readings cannot be placed, and why (2026-11-12)
+
+After linking `I-281`, the document stands at 26/42; 16 readings over 9
+designations remain, and each was checked on the page:
+
+| designation | readings | page fact |
+| --- | --- | --- |
+| `I-281` | 1.59 | **resolved**: p50 (claims) prints `1-280 / 1-281 / 1-282` in a row; the drawing under `1-281` is the compound. The 1/I OCR split plus a stray `I-284` prose token had made the identity a three-way tie — written with `method=agent` |
+| `I-2` | 39.43, 8.3 | cited only by the p195/p196 tables; no drawing carries `I-2` |
+| `I-109` | 14.60, 8.11 | same |
+| `I-298-A` | 55.06 | same |
+| `I-273-A` / `I-273-B` | 15.45 / 7.23, 15.27 / 15.43 | p180 draws one racemate captioned `I-273-A 或I-273-B`; p181 gives only the separated enantiomer's MS (584.0) |
+| `I-274-A` | 8.96, 36.7 | the document draws `I-274` (p131) without the `-A` suffix; the single enantiomer is never drawn |
+| `实施例15 组分1` / `组分2` | 16.2 / 129.7, 6.23 / 34.88 | p161 names 实施例15 as `化合物I-233-A, I-233-B, I-233-C, I-233-D`; `组分1/2` is printed nowhere beside a structure |
+| `实施例52 组分2` | 11.83 | same pattern as 实施例15 |
+
+So "cannot be found" splits into two truths: seven designations are never drawn
+at all, and two name one member of a pair the document prints under a shared
+caption. Neither is a label-reading or binding bug.
