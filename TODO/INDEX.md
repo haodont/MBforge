@@ -1472,3 +1472,8 @@ touched modules. Batch writer covered by
 `test_assign_attributions_writes_a_validated_batch`; the product-sentence path
 by `test_an_example_reading_goes_to_the_compound_its_body_prints`; the example
 key space by `test_an_example_captioned_drawing_answers_to_its_example_identity`.
+
+One correction from running the loop: `unlabeled_structures` for CN121717757A was
+1133 rows of Markush scaffolds, which buries the handful of concrete drawings a
+`label_not_read` decision actually compares against. The packet now publishes
+only concrete, designation-less structures (no `*` in the SMILES).

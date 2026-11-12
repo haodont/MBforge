@@ -316,7 +316,17 @@ def binding_candidates(
     readings = list_activity_records(library_root, doc_id, limit=_READING_LIMIT)
     all_structures = _candidate_structures(library_root, doc_id)
     structures = [row for row in all_structures if row.get("label_keys")]
-    unlabeled = [row for row in all_structures if not row.get("label_keys")]
+    # A Markush scaffold never owns a finished compound's reading, and a
+    # 196-page patent draws hundreds of them: publishing them buried the few
+    # concrete drawings a decision compares against (measured: 1133 rows, all
+    # scaffolds). Only a concrete unlabelled drawing is material here.
+    unlabeled = [
+        row
+        for row in all_structures
+        if not row.get("label_keys")
+        and row.get("structure_kind", "concrete") != "markush"
+        and "*" not in str(row.get("canonical_smiles") or "")
+    ]
     entries = _entries(library_root, doc_id)
     review_items = _review_items(library_root, doc_id)
     table_cells = _table_cells(library_root, doc_id)
