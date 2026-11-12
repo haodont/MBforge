@@ -42,6 +42,9 @@ class PipelineErrorCode:
 
     PDF_PARSE_ERROR = "PDF_PARSE_ERROR"
     LAYOUT_UNAVAILABLE = "LAYOUT_UNAVAILABLE"
+    #: MolDet found drawings but no structure could be recognized for any of
+    #: them (the recognizer never loaded, or every crop came back empty).
+    MOLECULE_RECOGNITION_UNAVAILABLE = "MOLECULE_RECOGNITION_UNAVAILABLE"
     PATENT_EXTRACTION_FAILED = "PATENT_EXTRACTION_FAILED"
     MISSING_CONTEXT = "MISSING_CONTEXT"
     PIPELINE_CANCELLED = "PIPELINE_CANCELLED"

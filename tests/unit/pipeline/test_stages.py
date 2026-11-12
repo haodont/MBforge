@@ -272,3 +272,32 @@ def test_write_rough_markdown_keeps_page_text_verbatim(tmp_path: Path) -> None:
     assert "<!-- PAGE 2 -->" in content
     assert "Some intro text" in content
     assert "Plain text only" in content
+
+
+def test_extract_fails_when_no_drawing_carries_a_structure() -> None:
+    """A recognizer that never loaded must not look like a success.
+
+    Every crop comes back with an empty SMILES when the model is unavailable.
+    Persisting that mints molecule evidence with no structure and the document
+    then reads as extracted while no reading can be owned — measured on
+    CN120118069A, which lost all 69 readings and still reported stage success.
+    """
+    from types import SimpleNamespace
+
+    from mbforge.service.pipeline.stages.extract_stage import _recognition_failure
+
+    drawings = [SimpleNamespace(name="30A"), SimpleNamespace(name="50A")]
+
+    empty = [
+        SimpleNamespace(canonical_smiles=""),
+        SimpleNamespace(canonical_smiles="  "),
+    ]
+    reason = _recognition_failure(drawings, empty)
+    assert reason is not None
+    assert "2 drawings" in reason
+
+    one_structure = [SimpleNamespace(canonical_smiles="CCO")]
+    assert _recognition_failure(drawings, one_structure) is None
+
+    # A page with no drawing at all is a text-only document, not a failure.
+    assert _recognition_failure([], empty) is None

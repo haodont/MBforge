@@ -16,7 +16,10 @@ fallback), mirroring the moldet self-ensure path.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import threading
+from collections.abc import Iterator
 
 import numpy as np
 from PIL import Image
@@ -27,6 +30,13 @@ from mbforge.foundation.inference.load_guard import LoadGuard
 from mbforge.foundation.logger import get_logger
 
 logger = get_logger(__name__)
+
+# ``transformers`` draws a tqdm bar while loading weights, and tqdm flushes
+# ``sys.stderr`` from its status printer. A backend whose stderr handle is gone
+# raises OSError there, which used to cost the whole model for no reason (see
+# ``_flushable_stderr``). The bars are noise in a server process anyway.
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
 _MODEL = None
 _AVAILABLE: bool = False
@@ -45,6 +55,46 @@ def _strip_trailing_sep(esmiles: str) -> str:
     """MolParser 的 ``esmi`` 对无标签分子追加孤立 ``<sep>``；MBForge 规范
     （docs/wiki/esmiles.md）要求无扩展时退化为纯 SMILES，故剥离尾部 ``<sep>``。"""
     return esmiles[:-5] if esmiles.endswith("<sep>") else esmiles
+
+
+def _flushable_stderr() -> contextlib.AbstractContextManager[None] | None:
+    """Return a guard that substitutes a sink when ``sys.stderr`` is broken.
+
+    ``transformers`` builds a ``tqdm`` bar while it loads the weights, and
+    ``tqdm`` flushes ``sys.stderr`` from its status printer. A process whose
+    stderr handle is closed (a backend spawned with its stderr redirected and
+    the pipe already gone) raises ``OSError: [Errno 22] Invalid argument``
+    inside ``from_pretrained``, so the whole model fails to load for a reason
+    that has nothing to do with the weights. Measured on CN120118069A: the load
+    failed that way, every crop then produced an empty SMILES, and Extract
+    still reported success.
+
+    Probing the handle is cheap and only affects this load.
+    """
+    import sys
+
+    stream = sys.stderr
+    if stream is None:
+        return None
+    try:
+        stream.flush()
+    except (OSError, ValueError):
+        return _sink_stderr()
+    return None
+
+
+@contextlib.contextmanager
+def _sink_stderr() -> Iterator[None]:
+    """Point ``sys.stderr`` at a throwaway buffer for the duration of a load."""
+    import io
+    import sys
+
+    original = sys.stderr
+    sys.stderr = io.StringIO()
+    try:
+        yield
+    finally:
+        sys.stderr = original
 
 
 def load(device: str | None = None) -> None:
@@ -112,7 +162,14 @@ def load(device: str | None = None) -> None:
 
             from molparser.models.runtime import MolParserRecognizer
 
-            _MODEL = MolParserRecognizer(str(path), device=dev)
+            # A broken stderr must not cost the model: transformers' progress
+            # bar flushes it while loading weights (see _flushable_stderr).
+            guard = _flushable_stderr()
+            if guard is None:
+                _MODEL = MolParserRecognizer(str(path), device=dev)
+            else:
+                with guard:
+                    _MODEL = MolParserRecognizer(str(path), device=dev)
             _AVAILABLE = True
             _GUARD.record_success()
             logger.info("MolParser-Mobile loaded successfully on %s", dev)

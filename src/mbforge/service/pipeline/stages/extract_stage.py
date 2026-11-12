@@ -35,6 +35,33 @@ from mbforge.service.pipeline.stage import PipelineErrorCode, StageResult, regis
 logger = get_logger("mbforge.service.pipeline.stages.extract")
 
 
+class StructureRecognitionError(RuntimeError):
+    """Recognized drawings carry no structure at all for this document."""
+
+
+def _recognition_failure(results: list[Any], candidates: list[Any]) -> str | None:
+    """Return why no drawing carries a structure, or ``None`` when some do.
+
+    A recognizer that never loaded returns an empty SMILES for every crop.
+    Persisting that mints molecule evidence rows with no structure, and the
+    document then looks extracted while every reading is unownable — measured
+    on CN120118069A, where a ``from_pretrained`` crash (broken stderr, see
+    ``molparser._flushable_stderr``) cost the model and the run still reported
+    success with 0 activity-backed molecules. Recognition failure is a stage
+    failure; an empty result is not a result.
+    """
+    if not results:
+        return None
+    if any(
+        str(getattr(item, "canonical_smiles", "") or "").strip() for item in candidates
+    ):
+        return None
+    return (
+        f"{len(results)} drawings were detected but no structure was recognized; "
+        "the molecule recognizer failed to load or returned nothing"
+    )
+
+
 def _name_drawings_from_page_text(
     results: list[Any],
     pages: list[Any],
@@ -246,6 +273,12 @@ class ExtractStage:
             for candidate in candidates:
                 classify_structure_role(candidate)
 
+            failure = _recognition_failure(
+                list(molecule_stats.get("results", [])), candidates
+            )
+            if failure is not None:
+                raise StructureRecognitionError(failure)
+
             repositories = get_repositories(ctx.library_root)
             ctx.source_evidence_count = repositories.evidence.persist(evidence)
             # ADR 0001: persist the printed-designation anchor index beside the
@@ -328,7 +361,10 @@ class ExtractStage:
             )
             from mbforge.service.pipeline.layout.parse import LayoutUnavailableError
 
-            if isinstance(e, LayoutUnavailableError):
+            if isinstance(e, StructureRecognitionError):
+                error_code = PipelineErrorCode.MOLECULE_RECOGNITION_UNAVAILABLE
+                message_prefix = "Molecule recognition unavailable"
+            elif isinstance(e, LayoutUnavailableError):
                 error_code = PipelineErrorCode.LAYOUT_UNAVAILABLE
                 message_prefix = "Layout detection unavailable"
             else:
