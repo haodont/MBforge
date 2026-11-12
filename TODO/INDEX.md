@@ -1588,3 +1588,28 @@ The residue is not a pipeline gap: each remaining designation is either a
 compound the patent never drew, a pair printed under one shared caption, or a
 comparator. Those are review-queue decisions, and `list_review_queue` already
 holds the `designation_unbound` items for them.
+
+## The queue now follows the data, and adjudications survive re-runs (2026-11-12)
+
+Two lifecycle defects surfaced while re-running Patent over all six documents:
+
+- **A resolved reading stayed queued.** Thirty `designation_unbound` items for
+  `实施例…` readings were still pending after the example-label fallback bound
+  them — a human was being asked to decide a link that already existed. The
+  publication pass now closes the pending item of every reading it bound
+  (`review_store.resolve_bound_designations`), and only those: a reading whose
+  section drew nothing keeps its item because no structure was found for it.
+  Measured: the queue went from 99 pending to 27, and the 27 are the readings
+  that really need a decision.
+- **A re-run erased human and agent links.** Both write paths
+  (`replace_document_measurements` and `patent_analysis_store`) deleted the
+  document's readings and inserted fresh ones, taking every attribution with
+  them; CN119504738A lost its two agent-decided links on three separate runs.
+  Only rule links are recomputed now; a human or agent link is kept while its
+  reading exists and dropped when the reading is gone.
+
+Verified: `uv run pytest tests/unit` 464 passed, including
+`test_republishing_keeps_an_agent_adjudication`,
+`test_a_reading_bound_by_a_later_pass_closes_its_queue_item` and the
+measurement-replace counterpart. After the fixes, a Patent re-run of
+CN119504738A leaves 17/18 with both agent links intact.
