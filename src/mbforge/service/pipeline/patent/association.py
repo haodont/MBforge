@@ -14,6 +14,7 @@ from mbforge.domain.patent import (
     designation_key,
     entry_id,
 )
+from mbforge.foundation.logger import get_logger
 from mbforge.service.pipeline.patent.candidate_labels import (
     candidate_designation_keys,
     candidate_owns_designation,
@@ -22,6 +23,8 @@ from mbforge.service.pipeline.patent.sections import (
     ParsedSection as DocumentSection,
 )
 from mbforge.service.pipeline.persist.molecules import filter_persistable_candidates
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from mbforge.service.pipeline.activity.normalization import ReferenceLabel
@@ -645,6 +648,21 @@ def associate_facts(
             ]
             if len(named) == 1:
                 owned = named
+        if len(owned) > 1:
+            # One compound is often drawn (and recognized) more than once. Two
+            # candidates with the same SMILES are one structure, so they cannot
+            # make a designation ambiguous — CN120943813A's compound 44 is two
+            # detections of one drawing, and treating them as rivals left the
+            # entry unresolved and every reading that cited it unowned.
+            unique: list[Any] = []
+            seen_smiles: set[str] = set()
+            for match in owned:
+                smiles = str(getattr(match[0], "canonical_smiles", "") or "")
+                if smiles in seen_smiles:
+                    continue
+                seen_smiles.add(smiles)
+                unique.append(match)
+            owned = unique
         if len(owned) != 1 and characterizations:
             # Two drawings claim one designation. The filing usually settles it:
             # the section that prepares the compound prints its LC-MS, and only
