@@ -1986,3 +1986,10 @@ carries its real distance so a caption between two rows belongs to the nearer on
 Remaining on that document: `label_not_read` 11, `designation_group_caption` 2,
 `structure_detected_unmatched` 2, plus `printed_ms_unowned` and the run-to-run
 detection instability.
+
+Same fixes on CN120943813A (reingest `20261113090006`, Patent `20261113090658`): **no
+change, 24/45** — its gap is `structure_detected_unmatched` 7 plus the 9 declared
+`designation_group_caption`, not caption geometry. So re-extracting the remaining
+four documents buys almost nothing (their `label_not_read` counts are 3/0/1/1);
+the next real target is `structure_detected_unmatched` (17 readings across the six),
+which is Patent-stage only and needs no re-extraction.
