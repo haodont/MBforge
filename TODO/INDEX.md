@@ -2230,3 +2230,13 @@ Two of those six runs' documents (8cb5, 94dd) still need a re-extraction to pick
 the label-geometry fixes; the association side is now exhausted of known gaps except
 8cb5's remaining 19 (9 declared group captions, 3 label_not_read, 2 no designation,
 5 sdm).
+
+## Operational: a watchfiles reload cancels an in-flight reingest (2026-11-13)
+
+The 94dd reingest (`20261113121754`) was reported "cancelled by user" at 90 s because
+the dev backend reloaded (`watchfiles` saw a change in
+`foundation/inference/ocr/page_text.py`) while the pipeline was running. Retrying the
+cancelled run worked, and the retry reproduced 32/42 exactly — the same extraction
+result twice, which is the reproducibility the earlier three-way divergence lacked.
+
+Do not edit source under `src/` while a reingest is running; a reload kills the run.
