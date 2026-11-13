@@ -1854,3 +1854,27 @@ set. Changing anything in the detection/label path therefore requires
 Cost to remember: reingest re-mints measurements, so agent/human attribution rows
 keyed by measurement id do not survive it — the adjudications already written for
 94dd (I-281, I-109, I-266-A) have to be re-applied after the re-extraction.
+
+## The 94dd reingest regression: p32 yields 15 crops, most of them fragments (2026-11-13)
+
+After `reingest_document(94dd6070bbd4)` the same page 32 that had produced three
+full compounds now produces **15 crops**, and the reads are dummy-atom fragments
+(`*C1CC(NC(=O)c2cn(CC(C)(C)O)nc2Cl)CC(F)(F)C1`) instead of complete structures.
+Scoreboard fell 34/42 → 15/42 (`label_not_read` 22, `structure_detected_unmatched`
+5). Nothing in the detection or recognition path changed in this session, so the
+difference is in how the crops were cut, and the crop files were overwritten —
+the previous run's boxes are gone.
+
+Measured from what survives: crop `page_0031_mol_0001.png` is 421×297 px for a
+bbox of 132×93 pt, i.e. ~230 DPI (Extract renders at 144), so the crop has grown
+with padding while the box shrank. Two candidate causes, to check in this order:
+
+1. MolDet split a drawing at internal whitespace (one compound → several boxes,
+   each reading only its own fragment). Compare the 15 boxes' x-extents on p32:
+   if they tile a single drawing's width, that is the cause.
+2. A padding change grew the crop beyond the box while MolParser still frames on
+   the original box, so it reads the surroundings instead of the whole structure.
+
+Do not reingest again until one of these is confirmed: each reingest destroys the
+detection set that would show the difference, and 94dd is now the only document
+at the regressed count (the other five keep their earlier extractions).
