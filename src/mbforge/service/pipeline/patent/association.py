@@ -658,4 +658,35 @@ def associate_facts(
         entry["linking_status"] = "linked"
 
 
+    # A reading can be owned by a drawing even when no entry declares its
+    # designation. CN120943813A's page-94 table cites 44, 48, 43, 19 …: the
+    # example section draws each compound and captions it, so exactly one
+    # structure owns the designation, while the entry side left them unresolved
+    # and the readings stayed unowned ("designation_without_structure" in the
+    # queue, "structure_detected_unmatched" in the dataset — the same fact read
+    # twice). Binding by the drawing is deterministic: one owning structure or
+    # nothing.
+    owning: dict[str, list[Any]] = {}
+    for candidate in filter_persistable_candidates("", list(candidates), warn=False):
+        for key in candidate_designation_keys(candidate):
+            if candidate_owns_designation(candidate, key):
+                owning.setdefault(key, []).append(candidate)
+    for measurement in measurements:
+        if measurement.get("mol_id"):
+            continue
+        provenance = measurement.get("provenance")
+        provenance = provenance if isinstance(provenance, dict) else {}
+        reference = normalize_reference_label(
+            provenance.get("reference_raw") or provenance.get("reference_key") or ""
+        )
+        if reference.reference_type != "compound" or not reference.key:
+            continue
+        matches = owning.get(reference.key, [])
+        if len(matches) != 1:
+            continue
+        smiles = getattr(matches[0], "canonical_smiles", "")
+        if isinstance(smiles, str) and smiles.strip():
+            measurement["mol_id"] = smiles.strip()
+
+
 __all__ = ["associate_facts"]

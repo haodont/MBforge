@@ -1522,3 +1522,71 @@ def test_a_printed_mass_is_read_after_its_adduct_expression() -> None:
 
     # An unknown fragment makes the expression unreadable rather than wrong.
     assert adduct_mass_delta("+H-Xy3") is None
+
+
+def test_a_drawing_that_owns_the_designation_binds_a_reading_without_an_entry() -> None:
+    """A table cites ``44``; the example section draws and captions compound 44.
+
+    CN120943813A's page-94 IC50 table cites 44, 48, 43, 19 … and no entry
+    declares them, so binding by entry alone left seven readings unowned while
+    exactly one drawing carried each designation. One owning structure is a rule,
+    not a judgement — and a designation two structures own still binds nothing.
+    """
+    measurement = {
+        "measurement_id": "m-44",
+        "provenance": {"reference_raw": "化合物44", "reference_key": "44"},
+        "evidence_ids": ["ev-table-94"],
+        "page_num": 94,
+    }
+    drawn_44 = Molecule(
+        canonical_smiles="Cn1cc(C(=O)Nc2ccccc2)cn1",
+        esmiles="",
+        name="44",
+        labels=["44"],
+        status="pending",
+        detections=[DetectionSource(source="image", page=90, bbox=(1, 2, 3, 4))],
+        properties={"structure_role": "complete"},
+    )
+    issues: list[dict] = []
+
+    associate_facts(
+        [],
+        [],
+        [],
+        [measurement],
+        [drawn_44],
+        {"ev-table-94"},
+        issues,
+    )
+
+    assert measurement["mol_id"] == "Cn1cc(C(=O)Nc2ccccc2)cn1"
+
+    ambiguous = {
+        "measurement_id": "m-45",
+        "provenance": {"reference_raw": "化合物45", "reference_key": "45"},
+        "evidence_ids": ["ev-table-94"],
+        "page_num": 94,
+    }
+    twin = replace(
+        drawn_44,
+        canonical_smiles="Cn1cc(C(=O)Nc2cccc(F)c2)cn1",
+        name="45",
+        labels=["45"],
+    )
+    other = replace(
+        drawn_44,
+        canonical_smiles="Cn1cc(C(=O)Nc2ccc(Cl)cc2)cn1",
+        name="45",
+        labels=["45"],
+    )
+    associate_facts(
+        [],
+        [],
+        [],
+        [ambiguous],
+        [twin, other],
+        {"ev-table-94"},
+        [],
+    )
+
+    assert "mol_id" not in ambiguous

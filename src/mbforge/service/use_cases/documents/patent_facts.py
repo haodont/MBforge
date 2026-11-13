@@ -364,6 +364,17 @@ def _queue_unbound_readings(
         if isinstance(entry, dict) and entry.get("entry_id")
     }
     declared = _designation_scope(artifact)
+    # The reason must come from the same fact the dataset reports, or the two
+    # paths disagree about one reading: CN120943813A's page-94 table asks a human
+    # to decide a link to a drawing that already carries the designation, and the
+    # queue called that "the document never drew it" while the dataset called it
+    # "detected but unmatched". One source of truth answers both.
+    from mbforge.domain.patent import designation_key
+    from mbforge.service.pipeline.patent.candidate_labels import candidate_label_keys
+
+    carried = set()
+    for candidate in candidates:
+        carried |= candidate_label_keys(candidate)
     # A question this pass can answer must not stay pending: the example-label
     # fallback bound thirty readings in CN120943813A while their items stayed in
     # the queue, asking a human to decide a link that already existed.
@@ -417,7 +428,11 @@ def _queue_unbound_readings(
             doc_id=doc_id,
             page=page if isinstance(page, int) else None,
             name=designation,
-            reasons=["designation_without_structure"],
+            reasons=[
+                "structure_detected_unmatched"
+                if designation_key(designation) in carried
+                else "designation_without_structure"
+            ],
             context_text=str(measurement.get("raw_text") or "")[:300] or None,
             payload={
                 "doc_id": doc_id,
