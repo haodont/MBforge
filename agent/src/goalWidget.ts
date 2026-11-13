@@ -4,14 +4,22 @@ import type { ExtensionContext, Theme } from '@earendil-works/pi-coding-agent'
 import { goalStateFromBranch, type GoalDefinition } from './goal.js'
 import { joinColumns, renderRow, renderSegments, wrapText, type Segment } from './uiText.js'
 
+const STATUS_MARKER: Record<string, string> = {
+  pending: '☐',
+  doing: '◐',
+  done: '☑',
+  blocked: '⊘',
+}
+
 /**
  * Pinned active-goal checklist below the editor.
  *
  * A goal is the user's committed scope, so it should stay visible while the
- * transcript scrolls. The card is a compact todo: the title and objective, then
- * checkbox rows for requirements and acceptance, and compact constraint /
- * non-goal rows. It reads the active branch so an `update` or a resumed session
- * shows the latest definition; the extension removes it when the goal ends.
+ * transcript scrolls. The card is a living todo: the title and objective, then
+ * status-marked requirement rows (pending/doing/done/blocked) with a done count,
+ * and compact constraint / non-goal rows. It reads the active branch so a
+ * `progress`/`update` or a resumed session shows the latest plan; the extension
+ * removes it when the goal ends.
  */
 export function goalWidget(
   theme: Theme,
@@ -113,8 +121,59 @@ export function goalWidget(
         }
       }
 
-      section(rows, 'Requirements', goal.requirements, '☐', textStyle, width, 5)
-      section(rows, 'Acceptance', goal.acceptance, '☐', textStyle, width, 5)
+      if (goal.status === 'paused') {
+        rows.push(
+          renderSegments([
+            { text: '  ⏸ paused', style: (text) => theme.fg('warning', text) },
+          ]),
+        )
+      }
+
+      if (goal.requirements.length > 0) {
+        const done = goal.requirements.filter((item) => item.status === 'done').length
+        rows.push(
+          renderSegments([
+            {
+              text: `  Requirements · ${done}/${goal.requirements.length} done`,
+              style: dimStyle,
+            },
+          ]),
+        )
+        for (const requirement of goal.requirements.slice(0, 8)) {
+          const marker = STATUS_MARKER[requirement.status] ?? '☐'
+          const style =
+            requirement.status === 'done'
+              ? dimStyle
+              : requirement.status === 'blocked'
+                ? (text: string) => theme.fg('warning', text)
+                : textStyle
+          const suffix =
+            requirement.status === 'blocked' && requirement.note
+              ? ` — ${requirement.note}`
+              : ''
+          const lines = wrapText(`${requirement.text}${suffix}`, Math.max(8, width - 4))
+          for (const [index, line] of lines.entries()) {
+            rows.push(
+              renderSegments(
+                index === 0
+                  ? [
+                      { text: `  ${marker} `, style: dimStyle },
+                      { text: line, style },
+                    ]
+                  : [{ text: '    ' }, { text: line, style }],
+              ),
+            )
+          }
+        }
+        if (goal.requirements.length > 8) {
+          rows.push(
+            renderSegments([
+              { text: `    … ${goal.requirements.length - 8} more`, style: dimStyle },
+            ]),
+          )
+        }
+      }
+
       section(rows, 'Constraints', goal.constraints, '·', mutedStyle, width, 3)
       section(rows, 'Not in scope', goal.non_goals, '×', dimStyle, width, 3)
       return rows

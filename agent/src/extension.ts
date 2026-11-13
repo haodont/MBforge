@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { createHash } from 'node:crypto'
+import { stat } from 'node:fs/promises'
 
 import {
   BACKEND_TOOL_NAMES,
@@ -42,6 +43,8 @@ import { registerEndpointCommand } from './endpoint.js'
 import {
   ensureMemoryFile,
   MEMORY_TOOL_NAMES,
+  memoryColdPath,
+  memoryFilePath,
   memorySystemPrompt,
   registerMemoryCommand,
   registerMemoryTools,
@@ -79,12 +82,6 @@ import {
   ReviewNoticeQueue,
   type ReviewNotice,
 } from './reviewNotices.js'
-import {
-  goalArtifactRoot,
-  pruneAllGoalArtifacts,
-  pruneOldGoalArtifacts,
-  writeGoalArtifact,
-} from './goalArtifacts.js'
 import { createRunNotifier, createRunWatcher } from './runs.js'
 import { DEV_MODE_TOOL_NAMES, registerDevModeTool } from './devMode.js'
 import { ASK_TOOL_NAME, ASK_TOOL_NAMES, registerAskTool } from './ask.js'
@@ -97,14 +94,24 @@ import {
 } from './research.js'
 import { goalWidget } from './goalWidget.js'
 import {
+  addWorkThread,
+  readWorkState,
   registerWorkStateTools,
-  setActiveWorkGoal,
   WORK_STATE_TOOL_NAMES,
+  workStateFilePath,
   workStateSystemPrompt,
 } from './workState.js'
 import { detectNoProgress } from './behaviorEval.js'
-import { exportGoalFixture } from './evalFixtures.js'
-import type { TrajectoryStep } from './trajectory.js'
+import { exportGoalFixture, sweepFixtures } from './evalFixtures.js'
+import {
+  learnedMethodsPrompt,
+  pruneSkeleton,
+  readSkills,
+  recordSuccess,
+  refreshSkills,
+  skillStorePath,
+} from './skillInduction.js'
+import { trajectoryFromBranch, type TrajectoryStep } from './trajectory.js'
 
 const BUILTIN_TOOL_NAMES = [
   'read',
@@ -115,6 +122,40 @@ const BUILTIN_TOOL_NAMES = [
   'find',
   'ls',
 ] as const
+
+/** Cheap change-detector for a store file: mtime+size, or 'absent'. */
+async function fileSignature(path: string): Promise<string> {
+  try {
+    const info = await stat(path)
+    return `${info.mtimeMs}:${info.size}`
+  } catch {
+    return 'absent'
+  }
+}
+
+/**
+ * Close the eval loop: behavioral regressions found by the fixture sweep become
+ * deduped work_state follow-ups so they re-enter the agent's resume context
+ * instead of only failing `npm test`. Best-effort and bounded.
+ */
+async function surfaceBehavioralRegressions(): Promise<void> {
+  const failures = await sweepFixtures()
+  if (failures.length === 0) return
+  const state = await readWorkState()
+  const openTitles = new Set(
+    state.threads.filter((thread) => thread.status === 'open').map((thread) => thread.title),
+  )
+  for (const failure of failures.slice(0, 5)) {
+    const title = `behavioral regression: ${failure.file}`
+    if (openTitles.has(title)) continue
+    openTitles.add(title)
+    await addWorkThread({
+      kind: 'follow_up',
+      title,
+      detail: failure.violations.map((violation) => violation.rule).join(', '),
+    })
+  }
+}
 
 /**
  * Pi throws from every ctx accessor once the session is replaced (`newSession`,
@@ -321,16 +362,14 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       activeGoal = id
       refreshGoalWidget(ctx)
     },
-    persistActive: (goal) => {
-      void setActiveWorkGoal(
-        goal ? { id: goal.id, title: goal.title, objective: goal.objective } : null,
-      ).catch(() => {
-        // The ledger is best-effort; the session goal still works without it.
-      })
-    },
     archiveTrajectory: (goalId, branch) => {
-      void exportGoalFixture(goalId, branch, sessionMode).catch(() => {
-        // Fixture export is best-effort; never block goal completion.
+      void (async () => {
+        await exportGoalFixture(goalId, branch, sessionMode)
+        await refreshSkills()
+        const trajectory = trajectoryFromBranch(branch, goalId)
+        if (trajectory) await recordSuccess(pruneSkeleton(trajectory.steps))
+      })().catch(() => {
+        // Learning is best-effort; never block goal completion.
       })
     },
   })
@@ -389,11 +428,15 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     const suggestions = result.improvements
       .map((item) => `- ${item.title}`)
       .join('\n')
+    const followUps = result.follow_ups
+      .map((item) => `- ${item.title}`)
+      .join('\n')
     return [
       `Goal review · ${job.goalId}`,
       result.summary || '(no summary)',
       `Memory lessons: ${result.memories.length}`,
       suggestions ? `Suggestions:\n${suggestions}` : 'Suggestions: none',
+      followUps ? `Follow-ups queued:\n${followUps}` : '',
       result.warnings.length > 0
         ? `Warnings:\n${result.warnings.map((item) => `- ${item}`).join('\n')}`
         : '',
@@ -518,7 +561,39 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   // script's `--theme` flag.
   pi.on('resources_discover', () => ({ themePaths: brandThemePaths() }))
 
+  // Memoized injected context: rebuild only when a source actually changes, so
+  // unchanged turns return a byte-identical system prompt (provider prefix-cache
+  // friendly) and skip re-reading the stores.
+  let injectedContextCache: { key: string; value: string } | undefined
+
   pi.on('before_agent_start', async (event, ctx) => {
+    const branch = ctx.sessionManager.getBranch()
+    let goalEntryCount = 0
+    for (const entry of branch) {
+      if (
+        typeof entry === 'object' &&
+        entry !== null &&
+        (entry as { customType?: string }).customType === GOAL_ENTRY_TYPE
+      ) {
+        goalEntryCount += 1
+      }
+    }
+    const key = JSON.stringify([
+      event.systemPrompt,
+      sessionMode,
+      capabilityToolset.loadError ?? '',
+      capabilityToolset.tools.map((tool) => tool.name).join(','),
+      memoryError ?? '',
+      await fileSignature(memoryFilePath()),
+      await fileSignature(memoryColdPath()),
+      await fileSignature(workStateFilePath()),
+      await fileSignature(skillStorePath()),
+      activeGoal ?? '',
+      goalEntryCount,
+    ])
+    if (injectedContextCache && injectedContextCache.key === key) {
+      return { systemPrompt: injectedContextCache.value }
+    }
     let memory = ''
     if (!memoryError) {
       try {
@@ -535,12 +610,17 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     }
     let goalContract = ''
     try {
-      const branch = ctx.sessionManager.getBranch()
       const id = activeGoalFromBranch(branch)
       const state = id ? goalStateFromBranch(branch, id) : undefined
       if (state) goalContract = goalContractPrompt(state.goal)
     } catch {
       // The goal contract is best-effort context; never block the agent on it.
+    }
+    let learned = ''
+    try {
+      learned = learnedMethodsPrompt(await readSkills())
+    } catch {
+      // Learned methods are best-effort context; never block the agent on them.
     }
     const sections = [
       event.systemPrompt,
@@ -565,11 +645,14 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       memory,
       workState,
       goalContract,
+      learned,
     ].filter((section) => section.length > 0)
-    return { systemPrompt: sections.join('\n\n') }
+    const value = sections.join('\n\n')
+    injectedContextCache = { key, value }
+    return { systemPrompt: value }
   })
 
-  const skippedArtifactTools = new Set([
+  const skippedTrajectoryTools = new Set([
     GOAL_TOOL_NAME,
     REVIEW_TOOL_NAME,
     ASK_TOOL_NAME,
@@ -622,34 +705,8 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       .slice(0, 16)
     trackLoop(event.toolName, inputDigest, Boolean(event.isError), ctx)
     const goalId = pending?.goalId ?? activeGoal
-    if (!goalId || skippedArtifactTools.has(event.toolName)) return
+    if (!goalId || skippedTrajectoryTools.has(event.toolName)) return
 
-    const result = event.result as
-      | { content?: Array<{ type?: string; text?: string }> }
-      | undefined
-    const parts = Array.isArray(result?.content)
-      ? result.content.map((part) =>
-          part.type === 'text' && typeof part.text === 'string'
-            ? part.text
-            : `[${part.type ?? 'result'}]`,
-        )
-      : []
-    const body =
-      parts.join('\n') ||
-      (event.isError ? 'tool execution failed without a text result' : '')
-    let artifact = ''
-    try {
-      if (body) {
-        artifact = await writeGoalArtifact({
-          sessionId: ctx.sessionManager.getSessionId() ?? 'session',
-          goalId,
-          toolName: event.toolName,
-          content: body,
-        })
-      }
-    } catch {
-      // Artifact capture is best-effort; the session transcript still has the result.
-    }
     pi.appendEntry(GOAL_ENTRY_TYPE, {
       action: 'tool',
       goal_id: goalId,
@@ -657,7 +714,6 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       input: serializedInput,
       input_digest: inputDigest,
       status: event.isError ? 'error' : 'ok',
-      artifact,
       at: new Date().toISOString(),
     })
   })
@@ -672,12 +728,8 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     tpsStart = undefined
     tpsChars = 0
     applyActiveTools()
-    void pruneOldGoalArtifacts(
-      activeGoal
-        ? { sessionId: ctx.sessionManager.getSessionId() ?? 'session', goalId: activeGoal }
-        : undefined,
-    ).catch(() => {
-      // Artifact retention is best-effort housekeeping; never block the session.
+    void surfaceBehavioralRegressions().catch(() => {
+      // Eval feedback is best-effort; never block session start.
     })
     flushReviewNotices(ctx)
     void drainReviewQueue(ctx).catch((error) => {
@@ -772,13 +824,16 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     runNotifier.markIdle()
     if (event.aborted && activeGoal) {
       const id = activeGoal
-      pi.appendEntry(GOAL_ENTRY_TYPE, {
-        action: 'cancel',
-        goal_id: id,
-        reason: 'run aborted',
-        at: new Date().toISOString(),
-      })
-      activeGoal = undefined
+      const state = goalStateFromBranch(ctx.sessionManager.getBranch(), id)
+      if (state && state.goal.status !== 'paused') {
+        pi.appendEntry(GOAL_ENTRY_TYPE, {
+          action: 'update',
+          goal_id: id,
+          goal: { ...state.goal, status: 'paused' },
+          reason: 'run aborted',
+          at: new Date().toISOString(),
+        })
+      }
       refreshGoalWidget(ctx)
     }
     void drainReviewQueue(ctx).catch((error) => {
@@ -883,14 +938,9 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
           })
           return
         }
-        if (action === 'prune') {
-          const removed = await pruneAllGoalArtifacts()
-          ctx.ui.notify(`Pruned ${removed} goal artifact file(s)`, 'info')
-          return
-        }
         if (action) {
           ctx.ui.notify(
-            'Usage: /goal-reviews | /goal-reviews retry <review-id|goal-id> | /goal-reviews prune',
+            'Usage: /goal-reviews | /goal-reviews retry <review-id|goal-id>',
             'warning',
           )
           return
@@ -901,7 +951,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
           held > 0 ? `${held} held until the active goal ends` : ''
         if (jobs.length === 0) {
           ctx.ui.notify(
-            `No goal reviews queued.${heldLabel ? ` ${heldLabel}.` : ''} Artifacts: ${goalArtifactRoot()}`,
+            `No goal reviews queued.${heldLabel ? ` ${heldLabel}.` : ''}`,
             'info',
           )
           return
@@ -912,7 +962,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         })
         ctx.ui.notify(
           [
-            `Goal reviews (${jobs.length})${heldLabel ? ` · ${heldLabel}` : ''} · artifacts: ${goalArtifactRoot()}`,
+            `Goal reviews (${jobs.length})${heldLabel ? ` · ${heldLabel}` : ''}`,
             ...lines,
           ].join('\n'),
           'info',

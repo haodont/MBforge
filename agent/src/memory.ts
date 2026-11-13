@@ -24,11 +24,8 @@ const HOT_UPDATE_INTERVAL = 3
 const COMPRESSION_TIMEOUT_MS = 60_000
 const EPHEMERAL_SUFFIX = '.ephemeral.md'
 const COLD_SUFFIX = '.cold.md'
-const PERSONA_SUFFIX = '.persona.md'
 const STATE_SUFFIX = '.state.json'
 const ARCHIVE_SUFFIX = '.archive.md'
-const WORKING_PROFILE_START = '<!-- WORKING_PROFILE_START -->'
-const WORKING_PROFILE_END = '<!-- WORKING_PROFILE_END -->'
 
 const SECTION_HEADER =
   '## user\n\n## feedback\n\n## project\n\n## reference\n'
@@ -47,10 +44,6 @@ const COLD_HEADER =
   '# MBForge cold memory\n\n' +
   'Stable rules promoted from hot memory. Rarely changes.\n\n' +
   '## rules\n'
-
-const PERSONA_HEADER =
-  '# MBForge persona\n\n' +
-  `${WORKING_PROFILE_START}\n## Working profile\n\n${WORKING_PROFILE_END}\n`
 
 const MEMORY_ARCHIVE_HEADER =
   '# MBForge memory archive\n\n' +
@@ -126,7 +119,6 @@ export interface ListMemoryResult {
 export interface MemoryLayers {
   hot: string
   cold: string
-  persona: string
   ephemeral: ListMemoryResult
 }
 
@@ -175,10 +167,6 @@ export function memoryColdPath(): string {
   return layerPathFrom(memoryFilePath(), COLD_SUFFIX)
 }
 
-export function memoryPersonaPath(): string {
-  return layerPathFrom(memoryFilePath(), PERSONA_SUFFIX)
-}
-
 export function memoryStatePath(): string {
   return layerPathFrom(memoryFilePath(), STATE_SUFFIX)
 }
@@ -199,7 +187,6 @@ export async function ensureMemoryFile(): Promise<string> {
   await ensureFile(hot, MEMORY_HEADER)
   await ensureFile(memoryEphemeralPath(), EPHEMERAL_HEADER)
   await ensureFile(memoryColdPath(), COLD_HEADER)
-  await ensureFile(memoryPersonaPath(), PERSONA_HEADER)
   return hot
 }
 
@@ -232,11 +219,6 @@ export async function readColdMemory(): Promise<string> {
   return readLayer(memoryColdPath(), COLD_HEADER)
 }
 
-export async function readPersona(): Promise<string> {
-  await ensureMemoryFile()
-  return readLayer(memoryPersonaPath(), PERSONA_HEADER)
-}
-
 function hasLayerContent(text: string, header: string): boolean {
   return text.trim() !== header.trim()
 }
@@ -244,20 +226,13 @@ function hasLayerContent(text: string, header: string): boolean {
 /** Prompt section for the active layers; ephemeral notes are deliberately excluded. */
 export async function memorySystemPrompt(): Promise<string> {
   await waitForMemoryMaintenance(2_000)
-  const [hot, cold, persona] = await Promise.all([
-    readMemory(),
-    readColdMemory(),
-    readPersona(),
-  ])
+  const [hot, cold] = await Promise.all([readMemory(), readColdMemory()])
   const sections: string[] = []
   if (hasLayerContent(cold, COLD_HEADER)) {
     sections.push('### Cold memory', cold.trim())
   }
   if (hasLayerContent(hot, MEMORY_HEADER)) {
     sections.push('### Hot memory', hot.trim())
-  }
-  if (hasLayerContent(persona, PERSONA_HEADER)) {
-    sections.push('### Persona', persona.trim())
   }
   if (sections.length === 0) return ''
   return [
@@ -362,19 +337,6 @@ function appendColdRule(cold: string, rule: string): string {
   return `${cold.replace(/\s+$/, '')}\n${line}\n`
 }
 
-function renderPersona(hot: string, existing: string): string {
-  const entries = parseEntries(hot).filter(
-    (entry) => entry.type === 'user' || entry.type === 'feedback',
-  )
-  const generated = [...new Set(entries.map((entry) => entry.content))]
-    .map((content) => `- ${content}`)
-    .join('\n')
-  const stable = existing.includes(WORKING_PROFILE_START)
-    ? existing.slice(0, existing.indexOf(WORKING_PROFILE_START)).trimEnd()
-    : existing.trimEnd()
-  return `${stable}\n\n${WORKING_PROFILE_START}\n## Working profile\n\n${generated}\n${WORKING_PROFILE_END}\n`
-}
-
 async function archiveEntries(basePath: string, lines: string[]): Promise<void> {
   if (lines.length === 0) return
   const archive = memoryArchivePath(basePath)
@@ -460,14 +422,8 @@ async function compactEphemeralNow(): Promise<boolean> {
       cold = appendColdRule(cold, promoted.rule)
     }
   }
-  const persona = renderPersona(
-    hot,
-    await readFile(memoryPersonaPath(), 'utf8'),
-  )
-
   await atomicWrite(memoryFilePath(), hot)
   await atomicWrite(memoryColdPath(), cold)
-  await atomicWrite(memoryPersonaPath(), persona)
   await writeState(state)
   return true
 }
@@ -587,7 +543,6 @@ async function maintainNow(): Promise<boolean> {
   const state = await readState()
   let hot = await readFile(memoryFilePath(), 'utf8')
   let cold = await readFile(memoryColdPath(), 'utf8')
-  let persona = await readFile(memoryPersonaPath(), 'utf8')
   let changed = false
 
   const ephemeralText = await readFile(memoryEphemeralPath(), 'utf8')
@@ -624,10 +579,8 @@ async function maintainNow(): Promise<boolean> {
   }
 
   if (changed) {
-    persona = renderPersona(hot, persona)
     await atomicWrite(memoryFilePath(), hot)
     await atomicWrite(memoryColdPath(), cold)
-    await atomicWrite(memoryPersonaPath(), persona)
   }
   state.pending = false
   await writeState(state)
@@ -740,13 +693,8 @@ async function appendHotMemoryNow(
       cold = appendColdRule(cold, promoted.rule)
     }
   }
-  const persona = renderPersona(
-    hot,
-    await readFile(memoryPersonaPath(), 'utf8'),
-  )
   await atomicWrite(path, hot)
   await atomicWrite(memoryColdPath(), cold)
-  await atomicWrite(memoryPersonaPath(), persona)
   await writeState(state)
   return { path, id, type, entry: line, bytes: Buffer.byteLength(hot) }
 }
@@ -888,13 +836,12 @@ export async function listMemory(): Promise<ListMemoryResult> {
 }
 
 export async function readActiveMemory(): Promise<MemoryLayers> {
-  const [hot, cold, persona, ephemeral] = await Promise.all([
+  const [hot, cold, ephemeral] = await Promise.all([
     readMemory(),
     readColdMemory(),
-    readPersona(),
     listEphemeralMemory(),
   ])
-  return { hot, cold, persona, ephemeral }
+  return { hot, cold, ephemeral }
 }
 
 /** Tool payload for the active `memory` tool. */
@@ -910,7 +857,6 @@ export interface MemoryToolDetails {
   updated?: boolean
   hot?: string
   cold?: string
-  persona?: string
   ephemeral_count?: number
   count?: number
 }
@@ -967,7 +913,7 @@ const memoryParameters = Type.Union([
 
 /**
  * The active memory tool: add/update/delete ephemeral notes, or list the
- * active cold/hot/persona layers. Ephemeral contents are intentionally not
+ * active cold/hot layers. Ephemeral contents are intentionally not
  * returned here; use memory action "ephemeral" to inspect the transient layer.
  */
 export function memoryTool() {
@@ -975,11 +921,11 @@ export function memoryTool() {
     name: MEMORY_TOOL_NAME,
     label: MEMORY_TOOL_NAME,
     description:
-      'Manage local memory. add/update/delete operate on ephemeral notes; list returns the active cold, hot and persona layers, which are the ones injected into context. Use memory action "ephemeral" to inspect transient notes. Memory is for stable lessons and preferences; research work in progress (hypotheses, follow-ups, decisions) belongs in work_state, not here. Never store secrets, credentials, evidence text, or transient tool output.',
+      'Manage local memory. add/update/delete operate on ephemeral notes; list returns the active cold and hot layers, which are the ones injected into context. Use memory action "ephemeral" to inspect transient notes. Memory is for stable lessons and preferences; research work in progress (hypotheses, follow-ups, decisions) belongs in work_state, not here. Never store secrets, credentials, evidence text, or transient tool output.',
     promptGuidelines: [
       'Use memory action "add" for durable user preferences, corrections, or workspace facts. Notes go to ephemeral memory first; when it exceeds 16 entries, background maintenance asks the current model to compress it into hot memory.',
       'Memory holds stable lessons; work_state holds mutable research work in progress. Record a hypothesis, pending follow-up, or design decision in work_state, not memory — do not double-store.',
-      'Use memory action "list" to read the active cold/hot/persona layers. Use memory action "ephemeral" when you need to inspect the transient layer; it is not injected into the prompt.',
+      'Use memory action "list" to read the active cold/hot layers. Use memory action "ephemeral" when you need to inspect the transient layer; it is not injected into the prompt.',
       'To correct a note, prefer action "update" with its id. If the id is no longer ephemeral, edit hot memory from a list result or use the user-facing /memory command.',
       'Do not store passwords, tokens, document text, or temporary results.',
     ],
@@ -1055,13 +1001,12 @@ export function memoryTool() {
       }
       if (params.action === 'list') {
         await waitForMemoryMaintenance()
-        const { hot, cold, persona, ephemeral } = await readActiveMemory()
+        const { hot, cold, ephemeral } = await readActiveMemory()
         const details: MemoryToolDetails = {
           action: 'list',
           path: memoryFilePath(),
           hot,
           cold,
-          persona,
           ephemeral_count: ephemeral.entries.length,
         }
         return {
@@ -1089,7 +1034,7 @@ export function registerMemoryCommand(pi: ExtensionAPI): void {
       const input = args.trim()
       try {
         if (!input || input === 'show' || input === 'list') {
-          const { hot, cold, persona, ephemeral } = await readActiveMemory()
+          const { hot, cold, ephemeral } = await readActiveMemory()
           ctx.ui.notify(
             [
               `Active memory (${memoryFilePath()})`,
@@ -1098,8 +1043,6 @@ export function registerMemoryCommand(pi: ExtensionAPI): void {
               cold.trim(),
               '',
               hot.trim(),
-              '',
-              persona.trim(),
             ].join('\n'),
             'info',
           )

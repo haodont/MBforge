@@ -1,4 +1,4 @@
-// @tested-functions goalTool, activeGoalFromBranch, goalStateFromBranch
+// @tested-functions goalTool, activeGoalFromBranch, goalStateFromBranch, goalContractPrompt
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -20,8 +20,7 @@ function fakeContext(branch: unknown[]) {
   } as never
 }
 
-test('goal lifecycle records a goal, queues a scoped review, and archives the trajectory on completion', async () => {
-  const branch: unknown[] = []
+function harness(branch: unknown[]) {
   const queued: GoalReviewJob[] = []
   const archived: Array<{ goalId: string; branch: readonly unknown[] }> = []
   let active: string | undefined
@@ -40,115 +39,73 @@ test('goal lifecycle records a goal, queues a scoped review, and archives the tr
       archived.push({ goalId, branch: recorded })
     },
   })
+  const run = (params: Record<string, unknown>) =>
+    tool.execute(params.action as string, params, undefined, undefined, fakeContext(branch))
+  return { run, queued, archived, activeId: () => active }
+}
 
-  const started = await tool.execute(
-    'begin',
-    {
-      action: 'begin',
-      title: 'Fix review cache',
-      objective: 'Make review counts refresh after a decision.',
-      requirements: ['Invalidate the review query after a decision'],
-      acceptance: ['Focused frontend test passes'],
-    },
-    undefined,
-    undefined,
-    fakeContext(branch),
-  )
-  assert.match(JSON.stringify(started.details), /goal-/)
-  assert.ok(active)
-  const goalId = active
+test('goal is a living plan: light begin, progress with evidence, pause/resume, complete reports unmet', async () => {
+  const branch: unknown[] = []
+  const { run, queued, archived, activeId } = harness(branch)
 
-  branch.push({
-    type: 'message',
-    message: { role: 'user', content: 'Please keep the API stable.' },
+  const started = await run({
+    action: 'begin',
+    objective: 'Make review counts refresh after a decision.',
   })
+  const goalId = activeId()
+  assert.ok(goalId)
+  assert.match(JSON.stringify(started.details), /goal-/)
+  assert.equal(started.details.goal.requirements.length, 0, 'begin needs only an objective')
+  assert.equal(started.details.goal.title, 'Make review counts refresh after a decision.')
+
+  const added = await run({
+    action: 'progress',
+    requirements: [{ text: 'Invalidate the review query' }, { text: 'Add a focused test' }],
+  })
+  assert.equal(added.details.total, 2)
+
+  const marked = await run({
+    action: 'progress',
+    requirements: [
+      { id: 'r1', status: 'done', evidence: 'ev-7' },
+      { id: 'r2', status: 'blocked', note: 'waiting on a decision' },
+    ],
+  })
+  assert.equal(marked.details.done, 1)
+
   branch.push({
     type: 'custom',
     customType: GOAL_ENTRY_TYPE,
-    data: {
-      action: 'tool',
-      goal_id: goalId,
-      tool: 'search_evidence',
-      input_digest: 'd1',
-      status: 'ok',
-    },
+    data: { action: 'tool', goal_id: goalId, tool: 'search_evidence', input_digest: 'd1', status: 'ok' },
   })
 
-  await tool.execute(
-    'complete',
-    {
-      action: 'complete',
-      summary: 'The review query is invalidated after a decision.',
-      verification: ['npm run test -> passed'],
-      risks: ['None.'],
-    },
-    undefined,
-    undefined,
-    fakeContext(branch),
-  )
+  const paused = await run({ action: 'update', status: 'paused' })
+  assert.equal(paused.details.goal.status, 'paused')
+  assert.equal(activeId(), goalId, 'a paused goal keeps its slot')
+  const contract = goalContractPrompt(goalStateFromBranch(branch, goalId!)!.goal)
+  assert.match(contract, /\(paused\)/)
+  assert.match(contract, /1\/2 done/)
+  assert.match(contract, /\[done\] r1: Invalidate the review query \(evidence: ev-7\)/)
+  assert.match(contract, /\[blocked\] r2: Add a focused test — waiting on a decision/)
 
-  assert.equal(active, undefined)
+  await run({ action: 'update', status: 'active' })
+  assert.equal(goalStateFromBranch(branch, goalId!)!.goal.status, 'active')
+
+  const completed = await run({ action: 'complete' })
+  assert.equal(activeId(), undefined)
   assert.equal(activeGoalFromBranch(branch), undefined)
+  assert.deepEqual(
+    completed.details.unmet.map((item: { id: string }) => item.id),
+    ['r2'],
+    'complete surfaces the unmet requirement instead of blocking',
+  )
   assert.equal(queued.length, 1)
-  assert.match(queued[0]?.transcript ?? '', /Fix review cache/)
-  assert.match(queued[0]?.transcript ?? '', /Please keep the API stable/)
-  assert.match(queued[0]?.transcript ?? '', /The review query is invalidated/)
-  assert.match(queued[0]?.transcript ?? '', /npm run test -> passed/)
-
+  assert.match(queued[0]?.transcript ?? '', /\[done\] r1/)
+  assert.match(queued[0]?.transcript ?? '', /\[blocked\] r2/)
   assert.equal(archived.length, 1)
-  assert.equal(archived[0]?.goalId, goalId)
-  const frozen = trajectoryFromBranch(archived[0]?.branch ?? [], goalId)
+  const frozen = trajectoryFromBranch(archived[0]?.branch ?? [], goalId!)
   assert.equal(frozen?.steps.length, 1)
   assert.equal(frozen?.steps[0]?.tool, 'search_evidence')
-})
-
-test('goal mirrors the active objective into the durable ledger across its lifecycle', async () => {
-  const branch: unknown[] = []
-  let active: string | undefined
-  const mirrored: Array<{ id: string; title: string } | null> = []
-  const tool = goalTool({
-    appendEntry: (data) => {
-      branch.push({ type: 'custom', customType: GOAL_ENTRY_TYPE, data })
-    },
-    enqueueReview: () => {},
-    getActiveGoal: () => active,
-    setActiveGoal: (id) => {
-      active = id
-    },
-    persistActive: (goal) => {
-      mirrored.push(goal ? { id: goal.id, title: goal.title } : null)
-    },
-  })
-
-  await tool.execute(
-    'begin',
-    { action: 'begin', title: 'Design candidates', objective: 'Propose candidates.', requirements: ['r1'] },
-    undefined,
-    undefined,
-    fakeContext(branch),
-  )
-  assert.equal(mirrored.length, 1)
-  assert.equal(mirrored[0]?.title, 'Design candidates')
-
-  await tool.execute(
-    'update',
-    { action: 'update', title: 'Design candidates v2' },
-    undefined,
-    undefined,
-    fakeContext(branch),
-  )
-  assert.equal(mirrored.length, 2)
-  assert.equal(mirrored[1]?.title, 'Design candidates v2', 'update mirrors the revised objective')
-
-  await tool.execute(
-    'complete',
-    { action: 'complete', summary: 'done' },
-    undefined,
-    undefined,
-    fakeContext(branch),
-  )
-  assert.equal(mirrored.length, 3)
-  assert.equal(mirrored[2], null, 'completion clears the mirrored goal')
 })
 
 test('goal transcript and contract prompt render the definition and tool index', () => {
@@ -163,10 +120,10 @@ test('goal transcript and contract prompt render the definition and tool index',
           id: 'goal-tools',
           title: 'Inspect page',
           objective: 'Check one page.',
-          requirements: ['Read it'],
-          acceptance: ['It is read'],
+          requirements: [{ id: 'r1', text: 'Read it', status: 'done', evidence: 'ev-1' }],
           constraints: ['Keep the API stable'],
           non_goals: ['No rewrite'],
+          status: 'active',
           created_at: '2026-01-01T00:00:00.000Z',
         },
       },
@@ -181,7 +138,6 @@ test('goal transcript and contract prompt render the definition and tool index',
         input: '{"page":1}',
         input_digest: 'abc123',
         status: 'ok',
-        artifact: 'C:/agent/GOAL_ARTIFACTS/s/g/1.txt',
       },
     },
   ]
@@ -190,17 +146,17 @@ test('goal transcript and contract prompt render the definition and tool index',
   const transcript = goalTranscript(state.goal, branch, state.startIndex)
   assert.match(transcript, /Tool index/)
   assert.match(transcript, /inspect_visual ok input=\{"page":1\}/)
-  assert.match(transcript, /GOAL_ARTIFACTS/)
 
   const contract = goalContractPrompt(state.goal)
   assert.match(contract, /## Active goal contract/)
-  assert.match(contract, /Acceptance:\n- It is read/)
+  assert.match(contract, /1\/1 done/)
+  assert.match(contract, /\[done\] r1: Read it \(evidence: ev-1\)/)
   assert.match(contract, /Constraints:\n- Keep the API stable/)
   assert.match(contract, /Non-goals:\n- No rewrite/)
-  assert.match(contract, /do not call goal complete until they are satisfied/)
+  assert.match(contract, /action=progress/)
 })
 
-test('goal state and active flag survive from the branch', () => {
+test('goal state survives the branch: legacy string requirements, progress merge, and pause', () => {
   const branch: unknown[] = [
     {
       type: 'custom',
@@ -213,19 +169,48 @@ test('goal state and active flag survive from the branch', () => {
           title: 'Keep the branch',
           objective: 'Resume the goal.',
           requirements: ['One requirement'],
-          acceptance: [],
-          constraints: [],
-          non_goals: [],
           created_at: '2026-01-01T00:00:00.000Z',
         },
       },
     },
   ]
   assert.equal(activeGoalFromBranch(branch), 'goal-1234')
-  assert.deepEqual(
-    goalStateFromBranch(branch, 'goal-1234')?.goal.requirements,
-    ['One requirement'],
-  )
+  assert.deepEqual(goalStateFromBranch(branch, 'goal-1234')?.goal.requirements, [
+    { id: 'r1', text: 'One requirement', status: 'pending' },
+  ])
+
+  branch.push({
+    type: 'custom',
+    customType: GOAL_ENTRY_TYPE,
+    data: {
+      action: 'progress',
+      goal_id: 'goal-1234',
+      requirements: [{ id: 'r1', text: 'One requirement', status: 'done', evidence: 'ev-9' }],
+    },
+  })
+  branch.push({
+    type: 'custom',
+    customType: GOAL_ENTRY_TYPE,
+    data: {
+      action: 'update',
+      goal_id: 'goal-1234',
+      goal: {
+        id: 'goal-1234',
+        title: 'Keep the branch',
+        objective: 'Resume the goal.',
+        requirements: [{ id: 'r1', text: 'One requirement', status: 'done', evidence: 'ev-9' }],
+        constraints: [],
+        non_goals: [],
+        status: 'paused',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    },
+  })
+  const state = goalStateFromBranch(branch, 'goal-1234')
+  assert.equal(state?.goal.status, 'paused')
+  assert.equal(state?.goal.requirements[0]?.status, 'done')
+  assert.equal(activeGoalFromBranch(branch), 'goal-1234', 'paused goal stays active')
+
   branch.push({
     type: 'custom',
     customType: GOAL_ENTRY_TYPE,

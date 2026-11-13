@@ -334,11 +334,10 @@ test('local tools render flat details as branded summaries instead of raw JSON',
     path: 'C:/agent/MEMORY.md',
     hot: '## user\n- likes brevity',
     cold: 'cold facts',
-    persona: 'persona text',
     ephemeral_count: 2,
   })
   const listCollapsed = render(toolRenderers('memory'), 'result', memoryList, collapsedOptions).join('\n')
-  assert.match(listCollapsed, /✓ list · hot 23 chars · cold 10 chars · persona 12 chars · 2 ephemeral/)
+  assert.match(listCollapsed, /✓ list · hot 23 chars · cold 10 chars · 2 ephemeral/)
   const listExpanded = render(toolRenderers('memory'), 'result', memoryList, expandedOptions).join('\n')
   assert.ok(listExpanded.includes('[hot]'))
   assert.ok(listExpanded.includes('- likes brevity'))

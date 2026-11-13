@@ -1,4 +1,4 @@
-// @tested-functions addWorkThread, updateWorkThread, closeWorkThread, setActiveWorkGoal, readWorkState, workStateSystemPrompt, workStateTool
+// @tested-functions addWorkThread, updateWorkThread, closeWorkThread, readWorkState, workStateSystemPrompt, workStateTool
 import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,7 +9,6 @@ import {
   addWorkThread,
   closeWorkThread,
   readWorkState,
-  setActiveWorkGoal,
   updateWorkThread,
   workStateSystemPrompt,
   workStateTool,
@@ -26,7 +25,7 @@ function useTempWorkState(t: test.TestContext): string {
   return path
 }
 
-test('work ledger persists across sessions, maintains threads, and mirrors the goal', async (t) => {
+test('work ledger persists across sessions and maintains threads', async (t) => {
   useTempWorkState(t)
 
   // A fresh library adds no prompt noise.
@@ -49,14 +48,7 @@ test('work ledger persists across sessions, maintains threads, and mirrors the g
   const reread = await readWorkState()
   assert.equal(reread.threads.length, 2)
 
-  // The goal tool mirrors its active objective into the ledger.
-  await setActiveWorkGoal({
-    id: 'goal-1',
-    title: 'Design MRGPRX2 antagonists',
-    objective: 'Propose candidates from the patent series.',
-  })
   const prompt = await workStateSystemPrompt()
-  assert.match(prompt, /Active goal: Design MRGPRX2 antagonists/)
   assert.match(prompt, /R1 = CF3 improves potency/)
   assert.match(prompt, /await synthesis of compound 12/)
 
@@ -68,9 +60,6 @@ test('work ledger persists across sessions, maintains threads, and mirrors the g
   assert.equal(after.threads.find((thread) => thread.id === hypothesis.id)?.detail, 'Refined after docking.')
   const promptAfterClose = await workStateSystemPrompt()
   assert.doesNotMatch(promptAfterClose, /await synthesis of compound 12/)
-
-  await setActiveWorkGoal(null)
-  assert.equal((await readWorkState()).active_goal, null)
 
   // The tool dispatches list/add/close over the same ledger.
   const tool = workStateTool()

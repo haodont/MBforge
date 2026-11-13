@@ -68,6 +68,19 @@ export interface FixtureResult {
   violations: BehaviorViolation[]
 }
 
+/** Load every valid stored trajectory (the raw experience for skill induction). */
+export async function loadFixtures(directory = evalFixtureDir()): Promise<Trajectory[]> {
+  const names = (await readdir(directory).catch(() => []))
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+  const trajectories: Trajectory[] = []
+  for (const name of names) {
+    const raw = await readJsonFile(join(directory, name)).catch(() => undefined)
+    if (isTrajectory(raw)) trajectories.push(raw)
+  }
+  return trajectories
+}
+
 /**
  * Grade every fixture against its auto-derived baseline; returns only the
  * fixtures that violate an invariant. An absent or empty directory yields [],

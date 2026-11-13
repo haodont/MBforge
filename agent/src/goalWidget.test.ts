@@ -16,10 +16,13 @@ const goal = {
   id: 'goal-1234abcd',
   title: 'Fix review cache',
   objective: 'Make review counts refresh after a decision.',
-  requirements: ['Refresh after decide', 'Keep API stable'],
-  acceptance: ['npm test passes'],
+  requirements: [
+    { id: 'r1', text: 'Refresh after decide', status: 'done', evidence: 'ev-1' },
+    { id: 'r2', text: 'Keep API stable', status: 'pending' },
+  ],
   constraints: [],
   non_goals: [],
+  status: 'active',
   created_at: '2026-01-01T00:00:00.000Z',
 }
 
@@ -41,10 +44,9 @@ test('the active goal is pinned with its title and counts', () => {
   const first = widget.render(100).join('\n')
   assert.match(first, /⬡ GOAL/)
   assert.match(first, /“Fix review cache”/)
-  assert.match(first, /Requirements · 2/)
-  assert.match(first, /☐ Refresh after decide/)
-  assert.match(first, /Acceptance · 1/)
-  assert.match(first, /☐ npm test passes/)
+  assert.match(first, /Requirements · 1\/2 done/)
+  assert.match(first, /☑ Refresh after decide/)
+  assert.match(first, /☐ Keep API stable/)
   assert.match(first, /goal-1234abcd/)
 
   branch.push({

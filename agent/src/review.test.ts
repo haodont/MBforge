@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { listMemory } from './memory.js'
+import { readWorkState } from './workState.js'
 import {
   buildReviewerArgs,
   collectTranscript,
@@ -14,15 +15,22 @@ import {
   runReview,
 } from './review.js'
 
-test('task review writes durable lessons and returns scoped improvements', async (t) => {
+test('task review routes lessons to memory and follow-ups to the work ledger', async (t) => {
   const previous = process.env.MBFORGE_MEMORY_FILE
   process.env.MBFORGE_MEMORY_FILE = join(
     mkdtempSync(join(tmpdir(), 'mbforge-review-')),
     'MEMORY.md',
   )
+  const previousWork = process.env.MBFORGE_WORK_STATE_FILE
+  process.env.MBFORGE_WORK_STATE_FILE = join(
+    mkdtempSync(join(tmpdir(), 'mbforge-review-work-')),
+    'WORK_STATE.json',
+  )
   t.after(() => {
     if (previous === undefined) delete process.env.MBFORGE_MEMORY_FILE
     else process.env.MBFORGE_MEMORY_FILE = previous
+    if (previousWork === undefined) delete process.env.MBFORGE_WORK_STATE_FILE
+    else process.env.MBFORGE_WORK_STATE_FILE = previousWork
   })
 
   const transcript = collectTranscript([
@@ -62,6 +70,12 @@ test('task review writes durable lessons and returns scoped improvements', async
           files: ['frontend/src/api/query/hooks/useReview.ts'],
         },
       ],
+      follow_ups: [
+        {
+          title: 'await synthesis of compound 12',
+          detail: 'activity result pending',
+        },
+      ],
     }),
     '```',
   ].join('\n')
@@ -76,6 +90,10 @@ test('task review writes durable lessons and returns scoped improvements', async
   assert.equal(result.memories[0]?.type, 'feedback')
   assert.equal(result.improvements[0]?.area, 'capability')
   assert.equal(result.improvements[0]?.files.length, 1)
+  assert.equal(result.follow_ups.length, 1)
+  const work = await readWorkState()
+  const followUp = work.threads.find((thread) => thread.kind === 'follow_up')
+  assert.match(followUp?.title ?? '', /await synthesis of compound 12/)
 
   const listed = await listMemory()
   assert.equal(listed.entries.length, 1)

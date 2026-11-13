@@ -11,6 +11,7 @@ import {
   IMPROVEMENT_AREAS,
   type ImprovementArea,
 } from './improvements.js'
+import { addWorkThread } from './workState.js'
 import { projectCwd, spawnPiText } from './piChild.js'
 import { toolRenderers } from './toolRender.js'
 
@@ -18,6 +19,7 @@ const MAX_MESSAGE_CHARS = 2_500
 const MAX_TRANSCRIPT_CHARS = 12_000
 const MAX_LESSONS = 5
 const MAX_IMPROVEMENTS = 3
+const MAX_FOLLOW_UPS = 5
 const REVIEW_STALL_MS = 300_000
 
 export const REVIEW_TOOL_NAME = 'review_task'
@@ -38,10 +40,16 @@ export interface ReviewImprovement {
   files: string[]
 }
 
+export interface ReviewFollowUp {
+  title: string
+  detail: string
+}
+
 export interface ReviewReport {
   summary: string
   lessons: ReviewLesson[]
   improvements: ReviewImprovement[]
+  follow_ups: ReviewFollowUp[]
   warnings: string[]
 }
 
@@ -91,6 +99,12 @@ Return ONLY a JSON object:
       "risk": "known risk or cost",
       "files": ["path/to/file"]
     }
+  ],
+  "follow_ups": [
+    {
+      "title": "short pending research action",
+      "detail": "what is awaited and why it matters"
+    }
   ]
 }
 
@@ -100,7 +114,10 @@ Rules:
   user's immediate request. Use [] when nothing durable was learned.
 - Improvements are only concrete design or tooling gaps discovered during the task.
   Do not propose ordinary requested edits or speculative refactors. Use [] when none.
-- At most ${MAX_LESSONS} lessons and ${MAX_IMPROVEMENTS} improvements.`
+- Follow_ups are pending research actions that must survive this session (await a
+  synthesis or activity result, a human review, a re-run). They are not code changes
+  and not durable facts. Use [] when nothing is left waiting.
+- At most ${MAX_LESSONS} lessons, ${MAX_IMPROVEMENTS} improvements and ${MAX_FOLLOW_UPS} follow_ups.`
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -259,6 +276,7 @@ export function parseReviewReport(raw: string): ReviewReport {
       summary: clip(raw, 4_000) || 'reviewer returned no output',
       lessons: [],
       improvements: [],
+      follow_ups: [],
       warnings: ['reviewer output was not a JSON object'],
     }
   }
@@ -311,11 +329,22 @@ export function parseReviewReport(raw: string): ReviewReport {
     }
   }
 
+  const follow_ups: ReviewFollowUp[] = []
+  if (Array.isArray(report.follow_ups)) {
+    for (const row of report.follow_ups.slice(0, MAX_FOLLOW_UPS)) {
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) continue
+      const rowRecord = row as Record<string, unknown>
+      const title = clip(text(rowRecord.title), 160)
+      if (!title) continue
+      follow_ups.push({ title, detail: clip(text(rowRecord.detail), 1_000) })
+    }
+  }
+
   if (!summary) warnings.push('reviewer omitted the summary')
-  if (lessons.length === 0 && improvements.length === 0) {
+  if (lessons.length === 0 && improvements.length === 0 && follow_ups.length === 0) {
     warnings.push('reviewer returned no lessons or improvements')
   }
-  return { summary, lessons, improvements, warnings }
+  return { summary, lessons, improvements, follow_ups, warnings }
 }
 
 /**
@@ -441,7 +470,23 @@ export async function runReview(
       )
     }
   }
-  return { ...report, memories, warnings }
+  // Route pending research actions to the durable work ledger (background-safe).
+  const follow_ups: ReviewFollowUp[] = []
+  for (const followUp of report.follow_ups) {
+    try {
+      await addWorkThread({
+        kind: 'follow_up',
+        title: followUp.title,
+        detail: followUp.detail || undefined,
+      })
+      follow_ups.push(followUp)
+    } catch (error) {
+      warnings.push(
+        `work_state write failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+  return { ...report, follow_ups, memories, warnings }
 }
 
 const reviewParameters = Type.Object({

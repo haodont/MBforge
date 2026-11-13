@@ -1,4 +1,4 @@
-// @tested-functions ensureMemoryFile, readMemory, readColdMemory, readPersona, memorySystemPrompt, appendMemory, updateMemory, forgetMemory, listMemory, listEphemeralMemory, memoryTool, memoryEphemeralTool
+// @tested-functions ensureMemoryFile, readMemory, readColdMemory, memorySystemPrompt, appendMemory, updateMemory, forgetMemory, listMemory, listEphemeralMemory, memoryTool, memoryEphemeralTool
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -18,7 +18,6 @@ import {
   memoryTool,
   readColdMemory,
   readMemory,
-  readPersona,
   setMemoryRuntime,
   updateMemory,
   waitForMemoryMaintenance,
@@ -78,7 +77,7 @@ test('ephemeral notes are isolated, editable, and removable', async (t) => {
   )
 })
 
-test('seventeen ephemeral notes compact into hot, persona and cold layers', async (t) => {
+test('seventeen ephemeral notes compact into hot and cold layers', async (t) => {
   const path = useTempMemory(t)
 
   for (let batch = 0; batch < 3; batch += 1) {
@@ -91,14 +90,10 @@ test('seventeen ephemeral notes compact into hot, persona and cold layers', asyn
   assert.equal((await listEphemeralMemory()).entries.length, 0)
   const hot = await readMemory()
   const cold = await readColdMemory()
-  const persona = await readPersona()
   assert.match(hot, /project 0-0/)
   assert.match(hot, /preference 2/)
   assert.match(cold, /preference 0/)
   assert.doesNotMatch(cold, /preference 2/)
-  assert.match(persona, /preference 1/)
-  assert.match(persona, /preference 2/)
-  assert.doesNotMatch(persona, /preference 0/)
 
   const state = JSON.parse(readFileSync(memoryStatePath(), 'utf8')) as {
     hot_updates: number
@@ -117,7 +112,6 @@ test('seventeen ephemeral notes compact into hot, persona and cold layers', asyn
   const prompt = await memorySystemPrompt()
   assert.match(prompt, /### Cold memory/)
   assert.match(prompt, /### Hot memory/)
-  assert.match(prompt, /### Persona/)
   assert.match(prompt, /preference 0/)
 })
 
@@ -148,7 +142,6 @@ test('memory tools list active layers and inspect ephemeral notes separately', a
     ephemeral_count: number
     hot: string
     cold: string
-    persona: string
   }
   assert.equal(listedDetails.ephemeral_count, 1)
   assert.doesNotMatch(JSON.stringify(listedDetails), /Prefer concise Chinese answers/)
@@ -246,7 +239,6 @@ test('background maintenance compresses ephemeral and hot memory with the model'
   assert.match(hot, /model hot preference/)
   assert.doesNotMatch(hot, /project 0-0/)
   assert.match(await readColdMemory(), /model cold rule/)
-  assert.match(await readPersona(), /model hot preference/)
   assert.match(
     readFileSync(memoryArchivePath(path), 'utf8'),
     /project 0-0/,

@@ -249,7 +249,7 @@ const REPORT_LISTS: ReadonlyArray<{ field: string; singular: string; plural: str
   { field: 'warnings', singular: 'warning', plural: 'warnings' },
 ]
 
-const MEMORY_LAYERS = ['hot', 'cold', 'persona'] as const
+const MEMORY_LAYERS = ['hot', 'cold'] as const
 
 function nounFor(field: string, sample: unknown): string {
   if (field === 'matches') return 'documents'
@@ -418,7 +418,7 @@ function summarize(data: unknown): Summary {
     }
   }
 
-  // Memory payloads: an entry action, or the active hot/cold/persona layers.
+  // Memory payloads: an entry action, or the active hot/cold layers.
   if (text(data.entry) || typeof data.ephemeral_count === 'number') {
     const parts = [text(data.action) || 'memory']
     if (text(data.id)) parts.push(shortId(data.id))

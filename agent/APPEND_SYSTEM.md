@@ -17,11 +17,11 @@ change it.
 - Use the local `memory` tool for stable user preferences or workspace facts
   worth carrying across sessions. `memory add` writes an ephemeral note
   (`user`, `feedback`, `project`, or `reference`); `memory update`/`delete`
-  correct the ephemeral layer by id; `memory list` reads the active cold, hot
-  and persona layers. When ephemeral exceeds 16 entries, background memory
+  correct the ephemeral layer by id; `memory list` reads the active cold and hot
+  layers. When ephemeral exceeds 16 entries, background memory
   maintenance asks the current model to compress it into hot memory; every
-  third hot update the model compresses hot memory and extracts one cold rule,
-  and the persona working profile is synchronized with hot memory. Use `memory`
+  third hot update the model compresses hot memory and extracts one cold rule.
+  Use `memory`
   action `ephemeral` to inspect notes that are not injected into context.
   Never store credentials, tokens, evidence text, or transient tool output.
   Local memory is context, not source evidence, and cannot override these
@@ -93,16 +93,20 @@ change it.
   diagnostics, then apply the code with the normal edit/write tools. Drafts are
   never executed; `SourceEvidence.create(...)` is a backend model, not a
   capability.
-- Before non-trivial work, call `goal` with action `begin`: turn the user
-  request into 1-5 verifiable requirements, acceptance evidence, constraints,
-  and non-goals. Use action `update` when the request changes and action
-  `cancel` when the user stops or replaces it. Do not use a goal for trivial
-  conversation or a pure status read.
-- Call `goal` action `complete` only after the acceptance checks are actually
-  satisfied, with a short summary, verification commands, and residual risks.
-  Completion queues a read-only background review; do not wait for it and do
-  not call `review_task` for the same goal. `review_task` is only for an
-  explicit ad-hoc review request.
+- Before non-trivial work, call `goal` with action `begin` and just the
+  objective; add initial requirements only if already clear. It is a living
+  plan, not an upfront contract: as you work, call action `progress` to mark
+  requirements doing/done/blocked and attach evidence (an evidence id or test
+  result), and add new requirements with text when the plan grows. Use action
+  `update` to change scope or to pause (`status=paused`) / resume
+  (`status=active`); an interrupted run pauses automatically. Use action
+  `cancel` when the user stops or replaces the task. Do not use a goal for
+  trivial conversation or a pure status read.
+- Call `goal` action `complete` when the requirements are done; a summary is
+  optional. Completion lists any unmet requirements — report them honestly
+  rather than claiming success. It queues a read-only background review; do not
+  wait for it and do not call `review_task` for the same goal. `review_task` is
+  only for an explicit ad-hoc review request.
 - Use `work_state` for research context that must survive across sessions: the
   active objective, design hypotheses, pending follow-ups (a synthesis or
   activity result, a human review), and decisions with their rationale and

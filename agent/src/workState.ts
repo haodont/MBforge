@@ -70,15 +70,8 @@ export interface WorkThread {
   updated_at: string
 }
 
-export interface ActiveGoal {
-  id: string
-  title: string
-  objective: string
-}
-
 export interface WorkState {
   version: 1
-  active_goal: ActiveGoal | null
   threads: WorkThread[]
   updated_at: string
 }
@@ -96,7 +89,7 @@ export function workStateFilePath(): string {
 }
 
 function emptyState(): WorkState {
-  return { version: 1, active_goal: null, threads: [], updated_at: '' }
+  return { version: 1, threads: [], updated_at: '' }
 }
 
 function cleanText(value: string, field: string, max: number): string {
@@ -152,14 +145,8 @@ async function readState(): Promise<WorkState> {
   }
   const record = parsed as Partial<WorkState>
   const threads = Array.isArray(record.threads) ? record.threads.filter(isThread) : []
-  const goal = record.active_goal
-  const active_goal =
-    goal && typeof goal.id === 'string' && typeof goal.title === 'string'
-      ? { id: goal.id, title: goal.title, objective: String(goal.objective ?? '') }
-      : null
   return {
     version: 1,
-    active_goal,
     threads,
     updated_at: typeof record.updated_at === 'string' ? record.updated_at : '',
   }
@@ -249,15 +236,6 @@ export async function closeWorkThread(id: string): Promise<WorkThread> {
   return updateWorkThread(id, { status: 'done' })
 }
 
-/** Mirror the active research goal (or clear it) into the durable ledger. */
-export async function setActiveWorkGoal(goal: ActiveGoal | null): Promise<void> {
-  await serialize(async () => {
-    const state = await readState()
-    state.active_goal = goal
-    await writeState(state)
-  })
-}
-
 /** Read the whole ledger (used by the tool and the prompt). */
 export async function readWorkState(): Promise<WorkState> {
   return readState()
@@ -275,16 +253,11 @@ function clip(value: string, max: number): string {
 export async function workStateSystemPrompt(): Promise<string> {
   const state = await readState()
   const open = state.threads.filter((thread) => thread.status === 'open')
-  if (!state.active_goal && open.length === 0) return ''
+  if (open.length === 0) return ''
   const lines: string[] = [
     '## Research work state',
     'Durable cross-session work ledger (agent-local context, not library evidence). Resume from it and keep it current with work_state.',
   ]
-  if (state.active_goal) {
-    lines.push(
-      `Active goal: ${state.active_goal.title} — ${clip(state.active_goal.objective, PROMPT_DETAIL_CHARS)}`,
-    )
-  }
   if (open.length > 0) {
     lines.push('Open threads:')
     for (const thread of open.slice(0, PROMPT_THREAD_LIMIT)) {
@@ -385,7 +358,6 @@ export function workStateTool() {
         const details = {
           action: 'list' as const,
           path: workStateFilePath(),
-          active_goal: state.active_goal,
           items: threads,
           count: threads.length,
         }
