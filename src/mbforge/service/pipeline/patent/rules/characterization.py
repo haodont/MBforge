@@ -80,6 +80,10 @@ _STEP_HEADING_RE = re.compile(
     r"(?:第[一二三四五六七八九十]+步|步骤\s*\d+|实施例\s*[\dA-Za-z-]+|中间体\s*[\dA-Za-z-]+)"
     r".*?(?:的)?(?:合成|制备|制法|制得)"
 )
+#: A CN example heading that states no verb: ``[0625] 实施例44``. Its product is
+#: printed in the body below it (``得到33.75mg化合物44``), not in the title.
+_BARE_EXAMPLE_HEADING_RE = re.compile(r"(?:实施例|実施例)\s*[\dA-Za-z-]+")
+
 #: The heading usually names its product in parentheses after the chemistry:
 #: ``…甲酰胺(A1-6)的合成``.
 _HEADING_PRODUCT_RE = re.compile(
@@ -318,6 +322,22 @@ def _technique_of(line: str) -> str | None:
 #: A preparation step's own heading: ``第三步：(1S,3R)-…(A1-6)的合成``. A
 
 
+
+def _example_body_product_keys(
+    evidence: Sequence[SourceEvidence], start: int, stop: int, page: int | None
+) -> set[str]:
+    """The product designations an example's body states between two rows."""
+    keys: set[str] = set()
+    for index in range(start, min(stop, len(evidence))):
+        row = evidence[index]
+        if row.page != page:
+            break
+        text = row.raw_text or ""
+        for line in text.splitlines():
+            keys.update(_product_phrase_keys(line))
+    return keys
+
+
 def _characterization_owner(
     evidence: Sequence[SourceEvidence],
     row: SourceEvidence,
@@ -351,6 +371,13 @@ def _characterization_owner(
             break
         text = previous.raw_text or ""
         if not _STEP_HEADING_RE.search(text):
+            if _BARE_EXAMPLE_HEADING_RE.search(text):
+                # The example heading names no product of its own; its body does.
+                body_keys = _example_body_product_keys(
+                    evidence, index + 1, order, row.page
+                )
+                if len(body_keys) == 1:
+                    return next(iter(body_keys))
             continue
         keys = _designation_keys(text)
         if len(keys) == 1:

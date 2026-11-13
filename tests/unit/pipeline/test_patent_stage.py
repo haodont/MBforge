@@ -1676,13 +1676,48 @@ def test_an_example_text_opens_with_the_previous_examples_tail() -> None:
         "[0633] 得到45-P1(20mg)和45-P2(21mg)。\n"
     )
 
+    from mbforge.service.pipeline.patent.association import _own_example_text
     from mbforge.service.pipeline.patent.rules.characterization import (
         declared_product_labels,
     )
-    from mbforge.service.pipeline.patent.association import _own_example_text
 
     own = _own_example_text(text, "实施例44")
 
     assert "化合物44" in own
     assert "45-P1" not in own
     assert declared_product_labels(own) == ["化合物44"]
+
+
+def test_an_example_heading_owns_the_mass_its_body_states() -> None:
+    """A CN example heading prints no verb, so the old step-heading rule missed it.
+
+    ``[0625] 实施例44`` is a heading; its product is stated two rows down
+    (``得到33.75mg化合物44``). Without this the LC-MS line stayed unowned — 60 of 60
+    characterizations on CN120943813A arrived without a designation, which killed
+    every mass check on the document.
+    """
+    from mbforge.service.pipeline.patent.rules.characterization import (
+        extract_characterization,
+    )
+
+    def row(index: int, text: str) -> SourceEvidence:
+        return SourceEvidence(
+            doc_id="doc-1",
+            page=90,
+            bbox=(1.0, 1.0, 2.0, 2.0),
+            evidence_id=f"ev-{index}",
+            kind="text",
+            raw_text=text,
+        )
+
+    rows = [
+        row(1, "[0625] 实施例44"),
+        row(2, "[0627]"),
+        row(3, "44"),
+        row(4, "[0628]合成方法参考实施例43,得到33.75mg化合物44。"),
+        row(5, "[0629] MS(ESI)M/Z:470.2[M+H]+."),
+    ]
+
+    items = extract_characterization(rows, "doc-1")
+
+    assert [(item["technique"], item["label_key"]) for item in items] == [("ms", "44")]
