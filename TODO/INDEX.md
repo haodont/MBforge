@@ -2030,3 +2030,35 @@ entries downstream in `measurement_records._resolve_structure`, which returns
 Next: instrument one reading end to end — print `measurement["mol_id"]` right after
 `associate_facts` and again in `measurement_attributions` — and fix whichever of the
 two drops it. Do not add more rules before that is measured.
+
+## Reading p94 for real: the table's second pair of columns is by 实施例, not by 化合物 (2026-11-13)
+
+The page itself (`inspect_visual page_text`, p94) prints one four-column table whose
+**both headers say 化合物编号**:
+
+```
+| 化合物编号 | MRGPRX2 IP-1 IC50(nM) | 化合物编号 | MRGPRX2 IP-1 IC50(nM) |
+| 化合物1-P4 | 21 | 实施例 29 | 29 |
+...
+| 化合物19  | 66 | 实施例 43 | 40 |
+| 化合物20  | 20 | 实施例 44 | 17 |
+```
+
+The right-hand cells read `实施例 29 … 实施例 50`, i.e. they cite **examples**, and the
+header is wrong (both say 化合物编号). Our extraction stored those rows in the
+compound space: `实施例 44` became `compound 44`. That is a semantic flattening
+defect that will bind the wrong structure whenever an example's number differs from
+the compound it prepares (it happens to coincide for 实施例44 → 化合物44, which is
+why `44` looks like a binding problem rather than a reference-space problem).
+
+So `structure_detected_unmatched` on this table is at least partly this: the reading
+is asking for `化合物43/44/48` when the document said `实施例43/44/48`.
+
+Fix: when a cell's own text carries an example prefix, that wins over the column
+header — `label_space` is a default, not a rule — and the reading lands in
+`@example:N`, where the existing example-product binding already knows the compound
+the example prepares.
+
+Still unmeasured: why the entry-free ownership fallback (`3171c4a`, `b4e908e`) does
+not bind `化合物44` to the p90 drawing named 44. Run `20261113093503` is unchanged at
+24/45. Instrument that reading end to end before changing more rules.
