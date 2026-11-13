@@ -2091,3 +2091,32 @@ Next: build the product text from the section's body evidence rows
 (`body_evidence_ids` → `raw_text`, which association already has via
 `valid_evidence_ids`/the evidence store) and pass that to `declared_product_labels`,
 then re-run Patent only. Do not touch the section splitter before that is measured.
+
+## The blocker is one rule: "majority of its own drawings" ownership (2026-11-13)
+
+Three fixes in a row (`167fe49`, `3dcea5b`, and the identity pass) left CN120943813A
+at exactly 139 issues, so I stopped guessing and ran the real section text through
+the rules:
+
+```
+_own_example_text(p90 blocks, "实施例44")  →  "...1.27 (m,1H)."          # right cut
+declared_product_labels(own)               →  ['化合物44']                # one product
+```
+
+Both correct. So the chain dies one link earlier: the **product entry** `化合物44`
+is itself unresolved, and an identity can only inherit a resolved product. Why it is
+unresolved is the rule visible in the issues list — `molecule_candidate_ambiguous:
+compound label 24 matches multiple Detection candidates`.
+
+`candidate_owns_designation` requires a designation to be the **strict majority of
+that structure's own drawings**. A compound printed twice (``44`` once, something
+else once — a second printing that read a different number) therefore owns *neither*
+name, the entry stays `structure_type: missing`, and every reading that cites it is
+unowned. This is the same rule that defeated the entry-free binding fallback earlier
+(`3171c4a`, `b4e908e`).
+
+Proposed rule, to implement with a test: a structure owns every designation any of
+its drawings printed, contested only when a *different* structure printed the same
+designation — uniqueness across structures, not majority across its own drawings.
+Do not implement it blind: it changes which entry wins everywhere, so measure
+`molecule_candidate_ambiguous` count and the six-document scoreboard before/after.
