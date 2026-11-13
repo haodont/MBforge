@@ -2191,3 +2191,21 @@ Next, in this order: (1) print each candidate's `exact_mass` and its match verdi
 per line — that distinguishes the two causes in one run; (2) if the scope is too
 wide, narrow it to the single line printed **after the product statement** of the
 entry's own example instead of every line in the section.
+
+Measured, then fixed: with the 177 characterizations in place the probe printed each
+candidate's mass against each line —
+
+```
+key=44 mass=469.129 verdicts=[(470.2, 0.063), (478.2, None)]   ← the right structure
+key=44 mass=328.119 verdicts=[(470.2, 141.07), (478.2, None)]  ← the ester
+key=24 mass=527.171 verdicts=[(529.9, 1.742)]                  ← neither structure
+```
+
+The 0.06 Da match was rejected because the rule asked the structure to explain **all**
+masses printed for the designation, and a single molecule can never explain two. Asking
+for one match, with "exactly one candidate" as the guard, resolved it: CN120943813A
+25 → **26/45**.
+
+`24` stays unowned for the right reason: its printed 529.9 is 1.74 Da from the best
+structure — outside the patent's own 0.6 Da tolerance — so the document disagrees with
+the drawing and a human should decide. That is a review item, not a rule.
