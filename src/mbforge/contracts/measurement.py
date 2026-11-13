@@ -147,12 +147,21 @@ class MeasurementQuery(BaseModel):
 #:   no rule could tie it to this designation. This is the real extraction gap.
 #: - ``document_has_no_detections`` — the document yielded no structures at all,
 #:   so nothing could have been attributed.
+#: - ``designation_group_caption`` — the designation is only ever printed inside a
+#:   caption that names several at once (a stereoisomer family
+#:   ``1-P1 or 1-P2 or 1-P3 or 1-P4``, a fractionated example
+#:   ``I-233-A、I-233-B、I-233-C、I-233-D 中的一个或两个``). The document drew the
+#:   structures, but it does not give one of them for one designation, and MBForge
+#:   has no representation for a set. This is a **declared limitation of the
+#:   project**, not recoverable extraction work — it is reported on its own so the
+#:   backlog is not hidden inside ``label_not_read``.
 UnattributedReason = Literal[
     "no_printed_designation",
     "designation_without_structure",
     "label_not_read",
     "structure_detected_unmatched",
     "document_has_no_detections",
+    "designation_group_caption",
 ]
 
 

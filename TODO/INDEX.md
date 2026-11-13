@@ -1931,3 +1931,8 @@ caption, take the leading token as the drawing's designation and the rest as
 accepted alternates, and require the drawings it names to share formula/mass
 (which is what `or` means). The same shape covers 94dd's `实施例15 组分1/2`
 ("I-233-A、I-233-B、I-233-C、I-233-D 中的一个或两个") and `19-P1 or 19-P2`.
+
+Reading-level coverage now reports `designation_group_caption` separately
+(declared in `docs/known-limitations.md`), computed on read from the document's
+own evidence (`db.measurement_store.group_caption_designations`), so these
+readings no longer inflate `label_not_read`. Nothing in the binding path changed.

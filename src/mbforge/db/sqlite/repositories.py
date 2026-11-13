@@ -426,6 +426,9 @@ class SqliteMeasurementRepository:
     def document_label_numbers(self, doc_id: str) -> set[str]:
         return molecule_store.document_label_numbers(self.library_root, doc_id)
 
+    def group_caption_designations(self, doc_id: str) -> set[str]:
+        return measurement_store.group_caption_designations(self.library_root, doc_id)
+
     def unlabeled_structure_count(self, doc_id: str) -> int:
         return measurement_store.unlabeled_structure_count(self.library_root, doc_id)
 

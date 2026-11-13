@@ -104,16 +104,21 @@ def _document_context(library_root: str | None, doc_id: str) -> dict[str, Any]:
     """Drawings and label coverage for one document, read once per document."""
     repositories = get_repositories(library_root)
     if not doc_id:
-        return {"drawn": set(), "unlabeled": 0, "detections": 0}
+        return {"drawn": set(), "unlabeled": 0, "detections": 0, "grouped": set()}
     return {
         "drawn": repositories.measurements.document_label_numbers(doc_id),
         "unlabeled": repositories.measurements.unlabeled_structure_count(doc_id),
         "detections": repositories.measurements.document_detection_count(doc_id),
+        "grouped": repositories.measurements.group_caption_designations(doc_id),
     }
 
 
 def _unattributed_reason(
-    designation: str, drawn: set[str], unlabeled: int, detections: int
+    designation: str,
+    drawn: set[str],
+    unlabeled: int,
+    detections: int,
+    grouped: set[str] | None = None,
 ) -> str:
     """Why one unattributed reading has no structure.
 
@@ -125,6 +130,10 @@ def _unattributed_reason(
         return "no_printed_designation"
     if designation in drawn:
         return "structure_detected_unmatched"
+    if grouped and designation in grouped:
+        # A caption that names several designations at once: the document drew the
+        # structures but never gives one of them for one designation.
+        return "designation_group_caption"
     if detections == 0:
         return "document_has_no_detections"
     if unlabeled > 0:
@@ -239,6 +248,7 @@ def list_activity_records(
                         context["drawn"],
                         context["unlabeled"],
                         context["detections"],
+                        context["grouped"],
                     )
                 ]
             ),
@@ -291,6 +301,7 @@ def dataset_stats(
             context["drawn"],
             context["unlabeled"],
             context["detections"],
+            context["grouped"],
         )
         by_reason[reason] = by_reason.get(reason, 0) + 1
 

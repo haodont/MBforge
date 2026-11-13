@@ -12,6 +12,7 @@ so a re-run replaces instead of duplicating.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -416,6 +417,50 @@ def bind_attribution(
             (measurement_id,),
         )
     return attribution_id
+
+
+#: A caption that names several designations at once. CN patents write a
+#: stereoisomer family as ``1-P1 or 1-P2 or 1-P3 or 1-P4`` and a fractionated
+#: example as ``I-233-A、I-233-B、I-233-C、I-233-D 中的一个或两个``; either way one
+#: printed block names a set, and MBForge has no representation for a set.
+_GROUP_CAPTION_RE = re.compile(
+    r"(?P<first>[A-Za-z0-9][A-Za-z0-9-]{0,23})"
+    r"(?P<rest>(?:\s*(?:or|或|、)\s*[A-Za-z0-9][A-Za-z0-9-]{0,23}){1,})",
+    re.IGNORECASE,
+)
+#: The member tokens inside a group caption, after the first one.
+_GROUP_MEMBER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,23}")
+
+
+def group_caption_designations(library_root: str | Path, doc_id: str) -> set[str]:
+    """Designations the document only ever prints inside a multi-designation caption.
+
+    These are the readings MBForge declines to bind on purpose: one caption names
+    a stereoisomer family (``1-P1 or 1-P2 or 1-P3 or 1-P4``) or a fractionated
+    example (``I-233-A、I-233-B、I-233-C、I-233-D 中的一个或两个``), so no single
+    structure is printed for one designation and no rule may pick one. Reporting
+    them as ``label_not_read`` would hide a declared limitation behind recoverable
+    extraction work.
+    """
+    if not doc_id:
+        return set()
+    db = DatabaseManager.get(str(library_root))
+    rows = db.execute(
+        "SELECT raw_text FROM source_evidence WHERE doc_id = ? "
+        "AND kind IN ('text', 'figno', 'cap', 'tab')",
+        (doc_id,),
+    )
+    found: set[str] = set()
+    for row in rows:
+        text = row["raw_text"] if isinstance(row["raw_text"], str) else ""
+        for match in _GROUP_CAPTION_RE.finditer(text):
+            members = [match.group("first"), *_GROUP_MEMBER_RE.findall(match.group("rest"))]
+            members = [
+                member for member in members if member and member.lower() != "or"
+            ]
+            if len(members) >= 2:
+                found.update(members)
+    return found
 
 
 def unlabeled_structure_count(library_root: str | Path, doc_id: str) -> int:
