@@ -666,11 +666,25 @@ def associate_facts(
     # queue, "structure_detected_unmatched" in the dataset — the same fact read
     # twice). Binding by the drawing is deterministic: one owning structure or
     # nothing.
-    owning: dict[str, list[Any]] = {}
+    owning: dict[str, dict[str, Any]] = {}
     for candidate in filter_persistable_candidates("", list(candidates), warn=False):
-        for key in candidate_designation_keys(candidate):
-            if candidate_owns_designation(candidate, key):
-                owning.setdefault(key, []).append(candidate)
+        # The name the molecule pass gave the drawing is the pipeline's own
+        # identification of it, and unlike the majority vote below it survives a
+        # second drawing of the same structure that read a different number.
+        keys = set()
+        named = designation_key(str(getattr(candidate, "name", "") or ""))
+        if named:
+            keys.add(named)
+        keys |= {
+            key
+            for key in candidate_designation_keys(candidate)
+            if candidate_owns_designation(candidate, key)
+        }
+        smiles = str(getattr(candidate, "canonical_smiles", "") or "").strip()
+        if not smiles:
+            continue
+        for key in keys:
+            owning.setdefault(key, {}).setdefault(smiles, candidate)
     for measurement in measurements:
         if measurement.get("mol_id"):
             continue
@@ -681,12 +695,10 @@ def associate_facts(
         )
         if reference.reference_type != "compound" or not reference.key:
             continue
-        matches = owning.get(reference.key, [])
+        matches = owning.get(reference.key, {})
         if len(matches) != 1:
             continue
-        smiles = getattr(matches[0], "canonical_smiles", "")
-        if isinstance(smiles, str) and smiles.strip():
-            measurement["mol_id"] = smiles.strip()
+        measurement["mol_id"] = next(iter(matches))
 
 
 __all__ = ["associate_facts"]
