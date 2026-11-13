@@ -57,6 +57,16 @@ _FOOT_BAND = 0.12
 #: A caption is printed a few points below its drawing whatever the drawing's
 #: height, so the foot band reaches at least this far.
 _FOOT_MIN_REACH = 16.0
+#: A detection box often grows to include the caption printed under its drawing.
+#: The caption then sits *inside* the box, above the foot band, and is lost —
+#: CN121717757A p137 prints ``1-256-A`` at 461–470 inside a box ending at 482.
+#: Such a print is the drawing's own caption when it is in the box's lower half
+#: and is no taller than this fraction of the drawing (a paragraph is not a
+#: caption). Pairs found this way rank after every true foot-band pair, so an
+#: existing assignment is never displaced.
+_INSIDE_LOWER_HALF = 0.5
+_INSIDE_CAPTION_MAX_HEIGHT = 0.25
+_INSIDE_CAPTION_PENALTY = 1.0
 
 
 def to_top_down(
@@ -329,6 +339,28 @@ def _at_the_foot(
     return print_box[1] <= high and print_box[3] >= low
 
 
+
+def _inside_lower_strip(
+    print_box: tuple[float, float, float, float],
+    structure: tuple[float, float, float, float],
+) -> bool:
+    """Return whether a print sits inside the lower part of a drawing's box.
+
+    A detector box that swallowed its caption must not hide that caption: the
+    print is inside the box, in its lower half, narrow enough to be a caption,
+    and inside the box's columns. Every other case is left to the head and foot
+    bands.
+    """
+    height = max(structure[3] - structure[1], 1.0)
+    if (print_box[3] - print_box[1]) > _INSIDE_CAPTION_MAX_HEIGHT * height:
+        return False
+    if print_box[1] < structure[1] + _INSIDE_LOWER_HALF * height:
+        return False
+    if print_box[3] > structure[3] + 4.0:
+        return False
+    return structure[0] - 4.0 <= print_box[0] and print_box[2] <= structure[2] + 4.0
+
+
 def _under_gap(
     print_box: tuple[float, float, float, float],
     structure: tuple[float, float, float, float],
@@ -457,9 +489,13 @@ def assign_text_labels(
             under = _under_gap(designation.bbox, bbox) is not None
             if under:
                 # A caption printed under the drawing names that drawing.
-                if not _at_the_foot(designation.bbox, bbox):
+                if _at_the_foot(designation.bbox, bbox):
+                    gap = 0.0
+                elif _inside_lower_strip(designation.bbox, bbox):
+                    # The box swallowed its own caption; still that caption.
+                    gap = _INSIDE_CAPTION_PENALTY
+                else:
                     continue
-                gap = 0.0
             else:
                 if not _at_the_head(designation.bbox, bbox):
                     continue

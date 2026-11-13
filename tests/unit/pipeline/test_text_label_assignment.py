@@ -17,6 +17,7 @@ number by number.
 from __future__ import annotations
 
 from mbforge.service.pipeline.detection.text_label_assignment import (
+    TextDesignation,
     assign_text_labels,
     bare_designation,
     page_designations,
@@ -290,3 +291,27 @@ def test_a_letterless_series_token_names_a_drawing_only_at_that_drawing() -> Non
     reads = page_designations(regions, _PAGE_HEIGHT)
 
     assert [read.text for read in reads] == ["1-2"]
+
+
+def test_a_caption_inside_the_swallowed_box_still_names_its_drawing() -> None:
+    """A detection box that grew over its caption must not hide that caption.
+
+    CN121717757A p137 prints ``1-256-A`` at y 461–470 inside a drawing box that
+    runs 387–482: the print is above the foot band (470.4) by less than a point,
+    so the caption was lost and the reading stayed unowned. A print in the box's
+    lower half, no taller than a caption, names that drawing — and a print in the
+    upper half, where a substituent label sits, still names nothing.
+    """
+    structures = [
+        ("mol-137-a", (113.38, 387.34, 211.29, 481.66)),
+        ("mol-137-b", (423.66, 266.75, 527.33, 362.50)),
+    ]
+    designations = [
+        TextDesignation(text="1-256-A", bbox=(150.21, 461.18, 173.55, 469.51)),
+        # Same box's upper half: a label drawn as part of the structure.
+        TextDesignation(text="1-256-B", bbox=(150.21, 400.00, 173.55, 408.33)),
+    ]
+
+    result = assign_text_labels(structures, designations)
+
+    assert result.assignments == {"1-256-A": "mol-137-a"}
