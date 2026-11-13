@@ -163,6 +163,19 @@ substance the reading measured. Say which you concluded and why.
 
 ### `designation_without_structure` / `no_printed_designation`
 
+**First: is the token even a compound?** A CN table often cites `实施例 44` in a
+column whose header still says `化合物编号` — the example space, not the compound
+space. `query_activities` reports `reference_type`; if it says `example`, the
+reading belongs to the compound that example *prepares* (`得到 33.75mg 化合物44`),
+not to compound 44 of the same number. Read the example's own page before
+concluding anything about binding.
+
+**A caption naming several designations is not a gap.** `1-P2 or 1-P1 or 1-P3 or
+1-P4` under four stereoisomer drawings, or `I-233-A、I-233-B、… 中的一个或两个`,
+is a set the document declares interchangeable. MBForge reports it as
+`designation_group_caption` and deliberately does not bind it
+(`docs/known-limitations.md`). Do not hand-pick a member to "close" it.
+
 Prove it, do not infer it. Locate every page the designation is printed on
 (`search_evidence`), open those pages, and confirm no structure is drawn for
 it. Then it is a document gap, not a pipeline gap: report it and move on. A
@@ -201,6 +214,64 @@ Strongest first. Stop at the first rung that settles it.
 
 `assign_attributions` requires the capability token (a mutating call). It
 validates every reading and every molecule before writing anything.
+
+## When the counts move under you (measure before you fix)
+
+Three extraction runs of one PDF have produced three different detection
+geometries on CN121717757A. So:
+
+- Never compare a scoreboard across a reingest without naming the run ids.
+- `reingest_document` re-mints measurement ids: human/agent attributions do NOT
+  survive it. Re-apply them, or fix the label path first and reingest once.
+- A change that only touches labelling needs a re-extract (`reingest_document`),
+  a change in the association/characterization rules needs only
+  `submit_patent_analysis`. `submit_extraction` on an existing document fails
+  closed with "source evidence batch is immutable".
+
+## Verify a rule at the function level before touching the pipeline
+
+Every "the pipeline loses my designation" report so far has been answered by
+calling the rule directly on the text the page prints, in seconds, without a
+re-run:
+
+```python
+from mbforge.service.pipeline.activity.parsing.tables import _parse_simple_activity_table
+for r in _parse_simple_activity_table(md, 0, 94, default_target=""):
+    print(r.reference_raw, r.reference_key, r.reference_type, r.value_canonical)
+# or, for the example chain
+from mbforge.service.pipeline.patent.rules.entries import extract_entries_from_body
+from mbforge.service.pipeline.patent.rules.characterization import declared_product_labels
+```
+
+If the function returns the right thing, the defect is in the *plumbing* around it
+(section kind, evidence scope, which stage owns the value) — and only then is a
+re-run worth its ten minutes.
+
+## Label geometry: where captions actually sit
+
+The four bands that decide whether a printed number attaches to a drawing, in the
+order the matcher tries them, all in top-down page coordinates:
+
+1. **Head band** — `top ± 15% of the drawing's height`. A compound list prints the
+   number above its drawing.
+2. **Foot band** — `bottom − 12% … bottom + 16 pt`. A synthesis scheme prints the
+   number under the drawing.
+3. **Inside the box's lower half** — when the detector box grew over the caption
+   (`1-256-A` sat 0.9 pt above the foot band). A print in the *upper* half is a
+   substituent label and must not attach.
+4. **Inside the columns but above the drawing** — a table row of captions. Without
+   this only the outer two columns of a four-drawing row keep their numbers.
+
+A print inside the drawing's columns is not automatically a foot caption. If a
+row loses only its *inner* columns, this is the bug, not the OCR.
+
+## Series spelling: `1-256-A` and `I-256-A` are one compound
+
+The layout reads the series head `I` as the digit `1` often enough that a drawing
+is captioned `1-256-A` while the activity table cites `I-256-A`. Both spellings
+are legal keys and a candidate answers to all of them; a bare number or a
+chemistry name gains nothing. When a designation "has no recognized structure",
+check which spelling the drawing carries before believing it.
 
 ## Traps
 
