@@ -313,6 +313,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         port=port,
         reload=options.reload,
         reload_dirs=["src"] if options.reload else None,
+        # A running pipeline imports modules, which writes ``__pycache__`` under
+        # ``src`` — watched, that reload restarts the server and cancels the very
+        # run that caused it (measured twice on a reingest: "56 changes detected"
+        # then "Pipeline cancelled"). Only real source edits should reload.
+        reload_excludes=(
+            ["*__pycache__*", "*.pyc"] if options.reload else None
+        ),
         log_level="warning",
     )
 
