@@ -274,7 +274,7 @@ def _declare_entry(
 _NEXT_EXAMPLE_HEADING_RE = None
 
 
-def _own_example_text(text: str) -> str:
+def _own_example_text(text: str, heading: str = "") -> str:
     """The part of an example section's text that belongs to its own preparation.
 
     Sections are page-ranged, so 实施例44's text (pages 90–91) also holds the start
@@ -286,13 +286,22 @@ def _own_example_text(text: str) -> str:
     if _NEXT_EXAMPLE_HEADING_RE is None:
         import re
 
-        # A heading starts a line (optionally after a ``[0625]`` marker); a
-        # mention inside a sentence ("合成方法参考实施例43，得到…") is not one.
+        # A heading follows the end of a sentence (a newline, ``。`` or ``.``),
+        # optionally behind a ``[0625]`` marker; a mention inside a sentence
+        # ("合成方法参考实施例43，得到…") is part of the same statement.
         _NEXT_EXAMPLE_HEADING_RE = re.compile(
-            r"(?m)^[ 	]*(?:\[\d{4}\][ 	]*)?(?:实施例|実施例)[ 	]*\d"
+            r"(?<=[\n\u3002.])\s*(?:\[\d{4}\]\s*)?(?:实施例|実施例)[ \t]*\d"
         )
-    match = _NEXT_EXAMPLE_HEADING_RE.search(text or "", 1)
-    return str(text or "")[: match.start()] if match else str(text or "")
+    body = str(text or "")
+    # Start after this section's own heading: sections overlap by a page, so the
+    # text can open with the tail of the previous example.
+    anchor = body.find(heading.strip()) if heading else -1
+    start = anchor + len(heading.strip()) if anchor >= 0 else 0
+    match = _NEXT_EXAMPLE_HEADING_RE.search(body, start)
+    cut = match.start() if match else len(body)
+    # Start at this section's own heading: the tail of the previous example is not
+    # this example's product statement, and reading it makes the answer ambiguous.
+    return body[anchor:cut] if anchor >= 0 else body[:cut]
 
 
 def _example_product_entry(
@@ -703,7 +712,9 @@ def associate_facts(
         token = label_key.split(":", 1)[1]
         product = None
         for section in example_sections.get(token, []):
-            labels = declared_product_labels(_own_example_text(section.raw_text))
+            labels = declared_product_labels(
+                _own_example_text(section.raw_text, section.heading_line)
+            )
             if len(labels) != 1:
                 continue
             key = label_key_for(labels[0])

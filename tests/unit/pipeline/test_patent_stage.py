@@ -1657,3 +1657,32 @@ def test_an_example_identity_takes_the_structure_its_product_statement_names() -
     # The reading binds to the product entry: that is the structure owner. The
     # identity only has to stop being the end of the line.
     assert measurement["compound_entry_id"] in {"entry-44", "entry-example-44"}
+
+
+def test_an_example_text_opens_with_the_previous_examples_tail() -> None:
+    """Sections overlap a page, so 实施例44's text can start inside 实施例43.
+
+    Cutting at the first heading after the start would cut at 实施例44's *own*
+    heading and throw away the product statement that follows it — the identity
+    stayed unresolved that way. The cut is the next heading after this section's.
+    """
+    text = (
+        "[0619] 得到20mg化合物43。\n"
+        "[0625] 实施例44\n"
+        "[0626] N-((1R,3S)-3-氨基环己基)-1-甲基-1H-吡唑-4-甲酰胺\n"
+        "[0628]合成方法参考实施例43,得到33.75mg化合物44。\n"
+        "[0630] 1H NMR(400MHz,DMSO-d6)δ8.67(s,1H)。实施例45\n"
+        "[0631] N-((5R,7S)-7-氨基螺[2.5]辛烷-5-基)-1-甲基-1H-吡唑-4-甲酰胺\n"
+        "[0633] 得到45-P1(20mg)和45-P2(21mg)。\n"
+    )
+
+    from mbforge.service.pipeline.patent.rules.characterization import (
+        declared_product_labels,
+    )
+    from mbforge.service.pipeline.patent.association import _own_example_text
+
+    own = _own_example_text(text, "实施例44")
+
+    assert "化合物44" in own
+    assert "45-P1" not in own
+    assert declared_product_labels(own) == ["化合物44"]
