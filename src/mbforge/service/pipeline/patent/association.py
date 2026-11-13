@@ -342,6 +342,28 @@ def _example_product_entry(
     return None
 
 
+
+def _entry_scope_sections(
+    entry: Mapping[str, Any],
+    label_key: str,
+    example_sections: Mapping[str, Sequence[DocumentSection]],
+) -> tuple[str, ...]:
+    """The sections whose printed MS may decide this entry's structure.
+
+    An entry declared from a table row has no section of its own, so the example
+    that bears its number supplies the scope: ``化合物44`` is prepared, and its
+    mass printed, in 实施例44.
+    """
+    scopes: list[str] = []
+    own = entry.get("section_id")
+    if isinstance(own, str) and own:
+        scopes.append(own)
+    for section in example_sections.get(label_key, []):
+        if section.section_id not in scopes:
+            scopes.append(section.section_id)
+    return tuple(scopes)
+
+
 def associate_facts(
     sections: list[DocumentSection],
     entries: list[dict[str, Any]],
@@ -676,6 +698,9 @@ def associate_facts(
                 list(characterizations),
                 [candidate for candidate, _, _ in matches],
                 label_key,
+                section_ids=_entry_scope_sections(
+                    entry, label_key, example_sections
+                ),
             )
             if len(consistent) == 1:
                 owned = [

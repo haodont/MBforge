@@ -594,6 +594,7 @@ def mass_consistent_structures(
     label_key: str,
     *,
     tolerance: float = MASS_TOLERANCE_DA,
+    section_ids: Sequence[str] = (),
 ) -> list[Any]:
     """The structures whose calculated ion mass matches the mass printed for a label.
 
@@ -610,7 +611,16 @@ def mass_consistent_structures(
 
     printed: list[tuple[float, float]] = []
     for item in characterizations:
-        if item.get("technique") != "ms" or str(item.get("label_key") or "") != label_key:
+        if item.get("technique") != "ms":
+            continue
+        # The line belongs to this designation either by name or by the section
+        # that prepares it: a CN example prints ``MS…470.2`` for its product and
+        # the table cites the compound under the example's number.
+        by_name = str(item.get("label_key") or "") == label_key
+        by_section = bool(section_ids) and str(
+            item.get("section_id") or ""
+        ) in section_ids
+        if not by_name and not by_section:
             continue
         parsed = printed_ms_mz(str(item.get("raw_text") or ""))
         if parsed is None:
