@@ -678,9 +678,15 @@ def mass_consistent_structures(
         # A section may print several masses (its intermediates and its product),
         # so a section-scoped scope asks whether the structure explains *one* of
         # them; a line printed for the designation itself must explain it.
+        # One designation can carry several printed masses: its own line and the
+        # line the page prints for the product next to it. A single structure
+        # cannot explain two different masses, so requiring it to explain all of
+        # them decides nothing (measured: 44 had 470.2 and 478.2, the right
+        # structure matched 470.2 to 0.06 Da and was still rejected). One match is
+        # the evidence; the "exactly one candidate" rule keeps it honest.
         agrees = (
             any(_matches(item) for item in printed)
-            if section_scoped
+            if section_scoped or len(printed) > 1
             else all(_matches(item) for item in printed)
         )
         if agrees:
