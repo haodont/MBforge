@@ -1976,3 +1976,13 @@ p139–p142 and p32.
 
 Also still open from this run: `printed_ms_unowned` 30/41 and extraction that
 returns different boxes on each run (three runs, three geometries).
+
+`c1fc4fe` measured: reingest `20261113084959` + Patent `20261113085743` took
+CN121717757A from **15/42 to 27/42** (label_not_read 20 → 11, sdm 5 → 2), and the
+six-document total back to 187/235. The caption-row rule was the whole of it: a
+print inside a drawing's columns is now also tried at the head, and a foot pairing
+carries its real distance so a caption between two rows belongs to the nearer one.
+
+Remaining on that document: `label_not_read` 11, `designation_group_caption` 2,
+`structure_detected_unmatched` 2, plus `printed_ms_unowned` and the run-to-run
+detection instability.
