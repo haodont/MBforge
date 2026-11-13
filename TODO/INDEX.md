@@ -2258,3 +2258,11 @@ cannot help against a second editor.
 
 Until the other work stops, a reingest cannot complete. Do not retry blindly: pick a
 window with no source edits, or land the other work first and re-run then.
+
+Retried in a quiet window (no source edits for three minutes) and the reingest
+completed in 280 s: CN120943813A went 26 → **27/45** (structure_detected_unmatched
+5 → 4). That confirms the cancellation was the second editor, not the pipeline.
+
+Six-document scoreboard after the label-geometry re-extractions:
+31fc 18/18, 6f74 68/69, 44b8 23/27, 5a28 29/34, 94dd 32/42, 8cb5 27/45
+= **197/235 = 83.8%**.
