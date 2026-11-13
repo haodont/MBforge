@@ -15,6 +15,9 @@ from . import read_patent as _read_patent  # noqa: F401 — registers read capab
 from . import (
     read_review as _read_review,  # noqa: F401 — registers read capabilities
 )
+from . import (
+    read_roundtrip as _read_roundtrip,  # noqa: F401 — registers read capabilities
+)
 from . import read_sar as _read_sar  # noqa: F401 — registers read capabilities
 from . import (
     read_structures as _read_structures,  # noqa: F401 — registers read capabilities
