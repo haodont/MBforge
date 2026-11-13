@@ -435,7 +435,9 @@ def create_app(serve_frontend: bool | None = None) -> FastAPI:
     if _env_dist:
         frontend_dist = Path(_env_dist)
     else:
-        frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+        # `parents[3]` is the repository root: this file lives at
+        # `src/mbforge/server/app.py`, so three levels up is `src/`.
+        frontend_dist = Path(__file__).parents[3] / "frontend" / "dist"
     # Mount the React build only when explicitly requested. Dev mode keeps
     # the Vite server (5173) and the API server (18792) separated; set
     # MBFORGE_SERVE_FRONTEND=1 (or pass serve_frontend=True) to serve the

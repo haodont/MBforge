@@ -610,6 +610,7 @@ def mass_consistent_structures(
     from mbforge.service.pipeline.detection.label_recovery import exact_mass
 
     printed: list[tuple[float, float]] = []
+    section_scoped = False
     for item in characterizations:
         if item.get("technique") != "ms":
             continue
@@ -622,6 +623,7 @@ def mass_consistent_structures(
         ) in section_ids
         if not by_name and not by_section:
             continue
+        section_scoped = section_scoped or (by_section and not by_name)
         parsed = printed_ms_mz(str(item.get("raw_text") or ""))
         if parsed is None:
             continue
@@ -636,10 +638,19 @@ def mass_consistent_structures(
         )
         if structure_mass is None:
             continue
-        if all(
-            (delta := adduct_mass_delta(adduct)) is not None
-            and abs(mz - (structure_mass + delta)) <= tolerance
-            for mz, adduct in printed
-        ):
+        def _matches(item: tuple[float, float], mass: float = structure_mass) -> bool:
+            mz, adduct = item
+            delta = adduct_mass_delta(adduct)
+            return delta is not None and abs(mz - (mass + delta)) <= tolerance
+
+        # A section may print several masses (its intermediates and its product),
+        # so a section-scoped scope asks whether the structure explains *one* of
+        # them; a line printed for the designation itself must explain it.
+        agrees = (
+            any(_matches(item) for item in printed)
+            if section_scoped
+            else all(_matches(item) for item in printed)
+        )
+        if agrees:
             consistent.append(candidate)
     return consistent

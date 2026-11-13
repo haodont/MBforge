@@ -31,6 +31,7 @@ from mbforge.foundation.layout import (
 )
 from mbforge.service.dto.library import (
     MAX_EVIDENCE_RESOLVE_IDS,
+    EvidenceLocationResponse,
     LibraryConfigureRequest,
     LibraryConfigureResponse,
     LibraryDeleteDocumentsRequest,
@@ -272,6 +273,30 @@ async def library_resolve_document_evidence(
         raise NotFoundError("Source evidence is unavailable in this document")
     return LibraryEvidenceItem(
         **evidence.to_dict(), category=category_of(evidence.kind)
+    )
+
+
+@router.get("/evidence/{evidence_id}", response_model=EvidenceLocationResponse)
+async def library_evidence_location(
+    evidence_id: str, library_root: str | None = None
+) -> EvidenceLocationResponse:
+    """Resolve one evidence id to the document page region it points at.
+
+    This is the target of the agent's short ``/e/<evidence_id>`` citation link.
+    The link carries only the id, so the workbench asks here for the document,
+    page and bbox instead of receiving them in the URL.
+    """
+    root = str(resolve_library_root(library_root))
+    evidence = await asyncio.to_thread(source_evidence.resolve, root, evidence_id)
+    if evidence is None:
+        raise NotFoundError("Source evidence is unavailable")
+    return EvidenceLocationResponse(
+        evidence_id=evidence.evidence_id,
+        doc_id=evidence.doc_id,
+        page=evidence.page,
+        bbox=evidence.bbox,
+        kind=evidence.kind,
+        category=category_of(evidence.kind),
     )
 
 

@@ -108,3 +108,19 @@ class LibraryDeleteDocumentsResponse(BaseModel):
 class LibraryMoleculeEvidenceUpdateResponse(BaseModel):
     success: bool = True
     evidence_id: str
+
+
+class EvidenceLocationResponse(BaseModel):
+    """The page region one evidence id points at.
+
+    The agent cites with a short ``/e/<evidence_id>`` link; the workbench posts
+    the id to the resolver below and opens the document at this page and bbox,
+    so a citation never has to carry a document id, a page or a bbox.
+    """
+
+    evidence_id: str
+    doc_id: str
+    page: int
+    bbox: tuple[float, float, float, float]
+    kind: str
+    category: str = ""

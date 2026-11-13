@@ -15,11 +15,41 @@ from typing import Any
 from mbforge.contracts.molecule import MoleculeListRequest
 from mbforge.service.ports import get_repositories
 from mbforge.service.use_cases.documents.activity_queries import effective_attribution
+from mbforge.service.use_cases.documents.structure_verification import (
+    verify_structures as verify_document_structures,
+)
 from mbforge.service.use_cases.molecule.queries import (
     normalize_molecule_row,
     resolve_search_mode,
     search_molecules,
 )
+
+#: A series row needs the whole document's structure facts, not one page of them.
+_ALL_STRUCTURES = 100000
+
+#: ``measured_only`` scans this many molecules before paging over the measured ones.
+_MEASURED_SCAN_CAP = 5000
+
+
+def _structure_facts(
+    library_root: str, doc_ids: list[str]
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Map (document, mol_id) to the drawing's page, bbox, evidence id and mass verdict.
+
+    Reuses the verification pass the ``verify_structures`` capability runs, so a
+    series row cites the same structure evidence that tool reports. The pass is
+    per document and cached for the whole page, not per molecule.
+    """
+    facts: dict[tuple[str, str], dict[str, Any]] = {}
+    for doc_id in dict.fromkeys(doc_ids):
+        if not doc_id:
+            continue
+        data = verify_document_structures(library_root, doc_id, limit=_ALL_STRUCTURES)
+        for row in data.get("items", []):
+            mol_id = str(row.get("mol_id") or "")
+            if mol_id:
+                facts[(doc_id, mol_id)] = row
+    return facts
 
 
 def _select_molecules(
@@ -130,37 +160,61 @@ def analyze_series(
     target: str = "",
     offset: int = 0,
     limit: int = 20,
+    measured_only: bool = False,
 ) -> dict[str, Any]:
-    """Return a page of molecules, each carrying its attributed activity series."""
+    """Return a page of molecules, each carrying its attributed activity series.
+
+    ``measured_only`` pages over molecules that own at least one reading for the
+    requested metric instead of over every structure in scope, so a document with
+    hundreds of intermediates still yields one page of measured compounds. The
+    molecules dropped by that filter are counted in ``unmeasured`` rather than
+    silently vanishing.
+    """
     if not library_root or not (doc_id or query):
         return {
             "items": [],
             "resolved_mode": "",
             "truncated": False,
             "next_offset": None,
+            "unmeasured": 0,
         }
+    scan = _MEASURED_SCAN_CAP if measured_only else offset + limit + 1
     rows, resolved = _select_molecules(
         library_root,
         doc_id=doc_id,
         query=query,
         mode=mode,
         similarity_threshold=similarity_threshold,
-        top_k=offset + limit + 1,
+        top_k=scan,
     )
-    page = rows[offset : offset + limit]
-    truncated = len(rows) > offset + limit
-    mol_ids = [
-        str(row.get("mol_id") or row.get("canonical_smiles") or "") for row in page
-    ]
     by_mol = get_repositories(library_root).measurements.measurements_for_molecules(
-        [mol_id for mol_id in mol_ids if mol_id]
+        [str(row.get("mol_id") or row.get("canonical_smiles") or "") for row in rows]
+    )
+    selected: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    for row in rows:
+        mol_id = str(row.get("mol_id") or row.get("canonical_smiles") or "")
+        activities = _shape_activities(
+            by_mol.get(mol_id, []), mol_id, metric=metric, target=target
+        )
+        if measured_only and not activities:
+            continue
+        selected.append((row, activities))
+    unmeasured = len(rows) - len(selected) if measured_only else 0
+    page = selected[offset : offset + limit]
+    truncated = len(selected) > offset + limit
+    facts = _structure_facts(
+        library_root,
+        [str(row.get("source_doc") or "") for row, _ in page],
     )
     items: list[dict[str, Any]] = []
-    for row, mol_id in zip(page, mol_ids, strict=True):
+    for row, activities in page:
+        mol_id = str(row.get("mol_id") or row.get("canonical_smiles") or "")
         canonical = str(row.get("canonical_smiles") or row.get("smiles") or "")
         esmiles = str(row.get("esmiles") or "")
         properties = row.get("properties") or {}
         similarity = row.get("similarity")
+        source_doc = str(row.get("source_doc") or "")
+        structure = facts.get((source_doc, mol_id), {})
         items.append(
             {
                 "mol_id": mol_id or canonical,
@@ -171,9 +225,13 @@ def analyze_series(
                 "structure_role": str(properties.get("structure_role") or ""),
                 "source_doc": row.get("source_doc") or None,
                 "similarity": float(similarity) if similarity is not None else None,
-                "activities": _shape_activities(
-                    by_mol.get(mol_id, []), mol_id, metric=metric, target=target
-                ),
+                # The drawing this molecule's SMILES was read from: the second
+                # half of a citation, beside the reading's evidence ids below.
+                "structure_evidence_id": str(structure.get("evidence_id") or ""),
+                "structure_page": structure.get("page"),
+                "structure_bbox": structure.get("bbox"),
+                "mass_check": str(structure.get("mass_check") or ""),
+                "activities": activities,
             }
         )
     return {
@@ -181,6 +239,7 @@ def analyze_series(
         "resolved_mode": resolved,
         "truncated": truncated,
         "next_offset": offset + limit if truncated else None,
+        "unmeasured": unmeasured,
     }
 
 
