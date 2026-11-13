@@ -1805,3 +1805,40 @@ the printed mass of the designation the drawing is scoped to, and then let
 `promote_structures_by_printed_mass` name it. That is I-2's whole chain in one
 pass, and the same for the `+27.8`/`+13.8` intermediates if their reads are partly
 broken rather than merely wrong.
+
+## "Every printed designation has a structure" — so the residual is a resolution bug (2026-11-13)
+
+Owner's rule for CN patents: a printed designation always has a structure. Checking
+the 8 residual readings of CN121717757A against that rule shows the pipeline
+conflates three different situations under one reason code (`label_not_read`):
+
+- **The structure is drawn and even labelled, the label never attached.** `I-2`:
+  page 32 (claims) prints `1-1`, `1-3`, `1-4`, `1-5`, `1-6`, `1-8`, `1-9` next to
+  six drawings, and the drawing whose mass is 503.16 (matches the `(M+H)+=504.1`
+  printed for 化合物I-2 in 实施例3) is the one whose label `1-2` did not attach.
+  The OCR read `1-2` (there is already a `designation_ocr_reconciled` issue for
+  it) — the pairing step is what failed. The mass-based promotion cannot help:
+  five unlabelled isomeric drawings share mass 503.16, so "exactly one match"
+  correctly refuses.
+- **The token is an example and a chromatographic fraction, not a compound.**
+  `实施例15 组分1/2`: 实施例15 is I-233-A/B/C/D (p161-162, all four drawn and
+  labelled) and the text says 组分1 gives "化合物I-233-A、I-233-B、I-233-C、
+  I-233-D中的一个或两个". The document itself does not name one structure, so no
+  structure can own the reading; the correct outcome is an attribution to the
+  example's compound set, or a refusal whose reason says *mixture*, not
+  `label_not_read`. Same shape for `实施例52 组分2`.
+- **The designation is only a name in a claims enumeration.** `I-298-A` is printed
+  on p60 and p143 as one of "所述如式I所示的化合物为以下任一化合物" with no drawing
+  beside it; the preparation on p191 covers I-298-1/2/3. Still to confirm: whether
+  a later page draws I-298-A unlabelled.
+
+Actions: (a) attach a page-text designation block to the drawing it belongs to even
+when the nearest drawing already owns a label (the p32 grid is regular, so a
+page-scoped grid pass is the right shape, not a wider radius); (b) resolve an
+example-scoped token to the example's compound set and attribute as a set, or
+refuse with `document_declares_mixture`; (c) split `label_not_read` into
+`structure_exists_label_unattached` vs `not_a_compound_designation`.
+
+Live check of the new promotion pass: run 20261113014801 promoted `I-35-2`
+(unlabelled p156 drawing, printed 250.1) — the mechanism works, it just needs
+unambiguous masses.
