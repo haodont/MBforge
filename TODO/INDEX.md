@@ -2012,3 +2012,21 @@ to fix first).
 
 Next: take designation `44` on that page, print the entry rows the Patent stage
 extracted for it, and make the two reason paths read the same source of truth.
+
+## The designation-ownership fallback is in, but it does not reach the reading (2026-11-13)
+
+`3171c4a` adds, at the end of `associate_facts`, a deterministic binding: a reading
+whose designation exactly one persisted candidate owns takes that candidate's
+SMILES, whether or not any entry declared it. The review item's reason now comes
+from the same drawings, so queue and dataset agree.
+
+Live check: Patent `20261113092856` on CN120943813A is **unchanged** (24/45, sdm
+still 7). So either the fallback's ownership test rejects these rows
+(`candidate_owns_designation` for a molecule whose only label is its own name), or
+`mol_id` set here is discarded because the published attribution is recomputed from
+entries downstream in `measurement_records._resolve_structure`, which returns
+`direct or indirect` only when an entry exists.
+
+Next: instrument one reading end to end — print `measurement["mol_id"]` right after
+`associate_facts` and again in `measurement_attributions` — and fix whichever of the
+two drops it. Do not add more rules before that is measured.
