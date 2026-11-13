@@ -797,6 +797,36 @@ def associate_facts(
             )
         )
 
+    # An example reference whose section declares its product still had no owner
+    # when no entry row exists for the designation at all. explain_reading on
+    # CN120943813A's 实施例43 showed exactly that: the drawing named 43 owns it, the
+    # section prepares compound 43, and `entry_side` was empty — nothing to bind to.
+    # The product the section states is the structure, so bind it directly.
+    for measurement in measurements:
+        if measurement.get("mol_id"):
+            continue
+        provenance = measurement.get("provenance")
+        provenance = provenance if isinstance(provenance, dict) else {}
+        reference = normalize_reference_label(
+            provenance.get("reference_raw") or provenance.get("reference_key") or ""
+        )
+        if reference.reference_type != "example" or not reference.key:
+            continue
+        product = _example_product_entry(
+            reference.key, example_sections, entries_by_label
+        )
+        if product is None:
+            continue
+        product_key = str(product.get("label_key") or "")
+        owners = {
+            str(getattr(candidate, "canonical_smiles", "") or ""): candidate
+            for candidate, keys, _ids in candidate_matches.get(product_key, [])
+            if candidate_owns_designation(candidate, product_key)
+        }
+        owners.pop("", None)
+        if len(owners) == 1:
+            measurement["mol_id"] = next(iter(owners))
+
     # A reading can be owned by a drawing even when no entry declares its
     # designation. CN120943813A's page-94 table cites 44, 48, 43, 19 …: the
     # example section draws each compound and captions it, so exactly one
