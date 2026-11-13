@@ -1590,3 +1590,70 @@ def test_a_drawing_that_owns_the_designation_binds_a_reading_without_an_entry() 
     )
 
     assert "mol_id" not in ambiguous
+
+
+def test_an_example_identity_takes_the_structure_its_product_statement_names() -> None:
+    """``实施例44`` is never drawn; the page captions the product ``44`` instead.
+
+    CN120943813A captions every example's product with its compound number, so
+    ``@example:44`` answered to no drawing and stayed unresolved — forty-five such
+    issues on one document — while the section's own body says
+    ``得到33.75mg化合物44``. The identity entry takes the product's structure once
+    the product is resolved; a section whose product statement names no single
+    compound still resolves nothing.
+    """
+    section = ParsedSection(
+        section_id="sec-44",
+        title="实施例44",
+        kind="example",
+        page_start=90,
+        page_end=90,
+        raw_text="[0628]合成方法参考实施例43,得到33.75mg化合物44。",
+        labels=[],
+        esmiles_candidate_ids=[],
+        evidence_ids=["ev-0625", "ev-0628"],
+        title_evidence_ids=["ev-0625"],
+        heading_line="实施例44",
+    )
+    identity = {
+        "entry_id": "entry-example-44",
+        "label_raw": "实施例44",
+        "label_key": "@example:44",
+        "entry_role": "example",
+        "section_id": "sec-44",
+        "evidence_ids": ["ev-0625"],
+        "entity_id": None,
+    }
+    product = {
+        "entry_id": "entry-44",
+        "label_raw": "化合物44",
+        "label_key": "44",
+        "entry_role": "prepared",
+        "section_id": "sec-44",
+        "evidence_ids": ["ev-0628"],
+        # Already linked to the drawing by the entry pass.
+        "entity_id": "Cn1cc(C(=O)Nc2ccccc2)cn1",
+    }
+    measurement = {
+        "measurement_id": "m-44",
+        "provenance": {"reference_raw": "实施例 44", "reference_key": "44"},
+        "evidence_ids": ["ev-table-94"],
+        "page_num": 94,
+    }
+    issues: list[dict] = []
+
+    associate_facts(
+        [section],
+        [identity, product],
+        [],
+        [measurement],
+        [],
+        {"ev-0625", "ev-0628", "ev-table-94"},
+        issues,
+    )
+
+    assert identity["entity_id"] == "Cn1cc(C(=O)Nc2ccccc2)cn1"
+    assert identity["structure_status"] == "resolved"
+    # The reading binds to the product entry: that is the structure owner. The
+    # identity only has to stop being the end of the line.
+    assert measurement["compound_entry_id"] in {"entry-44", "entry-example-44"}

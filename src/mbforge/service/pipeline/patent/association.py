@@ -658,6 +658,35 @@ def associate_facts(
         entry["linking_status"] = "linked"
 
 
+    # An example identity has no drawing of its own: the page captions the product
+    # with its compound number (``44``), never with the heading (``实施例44``), so
+    # ``@example:44`` matched no candidate and stayed unresolved — CN120943813A
+    # reported that for forty-five examples, and every reading citing ``实施例44``
+    # therefore had nothing to bind to. The document does say what the example
+    # makes, in its product statement (``得到33.75mg化合物44``): the identity takes
+    # the structure that statement named, once the product entry is resolved.
+    for entry in entries:
+        label_key = entry.get("label_key")
+        if not isinstance(label_key, str) or not label_key.startswith("@example:"):
+            continue
+        if entry.get("entity_id"):
+            continue
+        product = _example_product_entry(
+            label_key.split(":", 1)[1], example_sections, entries_by_label
+        )
+        product_entity = (product or {}).get("entity_id")
+        if not product or not product_entity:
+            continue
+        entry["entity_id"] = product_entity
+        entry["structure_status"] = STRUCTURE_RESOLVED
+        entry["linking_status"] = "linked"
+        entry["evidence_ids"] = list(
+            dict.fromkeys(
+                _string_ids(entry.get("evidence_ids"))
+                + _string_ids(product.get("evidence_ids"))
+            )
+        )
+
     # A reading can be owned by a drawing even when no entry declares its
     # designation. CN120943813A's page-94 table cites 44, 48, 43, 19 …: the
     # example section draws each compound and captions it, so exactly one
