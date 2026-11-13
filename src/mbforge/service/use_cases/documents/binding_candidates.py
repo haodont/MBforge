@@ -282,6 +282,7 @@ def binding_candidates(
     *,
     offset: int = 0,
     limit: int = 50,
+    only_key: str = "",
 ) -> dict[str, Any]:
     """The candidate material package for one document's binding decisions.
 
@@ -380,6 +381,8 @@ def binding_candidates(
             }
         )
 
+    if only_key:
+        designations = [item for item in designations if item["label_key"] == only_key]
     total = len(designations)
     page_rows = designations[offset : offset + limit] if limit > 0 else []
     attributed = sum(1 for reading in readings if reading.get("attributed"))

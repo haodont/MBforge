@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from mbforge.foundation.errors import NotFoundError
 from mbforge.service.capabilities.registry import (
@@ -24,6 +24,9 @@ from mbforge.service.capabilities.registry import (
 from mbforge.service.use_cases.documents.binding_candidates import binding_candidates
 from mbforge.service.use_cases.documents.document_refs import short_doc_id
 from mbforge.service.use_cases.documents.library import LibraryStore
+from mbforge.service.use_cases.documents.reading_explanation import (
+    explain_reading as explain_one,
+)
 
 
 class GetBindingCandidatesInput(BaseModel):
@@ -356,5 +359,66 @@ register(
         output_model=GetBindingCandidatesOutput,
         mutating=False,
         handler=get_binding_candidates,
+    )
+)
+
+
+class ExplainReadingInput(BaseModel):
+    doc_id: str = doc_id_field()
+    measurement_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="The reading to explain, as query_activities reports it.",
+    )
+
+
+class ExplainReadingOutput(BaseModel):
+    """The chain from a printed reading to the structure that should own it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    doc_id: str
+    measurement_id: str
+    found: bool = True
+    printed: dict[str, object] = Field(default_factory=dict)
+    reference_space: dict[str, object] = Field(default_factory=dict)
+    drawings: dict[str, object] = Field(default_factory=dict)
+    entry_side: list[object] = Field(default_factory=list)
+    verdict: dict[str, object] = Field(default_factory=dict)
+    next_step: str = ""
+
+
+async def explain_reading(
+    context: CapabilityContext, request: ExplainReadingInput
+) -> CapabilityResult:
+    """Report every link between one reading and the structure that should own it."""
+    store = LibraryStore.get(context.library_root)
+    document = await asyncio.to_thread(store.load_document, request.doc_id)
+    if document is None:
+        raise NotFoundError("document not found", detail=request.doc_id)
+    report = await asyncio.to_thread(
+        explain_one,
+        context.library_root,
+        request.doc_id,
+        request.measurement_id,
+    )
+    return CapabilityResult(data=ExplainReadingOutput(**report))
+
+
+register(
+    Capability(
+        name="explain_reading",
+        description=(
+            "Why one reading has no structure, in one read: what the document "
+            "printed, which reference space it printed it in (compound vs "
+            "example), the drawings that carry that designation, the compound "
+            "entries involved, the reason the dataset reports with its inputs, "
+            "and the next step that follows from it. Read-only; it decides "
+            "nothing. Use it before changing a rule or re-extracting."
+        ),
+        input_model=ExplainReadingInput,
+        output_model=ExplainReadingOutput,
+        mutating=False,
+        handler=explain_reading,
     )
 )
