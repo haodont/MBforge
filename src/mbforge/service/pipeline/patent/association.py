@@ -269,6 +269,32 @@ def _declare_entry(
     return minted
 
 
+#: The next example heading inside a section's text. Sections overlap by a page,
+#: so one example's raw text runs into the next one's product statement.
+_NEXT_EXAMPLE_HEADING_RE = None
+
+
+def _own_example_text(text: str) -> str:
+    """The part of an example section's text that belongs to its own preparation.
+
+    Sections are page-ranged, so 实施例44's text (pages 90–91) also holds the start
+    of 实施例45 and 实施例46 and their product statements. Reading all of it makes
+    "which compound does this example prepare" ambiguous and the identity stays
+    unresolved; cutting at the next heading leaves the example's own statement.
+    """
+    global _NEXT_EXAMPLE_HEADING_RE
+    if _NEXT_EXAMPLE_HEADING_RE is None:
+        import re
+
+        # A heading starts a line (optionally after a ``[0625]`` marker); a
+        # mention inside a sentence ("合成方法参考实施例43，得到…") is not one.
+        _NEXT_EXAMPLE_HEADING_RE = re.compile(
+            r"(?m)^[ 	]*(?:\[\d{4}\][ 	]*)?(?:实施例|実施例)[ 	]*\d"
+        )
+    match = _NEXT_EXAMPLE_HEADING_RE.search(text or "", 1)
+    return str(text or "")[: match.start()] if match else str(text or "")
+
+
 def _example_product_entry(
     token: str,
     example_sections: Mapping[str, Sequence[DocumentSection]],
@@ -320,8 +346,12 @@ def associate_facts(
     once for the rule draft and again after the model's associations are applied,
     and the second pass must report the state it now finds.
     """
+    from mbforge.domain.patent import label_key_for
     from mbforge.service.pipeline.activity.normalization import (
         normalize_reference_label,
+    )
+    from mbforge.service.pipeline.patent.rules.characterization import (
+        declared_product_labels,
     )
     from mbforge.service.pipeline.patent.sections import example_token
 
@@ -657,7 +687,6 @@ def associate_facts(
         entry["structure_status"] = STRUCTURE_RESOLVED
         entry["linking_status"] = "linked"
 
-
     # An example identity has no drawing of its own: the page captions the product
     # with its compound number (``44``), never with the heading (``实施例44``), so
     # ``@example:44`` matched no candidate and stayed unresolved — CN120943813A
@@ -671,9 +700,21 @@ def associate_facts(
             continue
         if entry.get("entity_id"):
             continue
-        product = _example_product_entry(
-            label_key.split(":", 1)[1], example_sections, entries_by_label
-        )
+        token = label_key.split(":", 1)[1]
+        product = None
+        for section in example_sections.get(token, []):
+            labels = declared_product_labels(_own_example_text(section.raw_text))
+            if len(labels) != 1:
+                continue
+            key = label_key_for(labels[0])
+            same = [
+                candidate
+                for candidate in entries_by_label.get(key, [])
+                if candidate.get("section_id") == section.section_id
+            ]
+            product = (same or entries_by_label.get(key) or [None])[0]
+            if product is not None:
+                break
         product_entity = (product or {}).get("entity_id")
         if not product or not product_entity:
             continue
