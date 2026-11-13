@@ -2138,3 +2138,19 @@ Next probe (same recipe that found the duplicate): log inside
 `mass_consistent_structures` the `label_key`, `section_ids`, the number of
 characterizations seen, and the `printed` list it built, then run Patent only. Do not
 add another rule before that line is read — four guesses in a row is the signal.
+
+## Next probe: what `_example_body_product_keys` returns on the real page (2026-11-13)
+
+`extract_characterization` now grants an LC-MS line the designation its example
+heading's body states, and that is verified at function level on the reconstructed
+p90 sequence (5 rows → ``label_key="44"``; test in
+``test_an_example_heading_owns_the_mass_its_body_states``). The live document still
+builds an empty ``printed`` list for keys 24/44, so the real block sequence differs
+from the reconstruction: most likely the body rows between the heading and the
+spectrum contribute a second product key (the IUPAC name row), leaving
+``len(body_keys) == 2`` and no owner.
+
+Next (one log line, Patent only): print ``_example_body_product_keys(...)`` for the
+p90 page. The rule then probably has to be "the **last** product phrase printed
+between the heading and the characterization line", not "the only product phrase on
+those rows".
