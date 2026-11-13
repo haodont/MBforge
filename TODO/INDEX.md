@@ -2240,3 +2240,21 @@ cancelled run worked, and the retry reproduced 32/42 exactly — the same extrac
 result twice, which is the reproducibility the earlier three-way divergence lacked.
 
 Do not edit source under `src/` while a reingest is running; a reload kills the run.
+
+## Two editors in one tree right now (2026-11-13 21:00)
+
+Reingests of CN120943813A were cancelled three times in a row. The cause is not the
+pipeline: `find src -newermt "-20 minutes"` shows **source files being edited during
+the run** (`crop_labels.py`, `page_text.py`, `designation_decode.py`, `read_roundtrip.py`,
+`extract_stage.py`, `text_label_assignment.py`), `git status` lists thirteen modified
+files that are not mine, and the working tree's diff of
+`detection/text_label_assignment.py` adds a `document_spellings` fallback with the note
+"measured on CN121717757A: 47 of 50 sampled drawing labels stayed flattened" — another
+working copy is solving the same problem at the same time.
+
+watfiles sees those edits, uvicorn reloads, and the running pipeline is cancelled.
+My `reload_excludes` fix removed one real contributor (`__pycache__` writes), but it
+cannot help against a second editor.
+
+Until the other work stops, a reingest cannot complete. Do not retry blindly: pick a
+window with no source edits, or land the other work first and re-run then.
