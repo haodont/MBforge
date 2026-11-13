@@ -2209,3 +2209,24 @@ for one match, with "exactly one candidate" as the guard, resolved it: CN1209438
 `24` stays unowned for the right reason: its printed 529.9 is 1.74 Da from the best
 structure — outside the patent's own 0.6 Da tolerance — so the document disagrees with
 the drawing and a human should decide. That is a review item, not a rule.
+
+## Patent-only re-run across the six: 188/235 → 196/235 (83.4%) (2026-11-13)
+
+The characterization-cap, example-heading-ownership, duplicate-collapse and
+mass-"any-line" fixes all live in the Patent stage, so re-running Patent (no
+re-extraction) applied them to every document:
+
+| document | before | after |
+| --- | --- | --- |
+| CN119504738A 31fc | 17/18 | **18/18** |
+| CN120118069A 6f74 | 68/69 | 68/69 |
+| CN120329282A 44b8 | 22/27 | **23/27** |
+| CN121270515A 5a28 | 29/34 | 29/34 |
+| CN121717757A 94dd | 27/42 | **32/42** |
+| CN120943813A 8cb5 | 25/45 | **26/45** |
+| total | 188 | **196 / 235 = 83.4%** |
+
+Two of those six runs' documents (8cb5, 94dd) still need a re-extraction to pick up
+the label-geometry fixes; the association side is now exhausted of known gaps except
+8cb5's remaining 19 (9 declared group captions, 3 label_not_read, 2 no designation,
+5 sdm).
