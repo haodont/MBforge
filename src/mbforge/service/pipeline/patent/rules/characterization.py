@@ -72,7 +72,12 @@ _ELEMENTAL_LINE_RE = re.compile(
 )
 
 
-MAX_CHARACTERIZATIONS = 60
+#: How many printed spectra one document may contribute. The bound exists to keep
+#: the facts payload finite, but a patent prints one per compound, so a 200-page
+#: filing has hundreds: at 60 the list stopped inside the early examples and every
+#: later compound's mass was invisible to the mass checks (measured on
+#: CN120943813A, whose 实施例44 is on page 90 of 103 — its LC-MS never arrived).
+MAX_CHARACTERIZATIONS = 2000
 
 
 #: heading names, which is how a scanned patent lays a step out.
