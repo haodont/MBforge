@@ -41,6 +41,12 @@ _TRIM = " \t\r\n.,;"
 #: it names a compound.
 _LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 
+#: A designation with no letter at all, in the series form ``1-2`` … ``1-9``.
+#: CN121717757A enumerates its claims compounds that way; seen anywhere on a
+#: page it could as easily be a step, so it only counts as a designation when
+#: it is printed at the head or foot of a drawing (see ``_printed_at_a_drawing``).
+_LETTERLESS_SERIES_RE = re.compile(r"^\d+[-–]\d+(?:[-–][A-Za-z0-9]+)*$")
+
 #: How far a print may sit from the head of a drawing, as a fraction of the
 #: drawing's height.
 _HEAD_BAND = 0.15
@@ -195,6 +201,34 @@ def _figure_caption(text: str) -> str | None:
     return None
 
 
+
+def _printed_at_a_drawing(
+    bbox: tuple[float, float, float, float],
+    drawing_boxes: Sequence[tuple[float, float, float, float]],
+) -> bool:
+    """Whether *bbox* sits at the head or the foot of one of *drawing_boxes*.
+
+    All boxes are top-down. This is the difference between a claims list's
+    caption (``1-2`` printed under its drawing, part of a regular grid) and a
+    step number inside running prose: only the former is inside a drawing's
+    band and its column.
+    """
+    x0, y0, x1, y1 = bbox
+    center_x = (x0 + x1) / 2
+    center_y = (y0 + y1) / 2
+    for draw_x0, draw_y0, draw_x1, draw_y1 in drawing_boxes:
+        if not draw_x0 <= center_x <= draw_x1:
+            continue
+        height = draw_y1 - draw_y0
+        head = max(height * _HEAD_BAND, _FOOT_MIN_REACH)
+        foot = max(height * _FOOT_BAND, _FOOT_MIN_REACH)
+        if draw_y0 - head <= center_y <= draw_y0:
+            return True
+        if draw_y1 <= center_y <= draw_y1 + foot:
+            return True
+    return False
+
+
 def page_designations(
     regions: list[dict[str, Any]], page_height: float
 ) -> list[TextDesignation]:
@@ -210,12 +244,26 @@ def page_designations(
         for region in regions
         if str(region.get("kind") or "text") != "molecule"
     ]
+    drawing_boxes = [
+        to_top_down(tuple(region["bbox"]), page_height)
+        for region in regions
+        if str(region.get("kind") or "text") == "molecule"
+        and len(region.get("bbox") or ()) == 4
+    ]
     designations: list[TextDesignation] = []
     for region in regions:
         if str(region.get("kind") or "text") == "molecule":
             continue
         raw = str(region.get("text") or "").strip()
         token = bare_designation(raw)
+        if token is None and _LETTERLESS_SERIES_RE.match(raw.strip(_TRIM)):
+            # A letterless series token is a designation only where a drawing
+            # prints it, never where prose happens to say ``1-2``.
+            bbox = region.get("bbox") or ()
+            if len(bbox) == 4 and _printed_at_a_drawing(
+                to_top_down(tuple(bbox), page_height), drawing_boxes
+            ):
+                token = raw.strip(_TRIM)
         if token is None and str(region.get("kind") or "text") == "figno":
             token = _figure_caption(raw)
         if token is None:

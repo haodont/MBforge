@@ -270,3 +270,23 @@ def test_a_centred_caption_names_its_drawing_above_or_below() -> None:
     assignment = assign_text_labels(structures, designations)
 
     assert assignment.assignments == {"1-1": "left", "1-2": "middle"}
+
+
+def test_a_letterless_series_token_names_a_drawing_only_at_that_drawing() -> None:
+    """A claims list numbers its compounds ``1-2`` … ``1-9`` with no letter.
+
+    CN121717757A prints those tokens under each drawing of a regular grid; the
+    activity table then cites the same compound as ``I-2``, so a token that is
+    rejected outright leaves the reading unowned. The token is read only where
+    a drawing prints it — the same ``1-3`` inside running prose is still a step,
+    not a compound.
+    """
+    regions = [
+        {"kind": "molecule", "bbox": (249.81, 372.26, 358.15, 452.18), "text": ""},
+        {"kind": "text", "bbox": (286.19, 461.0, 300.02, 469.0), "text": "1-2"},
+        {"kind": "text", "bbox": (61.31, 700.0, 99.48, 710.0), "text": "1-3"},
+    ]
+
+    reads = page_designations(regions, _PAGE_HEIGHT)
+
+    assert [read.text for read in reads] == ["1-2"]
