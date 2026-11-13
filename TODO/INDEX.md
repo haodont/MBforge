@@ -2167,3 +2167,27 @@ settled by mass: with the lines now present the remaining question is their
 characterizations whose page is the entry's page — if the key is empty, the
 *mass tie-break* is fine and the *attribution* rule is what still fails, and the
 "last product phrase between heading and line" tightening is the fix.
+
+## The masses are there now; they do not separate the two structures (2026-11-13)
+
+After the cap fix the probe reads, for the contested entries:
+
+```
+key=24 printed=[529.9]
+key=44 printed=[470.2, 478.2]
+```
+
+and neither entry resolves, so the mass comparison returns zero or two — not one.
+Two readings of that, and the probe's own `consistent` counter was a mistake (it
+printed a literal empty list), so this is not yet measured either way:
+
+- the section scope is too wide: it picked up the neighbouring example's line
+  (478.2 next to 470.2), so "explains one printed mass" is true of more than one
+  candidate;
+- or `exact_mass` returns None for one of the two canonical SMILES (a stereo or
+  ring-closure spelling RDKit refuses), which looks identical to "no match".
+
+Next, in this order: (1) print each candidate's `exact_mass` and its match verdict
+per line — that distinguishes the two causes in one run; (2) if the scope is too
+wide, narrow it to the single line printed **after the product statement** of the
+entry's own example instead of every line in the section.
