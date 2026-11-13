@@ -1993,3 +1993,22 @@ change, 24/45** — its gap is `structure_detected_unmatched` 7 plus the 9 decla
 four documents buys almost nothing (their `label_not_read` counts are 3/0/1/1);
 the next real target is `structure_detected_unmatched` (17 readings across the six),
 which is Patent-stage only and needs no re-extraction.
+
+## `structure_detected_unmatched` on 8cb5: the drawing *is* named after the designation (2026-11-13)
+
+The seven `sdm` readings of CN120943813A are all in the page-94 IC50 table
+(designations `43`, `44`, `48`, `6-P2`, `19`, …). For each, the review payload
+lists a candidate whose **`name` is exactly the designation** — e.g. `44`:
+`Cn1cc(C(=O)N[C@@H]2CCC[C@H](Nc3c(F)c(C(F)(F)F)nc4ccc(Cl)cc34)C2)cn1`, page 90,
+bbox 113.74,559.05,209.13,707.01 — and the reading still has no attribution.
+
+So this class is not a label problem at all: the molecule row carries the right
+name, and the reading still does not bind. That points at the **compound-entry**
+side of the association (an entry for `44` either missing or left
+`structure_status != resolved`, which is also why the review item's own reason says
+`designation_without_structure` while the dataset says `structure_detected_unmatched`
+— the two disagree about the same reading, and that disagreement is itself the bug
+to fix first).
+
+Next: take designation `44` on that page, print the entry rows the Patent stage
+extracted for it, and make the two reason paths read the same source of truth.
