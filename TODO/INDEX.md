@@ -1903,3 +1903,31 @@ drawing's caption iff no other drawing claims it and the block is in the box's l
 strip with no other drawing's box overlapping it; keep the current head/foot rules
 first so nothing that already attaches is disturbed. Then reingest once and re-check
 the scoreboard before anything else.
+
+## The real class: a stereoisomer family captioned "A or B or C or D" (2026-11-13)
+
+Counter-example to "the document gave no structure", 8cb5 (CN120943813A) page 50.
+Four drawings sit in one row, and all four are read correctly as four distinct
+stereoisomers of one constitution:
+
+| bbox (top-down) | read |
+| --- | --- |
+| 113.74,443.14,197.25,582.09 | `CC(C)(O)Cn1cc(C(=O)N[C@@H]2CCCC[C@H](Nc3cc(C(F)(F)F)nc4ccc(Cl)cc34)C2)c(Cl)n1` |
+| 210.93,443.50,295.16,582.09 | `…[C@H]2CCCC[C@@H](…)…` |
+| 310.64,443.14,394.15,582.09 | `…[C@H]2CCCC[C@H](…)…` |
+| 407.11,443.14,490.97,582.09 | `…[C@@H]2CCCC[C@@H](…)…` |
+
+Under them the page prints four captions, each a four-way list in a different order
+(`1-P2 or 1-P1 or 1-P3 or 1-P4`, `1-P1 or 1-P2 or 1-P3 or 1-P4`, `1-P4 or 1-P1 or
+1-P2 or 1-P3`, `1-P3 or 1-P1 or 1-P2 or 1-P4`) — the leading token is that
+drawing's own designation, the rest are the stereoisomers it may be supplied as.
+The bare-token rule rejects the phrase on purpose, and "one number names one
+drawing" cannot map four numbers onto four drawings, so all four readings
+(`1-P1`…`1-P4`) stay unowned and are recorded as `label_not_read`.
+
+So this is a *notation* gap, not a missing structure: the pipeline has no
+representation for a stereoisomer family. The fix: parse an `A or B or C or D`
+caption, take the leading token as the drawing's designation and the rest as
+accepted alternates, and require the drawings it names to share formula/mass
+(which is what `or` means). The same shape covers 94dd's `实施例15 组分1/2`
+("I-233-A、I-233-B、I-233-C、I-233-D 中的一个或两个") and `19-P1 or 19-P2`.
