@@ -502,10 +502,24 @@ def assign_text_labels(
             if under:
                 # A caption printed under the drawing names that drawing.
                 if _at_the_foot(designation.bbox, bbox):
-                    gap = 0.0
+                    # The distance to the drawing, not a flat zero: a caption
+                    # printed between two drawings belongs to the nearer one, so
+                    # the row below it (head) can beat the row above (foot).
+                    gap = max(0.0, designation.bbox[1] - bbox[3])
                 elif _inside_lower_strip(designation.bbox, bbox):
                     # The box swallowed its own caption; still that caption.
                     gap = _INSIDE_CAPTION_PENALTY
+                elif _at_the_head(designation.bbox, bbox):
+                    # The print is inside the drawing's columns but printed
+                    # *above* it: a table-row caption. ``_under_gap`` only asked
+                    # whether the columns agree, so such a print used to be
+                    # judged as a foot caption and dropped here — that is how a
+                    # four-caption row (CN121717757A p137) kept only its outer
+                    # two designations. The vertical distance keeps the nearest
+                    # drawing, so a caption still belongs to the row it heads.
+                    gap = max(0.0, bbox[1] - designation.bbox[3]) + (
+                        _INSIDE_CAPTION_PENALTY
+                    )
                 else:
                     continue
             else:

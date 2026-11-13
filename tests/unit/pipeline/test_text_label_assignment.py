@@ -315,3 +315,38 @@ def test_a_caption_inside_the_swallowed_box_still_names_its_drawing() -> None:
     result = assign_text_labels(structures, designations)
 
     assert result.assignments == {"1-256-A": "mol-137-a"}
+
+
+def test_a_caption_row_assigns_all_four_columns_not_only_the_outer_two() -> None:
+    """A table row prints its caption above each drawing, inside its columns.
+
+    CN121717757A p137 prints ``1-255-A``…``1-255-D`` above four drawings of one
+    row and only the outer two kept their designations: the print's x-range falls
+    inside the drawing's, so it was judged a *foot* caption, failed the foot test
+    and was dropped without ever being tried at the head. The vertical distance
+    also keeps a caption with the row it heads rather than the row above.
+    """
+    row = (503.62, 586.77)
+    structures = [
+        ("mol-a", (113.38, row[0], 204.81, row[1])),
+        ("mol-b", (212.73, row[0], 304.16, row[1])),
+        ("mol-c", (304.16, row[0], 395.18, row[1])),
+        ("mol-d", (435.90, row[0], 526.97, row[1])),
+        # The row above, which no caption on this row belongs to.
+        ("mol-above", (113.38, 387.34, 211.29, 481.66)),
+    ]
+    designations = [
+        TextDesignation(text="1-255-A", bbox=(148.03, 490.40, 170.28, 498.55)),
+        TextDesignation(text="1-255-B", bbox=(246.10, 490.38, 269.94, 498.17)),
+        TextDesignation(text="1-255-C", bbox=(357.30, 490.75, 379.28, 498.48)),
+        TextDesignation(text="1-255-D", bbox=(469.32, 491.05, 492.39, 498.42)),
+    ]
+
+    result = assign_text_labels(structures, designations)
+
+    assert result.assignments == {
+        "1-255-A": "mol-a",
+        "1-255-B": "mol-b",
+        "1-255-C": "mol-c",
+        "1-255-D": "mol-d",
+    }
