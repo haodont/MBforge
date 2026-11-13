@@ -2120,3 +2120,21 @@ its drawings printed, contested only when a *different* structure printed the sa
 designation — uniqueness across structures, not majority across its own drawings.
 Do not implement it blind: it changes which entry wins everywhere, so measure
 `molecule_candidate_ambiguous` count and the six-document scoreboard before/after.
+
+## The mass tie-break on 8cb5 still does not fire; probe its `printed` list next (2026-11-13)
+
+Four attempts to close the two contested entries (labels `24`, `44`) changed nothing
+(8cb5 stays 25/45): the duplicate-collapse (`owned=2, same SMILES` → one) worked and
+gained one reading, but the remaining pair is two *different* structures — the final
+compound and an ester intermediate captioned with the same number.
+
+`167fe49`/`3dcea5b` (identity), the section-scoped scope and the "one printed mass"
+relaxation are all in and unit-tested, yet nothing resolves. That means the blind spot
+is now inside `mass_consistent_structures` itself — most likely `printed` is empty for
+that entry (the MS line carries a different `label_key`/`section_id` than assumed), not
+that the arithmetic fails.
+
+Next probe (same recipe that found the duplicate): log inside
+`mass_consistent_structures` the `label_key`, `section_ids`, the number of
+characterizations seen, and the `printed` list it built, then run Patent only. Do not
+add another rule before that line is read — four guesses in a row is the signal.
