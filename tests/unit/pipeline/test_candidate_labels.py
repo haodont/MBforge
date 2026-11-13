@@ -97,3 +97,23 @@ def test_an_example_captioned_drawing_answers_to_its_example_identity() -> None:
     assert candidate_example_keys(stored) == {"@example:19"}
     assert candidate_example_keys(printed) == {"@example:19"}
     assert candidate_owns_designation(stored, "@example:19") is True
+
+
+def test_a_digit_headed_series_label_answers_to_the_lettered_spelling() -> None:
+    """``1-256-A`` and ``I-256-A`` name one compound in a CN series.
+
+    The layout reads the series head ``I`` as the digit ``1`` often enough that a
+    drawing is captioned ``1-256-A`` while the activity table cites ``I-256-A``
+    (CN121717757A p137). Neither the digit form being an invalid designation nor
+    the two spellings being distinct keys may strand that reading: the drawing
+    answers to both, and a bare number or a chemistry name still gains nothing.
+    """
+    candidate = _Candidate(name="1-256-A", labels=["1-256-A"])
+
+    keys = candidate_label_keys(candidate)
+
+    assert "1-256-A" in keys
+    assert "I-256-A" in keys
+    # A stereochemical prefix keeps its own key and gains no series variant.
+    assert "cis-I-278" not in candidate_label_keys(_Candidate(name="I-255-A"))
+    assert "1" not in {key for key in keys if key != "1-256-A"}

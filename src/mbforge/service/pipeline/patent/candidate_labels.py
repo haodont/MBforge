@@ -72,7 +72,26 @@ def candidate_label_keys(candidate: Any) -> set[str]:
         normalized = normalize_coref_label(value)
         if normalized is not None and normalized.kind is LabelKind.COMPOUND:
             keys.add(normalized.normalized)
+            keys |= _series_spelling_variants(normalized.normalized)
     return keys
+
+
+def _series_spelling_variants(key: str) -> set[str]:
+    """The spellings a series designation may carry for the same compound.
+
+    The layout reads a series head ``I`` as the digit ``1`` often enough that one
+    drawing is captioned ``1-256-A`` while the activity table cites ``I-256-A``.
+    Both spellings name one compound in a CN series, so a key carries all of
+    them; only the first character varies and only for a hyphenated series token,
+    so a bare number or a chemistry name never gains a variant.
+    """
+    from mbforge.service.pipeline.detection.text_label_assignment import (
+        _ocr_confusable_forms,
+    )
+
+    if "-" not in key or key[:1] not in ("1", "I", "i", "l"):
+        return set()
+    return _ocr_confusable_forms(key)
 
 
 def candidate_example_keys(candidate: Any) -> set[str]:

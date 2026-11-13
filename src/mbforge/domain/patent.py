@@ -43,7 +43,7 @@ _COMPOUND_TOKEN = (
     # and ``I-278`` are different compounds.
     r"(?:(?i:cis|trans)-)?"
     r"(?:E\d+|[A-Z]{1,2}-\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?"
-    r"|\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3})?)"
+    r"|\d+[A-Za-z]?(?:-[A-Za-z0-9]{1,3}){0,2})"
 )
 _COMPOUND_PREFIX_RE = re.compile(
     rf"^(?:化合物|compound|cmpd|cpd)\s*#?\s*(?P<token>{_COMPOUND_TOKEN})$",

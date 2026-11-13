@@ -196,16 +196,23 @@ def _figure_caption(text: str) -> str | None:
 
     A head that is the ``1``/``I`` confusion is answered with the series letter
     when that spelling is itself a designation key; the association's
-    reconciliation then gives the token the spelling the document prints.
+    reconciliation then gives the token the spelling the document prints. A token
+    with two suffix groups (``1-273-A``, ``1-256-A``) is a series designation and
+    always takes the letter: the CN series is written ``I-256-A``, and the digit
+    head is the layout's read of it.
     """
     cleaned = str(text or "").strip().strip(_TRIM)
     if not cleaned or len(cleaned) > _MAX_TOKEN:
         return None
     if any(char.isspace() for char in cleaned):
         return None
+    if cleaned[:1] in ("1", "I", "i", "l") and cleaned.count("-") >= 2:
+        for variant in sorted(_ocr_confusable_forms(cleaned)):
+            if designation_key(variant):
+                return variant
     if designation_key(cleaned):
         return cleaned
-    for variant in _ocr_confusable_forms(cleaned):
+    for variant in sorted(_ocr_confusable_forms(cleaned)):
         if designation_key(variant):
             return variant
     return None
@@ -265,7 +272,14 @@ def page_designations(
         if str(region.get("kind") or "text") == "molecule":
             continue
         raw = str(region.get("text") or "").strip()
-        token = bare_designation(raw)
+        kind = str(region.get("kind") or "text")
+        # A caption is read before the bare-token rule: a figure caption normalizes
+        # its own spelling (``1-273-A`` → ``I-273-A``), and now that a digit-headed
+        # series token is a legal designation by itself, taking it first would keep
+        # the misread spelling.
+        token = _figure_caption(raw) if kind == "figno" else None
+        if token is None:
+            token = bare_designation(raw)
         if token is None and _LETTERLESS_SERIES_RE.match(raw.strip(_TRIM)):
             # A letterless series token is a designation only where a drawing
             # prints it, never where prose happens to say ``1-2``.
@@ -274,8 +288,6 @@ def page_designations(
                 to_top_down(tuple(bbox), page_height), drawing_boxes
             ):
                 token = raw.strip(_TRIM)
-        if token is None and str(region.get("kind") or "text") == "figno":
-            token = _figure_caption(raw)
         if token is None:
             # A caption the OCR read with the wrong letter is not a designation
             # yet; the page's own spelling may make it one.
