@@ -1955,3 +1955,24 @@ structures** for the document. What is wrong is narrower:
 Next: compare `designation_key` on a molecule's `label_keys` (`1-256-A`) against the
 reading's `reference_key` (`I-256-A`) and fix the one place that does not reconcile;
 then make MS-line ownership work again (12/41 is the metric to watch).
+
+## p137: the outer columns get their captions, the inner ones do not (2026-11-13)
+
+Measured on the current extraction (`verify_structures(page=137)`): the four
+`I-255-*` drawings of one row carry `I-255-A` (leftmost, bbox x 113.38–204.81) and
+`I-255-D` (rightmost, 435.90–526.97) with `label_keys` `[1-255-A, I-255-A, …]`,
+while the two middle drawings (x 212.73–304.16 and ~304–390) have
+`printed_labels: []` — and the I-256-A structure (`…C2)cn1`, bbox
+113.38,387.34,211.29,481.66) is one of the unlabelled ones. The page prints
+`1-255-A/B/C/D`, so B and C are read and then dropped.
+
+So the attachment is not failing at OCR nor at the token rule (both fixed), and not
+at persistence; it is the **column/greedy matcher** in `assign_text_labels`: a
+print that sits between two drawings of one row is either assigned to the wrong
+column by `_column_of` or loses the one-drawing-one-number race. Next: instrument
+that page (four drawings, four captions, one row) as a unit test and fix the
+column rule — the four-caption row is the smallest failing case and covers p137,
+p139–p142 and p32.
+
+Also still open from this run: `printed_ms_unowned` 30/41 and extraction that
+returns different boxes on each run (three runs, three geometries).
