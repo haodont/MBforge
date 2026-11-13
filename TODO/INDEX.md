@@ -2062,3 +2062,32 @@ the example prepares.
 Still unmeasured: why the entry-free ownership fallback (`3171c4a`, `b4e908e`) does
 not bind `化合物44` to the p90 drawing named 44. Run `20261113093503` is unchanged at
 24/45. Instrument that reading end to end before changing more rules.
+
+## The example→product chain reads `section.raw_text`, which the artifact does not carry (2026-11-13)
+
+Measured on CN120943813A after two fixes (`167fe49`, plus the own-text trim): the
+issue count is **unchanged at 139**, and `designation @example:10 …:32 … has no
+recognized structure` is still reported ~45 times. So the identity resolution never
+fires.
+
+What the artifact actually shows:
+
+- `sections` (45) expose `section_id / title / kind / page_start / page_end` and
+  **no raw text**; the product statements live in `source_evidence` rows.
+- `entries` (94) include the p94 table's own rows as entries with **`section_id: ""`**
+  (`化合物1-P4`, `化合物6-P2`, `实施例 45-P1`, …) — declared from a passage that belongs
+  to no section, so nothing joins them to a drawing or to a section.
+- the section that swallowed the table (`实施例50`) holds `化合物19…26` entries whose
+  `entry_role` is `example`, i.e. the table's left column was read as that section's
+  compounds.
+
+Consequence: every rule that resolves an example through its product statement
+(`_example_product_entry`, and the identity pass added in `167fe49`) reads
+`section.raw_text`; if the section object reaching association carries no raw text,
+that resolution is dead for the whole document — which is exactly what "45 examples
+unresolved" looks like.
+
+Next: build the product text from the section's body evidence rows
+(`body_evidence_ids` → `raw_text`, which association already has via
+`valid_evidence_ids`/the evidence store) and pass that to `declared_product_labels`,
+then re-run Patent only. Do not touch the section splitter before that is measured.
