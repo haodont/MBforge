@@ -20,6 +20,14 @@ Rules you never break:
 - `method=agent` is outranked by a human link, so a later human decision costs
   nothing; a wrong agent link is a silent data corruption.
 
+## 第 0 步：先问 `explain_reading`
+
+判断"这条读数为什么没有结构"不要靠拼图。`explain_reading(doc_id, measurement_id)`
+一次返回六段：印刷了什么、引用空间是 compound 还是 example、哪些图带这个编号、
+涉及哪些 compound entry、数据集给的理由及其输入、以及由此得出的下一步。它只读、
+不裁决。只有当它说"图注几何"时才去查配对，说"entry 侧"时才去查关联，说
+`designation_group_caption` 就直接按已声明缺陷处理，不要挑成员。
+
 ## The loop
 
 Run this loop until the remaining readings are proven to have no structure:
