@@ -2154,3 +2154,16 @@ Next (one log line, Patent only): print ``_example_body_product_keys(...)`` for 
 p90 page. The rule then probably has to be "the **last** product phrase printed
 between the heading and the characterization line", not "the only product phrase on
 those rows".
+
+The cap was real: CN120943813A's `characterization_count` went **60 → 177** after
+`MAX_CHARACTERIZATIONS` was raised, and issues went 139 → 221 — the 82 lines that
+were previously invisible now reach the mass checks, and most of them disagree with
+their structure (which is information, not damage: each is a review item).
+
+Readings did **not** move (25/45), so the contested entries 24/44 are still not
+settled by mass: with the lines now present the remaining question is their
+`label_key`, which the earlier probe saw as empty. Next probe is one line in
+`extract_characterization` printing `(page, technique, label_key)` for the
+characterizations whose page is the entry's page — if the key is empty, the
+*mass tie-break* is fine and the *attribution* rule is what still fails, and the
+"last product phrase between heading and line" tightening is the fix.
