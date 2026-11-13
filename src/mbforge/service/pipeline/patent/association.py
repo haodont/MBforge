@@ -630,6 +630,21 @@ def associate_facts(
             for candidate, keys, evidence_ids in matches
             if candidate_owns_designation(candidate, label_key)
         ]
+        if not owned:
+            # The structure whose own drawings disagree with each other owns none
+            # of the names by the majority rule — but the molecule pass already
+            # gave one of them the designation when it named the drawing. That name
+            # is the pipeline's own identification, so it decides the entry:
+            # CN120943813A's compound 44 is drawn twice and printed under two
+            # numbers, which stranded every reading that cited it.
+            named = [
+                match
+                for match in matches
+                if designation_key(str(getattr(match[0], "name", "") or ""))
+                == label_key
+            ]
+            if len(named) == 1:
+                owned = named
         if len(owned) != 1 and characterizations:
             # Two drawings claim one designation. The filing usually settles it:
             # the section that prepares the compound prints its LC-MS, and only
