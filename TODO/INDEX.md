@@ -1936,3 +1936,22 @@ Reading-level coverage now reports `designation_group_caption` separately
 (declared in `docs/known-limitations.md`), computed on read from the document's
 own evidence (`db.measurement_store.group_caption_designations`), so these
 readings no longer inflate `label_not_read`. Nothing in the binding path changed.
+
+## 94dd after the caption-inside-box fix: persistence is fine, label spelling is not (2026-11-13)
+
+Reingest `20261113082742` + Patent `20261113083452` with `7c589a8` still gives
+15/42, and the next link is *not* persistence: `verify_structures` reports **1496
+structures** for the document. What is wrong is narrower:
+
+- `search_molecules("I-233-A")` and `verify_structures(label="I-256-A")` find
+  nothing, while page 137's molecule evidence carries `name: "I-233-A"` /
+  `"I-176-A"` with `label_source: page_text`. So the drawings and their labels
+  exist; the label does not reach the *molecule* record under the spelling the
+  activity table uses (`I-` vs the page's `1-`).
+- **41 printed MS lines, only 12 structures own one** (`printed_ms_unowned: 30`).
+  The characterizations therefore have almost nothing to bind to, which also
+  disables the mass tie-break and the reprint recovery on this document.
+
+Next: compare `designation_key` on a molecule's `label_keys` (`1-256-A`) against the
+reading's `reference_key` (`I-256-A`) and fix the one place that does not reconcile;
+then make MS-line ownership work again (12/41 is the metric to watch).
