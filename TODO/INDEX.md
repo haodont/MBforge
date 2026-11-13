@@ -1842,3 +1842,15 @@ refuse with `document_declares_mixture`; (c) split `label_not_read` into
 Live check of the new promotion pass: run 20261113014801 promoted `I-35-2`
 (unlabelled p156 drawing, printed 250.1) — the mechanism works, it just needs
 unambiguous masses.
+
+## Re-extraction must go through reingest, not submit_extraction (2026-11-13)
+
+`submit_extraction` on a document that already has evidence fails closed:
+`source evidence batch is immutable: it would drop 3272 existing id(s)` — the
+Extract producer mints canonical SQL evidence and refuses to replace an existing
+set. Changing anything in the detection/label path therefore requires
+`reingest_document` (which clears pipeline outputs first), not a second Extract.
+
+Cost to remember: reingest re-mints measurements, so agent/human attribution rows
+keyed by measurement id do not survive it — the adjudications already written for
+94dd (I-281, I-109, I-266-A) have to be re-applied after the re-extraction.
