@@ -2,7 +2,11 @@ import type { ChildProcess } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { defineTool, type ExtensionAPI, type ExtensionToolContext } from '@earendil-works/pi-coding-agent'
+import {
+  defineTool,
+  type ExtensionAPI,
+  type ExtensionToolContext,
+} from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 
 import {
@@ -92,7 +96,10 @@ async function stopReport(address: BackendAddress, home: string) {
       message: `nothing answers on ${address.baseUrl}; already stopped`,
     }
   }
-  const result: StopBackendResult = await stopRecordedBackend({ agentHome: home, address })
+  const result: StopBackendResult = await stopRecordedBackend({
+    agentHome: home,
+    address,
+  })
   if (!result.stopped) {
     throw new Error(
       `refusing to stop ${address.baseUrl}: ${result.reason ?? 'the backend is not owned by this CLI'}. ` +
@@ -132,7 +139,7 @@ export function registerBackendTool(
         'Start, stop, or restart the local MBForge FastAPI backend. Use it after backend code changes so the running process picks them up, or when capabilities fail because the backend is down. The tool only stops a backend this CLI started.',
       promptGuidelines: [
         'Call `backend_control` only when the user asks for it, or when a capability failed because the backend is not running or is running stale code. Do not restart it during an ingest run or a reviewed task: a restart kills in-flight work.',
-        'A refusal that says the backend was not started by this CLI is final; report it with that backend\'s own start command instead of retrying.',
+        "A refusal that says the backend was not started by this CLI is final; report it with that backend's own start command instead of retrying.",
       ],
       parameters,
       ...toolRenderers(BACKEND_TOOL_NAME, true),
@@ -160,7 +167,11 @@ export function registerBackendTool(
           await options.onBackendRunning?.(ctx)
         }
 
-        const report: BackendToolReport = { action, base_url: address.baseUrl, ...outcome }
+        const report: BackendToolReport = {
+          action,
+          base_url: address.baseUrl,
+          ...outcome,
+        }
         return {
           content: [{ type: 'text', text: JSON.stringify(report) }],
           details: report,

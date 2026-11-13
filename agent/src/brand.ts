@@ -54,7 +54,11 @@ export function brandThemePaths(): string[] {
   return existsSync(THEME_DIR) ? [THEME_DIR] : []
 }
 
-function statusFacts(theme: Theme, state: BrandState, width: number): Segment[] {
+function statusFacts(
+  theme: Theme,
+  state: BrandState,
+  width: number,
+): Segment[] {
   const modeColor = state.mode === 'auto' ? 'accent' : 'warning'
   const row: Segment[] = [
     { text: '● ', style: (text) => theme.fg(modeColor, text) },
@@ -81,7 +85,12 @@ function statusFacts(theme: Theme, state: BrandState, width: number): Segment[] 
   return row
 }
 
-function frame(theme: Theme, total: number, contentWidth: number, rows: Segment[][]): string[] {
+function frame(
+  theme: Theme,
+  total: number,
+  contentWidth: number,
+  rows: Segment[][],
+): string[] {
   const border = (text: string) => theme.fg('borderMuted', text)
   const rule = (left: string, right: string) =>
     `  ${border(`${left}${'─'.repeat(total - 2)}${right}`)}`
@@ -105,7 +114,10 @@ export function brandHeader(theme: Theme, state: BrandState) {
     render(width: number): string[] {
       const safeWidth = Math.max(1, width)
       const brand: Segment[] = [
-        { text: `${GLYPH}─${GLYPH}`, style: (text) => theme.fg('accent', text) },
+        {
+          text: `${GLYPH}─${GLYPH}`,
+          style: (text) => theme.fg('accent', text),
+        },
         { text: '  ' },
         {
           text: 'M B F O R G E',
@@ -141,7 +153,10 @@ export function brandHeader(theme: Theme, state: BrandState) {
         return [
           renderRow(safeWidth, [{ text: indent }, ...brand]),
           renderRow(safeWidth, [{ text: indent }, ...tagline]),
-          renderRow(safeWidth, [{ text: indent }, ...statusFacts(theme, state, safeWidth)]),
+          renderRow(safeWidth, [
+            { text: indent },
+            ...statusFacts(theme, state, safeWidth),
+          ]),
           renderRow(safeWidth, [{ text: indent }, ...health]),
           ...(hint ? [renderRow(safeWidth, [{ text: indent }, ...hint])] : []),
           '',

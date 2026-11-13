@@ -13,7 +13,11 @@ export interface Segment {
 }
 
 /** One pluralized count label shared by the banner, footer, and message card. */
-export function countLabel(count: number, singular: string, plural: string): string {
+export function countLabel(
+  count: number,
+  singular: string,
+  plural: string,
+): string {
   return `${count} ${count === 1 ? singular : plural}`
 }
 
@@ -22,16 +26,21 @@ export function wrapText(text: string, width: number): string[] {
   const limit = Math.max(1, Math.floor(width))
   const lines: string[] = []
   for (const paragraph of text.split('\n')) {
-    const words = paragraph.trim().split(/\s+/).filter((word) => word.length > 0)
+    const words = paragraph
+      .trim()
+      .split(/\s+/)
+      .filter((word) => word.length > 0)
     if (words.length === 0) {
       lines.push('')
       continue
     }
     let current = ''
     for (const word of words) {
-      const piece = word.length > limit ? `${word.slice(0, Math.max(0, limit - 1))}…` : word
+      const piece =
+        word.length > limit ? `${word.slice(0, Math.max(0, limit - 1))}…` : word
       if (current === '') current = piece
-      else if (current.length + 1 + piece.length <= limit) current += ` ${piece}`
+      else if (current.length + 1 + piece.length <= limit)
+        current += ` ${piece}`
       else {
         lines.push(current)
         current = piece

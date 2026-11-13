@@ -47,7 +47,8 @@ async function readQueue(path: string): Promise<ReviewQueueState> {
   }
   const jobs = rows
     .filter((row): row is QueuedGoalReview => {
-      if (typeof row !== 'object' || row === null || Array.isArray(row)) return false
+      if (typeof row !== 'object' || row === null || Array.isArray(row))
+        return false
       const item = row as Partial<QueuedGoalReview>
       return (
         typeof item.id === 'string' &&
@@ -60,7 +61,11 @@ async function readQueue(path: string): Promise<ReviewQueueState> {
     .map((job) => {
       if (job.status !== 'running') return job
       if (job.attempts >= MAX_ATTEMPTS) {
-        return { ...job, status: 'failed' as const, error: 'interrupted too many times' }
+        return {
+          ...job,
+          status: 'failed' as const,
+          error: 'interrupted too many times',
+        }
       }
       return { ...job, status: 'queued' as const }
     })

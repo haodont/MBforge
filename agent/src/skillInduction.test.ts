@@ -34,7 +34,8 @@ test('skills are pruned methods induced by multi-goal recurrence and activated b
   t.after(() => {
     if (previousSkills === undefined) delete process.env.MBFORGE_SKILLS_FILE
     else process.env.MBFORGE_SKILLS_FILE = previousSkills
-    if (previousFixtures === undefined) delete process.env.MBFORGE_EVAL_EXPORT_DIR
+    if (previousFixtures === undefined)
+      delete process.env.MBFORGE_EVAL_EXPORT_DIR
     else process.env.MBFORGE_EVAL_EXPORT_DIR = previousFixtures
   })
 
@@ -50,7 +51,13 @@ test('skills are pruned methods induced by multi-goal recurrence and activated b
 
   const method = [step('search'), step('analyze'), step('report')]
   const fixtures = [
-    fixture('goal-1', [step('search'), step('search'), step('analyze'), step('bash', 'error'), step('report')]),
+    fixture('goal-1', [
+      step('search'),
+      step('search'),
+      step('analyze'),
+      step('bash', 'error'),
+      step('report'),
+    ]),
     fixture('goal-2', method),
     fixture('goal-3', [step('read'), step('write')]), // one-off: not a method
   ]
@@ -79,5 +86,9 @@ test('skills are pruned methods induced by multi-goal recurrence and activated b
   const prompt = learnedMethodsPrompt(stored)
   assert.match(prompt, /## Learned methods/)
   assert.match(prompt, /search → analyze → report/)
-  assert.equal(learnedMethodsPrompt(induced), '', 'candidates are not injected until active')
+  assert.equal(
+    learnedMethodsPrompt(induced),
+    '',
+    'candidates are not injected until active',
+  )
 })

@@ -67,38 +67,47 @@ function link(label: string, url: string): string {
  * `[[ui:queue]]`, `[[ui:molecules]]`, `[[ui:workspace]]`.
  */
 export function linkifyUiLinks(markdown: string): string {
-  return markdown.replace(UI_MARKER, (marker: string, name: string, rest?: string) => {
-    switch (name) {
-      case 'review': {
-        if (rest === undefined) return link('复核中心', reviewQueueUrl())
-        const separator = rest.indexOf(':')
-        if (separator <= 0) return marker
-        const kind = rest.slice(0, separator)
-        const itemId = rest.slice(separator + 1)
-        if (REVIEW_KINDS[kind] !== true || itemId === '') return marker
-        return link('复核项', reviewItemUrl(kind, itemId))
+  return markdown.replace(
+    UI_MARKER,
+    (marker: string, name: string, rest?: string) => {
+      switch (name) {
+        case 'review': {
+          if (rest === undefined) return link('复核中心', reviewQueueUrl())
+          const separator = rest.indexOf(':')
+          if (separator <= 0) return marker
+          const kind = rest.slice(0, separator)
+          const itemId = rest.slice(separator + 1)
+          if (REVIEW_KINDS[kind] !== true || itemId === '') return marker
+          return link('复核项', reviewItemUrl(kind, itemId))
+        }
+        case 'doc': {
+          if (rest === undefined) return marker
+          const parts = rest.split(':')
+          if (parts.length > 2) return marker
+          const [docId, pageText] = parts
+          if (!FULL_DOC_ID.test(docId)) return marker
+          if (pageText === undefined) return link('文档', documentUrl(docId))
+          const page = Number(pageText)
+          if (!Number.isInteger(page) || page < 1) return marker
+          return link(`文档·p.${page}`, documentUrl(docId, page))
+        }
+        case 'queue':
+          return rest === undefined
+            ? link('处理队列', workbenchUrl('/queue'))
+            : marker
+        case 'molecules':
+          return rest === undefined
+            ? link('分子库', workbenchUrl('/molecules'))
+            : marker
+        case 'workspace':
+          return rest === undefined
+            ? link('工作台', workbenchUrl('/workspace'))
+            : marker
+        default:
+          return marker
       }
-      case 'doc': {
-        if (rest === undefined) return marker
-        const parts = rest.split(':')
-        if (parts.length > 2) return marker
-        const [docId, pageText] = parts
-        if (!FULL_DOC_ID.test(docId)) return marker
-        if (pageText === undefined) return link('文档', documentUrl(docId))
-        const page = Number(pageText)
-        if (!Number.isInteger(page) || page < 1) return marker
-        return link(`文档·p.${page}`, documentUrl(docId, page))
-      }
-      case 'queue':
-        return rest === undefined ? link('处理队列', workbenchUrl('/queue')) : marker
-      case 'molecules':
-        return rest === undefined ? link('分子库', workbenchUrl('/molecules')) : marker
-      case 'workspace':
-        return rest === undefined ? link('工作台', workbenchUrl('/workspace')) : marker
-      default:
-        return marker
-    }
-  })
+    },
+  )
 }
 
 /** Tools whose results the user should inspect in the browser, not only read. */

@@ -16,7 +16,10 @@ import {
 
 function useTempWorkState(t: test.TestContext): string {
   const previous = process.env.MBFORGE_WORK_STATE_FILE
-  const path = join(mkdtempSync(join(tmpdir(), 'mbforge-work-')), 'WORK_STATE.json')
+  const path = join(
+    mkdtempSync(join(tmpdir(), 'mbforge-work-')),
+    'WORK_STATE.json',
+  )
   process.env.MBFORGE_WORK_STATE_FILE = path
   t.after(() => {
     if (previous === undefined) delete process.env.MBFORGE_WORK_STATE_FILE
@@ -56,8 +59,14 @@ test('work ledger persists across sessions and maintains threads', async (t) => 
   await updateWorkThread(hypothesis.id, { detail: 'Refined after docking.' })
   await closeWorkThread(followUp.id)
   const after = await readWorkState()
-  assert.equal(after.threads.find((thread) => thread.id === followUp.id)?.status, 'done')
-  assert.equal(after.threads.find((thread) => thread.id === hypothesis.id)?.detail, 'Refined after docking.')
+  assert.equal(
+    after.threads.find((thread) => thread.id === followUp.id)?.status,
+    'done',
+  )
+  assert.equal(
+    after.threads.find((thread) => thread.id === hypothesis.id)?.detail,
+    'Refined after docking.',
+  )
   const promptAfterClose = await workStateSystemPrompt()
   assert.doesNotMatch(promptAfterClose, /await synthesis of compound 12/)
 
@@ -71,15 +80,40 @@ test('work ledger persists across sessions and maintains threads', async (t) => 
     {} as never,
   )
   const addedId = (added.details as { id: string }).id
-  const listed = await tool.execute('call-2', { action: 'list' }, undefined, undefined, {} as never)
+  const listed = await tool.execute(
+    'call-2',
+    { action: 'list' },
+    undefined,
+    undefined,
+    {} as never,
+  )
   const openItems = (listed.details as { items: Array<{ id: string }> }).items
   assert.ok(openItems.some((item) => item.id === addedId))
-  assert.ok(!openItems.some((item) => item.id === followUp.id), 'list defaults to open threads')
-  await tool.execute('call-3', { action: 'close', id: addedId }, undefined, undefined, {} as never)
-  assert.equal((await readWorkState()).threads.find((thread) => thread.id === addedId)?.status, 'done')
+  assert.ok(
+    !openItems.some((item) => item.id === followUp.id),
+    'list defaults to open threads',
+  )
+  await tool.execute(
+    'call-3',
+    { action: 'close', id: addedId },
+    undefined,
+    undefined,
+    {} as never,
+  )
+  assert.equal(
+    (await readWorkState()).threads.find((thread) => thread.id === addedId)
+      ?.status,
+    'done',
+  )
 
-  await assert.rejects(addWorkThread({ kind: 'note', title: 'x'.repeat(161) }), /at most 160/)
-  await assert.rejects(updateWorkThread('wt-00000000', { title: 'gone' }), /not found/)
+  await assert.rejects(
+    addWorkThread({ kind: 'note', title: 'x'.repeat(161) }),
+    /at most 160/,
+  )
+  await assert.rejects(
+    updateWorkThread('wt-00000000', { title: 'gone' }),
+    /not found/,
+  )
 })
 
 test('the work ledger is bounded so it cannot grow without limit', async (t) => {

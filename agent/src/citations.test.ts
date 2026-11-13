@@ -14,12 +14,32 @@ test('citations resolve to frontend deep links from both evidence tools; unknown
   const search = harvestEvidence(
     'search_evidence',
     {},
-    { items: [{ evidence_id: 'ev-s', doc_id: 'doc-abc', page: 2, kind: 'text', snippet: 's' }] },
+    {
+      items: [
+        {
+          evidence_id: 'ev-s',
+          doc_id: 'doc-abc',
+          page: 2,
+          kind: 'text',
+          snippet: 's',
+        },
+      ],
+    },
   )
   const list = harvestEvidence(
     'list_evidence',
     { doc_id: 'doc-xyz' },
-    { items: [{ evidence_id: 'ev-l', page: 5, bbox: [1, 2, 3, 4], kind: 'text', raw_text: 'x' }] },
+    {
+      items: [
+        {
+          evidence_id: 'ev-l',
+          page: 5,
+          bbox: [1, 2, 3, 4],
+          kind: 'text',
+          raw_text: 'x',
+        },
+      ],
+    },
   )
   const shortList = harvestEvidence(
     'list_evidence',
@@ -27,7 +47,15 @@ test('citations resolve to frontend deep links from both evidence tools; unknown
     {
       doc_id: 'doc-full-list',
       short_id: 'short-list',
-      items: [{ evidence_id: 'ev-ls', page: 7, bbox: [5, 6, 7, 8], kind: 'text', raw_text: 'y' }],
+      items: [
+        {
+          evidence_id: 'ev-ls',
+          page: 7,
+          bbox: [5, 6, 7, 8],
+          kind: 'text',
+          raw_text: 'y',
+        },
+      ],
     },
   )
   const verified = harvestEvidence(
@@ -36,7 +64,14 @@ test('citations resolve to frontend deep links from both evidence tools; unknown
     {
       doc_id: 'doc-full-verify',
       short_id: 'short-verify',
-      items: [{ evidence_id: 'ev-v', page: 62, bbox: [10, 20, 30, 40], formula: 'C13H19N5' }],
+      items: [
+        {
+          evidence_id: 'ev-v',
+          page: 62,
+          bbox: [10, 20, 30, 40],
+          formula: 'C13H19N5',
+        },
+      ],
     },
   )
   for (const location of [...search, ...list, ...shortList, ...verified]) {

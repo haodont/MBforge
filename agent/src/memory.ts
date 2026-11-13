@@ -12,6 +12,7 @@ import {
 import { Type } from 'typebox'
 
 import { atomicWrite, createSerializer, readJsonFile } from './localStore.js'
+import { errorMessage } from './text.js'
 import { toolRenderers } from './toolRender.js'
 
 const MEMORY_FILE_NAME = 'MEMORY.md'
@@ -27,8 +28,7 @@ const COLD_SUFFIX = '.cold.md'
 const STATE_SUFFIX = '.state.json'
 const ARCHIVE_SUFFIX = '.archive.md'
 
-const SECTION_HEADER =
-  '## user\n\n## feedback\n\n## project\n\n## reference\n'
+const SECTION_HEADER = '## user\n\n## feedback\n\n## project\n\n## reference\n'
 
 const MEMORY_HEADER =
   '# MBForge memory\n\n' +
@@ -75,7 +75,13 @@ const ENTRY_ID_PATTERN = /^[ufpr]-[0-9a-f]{8}$/
 export const MEMORY_TOOL_NAME = 'memory'
 export const MEMORY_TOOL_NAMES = [MEMORY_TOOL_NAME] as const
 
-export const MEMORY_ACTIONS = ['add', 'update', 'delete', 'list', 'ephemeral'] as const
+export const MEMORY_ACTIONS = [
+  'add',
+  'update',
+  'delete',
+  'list',
+  'ephemeral',
+] as const
 export type MemoryAction = (typeof MEMORY_ACTIONS)[number]
 
 export interface AppendMemoryResult {
@@ -136,8 +142,7 @@ type MemoryModel = NonNullable<ExtensionContext['model']>
 type MemoryRegistry = ExtensionContext['modelRegistry']
 
 let compressionRuntime:
-  | { model: MemoryModel; registry: MemoryRegistry }
-  | undefined
+  { model: MemoryModel; registry: MemoryRegistry } | undefined
 
 /** Capture the active model from a tool context for background compression. */
 export function setMemoryRuntime(
@@ -207,11 +212,6 @@ async function readLayer(path: string, header: string): Promise<string> {
 export async function readMemory(): Promise<string> {
   await ensureMemoryFile()
   return readLayer(memoryFilePath(), MEMORY_HEADER)
-}
-
-export async function readEphemeralMemory(): Promise<string> {
-  await ensureMemoryFile()
-  return (await readFile(memoryEphemeralPath(), 'utf8')).replace(/^\uFEFF/, '')
 }
 
 export async function readColdMemory(): Promise<string> {
@@ -290,9 +290,7 @@ function parseEntries(text: string): StoredMemoryEntry[] {
 }
 
 function findEntryLine(text: string, id: string): string | undefined {
-  return text
-    .split('\n')
-    .find((line) => ENTRY_PATTERN.exec(line)?.[1] === id)
+  return text.split('\n').find((line) => ENTRY_PATTERN.exec(line)?.[1] === id)
 }
 
 function insertEntry(text: string, type: MemoryType, line: string): string {
@@ -320,7 +318,9 @@ function mergeContents(contents: string[]): string {
   return `${joined.slice(0, MAX_ENTRY_CHARS - 20)}… (+${unique.length})`
 }
 
-function promoteHotRule(hot: string): { hot: string; rule: string } | undefined {
+function promoteHotRule(
+  hot: string,
+): { hot: string; rule: string } | undefined {
   const entries = parseEntries(hot)
   if (entries.length === 0) return undefined
   const preferred = entries.filter(
@@ -337,7 +337,10 @@ function appendColdRule(cold: string, rule: string): string {
   return `${cold.replace(/\s+$/, '')}\n${line}\n`
 }
 
-async function archiveEntries(basePath: string, lines: string[]): Promise<void> {
+async function archiveEntries(
+  basePath: string,
+  lines: string[],
+): Promise<void> {
   if (lines.length === 0) return
   const archive = memoryArchivePath(basePath)
   let text = MEMORY_ARCHIVE_HEADER
@@ -394,7 +397,10 @@ async function compactEphemeralNow(): Promise<boolean> {
   const entries = parseEntries(text)
   if (entries.length <= MAX_EPHEMERAL_ENTRIES) return false
 
-  await archiveEntries(memoryFilePath(), entries.map((entry) => entry.line))
+  await archiveEntries(
+    memoryFilePath(),
+    entries.map((entry) => entry.line),
+  )
   await atomicWrite(ephemeralPath, EPHEMERAL_HEADER)
 
   const groups = new Map<MemoryType, string[]>()
@@ -471,7 +477,8 @@ function compressedEntries(value: unknown): Array<{
   type: MemoryType
   content: string
 }> {
-  if (!Array.isArray(value)) throw new Error('memory compactor returned no entries')
+  if (!Array.isArray(value))
+    throw new Error('memory compactor returned no entries')
   const result: Array<{ type: MemoryType; content: string }> = []
   for (const item of value) {
     if (typeof item !== 'object' || item === null) continue
@@ -480,7 +487,8 @@ function compressedEntries(value: unknown): Array<{
     if (!type || typeof item.content !== 'string') continue
     result.push({ type, content: normalizeEntry(item.content) })
   }
-  if (result.length === 0) throw new Error('memory compactor returned no valid entries')
+  if (result.length === 0)
+    throw new Error('memory compactor returned no valid entries')
   return result.slice(0, 8)
 }
 
@@ -488,7 +496,7 @@ async function compressEphemeralWithModel(
   entries: StoredMemoryEntry[],
 ): Promise<Array<{ type: MemoryType; content: string }>> {
   const prompt = [
-    "Compress these transient agent-memory notes into at most 8 durable hot-memory entries.",
+    'Compress these transient agent-memory notes into at most 8 durable hot-memory entries.',
     'Preserve user preferences, feedback corrections, project facts, and references; merge duplicates.',
     'Return ONLY a JSON array: [{"type":"user|feedback|project|reference","content":"..."}].',
     '',
@@ -675,7 +683,13 @@ async function appendHotMemoryNow(
   const id = entryId(type, content)
   const existing = findEntryLine(current, id)
   if (existing) {
-    return { path, id, type, entry: existing, bytes: Buffer.byteLength(current) }
+    return {
+      path,
+      id,
+      type,
+      entry: existing,
+      bytes: Buffer.byteLength(current),
+    }
   }
 
   const date = new Date().toISOString().slice(0, 10)
@@ -773,7 +787,8 @@ async function updateMemoryNow(
   if (!match) throw new Error(`Memory entry is malformed: ${id}`)
   const previousType = TYPE_BY_PREFIX[match[1].charAt(0)] ?? 'project'
   const type = rawType === undefined ? previousType : normalizeType(rawType)
-  const content = rawContent === undefined ? match[3] : normalizeEntry(rawContent)
+  const content =
+    rawContent === undefined ? match[3] : normalizeEntry(rawContent)
   const newId = entryId(type, content)
   const date = match[2]
   const newLine = `- [${newId}] ${date}: ${content}`
@@ -884,7 +899,8 @@ const memoryParameters = Type.Union([
     }),
     content: Type.Optional(
       Type.String({
-        description: 'Replacement note content. Omit to keep the current content.',
+        description:
+          'Replacement note content. Omit to keep the current content.',
         minLength: 1,
         maxLength: MAX_ENTRY_CHARS,
       }),
@@ -892,7 +908,10 @@ const memoryParameters = Type.Union([
     type: Type.Optional(
       Type.Union(
         MEMORY_TYPES.map((type) => Type.Literal(type)),
-        { description: 'Replacement category. Omit to keep the current category.' },
+        {
+          description:
+            'Replacement category. Omit to keep the current category.',
+        },
       ),
     ),
   }),
@@ -947,7 +966,9 @@ export function memoryTool() {
           ephemeral_count: (await listEphemeralMemory()).entries.length,
         }
         return {
-          content: [{ type: 'text', text: JSON.stringify({ ...details, saved: true }) }],
+          content: [
+            { type: 'text', text: JSON.stringify({ ...details, saved: true }) },
+          ],
           details,
         }
       }
@@ -955,7 +976,11 @@ export function memoryTool() {
         if (params.content === undefined && params.type === undefined) {
           throw new Error('memory action "update" requires content or type')
         }
-        const result = await updateMemory(params.id, params.content, params.type)
+        const result = await updateMemory(
+          params.id,
+          params.content,
+          params.type,
+        )
         const details: MemoryToolDetails = {
           action: 'update',
           path: result.path,
@@ -1100,7 +1125,7 @@ export function registerMemoryCommand(pi: ExtensionAPI): void {
           'info',
         )
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorMessage(error)
         ctx.ui.notify(`Memory failed: ${message}`, 'error')
       }
     },

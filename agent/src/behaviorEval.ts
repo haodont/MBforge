@@ -8,10 +8,7 @@ export interface BehaviorExpectations {
 }
 
 export type BehaviorRule =
-  | 'required_tool'
-  | 'forbidden_tool'
-  | 'step_budget'
-  | 'no_progress'
+  'required_tool' | 'forbidden_tool' | 'step_budget' | 'no_progress'
 
 export interface BehaviorViolation {
   rule: BehaviorRule
@@ -50,7 +47,11 @@ export function detectNoProgress(
       continue
     }
     if (previous && run >= threshold) {
-      return { tool: previous.tool, inputDigest: previous.inputDigest, count: run }
+      return {
+        tool: previous.tool,
+        inputDigest: previous.inputDigest,
+        count: run,
+      }
     }
     run = 1
   }
@@ -68,15 +69,24 @@ export function gradeTrajectory(
 
   for (const tool of expectations.requiredTools ?? []) {
     if (!called.has(tool)) {
-      violations.push({ rule: 'required_tool', message: `required tool ${tool} was never called` })
+      violations.push({
+        rule: 'required_tool',
+        message: `required tool ${tool} was never called`,
+      })
     }
   }
   for (const tool of expectations.forbiddenTools ?? []) {
     if (called.has(tool)) {
-      violations.push({ rule: 'forbidden_tool', message: `forbidden tool ${tool} was called` })
+      violations.push({
+        rule: 'forbidden_tool',
+        message: `forbidden tool ${tool} was called`,
+      })
     }
   }
-  if (expectations.maxSteps !== undefined && steps.length > expectations.maxSteps) {
+  if (
+    expectations.maxSteps !== undefined &&
+    steps.length > expectations.maxSteps
+  ) {
     violations.push({
       rule: 'step_budget',
       message: `${steps.length} steps exceeds the budget of ${expectations.maxSteps}`,
@@ -92,7 +102,11 @@ export function gradeTrajectory(
       message: `${loop.tool} repeated ${loop.count} identical consecutive calls without progress`,
     })
   }
-  return { passed: violations.length === 0, stepCount: steps.length, violations }
+  return {
+    passed: violations.length === 0,
+    stepCount: steps.length,
+    violations,
+  }
 }
 
 /** Repository mutation tools that bypass the capability contract in auto mode. */
@@ -104,7 +118,9 @@ export const AUTO_FORBIDDEN_TOOLS = ['bash', 'edit', 'write']
  * auto mode the built-in mutation tools must never appear (capabilities are the
  * only write path). Task-specific required tools stay a manual addition.
  */
-export function baselineExpectations(trajectory: Trajectory): BehaviorExpectations {
+export function baselineExpectations(
+  trajectory: Trajectory,
+): BehaviorExpectations {
   return {
     maxConsecutiveRepeats: DEFAULT_REPEAT_THRESHOLD,
     forbiddenTools: trajectory.mode === 'auto' ? [...AUTO_FORBIDDEN_TOOLS] : [],

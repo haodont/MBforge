@@ -25,6 +25,7 @@ import {
 import { Type } from 'typebox'
 
 import { atomicWrite, createSerializer, readJsonFile } from './localStore.js'
+import { cleanText, clip } from './text.js'
 import { toolRenderers } from './toolRender.js'
 
 const WORK_STATE_FILE_NAME = 'WORK_STATE.json'
@@ -79,27 +80,24 @@ export interface WorkState {
 export const WORK_STATE_TOOL_NAME = 'work_state'
 export const WORK_STATE_TOOL_NAMES = [WORK_STATE_TOOL_NAME] as const
 
-export const WORK_STATE_ACTIONS = ['list', 'add', 'update', 'close', 'check'] as const
-export type WorkStateAction = (typeof WORK_STATE_ACTIONS)[number]
+export const WORK_STATE_ACTIONS = [
+  'list',
+  'add',
+  'update',
+  'close',
+  'check',
+] as const
 
 /** Local ledger path; override with MBFORGE_WORK_STATE_FILE for tests. */
 export function workStateFilePath(): string {
   const override = process.env.MBFORGE_WORK_STATE_FILE?.trim()
-  return override ? resolve(override) : join(getAgentDir(), WORK_STATE_FILE_NAME)
+  return override
+    ? resolve(override)
+    : join(getAgentDir(), WORK_STATE_FILE_NAME)
 }
 
 function emptyState(): WorkState {
   return { version: 1, threads: [], updated_at: '' }
-}
-
-function cleanText(value: string, field: string, max: number): string {
-  const text = value.replace(/\r\n?/g, '\n').trim()
-  if (!text) throw new Error(`${field} must not be empty`)
-  if (text.length > max) throw new Error(`${field} must be at most ${max} characters`)
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) {
-    throw new Error(`${field} contains control characters`)
-  }
-  return text
 }
 
 function normalizeKind(value: string): WorkThreadKind {
@@ -122,7 +120,9 @@ function normalizeLink(link: WorkLink | undefined): WorkLink | undefined {
     throw new Error(`link kind must be one of: ${WORK_LINK_KINDS.join(', ')}`)
   }
   const id = cleanText(link.id, 'link id', MAX_REF_CHARS)
-  const sub = link.sub ? cleanText(link.sub, 'link sub', MAX_REF_CHARS) : undefined
+  const sub = link.sub
+    ? cleanText(link.sub, 'link sub', MAX_REF_CHARS)
+    : undefined
   return sub ? { kind: link.kind, id, sub } : { kind: link.kind, id }
 }
 
@@ -144,7 +144,9 @@ async function readState(): Promise<WorkState> {
     throw new Error(`Work state has an invalid shape: ${workStateFilePath()}`)
   }
   const record = parsed as Partial<WorkState>
-  const threads = Array.isArray(record.threads) ? record.threads.filter(isThread) : []
+  const threads = Array.isArray(record.threads)
+    ? record.threads.filter(isThread)
+    : []
   return {
     version: 1,
     threads,
@@ -168,10 +170,14 @@ export interface WorkThreadInput {
 }
 
 /** Add one open work thread; newest first, bounded. */
-export async function addWorkThread(input: WorkThreadInput): Promise<WorkThread> {
+export async function addWorkThread(
+  input: WorkThreadInput,
+): Promise<WorkThread> {
   const kind = normalizeKind(input.kind)
   const title = cleanText(input.title, 'title', MAX_TITLE_CHARS)
-  const detail = input.detail ? cleanText(input.detail, 'detail', MAX_DETAIL_CHARS) : ''
+  const detail = input.detail
+    ? cleanText(input.detail, 'detail', MAX_DETAIL_CHARS)
+    : ''
   const refs = normalizeRefs(input.refs)
   const link = normalizeLink(input.link)
   return serialize(async () => {
@@ -213,11 +219,14 @@ export async function updateWorkThread(
     const state = await readState()
     const thread = state.threads.find((item) => item.id === id)
     if (!thread) throw new Error(`Work thread not found: ${id}`)
-    if (update.title !== undefined) thread.title = cleanText(update.title, 'title', MAX_TITLE_CHARS)
-    if (update.detail !== undefined) thread.detail = cleanText(update.detail, 'detail', MAX_DETAIL_CHARS)
+    if (update.title !== undefined)
+      thread.title = cleanText(update.title, 'title', MAX_TITLE_CHARS)
+    if (update.detail !== undefined)
+      thread.detail = cleanText(update.detail, 'detail', MAX_DETAIL_CHARS)
     if (update.refs !== undefined) thread.refs = normalizeRefs(update.refs)
     if (update.link !== undefined) thread.link = normalizeLink(update.link)
-    if (update.last_checked !== undefined) thread.last_checked = update.last_checked
+    if (update.last_checked !== undefined)
+      thread.last_checked = update.last_checked
     if (update.check_note !== undefined) thread.check_note = update.check_note
     if (update.status !== undefined) {
       if (update.status !== 'open' && update.status !== 'done') {
@@ -241,11 +250,6 @@ export async function readWorkState(): Promise<WorkState> {
   return readState()
 }
 
-function clip(value: string, max: number): string {
-  const single = value.replace(/\s+/g, ' ').trim()
-  return single.length > max ? `${single.slice(0, max - 1)}…` : single
-}
-
 /**
  * Compact prompt section for a new session. Empty when nothing is recorded, so
  * a fresh library adds no noise. This is context, not evidence or instructions.
@@ -261,11 +265,15 @@ export async function workStateSystemPrompt(): Promise<string> {
   if (open.length > 0) {
     lines.push('Open threads:')
     for (const thread of open.slice(0, PROMPT_THREAD_LIMIT)) {
-      const detail = thread.detail ? `: ${clip(thread.detail, PROMPT_DETAIL_CHARS)}` : ''
+      const detail = thread.detail
+        ? `: ${clip(thread.detail, PROMPT_DETAIL_CHARS)}`
+        : ''
       lines.push(`- [${thread.kind}] ${thread.title}${detail}`)
     }
     if (open.length > PROMPT_THREAD_LIMIT) {
-      lines.push(`- … ${open.length - PROMPT_THREAD_LIMIT} more (use work_state action=list)`)
+      lines.push(
+        `- … ${open.length - PROMPT_THREAD_LIMIT} more (use work_state action=list)`,
+      )
     }
   }
   return lines.join('\n')
@@ -278,24 +286,34 @@ const workLinkSchema = Type.Object(
       { description: 'run, review, or document.' },
     ),
     id: Type.String({
-      description: 'The run_id, review item_id, or doc_id this follow_up waits on.',
+      description:
+        'The run_id, review item_id, or doc_id this follow_up waits on.',
       minLength: 1,
       maxLength: MAX_REF_CHARS,
     }),
     sub: Type.Optional(
-      Type.String({ description: 'Review kind, for a review link.', maxLength: MAX_REF_CHARS }),
+      Type.String({
+        description: 'Review kind, for a review link.',
+        maxLength: MAX_REF_CHARS,
+      }),
     ),
   },
-  { description: 'Optional server object a follow_up waits on; enables action=check.' },
+  {
+    description:
+      'Optional server object a follow_up waits on; enables action=check.',
+  },
 )
 
 const workStateParameters = Type.Union([
   Type.Object({
     action: Type.Literal('list'),
     status: Type.Optional(
-      Type.Union([Type.Literal('open'), Type.Literal('done'), Type.Literal('all')], {
-        description: 'Filter threads; defaults to open.',
-      }),
+      Type.Union(
+        [Type.Literal('open'), Type.Literal('done'), Type.Literal('all')],
+        {
+          description: 'Filter threads; defaults to open.',
+        },
+      ),
     ),
   }),
   Type.Object({
@@ -304,9 +322,16 @@ const workStateParameters = Type.Union([
       WORK_THREAD_KINDS.map((kind) => Type.Literal(kind)),
       { description: 'hypothesis, follow_up, decision, or note.' },
     ),
-    title: Type.String({ description: 'Short thread title.', minLength: 1, maxLength: MAX_TITLE_CHARS }),
+    title: Type.String({
+      description: 'Short thread title.',
+      minLength: 1,
+      maxLength: MAX_TITLE_CHARS,
+    }),
     detail: Type.Optional(
-      Type.String({ description: 'Rationale, evidence, or next step.', maxLength: MAX_DETAIL_CHARS }),
+      Type.String({
+        description: 'Rationale, evidence, or next step.',
+        maxLength: MAX_DETAIL_CHARS,
+      }),
     ),
     refs: Type.Optional(
       Type.Array(Type.String({ maxLength: MAX_REF_CHARS }), {
@@ -318,16 +343,30 @@ const workStateParameters = Type.Union([
   }),
   Type.Object({
     action: Type.Literal('update'),
-    id: Type.String({ description: 'Thread id, such as wt-12ab34cd.', pattern: '^wt-[0-9a-f]{8}$' }),
-    title: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_TITLE_CHARS })),
+    id: Type.String({
+      description: 'Thread id, such as wt-12ab34cd.',
+      pattern: '^wt-[0-9a-f]{8}$',
+    }),
+    title: Type.Optional(
+      Type.String({ minLength: 1, maxLength: MAX_TITLE_CHARS }),
+    ),
     detail: Type.Optional(Type.String({ maxLength: MAX_DETAIL_CHARS })),
-    status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('done')])),
-    refs: Type.Optional(Type.Array(Type.String({ maxLength: MAX_REF_CHARS }), { maxItems: MAX_REFS })),
+    status: Type.Optional(
+      Type.Union([Type.Literal('open'), Type.Literal('done')]),
+    ),
+    refs: Type.Optional(
+      Type.Array(Type.String({ maxLength: MAX_REF_CHARS }), {
+        maxItems: MAX_REFS,
+      }),
+    ),
     link: Type.Optional(workLinkSchema),
   }),
   Type.Object({
     action: Type.Literal('close'),
-    id: Type.String({ description: 'Thread id to mark done.', pattern: '^wt-[0-9a-f]{8}$' }),
+    id: Type.String({
+      description: 'Thread id to mark done.',
+      pattern: '^wt-[0-9a-f]{8}$',
+    }),
   }),
   Type.Object({
     action: Type.Literal('check'),
@@ -354,14 +393,19 @@ export function workStateTool() {
         const state = await readWorkState()
         const filter = params.status ?? 'open'
         const threads =
-          filter === 'all' ? state.threads : state.threads.filter((t) => t.status === filter)
+          filter === 'all'
+            ? state.threads
+            : state.threads.filter((t) => t.status === filter)
         const details = {
           action: 'list' as const,
           path: workStateFilePath(),
           items: threads,
           count: threads.length,
         }
-        return { content: [{ type: 'text', text: JSON.stringify(details) }], details }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(details) }],
+          details,
+        }
       }
       if (params.action === 'add') {
         const thread = await addWorkThread({
@@ -371,8 +415,16 @@ export function workStateTool() {
           refs: params.refs,
           link: params.link,
         })
-        const details = { action: 'add' as const, path: workStateFilePath(), ...thread, message: `recorded ${thread.kind} ${thread.id}` }
-        return { content: [{ type: 'text', text: JSON.stringify(details) }], details }
+        const details = {
+          action: 'add' as const,
+          path: workStateFilePath(),
+          ...thread,
+          message: `recorded ${thread.kind} ${thread.id}`,
+        }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(details) }],
+          details,
+        }
       }
       if (params.action === 'update') {
         const thread = await updateWorkThread(params.id, {
@@ -382,13 +434,29 @@ export function workStateTool() {
           refs: params.refs,
           link: params.link,
         })
-        const details = { action: 'update' as const, path: workStateFilePath(), ...thread, message: `updated ${thread.id}` }
-        return { content: [{ type: 'text', text: JSON.stringify(details) }], details }
+        const details = {
+          action: 'update' as const,
+          path: workStateFilePath(),
+          ...thread,
+          message: `updated ${thread.id}`,
+        }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(details) }],
+          details,
+        }
       }
       if (params.action === 'close') {
         const thread = await closeWorkThread(params.id)
-        const details = { action: 'close' as const, path: workStateFilePath(), ...thread, message: `closed ${thread.id}` }
-        return { content: [{ type: 'text', text: JSON.stringify(details) }], details }
+        const details = {
+          action: 'close' as const,
+          path: workStateFilePath(),
+          ...thread,
+          message: `closed ${thread.id}`,
+        }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(details) }],
+          details,
+        }
       }
       if (params.action === 'check') {
         // Lazy import keeps workState (storage) free of a static cycle with the
@@ -400,15 +468,21 @@ export function workStateTool() {
           path: workStateFilePath(),
           items: results,
           count: results.length,
-          closed: results.filter((result) => result.outcome === 'closed').length,
+          closed: results.filter((result) => result.outcome === 'closed')
+            .length,
           message:
             results.length === 0
               ? 'no open follow_up has a link to check'
               : `checked ${results.length} linked follow_up(s)`,
         }
-        return { content: [{ type: 'text', text: JSON.stringify(details) }], details }
+        return {
+          content: [{ type: 'text', text: JSON.stringify(details) }],
+          details,
+        }
       }
-      throw new Error(`work_state action must be one of: ${WORK_STATE_ACTIONS.join(', ')}`)
+      throw new Error(
+        `work_state action must be one of: ${WORK_STATE_ACTIONS.join(', ')}`,
+      )
     },
   })
 }

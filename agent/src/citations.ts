@@ -60,7 +60,11 @@ export function linkifyCitations(markdown: string): string {
   })
 }
 
-const CITATION_TOOLS = new Set(['search_evidence', 'list_evidence', 'verify_structures'])
+const CITATION_TOOLS = new Set([
+  'search_evidence',
+  'list_evidence',
+  'verify_structures',
+])
 
 /** Tools whose rows belong to the document the call named, not to the row. */
 const DOCUMENT_SCOPED_TOOLS = new Set(['list_evidence', 'verify_structures'])
@@ -85,7 +89,9 @@ export function harvestEvidence(
 
   const locations: EvidenceLocation[] = []
   const resultDocId =
-    'doc_id' in data && typeof data.doc_id === 'string' ? data.doc_id : undefined
+    'doc_id' in data && typeof data.doc_id === 'string'
+      ? data.doc_id
+      : undefined
   for (const item of items) {
     if (typeof item !== 'object' || item === null) continue
     const record = item as {
@@ -94,7 +100,8 @@ export function harvestEvidence(
       page?: unknown
       bbox?: unknown
     }
-    const id = typeof record.evidence_id === 'string' ? record.evidence_id : undefined
+    const id =
+      typeof record.evidence_id === 'string' ? record.evidence_id : undefined
     const page = typeof record.page === 'number' ? record.page : undefined
     if (!id || page === undefined) continue
     // Prefer the canonical document id echoed by the result. Document-scoped

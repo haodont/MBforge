@@ -13,6 +13,8 @@
     "build": "tsc -p tsconfig.json --incremental --tsBuildInfoFile dist/.tsbuildinfo",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "check": "tsc -p tsconfig.json --noEmit",
+    "format": "prettier --write src",
+    "format:check": "prettier --check src",
     "test": "npm run build && node --test \"dist/*.test.js\"",
     "precli": "npm run build",
     "cli": "node scripts/cli.mjs",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "prettier": "^3.10.1",
     "typescript": "^6.0.3"
   }
 }

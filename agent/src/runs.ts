@@ -54,7 +54,8 @@ interface RunNode {
 }
 
 function runCompletion(runId: string, snapshot: RunSnapshot): RunCompletion {
-  const status = typeof snapshot.status === 'string' ? snapshot.status : 'unknown'
+  const status =
+    typeof snapshot.status === 'string' ? snapshot.status : 'unknown'
   const docId =
     typeof snapshot.doc_id === 'string' && snapshot.doc_id !== ''
       ? snapshot.doc_id
@@ -72,7 +73,9 @@ function runCompletion(runId: string, snapshot: RunSnapshot): RunCompletion {
     .map((node) => {
       const error = typeof node.error === 'string' ? node.error.trim() : ''
       const stage = String(node.stage ?? '?')
-      return error === '' ? `${stage}: failed` : `${stage}: ${error.slice(0, 400)}`
+      return error === ''
+        ? `${stage}: failed`
+        : `${stage}: ${error.slice(0, 400)}`
     })
   const lines = [
     `MBForge run ${runId} finished with status "${status}" (document ${docId}).`,

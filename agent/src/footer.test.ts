@@ -30,7 +30,11 @@ function context(entries: unknown[]): ExtensionContext {
       getCwd: () => 'C:/repo',
       getSessionName: () => undefined,
     },
-    getContextUsage: () => ({ tokens: 1_000, contextWindow: 1_048_576, percent: 0.1 }),
+    getContextUsage: () => ({
+      tokens: 1_000,
+      contextWindow: 1_048_576,
+      percent: 0.1,
+    }),
   } as unknown as ExtensionContext
 }
 
@@ -45,13 +49,24 @@ const assistant = {
   type: 'message',
   message: {
     role: 'assistant',
-    usage: { input: 1_000, output: 234, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+    usage: {
+      input: 1_000,
+      output: 234,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: { total: 0 },
+    },
     durationMs: 10_000,
   },
 }
 
 test('the footer shows the final response TPS from usage and duration', () => {
-  const line = brandFooter(theme, state, context([assistant]), footerData).render(100)[1]
+  const line = brandFooter(
+    theme,
+    state,
+    context([assistant]),
+    footerData,
+  ).render(100)[1]
   assert.match(line, /23\.4 tps/)
 })
 
@@ -64,6 +79,11 @@ test('a live estimate is marked and compact mode rounds TPS', () => {
   ).render(100)[1]
   assert.match(live, /~18\.2 tps/)
 
-  const compact = brandFooter(theme, state, context([assistant]), footerData).render(60)[1]
+  const compact = brandFooter(
+    theme,
+    state,
+    context([assistant]),
+    footerData,
+  ).render(60)[1]
   assert.match(compact, /23 tps/)
 })

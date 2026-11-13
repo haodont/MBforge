@@ -71,8 +71,17 @@ function addUsage(totals: Totals, usage: UsageView): void {
 }
 
 /** Sum usage over the session; cached until an append or model switch. */
-function collectStats(entries: readonly SessionEntryView[], key: string): SessionStats {
-  const totals: Totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }
+function collectStats(
+  entries: readonly SessionEntryView[],
+  key: string,
+): SessionStats {
+  const totals: Totals = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+  }
   let tps: number | undefined
   for (const entry of entries) {
     if (entry.type === 'usage' && entry.usage) {
@@ -83,13 +92,20 @@ function collectStats(entries: readonly SessionEntryView[], key: string): Sessio
         addUsage(totals, message.usage)
         const output = message.usage.output ?? 0
         tps = undefined
-        if (typeof message.durationMs === 'number' && message.durationMs > 0 && output > 0) {
+        if (
+          typeof message.durationMs === 'number' &&
+          message.durationMs > 0 &&
+          output > 0
+        ) {
           tps = output / (message.durationMs / 1000)
         }
       } else if (message.role === 'toolResult' && message.usage) {
         addUsage(totals, message.usage)
       }
-    } else if ((entry.type === 'compaction' || entry.type === 'branch_summary') && entry.usage) {
+    } else if (
+      (entry.type === 'compaction' || entry.type === 'branch_summary') &&
+      entry.usage
+    ) {
       addUsage(totals, entry.usage)
     }
   }
@@ -131,7 +147,10 @@ function usageSegments(
     parts.push({ text: `↑${formatTokens(stats.totals.input)}`, color: 'muted' })
   }
   if (stats.totals.output > 0) {
-    parts.push({ text: `↓${formatTokens(stats.totals.output)}`, color: 'muted' })
+    parts.push({
+      text: `↓${formatTokens(stats.totals.output)}`,
+      color: 'muted',
+    })
   }
   if (tps) {
     parts.push({
@@ -140,7 +159,10 @@ function usageSegments(
     })
   }
   if (!compact && stats.totals.cacheRead > 0) {
-    parts.push({ text: `R${formatTokens(stats.totals.cacheRead)}`, color: 'muted' })
+    parts.push({
+      text: `R${formatTokens(stats.totals.cacheRead)}`,
+      color: 'muted',
+    })
   }
   if (!compact && stats.totals.cost >= 0.0005) {
     parts.push({ text: `$${stats.totals.cost.toFixed(3)}`, color: 'muted' })
@@ -148,9 +170,12 @@ function usageSegments(
   const window = usage?.contextWindow ?? modelWindow
   const percent = usage?.percent
   if (typeof percent === 'number') {
-    const color: ThemeColor = percent > 90 ? 'error' : percent > 70 ? 'warning' : 'muted'
+    const color: ThemeColor =
+      percent > 90 ? 'error' : percent > 70 ? 'warning' : 'muted'
     parts.push({
-      text: compact ? `${percent.toFixed(0)}%` : `${percent.toFixed(1)}%/${formatTokens(window ?? 0)}`,
+      text: compact
+        ? `${percent.toFixed(0)}%`
+        : `${percent.toFixed(1)}%/${formatTokens(window ?? 0)}`,
       color,
     })
   } else if (!compact && typeof window === 'number' && window > 0) {
@@ -158,7 +183,8 @@ function usageSegments(
   }
   const row: Segment[] = []
   for (const part of parts) {
-    if (row.length > 0) row.push({ text: ' · ', style: (text) => theme.fg('dim', text) })
+    if (row.length > 0)
+      row.push({ text: ' · ', style: (text) => theme.fg('dim', text) })
     row.push({ text: part.text, style: (text) => theme.fg(part.color, text) })
   }
   return row
@@ -187,14 +213,24 @@ export function brandFooter(
         if (cached?.key !== key) cached = collectStats(entries, key)
         const stats = cached
 
-        const modeColor: ThemeColor = state.mode === 'auto' ? 'accent' : 'warning'
+        const modeColor: ThemeColor =
+          state.mode === 'auto' ? 'accent' : 'warning'
         const base: Segment[] = [
           { text: `${GLYPH} `, style: (text) => theme.fg('accent', text) },
-          { text: 'MBForge', style: (text) => theme.bold(theme.fg('text', text)) },
+          {
+            text: 'MBForge',
+            style: (text) => theme.bold(theme.fg('text', text)),
+          },
           { text: '  ' },
-          { text: state.mode, style: (text) => theme.bold(theme.fg(modeColor, text)) },
+          {
+            text: state.mode,
+            style: (text) => theme.bold(theme.fg(modeColor, text)),
+          },
           { text: ' · ', style: (text) => theme.fg('dim', text) },
-          { text: `${state.toolCount} caps`, style: (text) => theme.fg('muted', text) },
+          {
+            text: `${state.toolCount} caps`,
+            style: (text) => theme.fg('muted', text),
+          },
         ]
         if (state.localToolCount > 0) {
           base.push({ text: ' · ', style: (text) => theme.fg('dim', text) })
@@ -216,13 +252,12 @@ export function brandFooter(
               { text: ' · ', style: (text) => theme.fg('dim', text) },
               { text: '⚠ offline', style: (text) => theme.fg('warning', text) },
             ]
-        const healthCompact: Segment[] =
-          state.online
-            ? [
-                { text: ' · ', style: (text) => theme.fg('dim', text) },
-                { text: '● online', style: (text) => theme.fg('success', text) },
-              ]
-            : healthFull
+        const healthCompact: Segment[] = state.online
+          ? [
+              { text: ' · ', style: (text) => theme.fg('dim', text) },
+              { text: '● online', style: (text) => theme.fg('success', text) },
+            ]
+          : healthFull
         const brandRow =
           plainWidth([...base, ...healthFull]) <= safeWidth
             ? [...base, ...healthFull]
@@ -236,7 +271,8 @@ export function brandFooter(
                 text: `queue ${state.queue.active}/${state.queue.backlog}`,
                 style: (text) =>
                   theme.fg(
-                    state.queue?.status === 'online' && state.queue.backlog === 0
+                    state.queue?.status === 'online' &&
+                      state.queue.backlog === 0
                       ? 'muted'
                       : 'warning',
                     text,
@@ -245,7 +281,8 @@ export function brandFooter(
             ]
           : []
         const combined = [...brandRow, ...queueRow]
-        const brandLineWithQueue = plainWidth(combined) <= safeWidth ? combined : brandRow
+        const brandLineWithQueue =
+          plainWidth(combined) <= safeWidth ? combined : brandRow
 
         const model = ctx.model
         const modelRow: Segment[] = model
@@ -253,8 +290,14 @@ export function brandFooter(
               { text: model.id, style: (text) => theme.fg('muted', text) },
               ...(ctx.thinkingLevel
                 ? [
-                    { text: ' · ', style: (text: string) => theme.fg('dim', text) },
-                    { text: ctx.thinkingLevel, style: (text: string) => theme.fg('dim', text) },
+                    {
+                      text: ' · ',
+                      style: (text: string) => theme.fg('dim', text),
+                    },
+                    {
+                      text: ctx.thinkingLevel,
+                      style: (text: string) => theme.fg('dim', text),
+                    },
                   ]
                 : []),
             ]
@@ -265,15 +308,24 @@ export function brandFooter(
             : brandLineWithQueue
 
         const path: Segment[] = [
-          { text: displayPath(ctx.sessionManager.getCwd()), style: (text) => theme.fg('dim', text) },
+          {
+            text: displayPath(ctx.sessionManager.getCwd()),
+            style: (text) => theme.fg('dim', text),
+          },
         ]
         const branch = footerData.getGitBranch()
         if (branch) {
-          path.push({ text: ` (${branch})`, style: (text) => theme.fg('muted', text) })
+          path.push({
+            text: ` (${branch})`,
+            style: (text) => theme.fg('muted', text),
+          })
         }
         const sessionName = ctx.sessionManager.getSessionName()
         if (sessionName) {
-          path.push({ text: ` • ${sessionName}`, style: (text) => theme.fg('muted', text) })
+          path.push({
+            text: ` • ${sessionName}`,
+            style: (text) => theme.fg('muted', text),
+          })
         }
 
         const compact = safeWidth < 80
@@ -302,14 +354,23 @@ export function brandFooter(
           .filter((value) => value.length > 0)
           .join(' · ')
         if (statusLine) {
-          lines.push(renderRow(safeWidth, [{ text: statusLine, style: (text) => theme.fg('dim', text) }]))
+          lines.push(
+            renderRow(safeWidth, [
+              { text: statusLine, style: (text) => theme.fg('dim', text) },
+            ]),
+          )
         }
         return lines
       } catch {
         // A footer must never take the session down; a minimal brand row is
         // better than a stack trace in the status area.
         return [
-          renderRow(safeWidth, [{ text: `${GLYPH} MBForge`, style: (text) => theme.fg('accent', text) }]),
+          renderRow(safeWidth, [
+            {
+              text: `${GLYPH} MBForge`,
+              style: (text) => theme.fg('accent', text),
+            },
+          ]),
         ]
       }
     },

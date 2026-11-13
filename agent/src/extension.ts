@@ -1,11 +1,11 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent'
 import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 
-import {
-  BACKEND_TOOL_NAMES,
-  registerBackendTool,
-} from './backendTool.js'
+import { BACKEND_TOOL_NAMES, registerBackendTool } from './backendTool.js'
 import {
   backendLabel,
   brandHeader,
@@ -39,7 +39,8 @@ import {
   type EvidenceLocation,
 } from './citations.js'
 import { linkifyUiLinks } from './uiLinks.js'
-import { registerEndpointCommand } from './endpoint.js'
+import { errorMessage } from './text.js'
+import { registerEndpointCommand } from './endpointCommand.js'
 import {
   ensureMemoryFile,
   MEMORY_TOOL_NAMES,
@@ -78,14 +79,15 @@ import {
   listReviewJobs,
   retryReviewJob,
 } from './reviewQueue.js'
-import {
-  ReviewNoticeQueue,
-  type ReviewNotice,
-} from './reviewNotices.js'
+import { ReviewNoticeQueue, type ReviewNotice } from './reviewNotices.js'
 import { createRunNotifier, createRunWatcher } from './runs.js'
 import { DEV_MODE_TOOL_NAMES, registerDevModeTool } from './devMode.js'
 import { ASK_TOOL_NAME, ASK_TOOL_NAMES, registerAskTool } from './ask.js'
-import { DRAFT_TOOL_NAME, DRAFT_TOOL_NAMES, registerDraftTool } from './draft.js'
+import {
+  DRAFT_TOOL_NAME,
+  DRAFT_TOOL_NAMES,
+  registerDraftTool,
+} from './draft.js'
 import {
   RESEARCH_TOOL_NAME,
   RESEARCH_TOOL_NAMES,
@@ -143,7 +145,9 @@ async function surfaceBehavioralRegressions(): Promise<void> {
   if (failures.length === 0) return
   const state = await readWorkState()
   const openTitles = new Set(
-    state.threads.filter((thread) => thread.status === 'open').map((thread) => thread.title),
+    state.threads
+      .filter((thread) => thread.status === 'open')
+      .map((thread) => thread.title),
   )
   for (const failure of failures.slice(0, 5)) {
     const title = `behavioral regression: ${failure.file}`
@@ -222,8 +226,12 @@ function capabilityContext(
     )
   }
   const mutating = new Set(mutatingNames)
-  const readNames = tools.filter((tool) => !mutating.has(tool.name)).map((tool) => tool.name)
-  const writeNames = tools.filter((tool) => mutating.has(tool.name)).map((tool) => tool.name)
+  const readNames = tools
+    .filter((tool) => !mutating.has(tool.name))
+    .map((tool) => tool.name)
+  const writeNames = tools
+    .filter((tool) => mutating.has(tool.name))
+    .map((tool) => tool.name)
   const localNote =
     localTools.length > 0
       ? ` Local tools (${localTools.join(', ')}) manage agent-local state, not library data; work_state action=check additionally reads linked run/review/document status read-only to reconcile follow-ups.`
@@ -259,7 +267,9 @@ function capabilityContext(
  * zero tools so pi still opens for provider login; the header reports the
  * offline state.
  */
-export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> {
+export default async function mbforgeExtension(
+  pi: ExtensionAPI,
+): Promise<void> {
   if (process.env.MBFORGE_RESEARCH_CHILD === '1') {
     await registerResearchChild(pi)
     return
@@ -269,7 +279,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   try {
     await ensureMemoryFile()
   } catch (error) {
-    memoryError = error instanceof Error ? error.message : String(error)
+    memoryError = errorMessage(error)
   }
 
   const runNotifier = createRunNotifier(pi)
@@ -306,7 +316,12 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     isError: boolean,
     ctx: ExtensionContext,
   ): void => {
-    loopTail.push({ tool, inputDigest, status: isError ? 'error' : 'ok', at: '' })
+    loopTail.push({
+      tool,
+      inputDigest,
+      status: isError ? 'error' : 'ok',
+      at: '',
+    })
     if (loopTail.length > LOOP_WINDOW) loopTail = loopTail.slice(-LOOP_WINDOW)
     const loop = detectNoProgress(loopTail, LOOP_THRESHOLD)
     if (!loop) {
@@ -327,7 +342,9 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     backend: backendLabel(backendBaseUrl()),
     online: capabilityToolset.loadError === undefined,
     toolCount: capabilityToolset.tools.length,
-    localToolCount: usesBuiltinTools(sessionMode) ? BUILTIN_TOOL_NAMES.length : 0,
+    localToolCount: usesBuiltinTools(sessionMode)
+      ? BUILTIN_TOOL_NAMES.length
+      : 0,
   }
 
   pi.registerMessageRenderer(GOAL_REVIEW_MESSAGE_TYPE, goalReviewRenderer)
@@ -407,7 +424,9 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     pi.setActiveTools([...next])
     state.toolCount = capability.length
     state.online = capabilityToolset.loadError === undefined
-    state.localToolCount = usesBuiltinTools(sessionMode) ? BUILTIN_TOOL_NAMES.length : 0
+    state.localToolCount = usesBuiltinTools(sessionMode)
+      ? BUILTIN_TOOL_NAMES.length
+      : 0
     if (!state.online) state.queue = undefined
   }
 
@@ -418,13 +437,24 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     applyActiveTools()
     refreshBrand(ctx)
     if (result.ok) {
-      notifyLive(ctx, `MBForge capabilities reloaded (${result.count} tools)`, 'info')
+      notifyLive(
+        ctx,
+        `MBForge capabilities reloaded (${result.count} tools)`,
+        'info',
+      )
     } else {
-      notifyLive(ctx, `MBForge capability reload failed: ${result.error}`, 'warning')
+      notifyLive(
+        ctx,
+        `MBForge capability reload failed: ${result.error}`,
+        'warning',
+      )
     }
   }
 
-  function formatReviewNotice(job: GoalReviewJob, result: Awaited<ReturnType<typeof runReview>>): string {
+  function formatReviewNotice(
+    job: GoalReviewJob,
+    result: Awaited<ReturnType<typeof runReview>>,
+  ): string {
     const suggestions = result.improvements
       .map((item) => `- ${item.title}`)
       .join('\n')
@@ -445,7 +475,10 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       .join('\n')
   }
 
-  function deliverReviewNotice(notice: ReviewNotice, ctx: ExtensionContext): void {
+  function deliverReviewNotice(
+    notice: ReviewNotice,
+    ctx: ExtensionContext,
+  ): void {
     pi.sendMessage(
       {
         customType: GOAL_REVIEW_MESSAGE_TYPE,
@@ -458,7 +491,10 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     if (notice.warning) ctx.ui.notify(notice.warning, 'warning')
   }
 
-  function publishReviewNotice(notice: ReviewNotice, ctx: ExtensionContext): void {
+  function publishReviewNotice(
+    notice: ReviewNotice,
+    ctx: ExtensionContext,
+  ): void {
     // A review outlives its turn: when the session behind `ctx` was replaced or
     // reloaded, hold the notice for the next settled point instead of writing to
     // a dead ctx.
@@ -503,7 +539,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
             ctx,
           )
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
+          const message = errorMessage(error)
           await failReviewJob(job.id, message)
           publishReviewNotice(
             {
@@ -527,7 +563,9 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
 
   function refreshBrand(ctx: ExtensionContext): void {
     ctx.ui.setHeader((_tui, theme) => brandHeader(theme, state))
-    ctx.ui.setFooter((_tui, theme, footerData) => brandFooter(theme, state, ctx, footerData))
+    ctx.ui.setFooter((_tui, theme, footerData) =>
+      brandFooter(theme, state, ctx, footerData),
+    )
     ctx.ui.setTitle(`MBForge · ${state.mode}`)
     refreshGoalWidget(ctx)
   }
@@ -552,7 +590,8 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
   // workbench markers into clickable frontend links. The session and model
   // context keep the original text.
   pi.registerMarkdownTransformer((markdown, context) => {
-    if (context.isStreaming || context.messageType !== 'assistant') return markdown
+    if (context.isStreaming || context.messageType !== 'assistant')
+      return markdown
     return linkifyUiLinks(linkifyCitations(markdown))
   })
 
@@ -678,8 +717,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     if (activeToolCalls === 0) ctx.ui.setWorkingMessage(WORKING_MESSAGE)
     if (event.toolName === 'get_worker_status' && !event.isError) {
       const result = event.result as
-        | { details?: { data?: unknown } }
-        | undefined
+        { details?: { data?: unknown } } | undefined
       const data = result?.details?.data
       if (typeof data === 'object' && data !== null) {
         const record = data as Record<string, unknown>
@@ -733,7 +771,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     })
     flushReviewNotices(ctx)
     void drainReviewQueue(ctx).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       notifyLive(ctx, `Goal review queue failed: ${message}`, 'error')
     })
     refreshBrand(ctx)
@@ -788,7 +826,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
     const start = tpsStart ?? Date.now()
     const seconds = (Date.now() - start) / 1000
     if (seconds >= 0.25) {
-      state.tps = (tpsChars / 4) / seconds
+      state.tps = tpsChars / 4 / seconds
       state.tpsLive = true
     }
   })
@@ -801,7 +839,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       state.tps = output / (duration / 1000)
     } else if (tpsStart !== undefined && tpsChars > 0) {
       const seconds = (Date.now() - tpsStart) / 1000
-      if (seconds > 0) state.tps = (tpsChars / 4) / seconds
+      if (seconds > 0) state.tps = tpsChars / 4 / seconds
     }
     state.tpsLive = false
     tpsStart = undefined
@@ -837,20 +875,24 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       refreshGoalWidget(ctx)
     }
     void drainReviewQueue(ctx).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       notifyLive(ctx, `Goal review queue failed: ${message}`, 'error')
     })
     flushReviewNotices(ctx)
   })
 
   pi.registerCommand('mbforge', {
-    description: 'Show or switch MBForge mode (auto|dev), or reload capabilities',
+    description:
+      'Show or switch MBForge mode (auto|dev), or reload capabilities',
     handler: async (args, ctx) => {
       const [action, value] = args.trim().split(/\s+/)
       if (action === 'mode') {
         const next = parseSessionMode(value ?? '')
         if (next === undefined) {
-          ctx.ui.notify('Usage: /mbforge mode auto|dev | /mbforge reload', 'warning')
+          ctx.ui.notify(
+            'Usage: /mbforge mode auto|dev | /mbforge reload',
+            'warning',
+          )
           return
         }
         enterMode(next, ctx)
@@ -867,7 +909,10 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         return
       }
       if (action) {
-        ctx.ui.notify('Usage: /mbforge mode auto|dev | /mbforge reload', 'warning')
+        ctx.ui.notify(
+          'Usage: /mbforge mode auto|dev | /mbforge reload',
+          'warning',
+        )
         return
       }
       if (capabilityToolset.loadError) {
@@ -878,8 +923,12 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
         return
       }
       const mutating = new Set(capabilityToolset.mutatingNames)
-      const readNames = capabilityToolset.tools.filter((tool) => !mutating.has(tool.name)).map((tool) => tool.name)
-      const writeNames = capabilityToolset.tools.filter((tool) => mutating.has(tool.name)).map((tool) => tool.name)
+      const readNames = capabilityToolset.tools
+        .filter((tool) => !mutating.has(tool.name))
+        .map((tool) => tool.name)
+      const writeNames = capabilityToolset.tools
+        .filter((tool) => mutating.has(tool.name))
+        .map((tool) => tool.name)
       ctx.ui.notify(
         [
           `⬡ MBForge · mode: ${sessionMode}`,
@@ -905,7 +954,10 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
       try {
         if (action === 'retry') {
           if (!id) {
-            ctx.ui.notify('Usage: /goal-reviews retry <review-id|goal-id>', 'warning')
+            ctx.ui.notify(
+              'Usage: /goal-reviews retry <review-id|goal-id>',
+              'warning',
+            )
             return
           }
           let review = await retryReviewJob(id)
@@ -933,7 +985,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
             )
           }
           void drainReviewQueue(ctx).catch((error) => {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = errorMessage(error)
             notifyLive(ctx, `Goal review queue failed: ${message}`, 'error')
           })
           return
@@ -968,7 +1020,7 @@ export default async function mbforgeExtension(pi: ExtensionAPI): Promise<void> 
           'info',
         )
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorMessage(error)
         ctx.ui.notify(`Goal review queue unavailable: ${message}`, 'error')
       }
     },

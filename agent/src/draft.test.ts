@@ -9,14 +9,21 @@ import test from 'node:test'
 import { checkDraft, listDrafts, readDraft, saveDraft } from './draft.js'
 
 test('python drafts get a syntax check and are never executed', async () => {
-  const marker = join(mkdtempSync(join(tmpdir(), 'mbforge-draft-run-')), 'ran.txt')
+  const marker = join(
+    mkdtempSync(join(tmpdir(), 'mbforge-draft-run-')),
+    'ran.txt',
+  )
   const result = await checkDraft(
     `from pathlib import Path\nPath(r"${marker}").write_text("executed")\n`,
   )
   const syntax = result.checks.find((check) => check.name === 'syntax')
   assert.ok(syntax)
   if (syntax.status !== 'unavailable') assert.equal(syntax.status, 'ok')
-  assert.equal(existsSync(marker), false, 'checkDraft must not execute the draft')
+  assert.equal(
+    existsSync(marker),
+    false,
+    'checkDraft must not execute the draft',
+  )
 
   const invalid = await checkDraft('def broken(:\n    pass\n')
   const invalidSyntax = invalid.checks.find((check) => check.name === 'syntax')
@@ -39,11 +46,21 @@ test('typescript, javascript and json get syntax checks; other languages are exp
 
   const js = await checkDraft('function f() { return 1 }\n', 'javascript')
   assert.equal(js.checks[0]?.name, 'javascript')
-  if (js.checks[0]?.status !== 'unavailable') assert.equal(js.checks[0]?.status, 'ok')
+  if (js.checks[0]?.status !== 'unavailable')
+    assert.equal(js.checks[0]?.status, 'ok')
 
-  assert.equal((await checkDraft('{"ok": true}\n', 'json')).checks[0]?.status, 'ok')
-  assert.equal((await checkDraft('{"ok":\n', 'json')).checks[0]?.status, 'error')
-  assert.equal((await checkDraft('select 1;\n', 'sql')).checks[0]?.status, 'unavailable')
+  assert.equal(
+    (await checkDraft('{"ok": true}\n', 'json')).checks[0]?.status,
+    'ok',
+  )
+  assert.equal(
+    (await checkDraft('{"ok":\n', 'json')).checks[0]?.status,
+    'error',
+  )
+  assert.equal(
+    (await checkDraft('select 1;\n', 'sql')).checks[0]?.status,
+    'unavailable',
+  )
 })
 
 test('saved drafts round-trip through list and read', async () => {

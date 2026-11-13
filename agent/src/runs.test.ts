@@ -2,7 +2,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createRunNotifier, createRunWatcher, type RunCompletion } from './runs.js'
+import {
+  createRunNotifier,
+  createRunWatcher,
+  type RunCompletion,
+} from './runs.js'
 
 interface SentMessage {
   message: { customType: string; content: unknown; details?: unknown }
@@ -180,7 +184,12 @@ test('a stalled poll times out and the watcher polls again', async () => {
           })
         }
         return Promise.resolve(
-          jsonResponse({ run_id: 'run-stall', doc_id: 'doc-1', status: 'done', nodes: [] }),
+          jsonResponse({
+            run_id: 'run-stall',
+            doc_id: 'doc-1',
+            status: 'done',
+            nodes: [],
+          }),
         )
       }) as unknown as typeof fetch,
     },
@@ -191,5 +200,8 @@ test('a stalled poll times out and the watcher polls again', async () => {
   watcher.stopAll()
 
   assert.equal(completed.length, 1)
-  assert.ok(polls >= 2, 'a hung request must not stop the watcher from retrying')
+  assert.ok(
+    polls >= 2,
+    'a hung request must not stop the watcher from retrying',
+  )
 })

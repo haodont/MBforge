@@ -101,8 +101,10 @@ function normalizeQuestion(question: AskQuestion): AskQuestion {
   }
   const seen = new Set<string>()
   for (const option of options) {
-    if (option.value === '') throw new Error('ask options need a non-empty value')
-    if (seen.has(option.value)) throw new Error(`ask option "${option.value}" is duplicated`)
+    if (option.value === '')
+      throw new Error('ask options need a non-empty value')
+    if (seen.has(option.value))
+      throw new Error(`ask option "${option.value}" is duplicated`)
     seen.add(option.value)
   }
   return {
@@ -201,7 +203,10 @@ class AskDialog implements Component {
     rows.push(
       renderSegments([
         { text: '⬡ ', style: (text) => this.theme.fg('accent', text) },
-        { text: 'MBForge', style: (text) => this.theme.bold(this.theme.fg('accent', text)) },
+        {
+          text: 'MBForge',
+          style: (text) => this.theme.bold(this.theme.fg('accent', text)),
+        },
         { text: ' · ', style: (text) => this.theme.fg('dim', text) },
         { text: kindLabel, style: (text) => this.theme.fg('muted', text) },
       ]),
@@ -210,7 +215,10 @@ class AskDialog implements Component {
     for (const line of wrapText(this.question.title, contentWidth)) {
       rows.push(
         renderSegments([
-          { text: line, style: (text) => this.theme.bold(this.theme.fg('text', text)) },
+          {
+            text: line,
+            style: (text) => this.theme.bold(this.theme.fg('text', text)),
+          },
         ]),
       )
     }
@@ -218,7 +226,13 @@ class AskDialog implements Component {
     if (message) {
       rows.push('')
       for (const line of wrapText(message, contentWidth)) {
-        rows.push(line === '' ? '' : renderSegments([{ text: line, style: (text) => this.theme.fg('muted', text) }]))
+        rows.push(
+          line === ''
+            ? ''
+            : renderSegments([
+                { text: line, style: (text) => this.theme.fg('muted', text) },
+              ]),
+        )
       }
     }
 
@@ -242,7 +256,12 @@ class AskDialog implements Component {
       const end = Math.min(options.length, start + OPTION_WINDOW)
       if (start > 0) {
         rows.push(
-          renderSegments([{ text: `… ${start} above`, style: (text) => this.theme.fg('dim', text) }]),
+          renderSegments([
+            {
+              text: `… ${start} above`,
+              style: (text) => this.theme.fg('dim', text),
+            },
+          ]),
         )
       }
       for (let index = start; index < end; index += 1) {
@@ -251,7 +270,10 @@ class AskDialog implements Component {
       if (end < options.length) {
         rows.push(
           renderSegments([
-            { text: `… ${options.length - end} below`, style: (text) => this.theme.fg('dim', text) },
+            {
+              text: `… ${options.length - end} below`,
+              style: (text) => this.theme.fg('dim', text),
+            },
           ]),
         )
       }
@@ -259,7 +281,9 @@ class AskDialog implements Component {
 
     rows.push('')
     rows.push(
-      renderSegments([{ text: this.hint(), style: (text) => this.theme.fg('dim', text) }]),
+      renderSegments([
+        { text: this.hint(), style: (text) => this.theme.fg('dim', text) },
+      ]),
     )
     return this.frame(total, contentWidth, rows)
   }
@@ -288,7 +312,10 @@ class AskDialog implements Component {
           : this.theme.fg(checked ? 'accent' : 'text', text),
     })
     if (option?.description) {
-      segments.push({ text: ` · ${option.description}`, style: (text) => this.theme.fg('dim', text) })
+      segments.push({
+        text: ` · ${option.description}`,
+        style: (text) => this.theme.fg('dim', text),
+      })
     }
     return renderSegments(segments)
   }
@@ -311,7 +338,9 @@ class AskDialog implements Component {
     const bottom = border(`╰${'─'.repeat(total - 2)}╯`)
     const body = rows.map((row) => {
       const clipped = truncateToWidth(row, contentWidth, '…')
-      const padding = ' '.repeat(Math.max(0, contentWidth - visibleWidth(clipped)))
+      const padding = ' '.repeat(
+        Math.max(0, contentWidth - visibleWidth(clipped)),
+      )
       return `${border('│')} ${clipped}${padding} ${border('│')}`
     })
     return [top, ...body, bottom]
@@ -332,7 +361,10 @@ class AskDialog implements Component {
   private move(delta: number): void {
     const count = this.question.options?.length ?? 0
     if (count === 0) return
-    this.selectedIndex = Math.min(count - 1, Math.max(0, this.selectedIndex + delta))
+    this.selectedIndex = Math.min(
+      count - 1,
+      Math.max(0, this.selectedIndex + delta),
+    )
   }
 
   private toggle(): void {
@@ -353,7 +385,8 @@ class AskDialog implements Component {
       ...this.base(),
       answer: option.value,
       answer_label: option.label ?? option.value,
-      confirmed: this.question.kind === 'confirm' ? this.selectedIndex === 0 : null,
+      confirmed:
+        this.question.kind === 'confirm' ? this.selectedIndex === 0 : null,
     })
   }
 
@@ -368,22 +401,30 @@ class AskDialog implements Component {
 }
 
 /** Fallback for RPC/headless sessions and tests without the custom dialog. */
-async function fallbackAsk(ctx: ExtensionContext, question: AskQuestion): Promise<AskAnswer> {
+async function fallbackAsk(
+  ctx: ExtensionContext,
+  question: AskQuestion,
+): Promise<AskAnswer> {
   if (question.kind === 'confirm') {
-    const approved = await ctx.ui.confirm(question.title, question.message ?? '')
+    const approved = await ctx.ui.confirm(
+      question.title,
+      question.message ?? '',
+    )
     return {
       kind: 'confirm',
       title: question.title,
       answer: approved ? 'yes' : 'no',
       answer_label: approved
-        ? question.options?.[0]?.label ?? 'Yes'
-        : question.options?.[1]?.label ?? 'No',
+        ? (question.options?.[0]?.label ?? 'Yes')
+        : (question.options?.[1]?.label ?? 'No'),
       confirmed: approved,
       selected: [],
       cancelled: false,
     }
   }
-  const prompt = question.message ? `${question.title}\n${question.message}` : question.title
+  const prompt = question.message
+    ? `${question.title}\n${question.message}`
+    : question.title
   if (question.kind === 'select') {
     const options = question.options ?? []
     const labels = options.map((option) => option.label ?? option.value)
@@ -428,12 +469,15 @@ export async function askUser(
   question: AskQuestion,
 ): Promise<AskAnswer> {
   if (!ctx.hasUI) {
-    throw new Error('ask needs an interactive session; no question dialog is available')
+    throw new Error(
+      'ask needs an interactive session; no question dialog is available',
+    )
   }
   const normalized = normalizeQuestion(question)
   if (ctx.mode === 'tui' && typeof ctx.ui.custom === 'function') {
     return ctx.ui.custom<AskAnswer>(
-      (_tui, theme, _keybindings, done) => new AskDialog(normalized, theme, done),
+      (_tui, theme, _keybindings, done) =>
+        new AskDialog(normalized, theme, done),
       { blocked: { kind: 'question', message: normalized.title } },
     )
   }
@@ -485,13 +529,15 @@ const askParameters = Type.Object({
   ),
   options: Type.Optional(
     Type.Array(askOptionParameters, {
-      description: 'Required for select and multi_select; ignored for confirm and text.',
+      description:
+        'Required for select and multi_select; ignored for confirm and text.',
       maxItems: OPTION_WINDOW,
     }),
   ),
   placeholder: Type.Optional(
     Type.String({
-      description: 'For text: grey placeholder, such as a file name or a format example.',
+      description:
+        'For text: grey placeholder, such as a file name or a format example.',
       maxLength: 160,
     }),
   ),
@@ -502,10 +548,16 @@ const askParameters = Type.Object({
     }),
   ),
   confirm_label: Type.Optional(
-    Type.String({ description: 'For confirm: label of the positive choice.', maxLength: 40 }),
+    Type.String({
+      description: 'For confirm: label of the positive choice.',
+      maxLength: 40,
+    }),
   ),
   cancel_label: Type.Optional(
-    Type.String({ description: 'For confirm: label of the negative choice.', maxLength: 40 }),
+    Type.String({
+      description: 'For confirm: label of the negative choice.',
+      maxLength: 40,
+    }),
   ),
 })
 

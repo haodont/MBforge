@@ -20,9 +20,7 @@ export class ReviewNoticeQueue {
 
   /** Drop a held notice whose review is being retried. */
   remove(reviewId: string): void {
-    this.pending = this.pending.filter(
-      (notice) => notice.reviewId !== reviewId,
-    )
+    this.pending = this.pending.filter((notice) => notice.reviewId !== reviewId)
   }
 
   /** Pop notices only when no foreground goal owns the session. */

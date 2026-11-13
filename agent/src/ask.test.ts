@@ -132,7 +132,12 @@ test('the ask tool validates options and returns the answer as details', async (
   const h = harness()
   const result = await registered.execute(
     'call-1',
-    { kind: 'confirm', title: 'Proceed?', confirm_label: 'Go', cancel_label: 'Stop' },
+    {
+      kind: 'confirm',
+      title: 'Proceed?',
+      confirm_label: 'Go',
+      cancel_label: 'Stop',
+    },
     undefined,
     undefined,
     h.ctx,

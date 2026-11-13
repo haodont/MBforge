@@ -28,9 +28,17 @@ test('research child loads the extension read-only, inherits the model, and keep
   const modelIndex = args.indexOf('--model')
   assert.equal(args[modelIndex + 1], 'custom/gpt-x')
   assert.ok(args.includes('--append-system-prompt'))
-  assert.equal(args.includes('Compare X'), false, 'the question travels over stdin, not argv')
+  assert.equal(
+    args.includes('Compare X'),
+    false,
+    'the question travels over stdin, not argv',
+  )
 
-  const bare = buildResearchArgs({ cwd: 'C:/repo', question: 'q', systemPrompt: 'sys' })
+  const bare = buildResearchArgs({
+    cwd: 'C:/repo',
+    question: 'q',
+    systemPrompt: 'sys',
+  })
   assert.equal(bare.includes('--model'), false)
   assert.equal(bare.includes('--tools'), false)
 })
@@ -38,7 +46,13 @@ test('research child loads the extension read-only, inherits the model, and keep
 test('runResearch appends focus and returns the trimmed finding', async () => {
   let captured: ResearchRunnerInput | undefined
   const answer = await runResearch(
-    { cwd: 'C:/repo', question: 'Compare X', focus: 'doc A', model: 'custom/gpt-x', tools: ['search_library'] },
+    {
+      cwd: 'C:/repo',
+      question: 'Compare X',
+      focus: 'doc A',
+      model: 'custom/gpt-x',
+      tools: ['search_library'],
+    },
     async (input) => {
       captured = input
       return '  finding  '
@@ -48,7 +62,10 @@ test('runResearch appends focus and returns the trimmed finding', async () => {
   assert.match(captured?.question ?? '', /Compare X\n\nFocus: doc A/)
   assert.equal(captured?.model, 'custom/gpt-x')
   assert.deepEqual(captured?.tools, ['search_library'])
-  assert.match(captured?.systemPrompt ?? '', /read-only library research subagent/)
+  assert.match(
+    captured?.systemPrompt ?? '',
+    /read-only library research subagent/,
+  )
 })
 
 test('research fans out sub-questions to bounded concurrent workers, preserving order and tolerating a failed worker', async () => {
@@ -85,7 +102,11 @@ test('research fans out sub-questions to bounded concurrent workers, preserving 
     'task order preserved',
   )
   assert.equal(findings[0].answer, 'finding for q1', 'finding trimmed')
-  assert.match(findings[1].error ?? '', /worker exploded/, 'failed worker surfaced, not thrown')
+  assert.match(
+    findings[1].error ?? '',
+    /worker exploded/,
+    'failed worker surfaced, not thrown',
+  )
   assert.equal(findings[1].answer, undefined)
   assert.equal(findings[2].focus, 'doc A', 'focus carried through')
   assert.equal(peak, 2, 'concurrency bounded to the cap and actually parallel')
@@ -106,13 +127,19 @@ test('the research child registers and activates only read-only capabilities', a
             name: 'search_library',
             description: 'read',
             mutating: false,
-            input_schema: { type: 'object', properties: { query: { type: 'string' } } },
+            input_schema: {
+              type: 'object',
+              properties: { query: { type: 'string' } },
+            },
           },
           {
             name: 'update_record',
             description: 'write',
             mutating: true,
-            input_schema: { type: 'object', properties: { id: { type: 'string' } } },
+            input_schema: {
+              type: 'object',
+              properties: { id: { type: 'string' } },
+            },
           },
         ],
       }),
@@ -121,7 +148,9 @@ test('the research child registers and activates only read-only capabilities', a
 
   const registered: string[] = []
   let active: string[] = []
-  let handler: ((event: { systemPrompt: string }) => Promise<{ systemPrompt: string }>) | undefined
+  let handler:
+    | ((event: { systemPrompt: string }) => Promise<{ systemPrompt: string }>)
+    | undefined
   const pi = {
     registerTool: (tool: { name: string }) => {
       registered.push(tool.name)
@@ -135,10 +164,17 @@ test('the research child registers and activates only read-only capabilities', a
   } as unknown as ExtensionAPI
 
   await registerResearchChild(pi)
-  assert.deepEqual(registered, ['search_library'], 'the mutating capability is never registered')
+  assert.deepEqual(
+    registered,
+    ['search_library'],
+    'the mutating capability is never registered',
+  )
   assert.deepEqual(active, ['search_library'])
   assert.ok(handler)
   const result = await handler({ systemPrompt: 'base' })
-  assert.match(result.systemPrompt, /Read-only library capabilities \(1\): search_library/)
+  assert.match(
+    result.systemPrompt,
+    /Read-only library capabilities \(1\): search_library/,
+  )
   assert.match(result.systemPrompt, /do not write or spawn subagents/)
 })

@@ -7,12 +7,10 @@ import {
   setMemoryRuntime,
   type MemoryType,
 } from './memory.js'
-import {
-  IMPROVEMENT_AREAS,
-  type ImprovementArea,
-} from './improvements.js'
+import { IMPROVEMENT_AREAS, type ImprovementArea } from './improvements.js'
 import { addWorkThread } from './workState.js'
 import { projectCwd, spawnPiText } from './piChild.js'
+import { errorMessage } from './text.js'
 import { toolRenderers } from './toolRender.js'
 
 const MAX_MESSAGE_CHARS = 2_500
@@ -123,7 +121,7 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function clip(value: string, max: number): string {
+function clipMultiline(value: string, max: number): string {
   const single = value.replace(/\r\n?/g, '\n').trim()
   return single.length > max ? `${single.slice(0, max - 1)}…` : single
 }
@@ -181,7 +179,7 @@ function transcriptRows(branch: readonly unknown[]): TranscriptRow[] {
     const toolName = text(message.toolName)
     const label = toolName ? `${role}:${toolName}` : role
     const body = contentText(message.content)
-      .map((part) => clip(part, MAX_MESSAGE_CHARS))
+      .map((part) => clipMultiline(part, MAX_MESSAGE_CHARS))
       .filter((part) => part !== '')
       .join('\n')
     if (body) rows.push({ role, text: `### ${label}\n${body}` })
@@ -221,7 +219,11 @@ export function collectTranscript(branch: readonly unknown[]): string {
 
   // Keep recent user turns (clarifications) before spending on tool output.
   let userBudget = Math.min(budget, Math.floor(MAX_TRANSCRIPT_CHARS * 0.45))
-  for (let index = userIndexes.length - 1; index >= 0 && userBudget > 0; index -= 1) {
+  for (
+    let index = userIndexes.length - 1;
+    index >= 0 && userBudget > 0;
+    index -= 1
+  ) {
     const rowIndex = userIndexes[index]
     if (selected.has(rowIndex)) continue
     const used = take(rowIndex, userBudget)
@@ -273,7 +275,7 @@ export function parseReviewReport(raw: string): ReviewReport {
   const parsed = parseJsonObject(raw)
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return {
-      summary: clip(raw, 4_000) || 'reviewer returned no output',
+      summary: clipMultiline(raw, 4_000) || 'reviewer returned no output',
       lessons: [],
       improvements: [],
       follow_ups: [],
@@ -282,13 +284,14 @@ export function parseReviewReport(raw: string): ReviewReport {
   }
 
   const report = parsed as Record<string, unknown>
-  const summary = clip(text(report.summary), 4_000)
+  const summary = clipMultiline(text(report.summary), 4_000)
   const lessons: ReviewLesson[] = []
   if (Array.isArray(report.lessons)) {
     for (const row of report.lessons.slice(0, MAX_LESSONS)) {
-      if (typeof row !== 'object' || row === null || Array.isArray(row)) continue
+      if (typeof row !== 'object' || row === null || Array.isArray(row))
+        continue
       const rowRecord = row as Record<string, unknown>
-      const content = clip(text(rowRecord.content), 2_000)
+      const content = clipMultiline(text(rowRecord.content), 2_000)
       if (!content) continue
       const typeValue = text(rowRecord.type)
       const type = (MEMORY_TYPES as readonly string[]).includes(typeValue)
@@ -301,11 +304,12 @@ export function parseReviewReport(raw: string): ReviewReport {
   const improvements: ReviewImprovement[] = []
   if (Array.isArray(report.improvements)) {
     for (const row of report.improvements.slice(0, MAX_IMPROVEMENTS)) {
-      if (typeof row !== 'object' || row === null || Array.isArray(row)) continue
+      if (typeof row !== 'object' || row === null || Array.isArray(row))
+        continue
       const rowRecord = row as Record<string, unknown>
-      const title = clip(text(rowRecord.title), 120)
-      const problem = clip(text(rowRecord.problem), 4_000)
-      const change = clip(text(rowRecord.change), 4_000)
+      const title = clipMultiline(text(rowRecord.title), 120)
+      const problem = clipMultiline(text(rowRecord.problem), 4_000)
+      const change = clipMultiline(text(rowRecord.change), 4_000)
       if (!title || !problem || !change) continue
       const areaValue = text(rowRecord.area)
       const area = (IMPROVEMENT_AREAS as readonly string[]).includes(areaValue)
@@ -322,8 +326,8 @@ export function parseReviewReport(raw: string): ReviewReport {
         area,
         problem,
         change,
-        rationale: clip(text(rowRecord.rationale), 4_000),
-        risk: clip(text(rowRecord.risk), 1_000),
+        rationale: clipMultiline(text(rowRecord.rationale), 4_000),
+        risk: clipMultiline(text(rowRecord.risk), 1_000),
         files,
       })
     }
@@ -332,16 +336,24 @@ export function parseReviewReport(raw: string): ReviewReport {
   const follow_ups: ReviewFollowUp[] = []
   if (Array.isArray(report.follow_ups)) {
     for (const row of report.follow_ups.slice(0, MAX_FOLLOW_UPS)) {
-      if (typeof row !== 'object' || row === null || Array.isArray(row)) continue
+      if (typeof row !== 'object' || row === null || Array.isArray(row))
+        continue
       const rowRecord = row as Record<string, unknown>
-      const title = clip(text(rowRecord.title), 160)
+      const title = clipMultiline(text(rowRecord.title), 160)
       if (!title) continue
-      follow_ups.push({ title, detail: clip(text(rowRecord.detail), 1_000) })
+      follow_ups.push({
+        title,
+        detail: clipMultiline(text(rowRecord.detail), 1_000),
+      })
     }
   }
 
   if (!summary) warnings.push('reviewer omitted the summary')
-  if (lessons.length === 0 && improvements.length === 0 && follow_ups.length === 0) {
+  if (
+    lessons.length === 0 &&
+    improvements.length === 0 &&
+    follow_ups.length === 0
+  ) {
     warnings.push('reviewer returned no lessons or improvements')
   }
   return { summary, lessons, improvements, follow_ups, warnings }
@@ -354,8 +366,7 @@ export function parseReviewReport(raw: string): ReviewReport {
  */
 export function finalAssistantText(raw: string): string {
   let last:
-    | { text: string; stopReason: string; errorMessage?: string }
-    | undefined
+    { text: string; stopReason: string; errorMessage?: string } | undefined
   for (const line of raw.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
@@ -399,7 +410,9 @@ export function finalAssistantText(raw: string): string {
     throw new Error('review subagent response was truncated')
   }
   if (last.stopReason === 'toolUse') {
-    throw new Error('review subagent stopped on a tool call without a final answer')
+    throw new Error(
+      'review subagent stopped on a tool call without a final answer',
+    )
   }
   if (!last.text.trim()) {
     throw new Error('review subagent returned no text')
@@ -446,7 +459,12 @@ export const spawnReviewer: ReviewRunner = async (input) => {
 
 /** Run the reviewer and persist its durable lessons through the local memory tool. */
 export async function runReview(
-  input: { cwd: string; transcript: string; signal?: AbortSignal; model?: string },
+  input: {
+    cwd: string
+    transcript: string
+    signal?: AbortSignal
+    model?: string
+  },
   runner: ReviewRunner = spawnReviewer,
 ): Promise<ReviewResult> {
   const cwd = projectCwd(input.cwd)
@@ -463,11 +481,13 @@ export async function runReview(
   for (const lesson of report.lessons) {
     try {
       const result = await appendHotMemory(lesson.content, lesson.type)
-      memories.push({ id: result.id, type: result.type, content: lesson.content })
+      memories.push({
+        id: result.id,
+        type: result.type,
+        content: lesson.content,
+      })
     } catch (error) {
-      warnings.push(
-        `memory write failed: ${error instanceof Error ? error.message : String(error)}`,
-      )
+      warnings.push(`memory write failed: ${errorMessage(error)}`)
     }
   }
   // Route pending research actions to the durable work ledger (background-safe).
@@ -481,9 +501,7 @@ export async function runReview(
       })
       follow_ups.push(followUp)
     } catch (error) {
-      warnings.push(
-        `work_state write failed: ${error instanceof Error ? error.message : String(error)}`,
-      )
+      warnings.push(`work_state write failed: ${errorMessage(error)}`)
     }
   }
   return { ...report, follow_ups, memories, warnings }
@@ -520,9 +538,13 @@ export function reviewTaskTool() {
       const result = await runReview(
         {
           cwd: ctx.cwd,
-          transcript: focus ? `${transcript}\n\nReviewer focus: ${focus}` : transcript,
+          transcript: focus
+            ? `${transcript}\n\nReviewer focus: ${focus}`
+            : transcript,
           signal,
-          model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
+          model: ctx.model
+            ? `${ctx.model.provider}/${ctx.model.id}`
+            : undefined,
         },
         spawnReviewer,
       )

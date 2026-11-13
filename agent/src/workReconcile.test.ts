@@ -22,14 +22,20 @@ function useTempWorkState(t: test.TestContext): void {
 
 type Handler = (payload: Record<string, unknown>) => unknown
 
-function stubFetch(t: test.TestContext, handlers: Record<string, Handler>): void {
+function stubFetch(
+  t: test.TestContext,
+  handlers: Record<string, Handler>,
+): void {
   const original = globalThis.fetch
   t.after(() => {
     globalThis.fetch = original
   })
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const name = String(input).split('/api/v1/capabilities/')[1]
-    const payload = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+    const payload = JSON.parse(String(init?.body ?? '{}')) as Record<
+      string,
+      unknown
+    >
     const data = handlers[name]?.(payload)
     if (data === undefined) {
       return new Response(JSON.stringify({ success: false }), { status: 500 })
@@ -47,7 +53,12 @@ test('check reconciles linked follow_ups against server status', async (t) => {
     runs: (payload) => {
       const id = String(payload.run_id)
       if (id === 'run-error') return undefined // unreachable
-      const status = id === 'run-done' ? 'done' : id === 'run-failed' ? 'failed' : 'processing'
+      const status =
+        id === 'run-done'
+          ? 'done'
+          : id === 'run-failed'
+            ? 'failed'
+            : 'processing'
       return { status, nodes: [] }
     },
     list_review_queue: () => ({
@@ -59,17 +70,49 @@ test('check reconciles linked follow_ups against server status', async (t) => {
     document_read: () => ({ status: 'extracted' }),
   })
 
-  const done = await addWorkThread({ kind: 'follow_up', title: 'await extract', link: { kind: 'run', id: 'run-done' } })
-  const failed = await addWorkThread({ kind: 'follow_up', title: 'await patent', link: { kind: 'run', id: 'run-failed' } })
-  const confirmed = await addWorkThread({ kind: 'follow_up', title: 'await review', link: { kind: 'review', id: 'rev-confirmed', sub: 'ai_review' } })
-  const pending = await addWorkThread({ kind: 'follow_up', title: 'await decision', link: { kind: 'review', id: 'rev-pending', sub: 'ai_review' } })
-  const doc = await addWorkThread({ kind: 'follow_up', title: 'await import', link: { kind: 'document', id: 'doc-x' } })
-  const unreachable = await addWorkThread({ kind: 'follow_up', title: 'await gone', link: { kind: 'run', id: 'run-error' } })
+  const done = await addWorkThread({
+    kind: 'follow_up',
+    title: 'await extract',
+    link: { kind: 'run', id: 'run-done' },
+  })
+  const failed = await addWorkThread({
+    kind: 'follow_up',
+    title: 'await patent',
+    link: { kind: 'run', id: 'run-failed' },
+  })
+  const confirmed = await addWorkThread({
+    kind: 'follow_up',
+    title: 'await review',
+    link: { kind: 'review', id: 'rev-confirmed', sub: 'ai_review' },
+  })
+  const pending = await addWorkThread({
+    kind: 'follow_up',
+    title: 'await decision',
+    link: { kind: 'review', id: 'rev-pending', sub: 'ai_review' },
+  })
+  const doc = await addWorkThread({
+    kind: 'follow_up',
+    title: 'await import',
+    link: { kind: 'document', id: 'doc-x' },
+  })
+  const unreachable = await addWorkThread({
+    kind: 'follow_up',
+    title: 'await gone',
+    link: { kind: 'run', id: 'run-error' },
+  })
   // A hypothesis with a link is not a follow_up: check must ignore it.
-  const hypothesis = await addWorkThread({ kind: 'hypothesis', title: 'idea', link: { kind: 'run', id: 'run-done' } })
+  const hypothesis = await addWorkThread({
+    kind: 'hypothesis',
+    title: 'idea',
+    link: { kind: 'run', id: 'run-done' },
+  })
 
   const results = await reconcileWorkThreads()
-  assert.equal(results.length, 6, 'only open follow_ups with a link are checked')
+  assert.equal(
+    results.length,
+    6,
+    'only open follow_ups with a link are checked',
+  )
 
   const byId = new Map(results.map((result) => [result.id, result]))
   assert.equal(byId.get(done.id)?.outcome, 'closed')
@@ -81,15 +124,29 @@ test('check reconciles linked follow_ups against server status', async (t) => {
   assert.equal(byId.get(unreachable.id)?.outcome, 'unreachable')
 
   const state = await readWorkState()
-  const statusOf = (id: string) => state.threads.find((thread) => thread.id === id)?.status
+  const statusOf = (id: string) =>
+    state.threads.find((thread) => thread.id === id)?.status
   assert.equal(statusOf(done.id), 'done', 'a done run closes its follow_up')
-  assert.equal(statusOf(failed.id), 'open', 'a failed run needs the model, stays open')
+  assert.equal(
+    statusOf(failed.id),
+    'open',
+    'a failed run needs the model, stays open',
+  )
   assert.equal(statusOf(confirmed.id), 'done')
   assert.equal(statusOf(pending.id), 'open')
-  assert.equal(statusOf(hypothesis.id), 'open', 'a non-follow_up is never auto-closed')
+  assert.equal(
+    statusOf(hypothesis.id),
+    'open',
+    'a non-follow_up is never auto-closed',
+  )
   // The check annotates the thread so the next session sees the last result.
-  assert.match(state.threads.find((thread) => thread.id === failed.id)?.check_note ?? '', /failed/)
-  assert.ok(state.threads.find((thread) => thread.id === failed.id)?.last_checked)
+  assert.match(
+    state.threads.find((thread) => thread.id === failed.id)?.check_note ?? '',
+    /failed/,
+  )
+  assert.ok(
+    state.threads.find((thread) => thread.id === failed.id)?.last_checked,
+  )
 })
 
 test('check with no linked follow_ups is a no-op', async (t) => {

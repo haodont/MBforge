@@ -8,7 +8,12 @@ import { deflateSync, crc32 } from 'node:zlib'
 import { isImageLine } from '@earendil-works/pi-tui/dist/terminal-image.js'
 import { visibleWidth } from '@earendil-works/pi-tui/dist/utils.js'
 
-import { IMAGE_LINE_MARKER, decodePng, renderSixelLines, sixelSupported } from './terminalImage.js'
+import {
+  IMAGE_LINE_MARKER,
+  decodePng,
+  renderSixelLines,
+  sixelSupported,
+} from './terminalImage.js'
 
 /** A PNG whose first row uses filter 0 and the rest filter 2, so the decoder's
  *  unfiltering is exercised against a real stream rather than raw rows. */
@@ -29,7 +34,10 @@ function png(
       row.set([red, green, blue, alpha], x * 4)
     }
     for (let index = 0; index < stride; index++) {
-      raw[at + 1 + index] = y === 0 ? (row[index] as number) : ((row[index] as number) - (previous[index] as number)) & 0xff
+      raw[at + 1 + index] =
+        y === 0
+          ? (row[index] as number)
+          : ((row[index] as number) - (previous[index] as number)) & 0xff
     }
     previous = row
   }
@@ -56,11 +64,20 @@ function png(
 
 test('sixel is enabled only on terminals pi reports as image-less but that speak sixel', () => {
   assert.equal(sixelSupported({}), false)
-  assert.equal(sixelSupported({ WT_SESSION: '1', TERM_PROGRAM_VERSION: '1.22.0' }), true)
-  assert.equal(sixelSupported({ WT_SESSION: '1', TERM_PROGRAM_VERSION: '1.21.0' }), false)
+  assert.equal(
+    sixelSupported({ WT_SESSION: '1', TERM_PROGRAM_VERSION: '1.22.0' }),
+    true,
+  )
+  assert.equal(
+    sixelSupported({ WT_SESSION: '1', TERM_PROGRAM_VERSION: '1.21.0' }),
+    false,
+  )
   assert.equal(sixelSupported({ TERM: 'xterm-sixel' }), true)
   assert.equal(sixelSupported({ PI_IMAGE_PROTOCOL: 'sixel' }), true)
-  assert.equal(sixelSupported({ PI_IMAGE_PROTOCOL: 'none', TERM: 'xterm-sixel' }), false)
+  assert.equal(
+    sixelSupported({ PI_IMAGE_PROTOCOL: 'none', TERM: 'xterm-sixel' }),
+    false,
+  )
   // A Kitty terminal takes pi's own path; do not draw the same image twice.
   assert.equal(sixelSupported({ KITTY_WINDOW_ID: '1' }), false)
 })
@@ -78,20 +95,31 @@ test('a png with filtered rows and transparency decodes to the composited pixels
   for (let y = 0; y < 3; y++) {
     const at = y * 2 * 3
     assert.deepEqual([...image.pixels.subarray(at, at + 3)], [255, 0, 0])
-    assert.deepEqual([...image.pixels.subarray(at + 3, at + 6)], [255, 255, 255])
+    assert.deepEqual(
+      [...image.pixels.subarray(at + 3, at + 6)],
+      [255, 255, 255],
+    )
   }
 })
 
 test('a rendered image becomes one sixel line pi will not slice, over reserved rows', () => {
   const data = png(40, 30, (x) => (x < 20 ? [0, 0, 0] : [255, 255, 255]))
-  const rendered = renderSixelLines(data, 'image/png', {}, { TERM: 'xterm-sixel' })
+  const rendered = renderSixelLines(
+    data,
+    'image/png',
+    {},
+    { TERM: 'xterm-sixel' },
+  )
   assert.ok(rendered, 'the image encodes')
   assert.equal(rendered.rows, 2, '30 px over an 18 px cell is two rows')
   assert.equal(rendered.lines.length, rendered.rows)
   assert.deepEqual(rendered.lines.slice(0, -1), [''])
 
   const drawn = rendered.lines.at(-1) as string
-  assert.ok(drawn.startsWith(`\x1b[${rendered.rows - 1}A${IMAGE_LINE_MARKER}\x1bPq`), drawn.slice(0, 40))
+  assert.ok(
+    drawn.startsWith(`\x1b[${rendered.rows - 1}A${IMAGE_LINE_MARKER}\x1bPq`),
+    drawn.slice(0, 40),
+  )
   assert.ok(drawn.endsWith('\x1b\\'))
   // pi slices every line wider than the terminal unless it is an image line;
   // the marker is the only reason this 40-column image survives at width 20.
@@ -101,9 +129,17 @@ test('a rendered image becomes one sixel line pi will not slice, over reserved r
 
 test('an oversized page render is scaled into the cell box instead of emitted at full width', () => {
   const data = png(400, 300, () => [0, 0, 0])
-  const rendered = renderSixelLines(data, 'image/png', {}, { TERM: 'xterm-sixel' })
+  const rendered = renderSixelLines(
+    data,
+    'image/png',
+    {},
+    { TERM: 'xterm-sixel' },
+  )
   assert.ok(rendered)
   assert.ok(rendered.columns <= 72)
   assert.ok(rendered.rows <= 24)
-  assert.equal(renderSixelLines(data, 'image/jpeg', {}, { TERM: 'xterm-sixel' }), null)
+  assert.equal(
+    renderSixelLines(data, 'image/jpeg', {}, { TERM: 'xterm-sixel' }),
+    null,
+  )
 })

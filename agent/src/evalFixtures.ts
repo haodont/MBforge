@@ -20,7 +20,8 @@ export function evalFixtureDir(): string {
 }
 
 function isTrajectory(value: unknown): value is Trajectory {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return false
   const record = value as Record<string, unknown>
   return typeof record.goalId === 'string' && Array.isArray(record.steps)
 }
@@ -33,7 +34,8 @@ async function pruneFixtures(directory: string): Promise<void> {
   const stats = await Promise.all(
     names.map(async (name) => ({
       name,
-      mtime: (await stat(join(directory, name)).catch(() => ({ mtimeMs: 0 }))).mtimeMs,
+      mtime: (await stat(join(directory, name)).catch(() => ({ mtimeMs: 0 })))
+        .mtimeMs,
     })),
   )
   stats.sort((left, right) => left.mtime - right.mtime)
@@ -69,7 +71,9 @@ export interface FixtureResult {
 }
 
 /** Load every valid stored trajectory (the raw experience for skill induction). */
-export async function loadFixtures(directory = evalFixtureDir()): Promise<Trajectory[]> {
+export async function loadFixtures(
+  directory = evalFixtureDir(),
+): Promise<Trajectory[]> {
   const names = (await readdir(directory).catch(() => []))
     .filter((name) => name.endsWith('.json'))
     .sort()
@@ -86,7 +90,9 @@ export async function loadFixtures(directory = evalFixtureDir()): Promise<Trajec
  * fixtures that violate an invariant. An absent or empty directory yields [],
  * so the regression gate is a no-op until real runs accumulate.
  */
-export async function sweepFixtures(directory = evalFixtureDir()): Promise<FixtureResult[]> {
+export async function sweepFixtures(
+  directory = evalFixtureDir(),
+): Promise<FixtureResult[]> {
   const names = (await readdir(directory).catch(() => []))
     .filter((name) => name.endsWith('.json'))
     .sort()

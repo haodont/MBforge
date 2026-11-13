@@ -51,7 +51,9 @@ export interface BackendRecord {
 }
 
 /** Backend address used by the extension and by the auto-start probe. */
-export function backendAddress(env: NodeJS.ProcessEnv = process.env): BackendAddress {
+export function backendAddress(
+  env: NodeJS.ProcessEnv = process.env,
+): BackendAddress {
   const explicit = env.MBFORGE_BACKEND_URL
   if (explicit) {
     const url = new URL(explicit)
@@ -74,7 +76,9 @@ export function backendAddress(env: NodeJS.ProcessEnv = process.env): BackendAdd
 }
 
 function isLocalHost(host: string): boolean {
-  return ['127.0.0.1', 'localhost', '::1', '[::1]', '0.0.0.0'].includes(host.toLowerCase())
+  return ['127.0.0.1', 'localhost', '::1', '[::1]', '0.0.0.0'].includes(
+    host.toLowerCase(),
+  )
 }
 
 /**
@@ -93,13 +97,20 @@ export async function probeBackend(baseUrl: string): Promise<BackendState> {
     // A timeout means something is listening but not answering; do not race a
     // second backend onto the same port.
     const name = (error as { name?: string } | undefined)?.name
-    return name === 'TimeoutError' || name === 'AbortError' ? 'occupied' : 'offline'
+    return name === 'TimeoutError' || name === 'AbortError'
+      ? 'occupied'
+      : 'offline'
   }
 
   if (!response.ok) return 'occupied'
   try {
-    const payload = (await response.json()) as { success?: unknown; capabilities?: unknown }
-    return payload?.success === true && Array.isArray(payload.capabilities) ? 'ready' : 'occupied'
+    const payload = (await response.json()) as {
+      success?: unknown
+      capabilities?: unknown
+    }
+    return payload?.success === true && Array.isArray(payload.capabilities)
+      ? 'ready'
+      : 'occupied'
   } catch {
     return 'occupied'
   }
@@ -109,11 +120,21 @@ export function backendRecordPath(agentHome: string): string {
   return join(agentHome, RECORD_NAME)
 }
 
-export function readBackendRecord(agentHome: string): BackendRecord | undefined {
+export function readBackendRecord(
+  agentHome: string,
+): BackendRecord | undefined {
   try {
-    const parsed = readJsonFileSync(backendRecordPath(agentHome)) as Partial<BackendRecord> | undefined
-    if (!parsed || typeof parsed.pid !== 'number' || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return undefined
-    if (typeof parsed.port !== 'number' || typeof parsed.baseUrl !== 'string') return undefined
+    const parsed = readJsonFileSync(backendRecordPath(agentHome)) as
+      Partial<BackendRecord> | undefined
+    if (
+      !parsed ||
+      typeof parsed.pid !== 'number' ||
+      !Number.isInteger(parsed.pid) ||
+      parsed.pid <= 0
+    )
+      return undefined
+    if (typeof parsed.port !== 'number' || typeof parsed.baseUrl !== 'string')
+      return undefined
     return {
       pid: parsed.pid,
       host: typeof parsed.host === 'string' ? parsed.host : '127.0.0.1',
@@ -128,15 +149,24 @@ export function readBackendRecord(agentHome: string): BackendRecord | undefined 
 }
 
 /** Write the record atomically; a half-written file must never look like an owner. */
-export function writeBackendRecord(agentHome: string, record: BackendRecord): void {
-  atomicWriteSync(backendRecordPath(agentHome), `${JSON.stringify(record, null, 2)}\n`)
+export function writeBackendRecord(
+  agentHome: string,
+  record: BackendRecord,
+): void {
+  atomicWriteSync(
+    backendRecordPath(agentHome),
+    `${JSON.stringify(record, null, 2)}\n`,
+  )
 }
 
 export function clearBackendRecord(agentHome: string): void {
   rmSync(backendRecordPath(agentHome), { force: true })
 }
 
-function backendCommand(repoRoot: string): { command: string; prefixArgs: string[] } {
+function backendCommand(repoRoot: string): {
+  command: string
+  prefixArgs: string[]
+} {
   const venvPython =
     process.platform === 'win32'
       ? join(repoRoot, '.venv', 'Scripts', 'python.exe')
@@ -195,7 +225,9 @@ export type StartBackendResult =
  * Start the MBForge backend when nothing is listening. A backend that is
  * already running is never touched or stopped by the caller.
  */
-export async function startBackend(options: StartBackendOptions): Promise<StartBackendResult> {
+export async function startBackend(
+  options: StartBackendOptions,
+): Promise<StartBackendResult> {
   const { agentHome, repoRoot, address, onChild } = options
   if (!address.local) {
     return { skipped: true, reason: 'backend address is not local' }
@@ -229,7 +261,17 @@ export async function startBackend(options: StartBackendOptions): Promise<StartB
     command,
     // Match `dev:all`: reload on Python source changes so a launcher-started
     // backend never keeps serving stale code after an edit.
-    [...prefixArgs, '-m', 'mbforge', '--host', address.host, '--port', String(address.port), '--no-browser', '--reload'],
+    [
+      ...prefixArgs,
+      '-m',
+      'mbforge',
+      '--host',
+      address.host,
+      '--port',
+      String(address.port),
+      '--no-browser',
+      '--reload',
+    ],
     {
       cwd: repoRoot,
       env: {
@@ -281,14 +323,23 @@ export async function startBackend(options: StartBackendOptions): Promise<StartB
       logPath,
       startedAt: new Date().toISOString(),
     })
-    return { started: true, child, logPath, host: address.host, port: address.port, pid: child.pid }
+    return {
+      started: true,
+      child,
+      logPath,
+      host: address.host,
+      port: address.port,
+      pid: child.pid,
+    }
   }
 
   stopBackend(child)
   log.end()
   return {
     skipped: true,
-    reason: spawnError?.message ?? `backend did not become ready on ${address.baseUrl}`,
+    reason:
+      spawnError?.message ??
+      `backend did not become ready on ${address.baseUrl}`,
     logPath,
     tail: readTail(logPath),
   }
@@ -297,7 +348,10 @@ export async function startBackend(options: StartBackendOptions): Promise<StartB
 /** Kill a process and its children. */
 export function killTree(pid: number): void {
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+    spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    })
     return
   }
   try {
@@ -353,7 +407,10 @@ export async function stopRecordedBackend(options: {
   const before = await probeBackend(address.baseUrl)
   if (before !== 'ready') {
     clearBackendRecord(agentHome)
-    return { stopped: false, reason: 'backend was not running; stale record discarded' }
+    return {
+      stopped: false,
+      reason: 'backend was not running; stale record discarded',
+    }
   }
 
   killTree(record.pid)

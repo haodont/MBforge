@@ -56,7 +56,13 @@ type Env = Record<string, string | undefined>
 export function sixelSupported(env: Env = process.env): boolean {
   const forced = (env.PI_IMAGE_PROTOCOL ?? '').trim().toLowerCase()
   if (forced === 'sixel') return true
-  if (forced === 'kitty' || forced === 'iterm2' || forced === 'none' || forced === '0' || forced === 'off') {
+  if (
+    forced === 'kitty' ||
+    forced === 'iterm2' ||
+    forced === 'none' ||
+    forced === '0' ||
+    forced === 'off'
+  ) {
     return false
   }
   const term = (env.TERM ?? '').toLowerCase()
@@ -74,7 +80,10 @@ export function sixelSupported(env: Env = process.env): boolean {
 /** Decode a base64 PNG into RGB pixels, compositing any alpha over white. */
 export function decodePng(bytes: Uint8Array): RgbImage {
   const signature = [137, 80, 78, 71, 13, 10, 26, 10]
-  if (bytes.length < 8 || signature.some((value, index) => bytes[index] !== value)) {
+  if (
+    bytes.length < 8 ||
+    signature.some((value, index) => bytes[index] !== value)
+  ) {
     throw new Error('not a PNG')
   }
   let width = 0
@@ -84,7 +93,7 @@ export function decodePng(bytes: Uint8Array): RgbImage {
   let interlace = 0
   const chunks: Uint8Array[] = []
   let palette: Uint8Array | null = null
-  for (let offset = 8; offset + 8 <= bytes.length; ) {
+  for (let offset = 8; offset + 8 <= bytes.length;) {
     const length = readUint32(bytes, offset)
     const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8))
     const start = offset + 8
@@ -104,9 +113,20 @@ export function decodePng(bytes: Uint8Array): RgbImage {
     offset = start + length + 4
   }
   if (width <= 0 || height <= 0) throw new Error('PNG has no header')
-  if (bitDepth !== 8 || interlace !== 0) throw new Error('unsupported PNG layout')
+  if (bitDepth !== 8 || interlace !== 0)
+    throw new Error('unsupported PNG layout')
   const channels =
-    colorType === 2 ? 3 : colorType === 6 ? 4 : colorType === 4 ? 2 : colorType === 0 ? 1 : colorType === 3 ? 1 : 0
+    colorType === 2
+      ? 3
+      : colorType === 6
+        ? 4
+        : colorType === 4
+          ? 2
+          : colorType === 0
+            ? 1
+            : colorType === 3
+              ? 1
+              : 0
   if (channels === 0) throw new Error('unsupported PNG colour type')
 
   const raw = inflateSync(Buffer.concat(chunks))
@@ -117,7 +137,8 @@ export function decodePng(bytes: Uint8Array): RgbImage {
   let source = 0
   for (let row = 0; row < height; row++) {
     const filter = raw[source++] ?? 0
-    for (let index = 0; index < stride; index++) current[index] = raw[source + index] ?? 0
+    for (let index = 0; index < stride; index++)
+      current[index] = raw[source + index] ?? 0
     source += stride
     unfilterRow(filter, current, previous, channels)
     for (let column = 0; column < width; column++) {
@@ -159,7 +180,11 @@ export function decodePng(bytes: Uint8Array): RgbImage {
 }
 
 /** Fit the image into a pixel box with a box filter, never enlarging it. */
-export function downscale(image: RgbImage, maxWidth: number, maxHeight: number): RgbImage {
+export function downscale(
+  image: RgbImage,
+  maxWidth: number,
+  maxHeight: number,
+): RgbImage {
   const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height)
   if (scale >= 1) return image
   const width = Math.max(1, Math.floor(image.width * scale))
@@ -167,10 +192,16 @@ export function downscale(image: RgbImage, maxWidth: number, maxHeight: number):
   const pixels = new Uint8Array(width * height * 3)
   for (let y = 0; y < height; y++) {
     const top = Math.floor((y * image.height) / height)
-    const bottom = Math.max(top + 1, Math.floor(((y + 1) * image.height) / height))
+    const bottom = Math.max(
+      top + 1,
+      Math.floor(((y + 1) * image.height) / height),
+    )
     for (let x = 0; x < width; x++) {
       const left = Math.floor((x * image.width) / width)
-      const right = Math.max(left + 1, Math.floor(((x + 1) * image.width) / width))
+      const right = Math.max(
+        left + 1,
+        Math.floor(((x + 1) * image.width) / width),
+      )
       let red = 0
       let green = 0
       let blue = 0
@@ -194,7 +225,10 @@ export function downscale(image: RgbImage, maxWidth: number, maxHeight: number):
 }
 
 /** Median-cut palette plus one palette index per pixel. */
-export function quantize(image: RgbImage, colors = 256): { palette: number[][]; indices: Uint8Array } {
+export function quantize(
+  image: RgbImage,
+  colors = 256,
+): { palette: number[][]; indices: Uint8Array } {
   interface Bucket {
     key: number
     red: number
@@ -246,14 +280,24 @@ export function quantize(image: RgbImage, colors = 256): { palette: number[][]; 
       lowBlue = Math.min(lowBlue, blue)
       highBlue = Math.max(highBlue, blue)
     }
-    return { start, end, weight, spread: Math.max(highRed - lowRed, highGreen - lowGreen, highBlue - lowBlue) }
+    return {
+      start,
+      end,
+      weight,
+      spread: Math.max(
+        highRed - lowRed,
+        highGreen - lowGreen,
+        highBlue - lowBlue,
+      ),
+    }
   }
   let boxes: Box[] = [measure(0, entries.length)]
   while (boxes.length < colors) {
     let target: Box | undefined
     for (const box of boxes) {
       if (box.end - box.start < 2) continue
-      if (!target || box.weight * box.spread > target.weight * target.spread) target = box
+      if (!target || box.weight * box.spread > target.weight * target.spread)
+        target = box
     }
     if (!target || target.spread === 0) break
     const box = target
@@ -262,14 +306,21 @@ export function quantize(image: RgbImage, colors = 256): { palette: number[][]; 
       .slice(box.start, box.end)
       .map((entry) => ({
         entry,
-        mean: (channel === 0 ? entry.red : channel === 1 ? entry.green : entry.blue) / entry.count,
+        mean:
+          (channel === 0
+            ? entry.red
+            : channel === 1
+              ? entry.green
+              : entry.blue) / entry.count,
       }))
       .sort((a, b) => a.mean - b.mean)
-    for (let index = 0; index < slice.length; index++) entries[box.start + index] = (slice[index] as { entry: Bucket }).entry
+    for (let index = 0; index < slice.length; index++)
+      entries[box.start + index] = (slice[index] as { entry: Bucket }).entry
     let split = box.start + 1
     let half = 0
     let total = 0
-    for (let index = box.start; index < box.end; index++) total += (entries[index] as Bucket).count
+    for (let index = box.start; index < box.end; index++)
+      total += (entries[index] as Bucket).count
     for (let index = box.start; index < box.end - 1; index++) {
       half += (entries[index] as Bucket).count
       split = index + 1
@@ -300,7 +351,8 @@ export function quantize(image: RgbImage, colors = 256): { palette: number[][]; 
     ]
     const paletteIndex = palette.length
     if (paletteIndex < 256) palette.push(color)
-    for (let index = box.start; index < box.end; index++) colorByKey.set((entries[index] as Bucket).key, paletteIndex)
+    for (let index = box.start; index < box.end; index++)
+      colorByKey.set((entries[index] as Bucket).key, paletteIndex)
   }
 
   const nearest = new Map<number, number>()
@@ -339,12 +391,18 @@ export function quantize(image: RgbImage, colors = 256): { palette: number[][]; 
 }
 
 /** Encode indexed pixels as one DECSIXEL sequence. */
-export function encodeSixel(image: RgbImage, palette: number[][], indices: Uint8Array): string {
+export function encodeSixel(
+  image: RgbImage,
+  palette: number[][],
+  indices: Uint8Array,
+): string {
   const parts: string[] = [`\x1bPq"1;1;${image.width};${image.height}`]
   for (let index = 0; index < palette.length; index++) {
     const color = palette[index] as number[]
     const percent = (value: number): number => Math.round((value * 100) / 255)
-    parts.push(`#${index};2;${percent(color[0] as number)};${percent(color[1] as number)};${percent(color[2] as number)}`)
+    parts.push(
+      `#${index};2;${percent(color[0] as number)};${percent(color[1] as number)};${percent(color[2] as number)}`,
+    )
   }
   const bands = Math.ceil(image.height / 6)
   const patterns = new Map<number, Uint8Array>()
@@ -416,7 +474,11 @@ export function renderSixelLines(
   let rendered: SixelLines | null = null
   try {
     const decoded = decodePng(Buffer.from(base64, 'base64'))
-    const fitted = downscale(decoded, maxWidthCells * cellWidthPx, maxHeightCells * cellHeightPx)
+    const fitted = downscale(
+      decoded,
+      maxWidthCells * cellWidthPx,
+      maxHeightCells * cellHeightPx,
+    )
     const { palette, indices } = quantize(fitted)
     const sequence = encodeSixel(fitted, palette, indices)
     const rows = Math.max(1, Math.ceil(fitted.height / cellHeightPx))
@@ -439,19 +501,26 @@ export function renderSixelLines(
 
 function readUint32(bytes: Uint8Array, offset: number): number {
   return (
-    ((bytes[offset] ?? 0) << 24) |
-    ((bytes[offset + 1] ?? 0) << 16) |
-    ((bytes[offset + 2] ?? 0) << 8) |
-    (bytes[offset + 3] ?? 0)
-  ) >>> 0
+    (((bytes[offset] ?? 0) << 24) |
+      ((bytes[offset + 1] ?? 0) << 16) |
+      ((bytes[offset + 2] ?? 0) << 8) |
+      (bytes[offset + 3] ?? 0)) >>>
+    0
+  )
 }
 
-function unfilterRow(filter: number, row: Uint8Array, previous: Uint8Array, channels: number): void {
+function unfilterRow(
+  filter: number,
+  row: Uint8Array,
+  previous: Uint8Array,
+  channels: number,
+): void {
   const stride = row.length
   if (filter === 0) return
   if (filter === 1) {
     for (let index = channels; index < stride; index++) {
-      row[index] = ((row[index] as number) + (row[index - channels] as number)) & 0xff
+      row[index] =
+        ((row[index] as number) + (row[index - channels] as number)) & 0xff
     }
     return
   }
@@ -464,7 +533,9 @@ function unfilterRow(filter: number, row: Uint8Array, previous: Uint8Array, chan
   if (filter === 3) {
     for (let index = 0; index < stride; index++) {
       const left = index >= channels ? (row[index - channels] as number) : 0
-      row[index] = ((row[index] as number) + ((left + (previous[index] as number)) >> 1)) & 0xff
+      row[index] =
+        ((row[index] as number) + ((left + (previous[index] as number)) >> 1)) &
+        0xff
     }
     return
   }
@@ -472,7 +543,8 @@ function unfilterRow(filter: number, row: Uint8Array, previous: Uint8Array, chan
     for (let index = 0; index < stride; index++) {
       const left = index >= channels ? (row[index - channels] as number) : 0
       const up = previous[index] as number
-      const upperLeft = index >= channels ? (previous[index - channels] as number) : 0
+      const upperLeft =
+        index >= channels ? (previous[index - channels] as number) : 0
       const estimate = left + up - upperLeft
       const da = Math.abs(estimate - left)
       const db = Math.abs(estimate - up)
@@ -485,7 +557,11 @@ function unfilterRow(filter: number, row: Uint8Array, previous: Uint8Array, chan
   throw new Error(`unknown PNG filter ${filter}`)
 }
 
-function dominantChannel(entries: { red: number; green: number; blue: number; count: number }[], start: number, end: number): 0 | 1 | 2 {
+function dominantChannel(
+  entries: { red: number; green: number; blue: number; count: number }[],
+  start: number,
+  end: number,
+): 0 | 1 | 2 {
   let lowRed = 255
   let highRed = 0
   let lowGreen = 255
@@ -493,7 +569,12 @@ function dominantChannel(entries: { red: number; green: number; blue: number; co
   let lowBlue = 255
   let highBlue = 0
   for (let index = start; index < end; index++) {
-    const entry = entries[index] as { red: number; green: number; blue: number; count: number }
+    const entry = entries[index] as {
+      red: number
+      green: number
+      blue: number
+      count: number
+    }
     const red = entry.red / entry.count
     const green = entry.green / entry.count
     const blue = entry.blue / entry.count

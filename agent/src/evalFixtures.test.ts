@@ -13,14 +13,24 @@ function branchWith(goalId: string, tools: Array<[string, string]>): unknown[] {
     {
       type: 'custom',
       customType: GOAL_ENTRY_TYPE,
-      data: { action: 'begin', goal_id: goalId, goal: { id: goalId, title: goalId, objective: 'x' } },
+      data: {
+        action: 'begin',
+        goal_id: goalId,
+        goal: { id: goalId, title: goalId, objective: 'x' },
+      },
     },
   ]
   for (const [tool, digest] of tools) {
     branch.push({
       type: 'custom',
       customType: GOAL_ENTRY_TYPE,
-      data: { action: 'tool', goal_id: goalId, tool, input_digest: digest, status: 'ok' },
+      data: {
+        action: 'tool',
+        goal_id: goalId,
+        tool,
+        input_digest: digest,
+        status: 'ok',
+      },
     })
   }
   return branch
@@ -38,7 +48,10 @@ test('completed goals auto-export fixtures and the sweep flags loops and capabil
 
   await exportGoalFixture(
     'goal-clean',
-    branchWith('goal-clean', [['resolve_document', 'd1'], ['search_evidence', 'd2']]),
+    branchWith('goal-clean', [
+      ['resolve_document', 'd1'],
+      ['search_evidence', 'd2'],
+    ]),
     'auto',
   )
   await exportGoalFixture(
@@ -61,9 +74,16 @@ test('completed goals auto-export fixtures and the sweep flags loops and capabil
   )
 
   // In dev mode the repo tools are legitimate, so the same bash call is not a bypass.
-  await exportGoalFixture('goal-dev', branchWith('goal-dev', [['bash', 'd4']]), 'dev')
+  await exportGoalFixture(
+    'goal-dev',
+    branchWith('goal-dev', [['bash', 'd4']]),
+    'dev',
+  )
   const devResults = await sweepFixtures(directory)
-  assert.equal(devResults.some((result) => result.file === 'goal-dev.json'), false)
+  assert.equal(
+    devResults.some((result) => result.file === 'goal-dev.json'),
+    false,
+  )
 
   for (let index = 0; index < 105; index += 1) {
     await exportGoalFixture(
@@ -72,11 +92,20 @@ test('completed goals auto-export fixtures and the sweep flags loops and capabil
       'auto',
     )
   }
-  const names = (await readdir(directory)).filter((name) => name.endsWith('.json'))
-  assert.ok(names.length <= 100, `fixture store must stay bounded, got ${names.length}`)
+  const names = (await readdir(directory)).filter((name) =>
+    name.endsWith('.json'),
+  )
+  assert.ok(
+    names.length <= 100,
+    `fixture store must stay bounded, got ${names.length}`,
+  )
 })
 
 test('the built-in regression sweep passes on the active fixture store', async () => {
   const results = await sweepFixtures()
-  assert.deepEqual(results, [], `behavioral regressions detected: ${JSON.stringify(results)}`)
+  assert.deepEqual(
+    results,
+    [],
+    `behavioral regressions detected: ${JSON.stringify(results)}`,
+  )
 })

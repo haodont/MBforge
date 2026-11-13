@@ -17,7 +17,12 @@ const goal = {
   title: 'Fix review cache',
   objective: 'Make review counts refresh after a decision.',
   requirements: [
-    { id: 'r1', text: 'Refresh after decide', status: 'done', evidence: 'ev-1' },
+    {
+      id: 'r1',
+      text: 'Refresh after decide',
+      status: 'done',
+      evidence: 'ev-1',
+    },
     { id: 'r2', text: 'Keep API stable', status: 'pending' },
   ],
   constraints: [],
@@ -71,7 +76,9 @@ test('a replaced session renders nothing instead of throwing', () => {
   const stale = {
     sessionManager: {
       getBranch: () => {
-        throw new Error('This extension ctx is stale after session replacement or reload.')
+        throw new Error(
+          'This extension ctx is stale after session replacement or reload.',
+        )
       },
     },
   } as unknown as ExtensionContext

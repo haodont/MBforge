@@ -13,6 +13,7 @@ import {
 import { Type } from 'typebox'
 
 import { atomicWrite, createSerializer, readJsonFile } from './localStore.js'
+import { errorMessage } from './text.js'
 import { toolRenderers } from './toolRender.js'
 
 /**
@@ -137,7 +138,7 @@ function runProcess(
       stdout: '',
       stderr: '',
       timedOut: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     })
     return promise
   }
@@ -166,7 +167,13 @@ function runProcess(
     stderr = cap(stderr + chunk)
   })
   child.on('error', (error) => {
-    finish({ code: null, stdout, stderr, timedOut: false, error: error.message })
+    finish({
+      code: null,
+      stdout,
+      stderr,
+      timedOut: false,
+      error: error.message,
+    })
   })
   child.on('close', (code) => {
     finish({ code, stdout, stderr, timedOut: false })
@@ -183,7 +190,12 @@ function toolCommand(
 ): { command: string; args: string[] } {
   const explicit = process.env[envName]?.trim()
   if (explicit) return { command: explicit, args: [] }
-  const venv = join(REPO_ROOT, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin', executable)
+  const venv = join(
+    REPO_ROOT,
+    '.venv',
+    process.platform === 'win32' ? 'Scripts' : 'bin',
+    executable,
+  )
   if (existsSync(venv)) return { command: venv, args: [] }
   return { command: fallback, args: [] }
 }
@@ -193,7 +205,11 @@ const PYTHON = toolCommand(
   process.platform === 'win32' ? 'python.exe' : 'python',
   process.platform === 'win32' ? 'python' : 'python3',
 )
-const RUFF = toolCommand('MBFORGE_RUFF', process.platform === 'win32' ? 'ruff.exe' : 'ruff', 'ruff')
+const RUFF = toolCommand(
+  'MBFORGE_RUFF',
+  process.platform === 'win32' ? 'ruff.exe' : 'ruff',
+  'ruff',
+)
 
 const PYTHON_PARSE = String.raw`
 import ast, json, sys
@@ -238,7 +254,11 @@ else:
 `
 
 async function checkPython(code: string): Promise<DraftAnalysis> {
-  const parsed = await runProcess(PYTHON.command, [...PYTHON.args, '-c', PYTHON_PARSE], code)
+  const parsed = await runProcess(
+    PYTHON.command,
+    [...PYTHON.args, '-c', PYTHON_PARSE],
+    code,
+  )
   if (parsed.error) {
     return {
       checks: [
@@ -289,13 +309,15 @@ async function checkPython(code: string): Promise<DraftAnalysis> {
       definitions: [],
     }
   }
-  const diagnostics = (payload.errors ?? []).slice(0, MAX_DIAGNOSTICS).map((error) => ({
-    code: 'syntax',
-    message: error.message ?? 'syntax error',
-    line: error.line ?? 0,
-    column: error.column ?? 0,
-    severity: 'error',
-  }))
+  const diagnostics = (payload.errors ?? [])
+    .slice(0, MAX_DIAGNOSTICS)
+    .map((error) => ({
+      code: 'syntax',
+      message: error.message ?? 'syntax error',
+      line: error.line ?? 0,
+      column: error.column ?? 0,
+      severity: 'error',
+    }))
   return {
     checks: [
       {
@@ -320,7 +342,15 @@ async function checkPython(code: string): Promise<DraftAnalysis> {
 async function checkRuff(code: string): Promise<DraftCheck> {
   const result = await runProcess(
     RUFF.command,
-    [...RUFF.args, 'check', '--stdin-filename', 'draft.py', '--output-format', 'json', '-'],
+    [
+      ...RUFF.args,
+      'check',
+      '--stdin-filename',
+      'draft.py',
+      '--output-format',
+      'json',
+      '-',
+    ],
     code,
   )
   if (result.error) {
@@ -332,7 +362,12 @@ async function checkRuff(code: string): Promise<DraftCheck> {
     }
   }
   if (result.timedOut) {
-    return { name: 'ruff', status: 'error', message: 'Ruff timed out', diagnostics: [] }
+    return {
+      name: 'ruff',
+      status: 'error',
+      message: 'Ruff timed out',
+      diagnostics: [],
+    }
   }
   let rows: Array<{
     code?: string
@@ -351,7 +386,12 @@ async function checkRuff(code: string): Promise<DraftCheck> {
     }
   }
   if (!Array.isArray(rows)) {
-    return { name: 'ruff', status: 'error', message: 'Ruff returned a non-array report', diagnostics: [] }
+    return {
+      name: 'ruff',
+      status: 'error',
+      message: 'Ruff returned a non-array report',
+      diagnostics: [],
+    }
   }
   const diagnostics = rows.slice(0, MAX_DIAGNOSTICS).map((row) => ({
     code: row.code ?? 'ruff',
@@ -363,7 +403,10 @@ async function checkRuff(code: string): Promise<DraftCheck> {
   return {
     name: 'ruff',
     status: diagnostics.length === 0 ? 'ok' : 'error',
-    message: diagnostics.length === 0 ? 'Ruff clean' : `${diagnostics.length} Ruff diagnostic(s)`,
+    message:
+      diagnostics.length === 0
+        ? 'Ruff clean'
+        : `${diagnostics.length} Ruff diagnostic(s)`,
     diagnostics,
   }
 }
@@ -381,7 +424,10 @@ function scriptCheckName(language: string): string {
     : 'javascript'
 }
 
-async function checkScript(code: string, language: string): Promise<DraftCheck> {
+async function checkScript(
+  code: string,
+  language: string,
+): Promise<DraftCheck> {
   // Optional dev dependency: loading the TypeScript compiler eagerly would add
   // ~17 MB to every session, including sessions that never draft TS.
   const ts = await import('typescript').catch(() => undefined)
@@ -389,7 +435,8 @@ async function checkScript(code: string, language: string): Promise<DraftCheck> 
     return {
       name: scriptCheckName(language),
       status: 'unavailable',
-      message: 'TypeScript is not installed; draft was saved without a syntax check.',
+      message:
+        'TypeScript is not installed; draft was saved without a syntax check.',
       diagnostics: [],
     }
   }
@@ -422,7 +469,9 @@ async function checkScript(code: string, language: string): Promise<DraftCheck> 
       },
     })
     const diagnostics = (result.diagnostics ?? [])
-      .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
+      .filter(
+        (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+      )
       .slice(0, MAX_DIAGNOSTICS)
       .map((diagnostic) => {
         const position =
@@ -450,7 +499,7 @@ async function checkScript(code: string, language: string): Promise<DraftCheck> 
     return {
       name: scriptCheckName(language),
       status: 'error',
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
       diagnostics: [],
     }
   }
@@ -460,12 +509,14 @@ function checkJson(code: string): DraftAnalysis {
   try {
     JSON.parse(code)
     return {
-      checks: [{ name: 'json', status: 'ok', message: 'JSON parsed', diagnostics: [] }],
+      checks: [
+        { name: 'json', status: 'ok', message: 'JSON parsed', diagnostics: [] },
+      ],
       calls: [],
       definitions: [],
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = errorMessage(error)
     const match = /position (\d+)/i.exec(message)
     let line = 0
     let column = 0
@@ -481,7 +532,9 @@ function checkJson(code: string): DraftAnalysis {
           name: 'json',
           status: 'error',
           message: 'JSON parse error',
-          diagnostics: [{ code: 'json', message, line, column, severity: 'error' }],
+          diagnostics: [
+            { code: 'json', message, line, column, severity: 'error' },
+          ],
         },
       ],
       calls: [],
@@ -529,9 +582,7 @@ export async function checkDraft(
 
 export function draftRoot(): string {
   const override = process.env.MBFORGE_DRAFT_DIR?.trim()
-  return override
-    ? resolve(override)
-    : join(getAgentDir(), 'DRAFTS')
+  return override ? resolve(override) : join(getAgentDir(), 'DRAFTS')
 }
 
 function indexFile(): string {
@@ -576,7 +627,7 @@ export async function saveDraft(input: SaveDraftInput): Promise<DraftRecord> {
   if (code.length > MAX_CODE_CHARS) {
     throw new Error(`draft is larger than ${MAX_CODE_CHARS} characters`)
   }
-  const language = (input.language?.trim().toLowerCase() || 'python')
+  const language = input.language?.trim().toLowerCase() || 'python'
   const analysis = await checkDraft(code, language)
   const id = `draft-${randomUUID().slice(0, 8)}`
   const file = join(draftRoot(), `${id}.${extensionFor(language)}`)
@@ -620,7 +671,9 @@ export async function readDraft(id: string): Promise<DraftRead> {
   if (!/^draft-[0-9a-f]{8}$/.test(normalized)) {
     throw new Error(`invalid draft id: ${id}`)
   }
-  const record = (await readStore()).items.find((item) => item.id === normalized)
+  const record = (await readStore()).items.find(
+    (item) => item.id === normalized,
+  )
   if (!record) throw new Error(`draft not found: ${normalized}`)
   const code = await readFile(record.file, 'utf8')
   return { record, code }
@@ -647,21 +700,29 @@ const draftParameters = Type.Object({
   ),
   language: Type.Optional(
     Type.String({
-      description: 'Language for syntax checks; Python currently gets AST + Ruff.',
+      description:
+        'Language for syntax checks; Python currently gets AST + Ruff.',
       maxLength: 32,
     }),
   ),
   target_path: Type.Optional(
     Type.String({
-      description: 'Intended repository file, used when the user applies the draft.',
+      description:
+        'Intended repository file, used when the user applies the draft.',
       maxLength: 500,
     }),
   ),
   summary: Type.Optional(
-    Type.String({ description: 'One-line purpose of this draft.', maxLength: 500 }),
+    Type.String({
+      description: 'One-line purpose of this draft.',
+      maxLength: 500,
+    }),
   ),
   id: Type.Optional(
-    Type.String({ description: 'Draft id for action=read.', pattern: '^draft-[0-9a-f]{8}$' }),
+    Type.String({
+      description: 'Draft id for action=read.',
+      pattern: '^draft-[0-9a-f]{8}$',
+    }),
   ),
 })
 
@@ -690,7 +751,8 @@ export function registerDraftTool(pi: ExtensionAPI): void {
       ...toolRenderers(DRAFT_TOOL_NAME),
       async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         if (params.action === 'check') {
-          if (!params.code) throw new Error('draft action "check" requires code')
+          if (!params.code)
+            throw new Error('draft action "check" requires code')
           const language = params.language?.trim().toLowerCase() || 'python'
           const analysis = await checkDraft(params.code, language)
           return toolResult({

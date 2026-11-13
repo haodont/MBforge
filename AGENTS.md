@@ -38,6 +38,8 @@ npm --prefix frontend install
 npm --prefix agent install
 npm --prefix frontend run dev:all
 npm --prefix agent run cli
+npm --prefix agent run format
+npm --prefix agent run format:check
 uv run pytest tests/ -q
 uv run ruff check src tests
 uv run ruff format src tests --check
@@ -50,7 +52,7 @@ The combined dev command runs backend reload and Vite HMR only. The agent CLI is
 
 ## Coding Style & Naming Conventions
 
-Python uses four spaces, Ruff formatting, type hints, `snake_case`, and `PascalCase` classes. Log with `get_logger(__name__)`; use typed `MBForgeError` API errors and avoid `print()` or bare `except`. Use MolParser E-SMILES for molecule recognition. TypeScript is strict: use `PascalCase` components, `useCamelCase` hooks, `@/` imports, and `import type`.
+Python uses four spaces, Ruff formatting, type hints, `snake_case`, and `PascalCase` classes. Log with `get_logger(__name__)`; use typed `MBForgeError` API errors and avoid `print()` or bare `except`. Use MolParser E-SMILES for molecule recognition. TypeScript is strict: use `PascalCase` components, `useCamelCase` hooks, `@/` imports, and `import type`. `agent/src` is Prettier-formatted per `agent/.prettierrc.json` (no semicolons, single quotes, 80 columns, CRLF); run `npm --prefix agent run format` after editing and `format:check` before finishing.
 
 ## Testing Guidelines
 

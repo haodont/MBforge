@@ -90,7 +90,13 @@ test('capability failures preserve details and add a recovery hint', async (t) =
   const tool = tools[0]
   assert.ok(tool)
   const invoke = () =>
-    tool.execute('call', { query: 'x' }, new AbortController().signal, undefined, {} as never)
+    tool.execute(
+      'call',
+      { query: 'x' },
+      new AbortController().signal,
+      undefined,
+      {} as never,
+    )
 
   await assert.rejects(
     invoke,
@@ -126,21 +132,40 @@ test('capability toolset recovers after an offline start and keeps tools when a 
   )
 
   await manager.load()
-  assert.deepEqual(manager.tools, [], 'an offline start registers no capability')
+  assert.deepEqual(
+    manager.tools,
+    [],
+    'an offline start registers no capability',
+  )
   assert.match(manager.loadError ?? '', /backend unreachable/)
 
   available = true
   const recovered = await manager.reload()
   assert.equal(recovered.ok, true)
-  assert.equal(manager.loadError, undefined, 'a successful reload clears the offline state')
+  assert.equal(
+    manager.loadError,
+    undefined,
+    'a successful reload clears the offline state',
+  )
   assert.deepEqual(registered, ['cap_v1'])
-  assert.deepEqual(manager.tools.map((tool: CapabilityTool) => tool.name), ['cap_v1'])
+  assert.deepEqual(
+    manager.tools.map((tool: CapabilityTool) => tool.name),
+    ['cap_v1'],
+  )
 
   version = 2
   const refreshed = await manager.reload()
   assert.equal(refreshed.ok, true)
-  assert.deepEqual(registered, ['cap_v1', 'cap_v2'], 'reload re-registers under the same names')
-  assert.deepEqual(manager.tools.map((tool: CapabilityTool) => tool.name), ['cap_v2'], 'the active list follows the new manifest')
+  assert.deepEqual(
+    registered,
+    ['cap_v1', 'cap_v2'],
+    'reload re-registers under the same names',
+  )
+  assert.deepEqual(
+    manager.tools.map((tool: CapabilityTool) => tool.name),
+    ['cap_v2'],
+    'the active list follows the new manifest',
+  )
 
   available = false
   const failed = await manager.reload()
@@ -150,5 +175,9 @@ test('capability toolset recovers after an offline start and keeps tools when a 
     ['cap_v2'],
     'a failed refresh keeps the previous toolset',
   )
-  assert.equal(manager.loadError, undefined, 'a working session does not flip offline on a failed refresh')
+  assert.equal(
+    manager.loadError,
+    undefined,
+    'a working session does not flip offline on a failed refresh',
+  )
 })

@@ -6,6 +6,7 @@ import type {
 import { Image } from '@earendil-works/pi-tui'
 
 import { renderSixelLines } from './terminalImage.js'
+import { asArray, clip, isRecord } from './text.js'
 
 /**
  * On-brand rendering for the MBForge tools.
@@ -22,9 +23,7 @@ const GLYPH = '⬡'
 const EXPANDED_ITEMS = 40
 const PREVIEW_CHARS = 72
 
-interface JsonRecord {
-  [key: string]: unknown
-}
+type JsonRecord = Record<string, unknown>
 
 interface ResultDetails {
   data?: unknown
@@ -35,17 +34,10 @@ interface ResultDetails {
 
 // ---------------------------------------------------------------- primitives --
 
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : []
-}
-
 function text(value: unknown): string {
   if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (typeof value === 'number' || typeof value === 'boolean')
+    return String(value)
   return ''
 }
 
@@ -54,19 +46,15 @@ function shortId(value: unknown): string {
   return id.length > 12 ? `${id.slice(0, 10)}…` : id
 }
 
-function clip(value: string, max: number): string {
-  const single = value.replace(/\s+/g, ' ').trim()
-  return single.length > max ? `${single.slice(0, max - 1)}…` : single
-}
-
 /** Word-wrap an error message so the validation tail is not silently cut. */
-function wrapText(value: string, max: number): string[] {
+function wrapErrorText(value: string, max: number): string[] {
   const single = value.replace(/\s+/g, ' ').trim()
   if (single === '') return ['']
   const lines: string[] = []
   let current = ''
   for (const word of single.split(' ')) {
-    const piece = word.length > max ? `${word.slice(0, Math.max(0, max - 1))}…` : word
+    const piece =
+      word.length > max ? `${word.slice(0, Math.max(0, max - 1))}…` : word
     if (current === '') current = piece
     else if (current.length + 1 + piece.length <= max) current += ` ${piece}`
     else {
@@ -151,7 +139,10 @@ function humanize(name: string): string {
 
 // ---------------------------------------------------------------- call line -
 
-const ARG_HINTS: ReadonlyArray<{ key: string; render: (value: unknown) => string }> = [
+const ARG_HINTS: ReadonlyArray<{
+  key: string
+  render: (value: unknown) => string
+}> = [
   { key: 'action', render: (value) => text(value) },
   { key: 'language', render: (value) => text(value) },
   { key: 'target_path', render: (value) => `path ${clip(text(value), 40)}` },
@@ -160,14 +151,21 @@ const ARG_HINTS: ReadonlyArray<{ key: string; render: (value: unknown) => string
   { key: 'content', render: (value) => `“${clip(text(value), 40)}”` },
   { key: 'instruction', render: (value) => `“${clip(text(value), 48)}”` },
   { key: 'smiles', render: (value) => `smiles ${clip(text(value), 32)}` },
-  { key: 'path', render: (value) => `path ${clip(text(value).split(/[\\/]/).pop() ?? '', 32)}` },
+  {
+    key: 'path',
+    render: (value) =>
+      `path ${clip(text(value).split(/[\\/]/).pop() ?? '', 32)}`,
+  },
   { key: 'doc_id', render: (value) => `doc ${shortId(value)}` },
   { key: 'run_id', render: (value) => `run ${shortId(value)}` },
   { key: 'id', render: (value) => text(value) },
   { key: 'page', render: (value) => `p${text(value)}` },
   {
     key: 'region',
-    render: (value) => `[${asArray(value).map((edge) => Math.round(Number(edge))).join(',')}]`,
+    render: (value) =>
+      `[${asArray(value)
+        .map((edge) => Math.round(Number(edge)))
+        .join(',')}]`,
   },
   { key: 'kind', render: (value) => text(value) },
   { key: 'mode', render: (value) => text(value) },
@@ -214,8 +212,9 @@ function builtinArgs(name: string, args: JsonRecord): string {
 /** One-line argument summary for the call row (`“query” · doc x · p3`). */
 function callArgsText(args: unknown): string {
   const record = isRecord(args) ? args : {}
-  const parts = ARG_HINTS.map((hint) => (text(record[hint.key]) ? hint.render(record[hint.key]) : ''))
-    .filter((part) => part !== '')
+  const parts = ARG_HINTS.map((hint) =>
+    text(record[hint.key]) ? hint.render(record[hint.key]) : '',
+  ).filter((part) => part !== '')
   if (text(record.image_base64)) {
     const bytes = Math.round((text(record.image_base64).length * 0.75) / 1024)
     parts.unshift(`image ~${bytes}KB`)
@@ -239,10 +238,23 @@ function callArgsText(args: unknown): string {
 // ------------------------------------------------------------- result summary -
 
 /** Field that carries the primary collection for each capability shape. */
-const LIST_FIELDS = ['items', 'matches', 'molecules', 'blocks', 'sections', 'entries', 'nodes', 'run_ids'] as const
+const LIST_FIELDS = [
+  'items',
+  'matches',
+  'molecules',
+  'blocks',
+  'sections',
+  'entries',
+  'nodes',
+  'run_ids',
+] as const
 
 /** Named collections of a report payload, in display order. */
-const REPORT_LISTS: ReadonlyArray<{ field: string; singular: string; plural: string }> = [
+const REPORT_LISTS: ReadonlyArray<{
+  field: string
+  singular: string
+  plural: string
+}> = [
   { field: 'lessons', singular: 'lesson', plural: 'lessons' },
   { field: 'improvements', singular: 'suggestion', plural: 'suggestions' },
   { field: 'memories', singular: 'memory note', plural: 'memory notes' },
@@ -272,19 +284,30 @@ function nounFor(field: string, sample: unknown): string {
 function itemLine(item: unknown): string {
   if (typeof item === 'string') return clip(item, PREVIEW_CHARS)
   if (!isRecord(item)) return clip(JSON.stringify(item), PREVIEW_CHARS)
-  const id = shortId(item.evidence_id ?? item.id ?? item.item_id ?? item.molecule_id ?? '')
+  const id = shortId(
+    item.evidence_id ?? item.id ?? item.item_id ?? item.molecule_id ?? '',
+  )
   const page = text(item.page) ? `p${text(item.page)} · ` : ''
   const kind = text(item.kind ?? item.type ?? item.mass_check)
     ? `${text(item.kind ?? item.type ?? item.mass_check)} · `
     : ''
-  const body = text(item.snippet ?? item.raw_text ?? item.text ?? item.content ?? item.smiles ?? item.esmiles ?? '')
+  const body = text(
+    item.snippet ??
+      item.raw_text ??
+      item.text ??
+      item.content ??
+      item.smiles ??
+      item.esmiles ??
+      '',
+  )
   const labelKeys = asArray(item.label_keys)
   const title =
     text(item.title ?? item.name ?? item.label) ||
     (labelKeys.length > 0 ? text(labelKeys[0]) : '')
   if (text(item.stage)) return `${text(item.stage)} → ${text(item.status)}`
   const head = title || id
-  if (body) return `${page}${kind}${head ? `${head} · ` : ''}“${clip(body, PREVIEW_CHARS)}”`
+  if (body)
+    return `${page}${kind}${head ? `${head} · ` : ''}“${clip(body, PREVIEW_CHARS)}”`
   if (text(item.status)) return `${head || '·'} · ${text(item.status)}`
   if (head) return `${page}${kind}${head}`
   return clip(JSON.stringify(item), PREVIEW_CHARS)
@@ -293,7 +316,9 @@ function itemLine(item: unknown): string {
 /** One HTTP route row: `GET,POST /api/v1/...`, falling back to the generic line. */
 function routeLine(item: unknown): string {
   const row = isRecord(item) ? item : {}
-  const methods = asArray(row.methods).map((method) => text(method)).filter((method) => method !== '')
+  const methods = asArray(row.methods)
+    .map((method) => text(method))
+    .filter((method) => method !== '')
   const method = methods.length > 0 ? methods.join(',') : text(row.method)
   const path = text(row.path)
   if (method || path) return `${method ? `${method} ` : ''}${path}`.trim()
@@ -312,7 +337,8 @@ function summarize(data: unknown): Summary {
     const noun = nounFor('items', data[0])
     return { head: `${data.length} ${noun}`, items: data.map(itemLine) }
   }
-  if (!isRecord(data)) return { head: clip(text(data), PREVIEW_CHARS), items: [] }
+  if (!isRecord(data))
+    return { head: clip(text(data), PREVIEW_CHARS), items: [] }
 
   // A Patent facts summary answers with counts and an empty items array; the
   // list branch below would otherwise read that as "no items".
@@ -329,7 +355,10 @@ function summarize(data: unknown): Summary {
     const page = data.routes.length
     const total = typeof data.total === 'number' ? data.total : page
     return {
-      head: total > page ? `${page}/${total} routes` : `${page} ${page === 1 ? 'route' : 'routes'}`,
+      head:
+        total > page
+          ? `${page}/${total} routes`
+          : `${page} ${page === 1 ? 'route' : 'routes'}`,
       items: data.routes.map(routeLine),
     }
   }
@@ -340,10 +369,13 @@ function summarize(data: unknown): Summary {
     typeof data.active === 'number' &&
     typeof data.backlog === 'number'
   ) {
-    const parts = [data.status === 'online' ? 'worker online' : `worker ${data.status}`]
+    const parts = [
+      data.status === 'online' ? 'worker online' : `worker ${data.status}`,
+    ]
     if (data.locked === true) parts.push('library locked')
     parts.push(`${data.active} active`, `${data.backlog} backlog`)
-    if (text(data.model_gate)) parts.push(`gate ${clip(text(data.model_gate), 48)}`)
+    if (text(data.model_gate))
+      parts.push(`gate ${clip(text(data.model_gate), 48)}`)
     return { head: parts.join(' · '), items: [] }
   }
 
@@ -362,7 +394,10 @@ function summarize(data: unknown): Summary {
       }),
     )
     const saved = data.action === 'save' ? `draft ${shortId(data.id)} · ` : ''
-    return { head: `${saved}${text(data.lines)} lines · ${labels.join(' · ')}`, items: diagnostics }
+    return {
+      head: `${saved}${text(data.lines)} lines · ${labels.join(' · ')}`,
+      items: diagnostics,
+    }
   }
 
   // ask: a decision, not a collection; show what the user chose.
@@ -375,7 +410,10 @@ function summarize(data: unknown): Summary {
       return { head: `selected ${clip(selected.join(', '), 48)}`, items: [] }
     }
     const answer = text(data.answer_label ?? data.answer)
-    return { head: answer ? `answer “${clip(answer, 48)}”` : 'answered', items: [] }
+    return {
+      head: answer ? `answer “${clip(answer, 48)}”` : 'answered',
+      items: [],
+    }
   }
 
   for (const field of LIST_FIELDS) {
@@ -385,9 +423,15 @@ function summarize(data: unknown): Summary {
       return { head: `no ${nounFor(field, {})}`, items: [] }
     }
     if (field === 'run_ids') {
-      return { head: `${rows.length} runs`, items: rows.map((run) => `run ${shortId(run)}`) }
+      return {
+        head: `${rows.length} runs`,
+        items: rows.map((run) => `run ${shortId(run)}`),
+      }
     }
-    return { head: `${rows.length} ${nounFor(field, rows[0])}`, items: rows.map(itemLine) }
+    return {
+      head: `${rows.length} ${nounFor(field, rows[0])}`,
+      items: rows.map(itemLine),
+    }
   }
 
   // Report payloads (review_task): a prose summary plus named collections.
@@ -403,7 +447,10 @@ function summarize(data: unknown): Summary {
       parts.push(`${rows.length} ${rows.length === 1 ? singular : plural}`)
       for (const row of rows) items.push(itemLine(row))
     }
-    return { head: parts.join(' · ') || clip(text(data.summary), PREVIEW_CHARS), items }
+    return {
+      head: parts.join(' · ') || clip(text(data.summary), PREVIEW_CHARS),
+      items,
+    }
   }
 
   // Goal lifecycle payloads: begin/update carry the goal record, cancel/complete the id.
@@ -425,11 +472,15 @@ function summarize(data: unknown): Summary {
     if (text(data.type)) parts.push(text(data.type))
     if (text(data.entry)) parts.push(`“${clip(text(data.entry), 48)}”`)
     const layers = MEMORY_LAYERS.filter((layer) => text(data[layer]))
-    for (const layer of layers) parts.push(`${layer} ${text(data[layer]).length} chars`)
-    if (typeof data.ephemeral_count === 'number') parts.push(`${text(data.ephemeral_count)} ephemeral`)
+    for (const layer of layers)
+      parts.push(`${layer} ${text(data[layer]).length} chars`)
+    if (typeof data.ephemeral_count === 'number')
+      parts.push(`${text(data.ephemeral_count)} ephemeral`)
     const items = layers.flatMap((layer) => [
       `[${layer}]`,
-      ...text(data[layer]).split('\n').map((line) => clip(line, PREVIEW_CHARS)),
+      ...text(data[layer])
+        .split('\n')
+        .map((line) => clip(line, PREVIEW_CHARS)),
     ])
     return { head: parts.join(' · '), items }
   }
@@ -456,13 +507,19 @@ function summarize(data: unknown): Summary {
   }
   if (text(data.content)) {
     const content = text(data.content)
-    const lines = content.split('\n').slice(0, EXPANDED_ITEMS).map((value) => clip(value, PREVIEW_CHARS))
+    const lines = content
+      .split('\n')
+      .slice(0, EXPANDED_ITEMS)
+      .map((value) => clip(value, PREVIEW_CHARS))
     return { head: `${content.length} chars`, items: lines }
   }
   if (text(data.smiles) || text(data.esmiles)) {
     const recognized = data.recognized === false ? ' · not recognized' : ''
     const primary = text(data.coref_primary ?? data.smiles)
-    return { head: `SMILES ${clip(primary, PREVIEW_CHARS)}${recognized}`, items: [] }
+    return {
+      head: `SMILES ${clip(primary, PREVIEW_CHARS)}${recognized}`,
+      items: [],
+    }
   }
   if (text(data.page) && text(data.width) && text(data.height)) {
     const doc = text(data.doc_id) ? `${shortId(data.doc_id)} · ` : ''
@@ -478,10 +535,15 @@ function summarize(data: unknown): Summary {
     return { head: `${clip(title, 48)}${status}${pages}`, items: [] }
   }
   if (text(data.enqueued) || text(data.skipped)) {
-    return { head: `${text(data.enqueued)} enqueued · ${text(data.skipped)} skipped`, items: [] }
+    return {
+      head: `${text(data.enqueued)} enqueued · ${text(data.skipped)} skipped`,
+      items: [],
+    }
   }
-  if (text(data.updated)) return { head: `${text(data.updated)} updated`, items: [] }
-  if (text(data.run_id)) return { head: `run ${shortId(data.run_id)}`, items: [] }
+  if (text(data.updated))
+    return { head: `${text(data.updated)} updated`, items: [] }
+  if (text(data.run_id))
+    return { head: `run ${shortId(data.run_id)}`, items: [] }
   return { head: 'ok', items: [] }
 }
 
@@ -505,10 +567,17 @@ export function toolRenderers(name: string, mutating = false): ToolRenderers {
           text: `${mutating ? '⬢' : GLYPH} `,
           style: (value) => theme.fg(mutating ? 'warning' : 'accent', value),
         },
-        { text: humanize(name), style: (value) => theme.bold(theme.fg('toolTitle', value)) },
+        {
+          text: humanize(name),
+          style: (value) => theme.bold(theme.fg('toolTitle', value)),
+        },
       ]
       const argsText = callArgsText(args)
-      if (argsText) segments.push({ text: `  ${argsText}`, style: (value) => theme.fg('dim', value) })
+      if (argsText)
+        segments.push({
+          text: `  ${argsText}`,
+          style: (value) => theme.fg('dim', value),
+        })
       segments.push(...runningSegments(theme, context))
       return {
         invalidate(): void {},
@@ -544,19 +613,31 @@ export function toolRenderers(name: string, mutating = false): ToolRenderers {
             return errorResultLines(width, result, theme)
           }
 
-          const expanded = options.expanded === true || context.expanded === true
+          const expanded =
+            options.expanded === true || context.expanded === true
           const summary = summarize(details.data ?? details)
           const head: Segment[] = [
             { text: '  └ ', style: connector },
             { text: '✓ ', style: (value) => theme.fg('success', value) },
-            { text: `${summary.head}${truncationFlag(details)}`, style: (value) => theme.fg('muted', value) },
+            {
+              text: `${summary.head}${truncationFlag(details)}`,
+              style: (value) => theme.fg('muted', value),
+            },
           ]
           const duration = formatDuration(context.durationMs)
-          if (duration) head.push({ text: ` · ${duration}`, style: (value) => theme.fg('dim', value) })
+          if (duration)
+            head.push({
+              text: ` · ${duration}`,
+              style: (value) => theme.fg('dim', value),
+            })
 
           if (!expanded && summary.items.length > 0) {
-            const key = context.keyHint?.('app.tools.expand', 'expand') ?? 'expand'
-            head.push({ text: ` · ▾ ${key}`, style: (value) => theme.fg('dim', value) })
+            const key =
+              context.keyHint?.('app.tools.expand', 'expand') ?? 'expand'
+            head.push({
+              text: ` · ▾ ${key}`,
+              style: (value) => theme.fg('dim', value),
+            })
           }
 
           const lines = [renderLine(width, head)]
@@ -567,10 +648,32 @@ export function toolRenderers(name: string, mutating = false): ToolRenderers {
           const shown = summary.items.slice(0, EXPANDED_ITEMS)
           const hidden = summary.items.length - shown.length
           for (const item of shown) {
-            lines.push(renderLine(width, [{ text: item, style: (value) => theme.fg('toolOutput', value) }], 6))
+            lines.push(
+              renderLine(
+                width,
+                [
+                  {
+                    text: item,
+                    style: (value) => theme.fg('toolOutput', value),
+                  },
+                ],
+                6,
+              ),
+            )
           }
           if (hidden > 0) {
-            lines.push(renderLine(width, [{ text: `… ${hidden} more`, style: (value) => theme.fg('dim', value) }], 6))
+            lines.push(
+              renderLine(
+                width,
+                [
+                  {
+                    text: `… ${hidden} more`,
+                    style: (value) => theme.fg('dim', value),
+                  },
+                ],
+                6,
+              ),
+            )
           }
           return lines
         },
@@ -586,17 +689,27 @@ export function toolRenderers(name: string, mutating = false): ToolRenderers {
  * those would lose information. Only the one-line call row changes, so dev-mode
  * repository work uses the same `⬡ name args` grammar as capability calls.
  */
-export function builtinToolRenderers(name: string, base: ToolRenderers): ToolRenderers {
+export function builtinToolRenderers(
+  name: string,
+  base: ToolRenderers,
+): ToolRenderers {
   return {
     ...base,
     renderCall(args, theme, context) {
       const record = isRecord(args) ? args : {}
       const segments: Segment[] = [
         { text: `${GLYPH} `, style: (value) => theme.fg('accent', value) },
-        { text: humanize(name), style: (value) => theme.bold(theme.fg('toolTitle', value)) },
+        {
+          text: humanize(name),
+          style: (value) => theme.bold(theme.fg('toolTitle', value)),
+        },
       ]
       const detail = builtinArgs(name, record)
-      if (detail) segments.push({ text: `  ${detail}`, style: (value) => theme.fg('dim', value) })
+      if (detail)
+        segments.push({
+          text: `  ${detail}`,
+          style: (value) => theme.fg('dim', value),
+        })
       segments.push(...runningSegments(theme, context))
       return {
         invalidate(): void {},
@@ -609,7 +722,8 @@ export function builtinToolRenderers(name: string, base: ToolRenderers): ToolRen
 }
 
 function truncationFlag(details: ResultDetails): string {
-  if (typeof details.next_offset === 'number') return ` · more at offset ${details.next_offset}`
+  if (typeof details.next_offset === 'number')
+    return ` · more at offset ${details.next_offset}`
   return details.truncated ? ' · truncated' : ''
 }
 
@@ -628,7 +742,7 @@ function errorResultLines(
   theme: Theme,
 ): string[] {
   const errorStyle = (value: string) => theme.fg('error', value)
-  const all = wrapText(errorText(result), Math.max(20, width - 8))
+  const all = wrapErrorText(errorText(result), Math.max(20, width - 8))
   const shown = all.slice(0, 3)
   const lines = shown.map((line, index) =>
     index === 0
@@ -640,7 +754,13 @@ function errorResultLines(
       : renderLine(width, [{ text: line, style: errorStyle }], 6),
   )
   if (shown.length < all.length) {
-    lines.push(renderLine(width, [{ text: '…', style: (value) => theme.fg('dim', value) }], 6))
+    lines.push(
+      renderLine(
+        width,
+        [{ text: '…', style: (value) => theme.fg('dim', value) }],
+        6,
+      ),
+    )
   }
   return lines
 }
@@ -675,7 +795,8 @@ interface ImprovementLine {
 function improvementItemLine(item: unknown): string {
   const row = isRecord(item) ? item : {}
   const status = text(row.status)
-  const mark = status === 'approved' ? '✓' : status === 'implemented' ? '●' : '×'
+  const mark =
+    status === 'approved' ? '✓' : status === 'implemented' ? '●' : '×'
   const label = status === 'rejected' ? 'declined' : status
   const area = text(row.area)
   const title = clip(text(row.title), 48)
@@ -683,7 +804,10 @@ function improvementItemLine(item: unknown): string {
 }
 
 /** Expanded rows: the proposal body for propose, the log for list, the note for complete. */
-function improvementDetailLines(details: JsonRecord, args: JsonRecord): ImprovementLine[] {
+function improvementDetailLines(
+  details: JsonRecord,
+  args: JsonRecord,
+): ImprovementLine[] {
   const action = text(details.action)
   if (action === 'propose') {
     const lines: ImprovementLine[] = []
@@ -695,15 +819,21 @@ function improvementDetailLines(details: JsonRecord, args: JsonRecord): Improvem
         lines.push({ text: clip(part, PREVIEW_CHARS), indent: 4 })
       }
     }
-    const files = asArray(args.files).map((file) => text(file)).filter((file) => file !== '')
+    const files = asArray(args.files)
+      .map((file) => text(file))
+      .filter((file) => file !== '')
     if (files.length > 0) {
       lines.push({ text: '涉及', indent: 2, label: true })
-      for (const file of files) lines.push({ text: clip(file, PREVIEW_CHARS), indent: 4 })
+      for (const file of files)
+        lines.push({ text: clip(file, PREVIEW_CHARS), indent: 4 })
     }
     return lines
   }
   if (action === 'list') {
-    return asArray(details.items).map((item) => ({ text: improvementItemLine(item), indent: 2 }))
+    return asArray(details.items).map((item) => ({
+      text: improvementItemLine(item),
+      indent: 2,
+    }))
   }
   if (action === 'complete') {
     const note = text(args.note)
@@ -729,7 +859,10 @@ export function improvementRenderers(): ToolRenderers {
       const action = text(record.action)
       const segments: Segment[] = [
         { text: `${GLYPH} `, style: (value) => theme.fg('accent', value) },
-        { text: 'suggest improvement', style: (value) => theme.bold(theme.fg('toolTitle', value)) },
+        {
+          text: 'suggest improvement',
+          style: (value) => theme.bold(theme.fg('toolTitle', value)),
+        },
       ]
       const parts: string[] = []
       if (action) parts.push(action)
@@ -741,7 +874,10 @@ export function improvementRenderers(): ToolRenderers {
         if (text(record.note)) parts.push(`“${clip(text(record.note), 32)}”`)
       }
       if (parts.length > 0) {
-        segments.push({ text: `  ${parts.join(' · ')}`, style: (value) => theme.fg('dim', value) })
+        segments.push({
+          text: `  ${parts.join(' · ')}`,
+          style: (value) => theme.fg('dim', value),
+        })
       }
       segments.push(...runningSegments(theme, context))
       return {
@@ -771,8 +907,14 @@ export function improvementRenderers(): ToolRenderers {
             const title = clip(text(args.title), 48)
             head.push(
               approved
-                ? { text: '✓ approved', style: (value) => theme.fg('success', value) }
-                : { text: '× declined', style: (value) => theme.fg('muted', value) },
+                ? {
+                    text: '✓ approved',
+                    style: (value) => theme.fg('success', value),
+                  }
+                : {
+                    text: '× declined',
+                    style: (value) => theme.fg('muted', value),
+                  },
             )
             head.push({
               text: ` · ${text(details.id)}${title ? ` · “${title}”` : ''}`,
@@ -780,15 +922,27 @@ export function improvementRenderers(): ToolRenderers {
             })
             if (approved && details.executable !== true) {
               notices.push([
-                { text: '    ! ', style: (value) => theme.fg('warning', value) },
-                { text: 'dev mode required', style: (value) => theme.fg('warning', value) },
+                {
+                  text: '    ! ',
+                  style: (value) => theme.fg('warning', value),
+                },
+                {
+                  text: 'dev mode required',
+                  style: (value) => theme.fg('warning', value),
+                },
               ])
             }
           } else if (action === 'list') {
             const items = asArray(details.items)
-            head.push({ text: '✓ ', style: (value) => theme.fg('success', value) })
+            head.push({
+              text: '✓ ',
+              style: (value) => theme.fg('success', value),
+            })
             if (items.length === 0) {
-              head.push({ text: 'no suggestions', style: (value) => theme.fg('muted', value) })
+              head.push({
+                text: 'no suggestions',
+                style: (value) => theme.fg('muted', value),
+              })
             } else {
               let approved = 0
               let implemented = 0
@@ -803,27 +957,45 @@ export function improvementRenderers(): ToolRenderers {
               if (approved > 0) parts.push(`${approved} approved`)
               if (implemented > 0) parts.push(`${implemented} implemented`)
               if (declined > 0) parts.push(`${declined} declined`)
-              head.push({ text: parts.join(' · '), style: (value) => theme.fg('muted', value) })
+              head.push({
+                text: parts.join(' · '),
+                style: (value) => theme.fg('muted', value),
+              })
             }
           } else if (action === 'complete') {
             const already = details.already_completed === true
-            head.push({ text: '✓ ', style: (value) => theme.fg('success', value) })
+            head.push({
+              text: '✓ ',
+              style: (value) => theme.fg('success', value),
+            })
             head.push({
               text: `${already ? 'already implemented' : 'implemented'} · ${text(details.id)}`,
               style: (value) => theme.fg('muted', value),
             })
           } else {
-            head.push({ text: '✓ ok', style: (value) => theme.fg('muted', value) })
+            head.push({
+              text: '✓ ok',
+              style: (value) => theme.fg('muted', value),
+            })
           }
 
           const duration = formatDuration(context.durationMs)
-          if (duration) head.push({ text: ` · ${duration}`, style: (value) => theme.fg('dim', value) })
+          if (duration)
+            head.push({
+              text: ` · ${duration}`,
+              style: (value) => theme.fg('dim', value),
+            })
 
           const detailLines = improvementDetailLines(details, args)
-          const expanded = options.expanded === true || context.expanded === true
+          const expanded =
+            options.expanded === true || context.expanded === true
           if (!expanded && detailLines.length > 0) {
-            const key = context.keyHint?.('app.tools.expand', 'expand') ?? 'expand'
-            head.push({ text: ` · ▾ ${key}`, style: (value) => theme.fg('dim', value) })
+            const key =
+              context.keyHint?.('app.tools.expand', 'expand') ?? 'expand'
+            head.push({
+              text: ` · ▾ ${key}`,
+              style: (value) => theme.fg('dim', value),
+            })
           }
 
           const lines = [renderLine(width, head)]
@@ -835,14 +1007,31 @@ export function improvementRenderers(): ToolRenderers {
             lines.push(
               renderLine(
                 width,
-                [{ text: line.text, style: (value) => theme.fg(line.label ? 'dim' : 'toolOutput', value) }],
+                [
+                  {
+                    text: line.text,
+                    style: (value) =>
+                      theme.fg(line.label ? 'dim' : 'toolOutput', value),
+                  },
+                ],
                 line.indent + 4,
               ),
             )
           }
           const hidden = detailLines.length - shown.length
           if (hidden > 0) {
-            lines.push(renderLine(width, [{ text: `… ${hidden} more`, style: (value) => theme.fg('dim', value) }], 6))
+            lines.push(
+              renderLine(
+                width,
+                [
+                  {
+                    text: `… ${hidden} more`,
+                    style: (value) => theme.fg('dim', value),
+                  },
+                ],
+                6,
+              ),
+            )
           }
           return lines
         },

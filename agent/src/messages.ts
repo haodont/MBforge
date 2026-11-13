@@ -1,7 +1,18 @@
 import type { Component } from '@earendil-works/pi-tui'
-import type { MessageRenderOptions, Theme, ThemeColor } from '@earendil-works/pi-coding-agent'
+import type {
+  MessageRenderOptions,
+  Theme,
+  ThemeColor,
+} from '@earendil-works/pi-coding-agent'
 
-import { countLabel, joinColumns, renderRow, wrapText, type Segment } from './uiText.js'
+import {
+  countLabel,
+  joinColumns,
+  renderRow,
+  wrapText,
+  type Segment,
+} from './uiText.js'
+import { asArray, clip, isRecord } from './text.js'
 
 /**
  * Branded rendering for the background goal-review report.
@@ -38,7 +49,9 @@ interface GoalReviewDetails {
 
 /** The fields this renderer reads from a custom message. */
 interface RenderableMessage {
-  content: string | ReadonlyArray<{ type?: string | undefined; text?: string | undefined }>
+  content:
+    | string
+    | ReadonlyArray<{ type?: string | undefined; text?: string | undefined }>
   details?: unknown
 }
 
@@ -46,26 +59,11 @@ function asText(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : []
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
-}
-
-function clip(text: string, max: number): string {
-  const single = text.replace(/\s+/g, ' ').trim()
-  return single.length > max ? `${single.slice(0, Math.max(0, max - 1))}…` : single
-}
-
 /** A suggestion/warning row: a string, or an object with a title/message. */
 function itemText(item: unknown): string {
   if (typeof item === 'string') return item
-  const record = asRecord(item)
-  return asText(record?.title) || asText(record?.message) || asText(record?.text)
+  if (!isRecord(item)) return ''
+  return asText(item.title) || asText(item.message) || asText(item.text)
 }
 
 function messageText(message: RenderableMessage): string {
@@ -91,7 +89,9 @@ export function goalReviewRenderer(
     render(width: number): string[] {
       const pad = ' '.repeat(Math.max(0, options.outputPad))
       const usable = Math.max(12, width - pad.length)
-      const details = asRecord(message.details) as GoalReviewDetails | undefined
+      const details = isRecord(message.details)
+        ? (message.details as GoalReviewDetails)
+        : undefined
       const error = asText(details?.error)
       const goalId = asText(details?.goalId)
       const summary = asText(details?.summary) || messageText(message)
@@ -101,10 +101,16 @@ export function goalReviewRenderer(
 
       const title: Segment[] = [
         { text: `${GLYPH} `, style: (text) => theme.fg('accent', text) },
-        { text: 'goal review', style: (text) => theme.bold(theme.fg('customMessageLabel', text)) },
+        {
+          text: 'goal review',
+          style: (text) => theme.bold(theme.fg('customMessageLabel', text)),
+        },
       ]
       if (goalId) {
-        title.push({ text: ` · ${clip(goalId, 28)}`, style: (text) => theme.fg('dim', text) })
+        title.push({
+          text: ` · ${clip(goalId, 28)}`,
+          style: (text) => theme.fg('dim', text),
+        })
       }
       const outcome: Segment[] = error
         ? [{ text: '✗ failed', style: (text) => theme.fg('error', text) }]
@@ -113,7 +119,11 @@ export function goalReviewRenderer(
 
       if (error) {
         for (const line of wrapText(error, usable - 2)) {
-          lines.push(renderRow(usable, [{ text: `  ${line}`, style: (text) => theme.fg('error', text) }]))
+          lines.push(
+            renderRow(usable, [
+              { text: `  ${line}`, style: (text) => theme.fg('error', text) },
+            ]),
+          )
         }
         return lines.map((line) => `${pad}${line}`)
       }
@@ -127,43 +137,80 @@ export function goalReviewRenderer(
           lines.push('')
           continue
         }
-        lines.push(renderRow(usable, [{ text: `  ${line}`, style: (text) => theme.fg('text', text) }]))
+        lines.push(
+          renderRow(usable, [
+            { text: `  ${line}`, style: (text) => theme.fg('text', text) },
+          ]),
+        )
       }
       const hiddenSummary = summaryLines.length - visibleSummary.length
 
       const counts: string[] = []
-      if (memories.length > 0) counts.push(countLabel(memories.length, 'memory lesson', 'memory lessons'))
-      if (improvements.length > 0) counts.push(countLabel(improvements.length, 'suggestion', 'suggestions'))
-      if (warnings.length > 0) counts.push(countLabel(warnings.length, 'warning', 'warnings'))
+      if (memories.length > 0)
+        counts.push(
+          countLabel(memories.length, 'memory lesson', 'memory lessons'),
+        )
+      if (improvements.length > 0)
+        counts.push(
+          countLabel(improvements.length, 'suggestion', 'suggestions'),
+        )
+      if (warnings.length > 0)
+        counts.push(countLabel(warnings.length, 'warning', 'warnings'))
       if (counts.length > 0) {
-        lines.push(renderRow(usable, [{ text: `  ${counts.join(' · ')}`, style: (text) => theme.fg('muted', text) }]))
+        lines.push(
+          renderRow(usable, [
+            {
+              text: `  ${counts.join(' · ')}`,
+              style: (text) => theme.fg('muted', text),
+            },
+          ]),
+        )
       }
 
-      const detailsAvailable = hiddenSummary > 0 || improvements.length > 0 || warnings.length > 0
+      const detailsAvailable =
+        hiddenSummary > 0 || improvements.length > 0 || warnings.length > 0
       if (!options.expanded) {
         if (detailsAvailable) {
           const hint = options.keyHint('app.tools.expand', 'expand')
-          lines.push(renderRow(usable, [{ text: `  › ${hint}`, style: (text) => theme.fg('dim', text) }]))
+          lines.push(
+            renderRow(usable, [
+              { text: `  › ${hint}`, style: (text) => theme.fg('dim', text) },
+            ]),
+          )
         }
       } else {
         if (improvements.length > 0) {
-          lines.push(renderRow(usable, [{ text: '  suggestions', style: (text) => theme.fg('dim', text) }]))
+          lines.push(
+            renderRow(usable, [
+              { text: '  suggestions', style: (text) => theme.fg('dim', text) },
+            ]),
+          )
           for (const item of improvements.slice(0, MAX_EXPANDED_ITEMS)) {
             lines.push(
               renderRow(usable, [
                 { text: '   • ', style: (text) => theme.fg('accent', text) },
-                { text: clip(itemText(item), usable - 8), style: (text) => theme.fg('text', text) },
+                {
+                  text: clip(itemText(item), usable - 8),
+                  style: (text) => theme.fg('text', text),
+                },
               ]),
             )
           }
         }
         if (warnings.length > 0) {
-          lines.push(renderRow(usable, [{ text: '  warnings', style: (text) => theme.fg('dim', text) }]))
+          lines.push(
+            renderRow(usable, [
+              { text: '  warnings', style: (text) => theme.fg('dim', text) },
+            ]),
+          )
           for (const item of warnings.slice(0, MAX_EXPANDED_ITEMS)) {
             lines.push(
               renderRow(usable, [
                 { text: '   ! ', style: (text) => theme.fg('warning', text) },
-                { text: clip(itemText(item), usable - 8), style: (text) => theme.fg('warning', text) },
+                {
+                  text: clip(itemText(item), usable - 8),
+                  style: (text) => theme.fg('warning', text),
+                },
               ]),
             )
           }
@@ -192,10 +239,8 @@ export function runNoticeRenderer(
     render(width: number): string[] {
       const pad = ' '.repeat(Math.max(0, options.outputPad))
       const usable = Math.max(12, width - pad.length)
-      const details = asRecord(message.details)
-      const runs = asArray(details?.runs)
-        .map(asRecord)
-        .filter((run): run is Record<string, unknown> => run !== undefined)
+      const details = isRecord(message.details) ? message.details : undefined
+      const runs = asArray(details?.runs).filter(isRecord)
       const blocks = messageText(message).split(/\n{2,}/)
       const lines: string[] = []
 
@@ -203,12 +248,19 @@ export function runNoticeRenderer(
         lines.push(
           renderRow(usable, [
             { text: `${GLYPH} `, style: (text) => theme.fg('accent', text) },
-            { text: 'run', style: (text) => theme.bold(theme.fg('customMessageLabel', text)) },
+            {
+              text: 'run',
+              style: (text) => theme.bold(theme.fg('customMessageLabel', text)),
+            },
           ]),
         )
         for (const line of wrapText(messageText(message), usable - 2)) {
           if (line !== '') {
-            lines.push(renderRow(usable, [{ text: `  ${line}`, style: (text) => theme.fg('muted', text) }]))
+            lines.push(
+              renderRow(usable, [
+                { text: `  ${line}`, style: (text) => theme.fg('muted', text) },
+              ]),
+            )
           }
         }
         return lines.map((line) => `${pad}${line}`)
@@ -219,22 +271,45 @@ export function runNoticeRenderer(
         const status = asText(run.status) || 'unknown'
         const docId = asText(run.docId)
         const color = RUN_STATUS_COLORS[status] ?? 'muted'
-        const mark = status === 'done' ? '✓' : status === 'failed' ? '✗' : status === 'cancelled' ? '⊘' : '•'
+        const mark =
+          status === 'done'
+            ? '✓'
+            : status === 'failed'
+              ? '✗'
+              : status === 'cancelled'
+                ? '⊘'
+                : '•'
         const title: Segment[] = [
           { text: `${GLYPH} `, style: (text) => theme.fg('accent', text) },
-          { text: 'run', style: (text) => theme.bold(theme.fg('customMessageLabel', text)) },
+          {
+            text: 'run',
+            style: (text) => theme.bold(theme.fg('customMessageLabel', text)),
+          },
         ]
         if (runId) {
-          title.push({ text: ` ${clip(runId, 18)}`, style: (text) => theme.fg('muted', text) })
+          title.push({
+            text: ` ${clip(runId, 18)}`,
+            style: (text) => theme.fg('muted', text),
+          })
         }
-        title.push({ text: ` · ${status}`, style: (text) => theme.fg(color, text) })
+        title.push({
+          text: ` · ${status}`,
+          style: (text) => theme.fg(color, text),
+        })
         if (docId) {
-          title.push({ text: ` · doc ${clip(docId, 12)}`, style: (text) => theme.fg('dim', text) })
+          title.push({
+            text: ` · doc ${clip(docId, 12)}`,
+            style: (text) => theme.fg('dim', text),
+          })
         }
         lines.push(
           renderRow(
             usable,
-            joinColumns(title, [{ text: mark, style: (text) => theme.fg(color, text) }], usable),
+            joinColumns(
+              title,
+              [{ text: mark, style: (text) => theme.fg(color, text) }],
+              usable,
+            ),
           ),
         )
 
@@ -250,7 +325,14 @@ export function runNoticeRenderer(
               ? 'dim'
               : 'muted'
           for (const wrapped of wrapText(line, usable - 2)) {
-            lines.push(renderRow(usable, [{ text: `  ${wrapped}`, style: (text) => theme.fg(token, text) }]))
+            lines.push(
+              renderRow(usable, [
+                {
+                  text: `  ${wrapped}`,
+                  style: (text) => theme.fg(token, text),
+                },
+              ]),
+            )
           }
         }
         if (index < runs.length - 1) lines.push('')

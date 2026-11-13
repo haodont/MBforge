@@ -44,7 +44,10 @@ test('ephemeral notes are isolated, editable, and removable', async (t) => {
 
   assert.equal((await listEphemeralMemory()).entries.length, 1)
   assert.equal((await listMemory()).entries.length, 0)
-  assert.doesNotMatch(await memorySystemPrompt(), /Prefer concise Chinese answers/)
+  assert.doesNotMatch(
+    await memorySystemPrompt(),
+    /Prefer concise Chinese answers/,
+  )
 
   const updated = await updateMemory(
     first.id,
@@ -99,16 +102,10 @@ test('seventeen ephemeral notes compact into hot and cold layers', async (t) => 
     hot_updates: number
   }
   assert.equal(state.hot_updates, 3)
-  assert.match(
-    readFileSync(memoryArchivePath(path), 'utf8'),
-    /project 0-0/,
-  )
+  assert.match(readFileSync(memoryArchivePath(path), 'utf8'), /project 0-0/)
 
   await appendMemory('ephemeral-only note', 'project')
-  assert.doesNotMatch(
-    await memorySystemPrompt(),
-    /ephemeral-only note/,
-  )
+  assert.doesNotMatch(await memorySystemPrompt(), /ephemeral-only note/)
   const prompt = await memorySystemPrompt()
   assert.match(prompt, /### Cold memory/)
   assert.match(prompt, /### Hot memory/)
@@ -144,7 +141,10 @@ test('memory tools list active layers and inspect ephemeral notes separately', a
     cold: string
   }
   assert.equal(listedDetails.ephemeral_count, 1)
-  assert.doesNotMatch(JSON.stringify(listedDetails), /Prefer concise Chinese answers/)
+  assert.doesNotMatch(
+    JSON.stringify(listedDetails),
+    /Prefer concise Chinese answers/,
+  )
   assert.match(listedDetails.hot, /# MBForge memory/)
 
   const ephemeral = await tool.execute(
@@ -160,7 +160,10 @@ test('memory tools list active layers and inspect ephemeral notes separately', a
   }
   assert.equal(ephemeralDetails.count, 1)
   assert.equal(ephemeralDetails.entries[0].id, addedDetails.id)
-  assert.equal(ephemeralDetails.entries[0].content, 'Prefer concise Chinese answers.')
+  assert.equal(
+    ephemeralDetails.entries[0].content,
+    'Prefer concise Chinese answers.',
+  )
 
   const updated = await tool.execute(
     'call-4',
@@ -193,12 +196,24 @@ test('memory tools list active layers and inspect ephemeral notes separately', a
 
   await assert.rejects(
     async () =>
-      tool.execute('call-6', { action: 'add' }, undefined, undefined, {} as never),
+      tool.execute(
+        'call-6',
+        { action: 'add' },
+        undefined,
+        undefined,
+        {} as never,
+      ),
     /requires content/,
   )
   await assert.rejects(
     async () =>
-      tool.execute('call-7', { action: 'delete' }, undefined, undefined, {} as never),
+      tool.execute(
+        'call-7',
+        { action: 'delete' },
+        undefined,
+        undefined,
+        {} as never,
+      ),
     /requires id/,
   )
 })
@@ -239,10 +254,7 @@ test('background maintenance compresses ephemeral and hot memory with the model'
   assert.match(hot, /model hot preference/)
   assert.doesNotMatch(hot, /project 0-0/)
   assert.match(await readColdMemory(), /model cold rule/)
-  assert.match(
-    readFileSync(memoryArchivePath(path), 'utf8'),
-    /project 0-0/,
-  )
+  assert.match(readFileSync(memoryArchivePath(path), 'utf8'), /project 0-0/)
 
   const state = JSON.parse(readFileSync(memoryStatePath(), 'utf8')) as {
     hot_updates: number

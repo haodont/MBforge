@@ -40,7 +40,13 @@ function harness(branch: unknown[]) {
     },
   })
   const run = (params: Record<string, unknown>) =>
-    tool.execute(params.action as string, params, undefined, undefined, fakeContext(branch))
+    tool.execute(
+      params.action as string,
+      params,
+      undefined,
+      undefined,
+      fakeContext(branch),
+    )
   return { run, queued, archived, activeId: () => active }
 }
 
@@ -55,12 +61,22 @@ test('goal is a living plan: light begin, progress with evidence, pause/resume, 
   const goalId = activeId()
   assert.ok(goalId)
   assert.match(JSON.stringify(started.details), /goal-/)
-  assert.equal(started.details.goal.requirements.length, 0, 'begin needs only an objective')
-  assert.equal(started.details.goal.title, 'Make review counts refresh after a decision.')
+  assert.equal(
+    started.details.goal.requirements.length,
+    0,
+    'begin needs only an objective',
+  )
+  assert.equal(
+    started.details.goal.title,
+    'Make review counts refresh after a decision.',
+  )
 
   const added = await run({
     action: 'progress',
-    requirements: [{ text: 'Invalidate the review query' }, { text: 'Add a focused test' }],
+    requirements: [
+      { text: 'Invalidate the review query' },
+      { text: 'Add a focused test' },
+    ],
   })
   assert.equal(added.details.total, 2)
 
@@ -76,17 +92,31 @@ test('goal is a living plan: light begin, progress with evidence, pause/resume, 
   branch.push({
     type: 'custom',
     customType: GOAL_ENTRY_TYPE,
-    data: { action: 'tool', goal_id: goalId, tool: 'search_evidence', input_digest: 'd1', status: 'ok' },
+    data: {
+      action: 'tool',
+      goal_id: goalId,
+      tool: 'search_evidence',
+      input_digest: 'd1',
+      status: 'ok',
+    },
   })
 
   const paused = await run({ action: 'update', status: 'paused' })
   assert.equal(paused.details.goal.status, 'paused')
   assert.equal(activeId(), goalId, 'a paused goal keeps its slot')
-  const contract = goalContractPrompt(goalStateFromBranch(branch, goalId!)!.goal)
+  const contract = goalContractPrompt(
+    goalStateFromBranch(branch, goalId!)!.goal,
+  )
   assert.match(contract, /\(paused\)/)
   assert.match(contract, /1\/2 done/)
-  assert.match(contract, /\[done\] r1: Invalidate the review query \(evidence: ev-7\)/)
-  assert.match(contract, /\[blocked\] r2: Add a focused test — waiting on a decision/)
+  assert.match(
+    contract,
+    /\[done\] r1: Invalidate the review query \(evidence: ev-7\)/,
+  )
+  assert.match(
+    contract,
+    /\[blocked\] r2: Add a focused test — waiting on a decision/,
+  )
 
   await run({ action: 'update', status: 'active' })
   assert.equal(goalStateFromBranch(branch, goalId!)!.goal.status, 'active')
@@ -120,7 +150,9 @@ test('goal transcript and contract prompt render the definition and tool index',
           id: 'goal-tools',
           title: 'Inspect page',
           objective: 'Check one page.',
-          requirements: [{ id: 'r1', text: 'Read it', status: 'done', evidence: 'ev-1' }],
+          requirements: [
+            { id: 'r1', text: 'Read it', status: 'done', evidence: 'ev-1' },
+          ],
           constraints: ['Keep the API stable'],
           non_goals: ['No rewrite'],
           status: 'active',
@@ -175,9 +207,10 @@ test('goal state survives the branch: legacy string requirements, progress merge
     },
   ]
   assert.equal(activeGoalFromBranch(branch), 'goal-1234')
-  assert.deepEqual(goalStateFromBranch(branch, 'goal-1234')?.goal.requirements, [
-    { id: 'r1', text: 'One requirement', status: 'pending' },
-  ])
+  assert.deepEqual(
+    goalStateFromBranch(branch, 'goal-1234')?.goal.requirements,
+    [{ id: 'r1', text: 'One requirement', status: 'pending' }],
+  )
 
   branch.push({
     type: 'custom',
@@ -185,7 +218,9 @@ test('goal state survives the branch: legacy string requirements, progress merge
     data: {
       action: 'progress',
       goal_id: 'goal-1234',
-      requirements: [{ id: 'r1', text: 'One requirement', status: 'done', evidence: 'ev-9' }],
+      requirements: [
+        { id: 'r1', text: 'One requirement', status: 'done', evidence: 'ev-9' },
+      ],
     },
   })
   branch.push({
@@ -198,7 +233,14 @@ test('goal state survives the branch: legacy string requirements, progress merge
         id: 'goal-1234',
         title: 'Keep the branch',
         objective: 'Resume the goal.',
-        requirements: [{ id: 'r1', text: 'One requirement', status: 'done', evidence: 'ev-9' }],
+        requirements: [
+          {
+            id: 'r1',
+            text: 'One requirement',
+            status: 'done',
+            evidence: 'ev-9',
+          },
+        ],
         constraints: [],
         non_goals: [],
         status: 'paused',
@@ -209,12 +251,20 @@ test('goal state survives the branch: legacy string requirements, progress merge
   const state = goalStateFromBranch(branch, 'goal-1234')
   assert.equal(state?.goal.status, 'paused')
   assert.equal(state?.goal.requirements[0]?.status, 'done')
-  assert.equal(activeGoalFromBranch(branch), 'goal-1234', 'paused goal stays active')
+  assert.equal(
+    activeGoalFromBranch(branch),
+    'goal-1234',
+    'paused goal stays active',
+  )
 
   branch.push({
     type: 'custom',
     customType: GOAL_ENTRY_TYPE,
-    data: { action: 'cancel', goal_id: 'goal-1234', at: '2026-01-01T00:01:00.000Z' },
+    data: {
+      action: 'cancel',
+      goal_id: 'goal-1234',
+      at: '2026-01-01T00:01:00.000Z',
+    },
   })
   assert.equal(activeGoalFromBranch(branch), undefined)
 })

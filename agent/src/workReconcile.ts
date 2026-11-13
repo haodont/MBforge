@@ -11,12 +11,8 @@
  */
 
 import { backendBaseUrl } from './capabilities.js'
-import { TERMINAL_RUN_STATUSES } from './runs.js'
-import {
-  readWorkState,
-  updateWorkThread,
-  type WorkLink,
-} from './workState.js'
+import { errorMessage } from './text.js'
+import { readWorkState, updateWorkThread, type WorkLink } from './workState.js'
 
 const CHECK_TIMEOUT_MS = 8_000
 //: Bound the review scan; an item beyond this page is reported, never closed.
@@ -37,29 +33,44 @@ interface LinkStatus {
   close: boolean
 }
 
-async function fetchCapability(name: string, payload: unknown): Promise<Record<string, unknown>> {
-  const response = await fetch(`${backendBaseUrl()}/api/v1/capabilities/${name}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
-  })
+async function fetchCapability(
+  name: string,
+  payload: unknown,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(
+    `${backendBaseUrl()}/api/v1/capabilities/${name}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
+    },
+  )
   if (!response.ok) throw new Error(`${name} failed (${response.status})`)
-  const body = (await response.json()) as { success?: boolean; data?: Record<string, unknown> }
+  const body = (await response.json()) as {
+    success?: boolean
+    data?: Record<string, unknown>
+  }
   if (!body.success) throw new Error(`${name} returned an error`)
   return body.data ?? {}
 }
 
 async function checkLink(link: WorkLink): Promise<LinkStatus> {
   if (link.kind === 'run') {
-    const data = await fetchCapability('runs', { action: 'get', run_id: link.id })
+    const data = await fetchCapability('runs', {
+      action: 'get',
+      run_id: link.id,
+    })
     const status = String(data.status ?? 'unknown')
     const note = `run ${link.id} is ${status}`
     // Only a successful run resolves the wait; a failure needs the model.
     return { status, note, close: status === 'done' }
   }
   if (link.kind === 'document') {
-    const data = await fetchCapability('document_read', { part: 'info', doc_id: link.id })
+    const data = await fetchCapability('document_read', {
+      part: 'info',
+      doc_id: link.id,
+    })
     const status = String(data.status ?? 'unknown')
     return { status, note: `document ${link.id} is ${status}`, close: false }
   }
@@ -71,11 +82,17 @@ async function checkLink(link: WorkLink): Promise<LinkStatus> {
   const items = Array.isArray(data.items) ? data.items : []
   const item = items.find(
     (row): row is Record<string, unknown> =>
-      typeof row === 'object' && row !== null && (row as { item_id?: unknown }).item_id === link.id,
+      typeof row === 'object' &&
+      row !== null &&
+      (row as { item_id?: unknown }).item_id === link.id,
   )
   if (!item) {
     // Absence may just mean the item is beyond the scanned page; never close on it.
-    return { status: 'not_found', note: `review ${link.id} not in first ${REVIEW_SCAN_LIMIT} items`, close: false }
+    return {
+      status: 'not_found',
+      note: `review ${link.id} not in first ${REVIEW_SCAN_LIMIT} items`,
+      close: false,
+    }
   }
   const status = String(item.status ?? 'pending')
   const decided = status === 'confirmed' || status === 'rejected'
@@ -86,7 +103,8 @@ async function checkLink(link: WorkLink): Promise<LinkStatus> {
 export async function reconcileWorkThreads(): Promise<ThreadCheckResult[]> {
   const state = await readWorkState()
   const targets = state.threads.filter(
-    (thread) => thread.status === 'open' && thread.kind === 'follow_up' && thread.link,
+    (thread) =>
+      thread.status === 'open' && thread.kind === 'follow_up' && thread.link,
   )
   const results: ThreadCheckResult[] = []
   for (const thread of targets) {
@@ -113,14 +131,9 @@ export async function reconcileWorkThreads(): Promise<ThreadCheckResult[]> {
         link,
         status: 'unknown',
         outcome: 'unreachable',
-        note: error instanceof Error ? error.message : String(error),
+        note: errorMessage(error),
       })
     }
   }
   return results
-}
-
-/** True when a run status ends the run (re-exported for callers/tests). */
-export function isTerminalRun(status: string): boolean {
-  return Object.hasOwn(TERMINAL_RUN_STATUSES, status)
 }

@@ -124,7 +124,10 @@ test('long task keeps the original goal and user clarifications', () => {
   }
   branch.push({
     type: 'message',
-    message: { role: 'user', content: 'Latest constraint: do not rename routes.' },
+    message: {
+      role: 'user',
+      content: 'Latest constraint: do not rename routes.',
+    },
   })
 
   const transcript = collectTranscript(branch)

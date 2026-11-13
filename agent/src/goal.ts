@@ -43,7 +43,14 @@ export interface GoalReviewJob {
 }
 
 interface GoalEventData {
-  action: 'begin' | 'update' | 'progress' | 'complete' | 'cancel' | 'supersede' | 'tool'
+  action:
+    | 'begin'
+    | 'update'
+    | 'progress'
+    | 'complete'
+    | 'cancel'
+    | 'supersede'
+    | 'tool'
   goal_id: string
   goal?: GoalDefinition
   requirements?: GoalRequirement[]
@@ -69,7 +76,12 @@ export interface GoalToolOptions {
   archiveTrajectory?: (goalId: string, branch: readonly unknown[]) => void
 }
 
-const REQUIREMENT_STATUSES: RequirementStatus[] = ['pending', 'doing', 'done', 'blocked']
+const REQUIREMENT_STATUSES: RequirementStatus[] = [
+  'pending',
+  'doing',
+  'done',
+  'blocked',
+]
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -108,7 +120,8 @@ function requirementsFromData(value: unknown): GoalRequirement[] {
   for (const [index, item] of value.entries()) {
     if (typeof item === 'string') {
       const trimmed = item.trim()
-      if (trimmed) result.push({ id: `r${index + 1}`, text: trimmed, status: 'pending' })
+      if (trimmed)
+        result.push({ id: `r${index + 1}`, text: trimmed, status: 'pending' })
       continue
     }
     if (typeof item !== 'object' || item === null) continue
@@ -185,7 +198,10 @@ export function goalStateFromBranch(
   for (let index = branch.length - 1; index >= 0; index -= 1) {
     const entry = customGoal(branch[index])
     if (!entry) continue
-    if (text(entry.data.action) !== 'begin' || text(entry.data.goal_id) !== goalId) {
+    if (
+      text(entry.data.action) !== 'begin' ||
+      text(entry.data.goal_id) !== goalId
+    ) {
       continue
     }
     startIndex = index
@@ -211,7 +227,9 @@ export function goalStateFromBranch(
 }
 
 function requirementLine(requirement: GoalRequirement): string {
-  const evidence = requirement.evidence ? ` (evidence: ${requirement.evidence})` : ''
+  const evidence = requirement.evidence
+    ? ` (evidence: ${requirement.evidence})`
+    : ''
   const note = requirement.note ? ` — ${requirement.note}` : ''
   return `- [${requirement.status}] ${requirement.id}: ${requirement.text}${evidence}${note}`
 }
@@ -263,7 +281,9 @@ export function goalTranscript(
   const tools = branch
     .slice(startIndex + 1)
     .map((entry) => customGoal(entry))
-    .filter((entry): entry is { data: Record<string, unknown> } => Boolean(entry))
+    .filter((entry): entry is { data: Record<string, unknown> } =>
+      Boolean(entry),
+    )
     .filter((entry) => text(entry.data.action) === 'tool')
     .slice(-40)
     .map((entry) => {
@@ -285,7 +305,8 @@ export function goalTranscript(
 
 const goalIdSchema = Type.Optional(
   Type.String({
-    description: 'Goal id for update/progress/complete/cancel. Defaults to the active goal.',
+    description:
+      'Goal id for update/progress/complete/cancel. Defaults to the active goal.',
     maxLength: 64,
   }),
 )
@@ -326,7 +347,8 @@ const goalParameters = Type.Union([
     title: Type.Optional(goalTitleSchema),
     requirements: Type.Optional(
       Type.Array(Type.String({ maxLength: 2_000 }), {
-        description: 'Optional initial requirements; decompose further with progress as you work.',
+        description:
+          'Optional initial requirements; decompose further with progress as you work.',
         maxItems: 20,
       }),
     ),
@@ -342,7 +364,8 @@ const goalParameters = Type.Union([
     non_goals: Type.Optional(goalNonGoalsSchema),
     status: Type.Optional(
       Type.Union([Type.Literal('active'), Type.Literal('paused')], {
-        description: 'Pause the goal (status=paused) or resume it (status=active).',
+        description:
+          'Pause the goal (status=paused) or resume it (status=active).',
       }),
     ),
   }),
@@ -351,31 +374,71 @@ const goalParameters = Type.Union([
     id: goalIdSchema,
     requirements: Type.Array(
       Type.Object({
-        id: Type.Optional(Type.String({ description: 'Existing requirement id to update.', maxLength: 32 })),
-        text: Type.Optional(Type.String({ description: 'Requirement text; a new id is assigned when adding.', maxLength: 2_000 })),
+        id: Type.Optional(
+          Type.String({
+            description: 'Existing requirement id to update.',
+            maxLength: 32,
+          }),
+        ),
+        text: Type.Optional(
+          Type.String({
+            description: 'Requirement text; a new id is assigned when adding.',
+            maxLength: 2_000,
+          }),
+        ),
         status: Type.Optional(requirementStatusSchema),
-        evidence: Type.Optional(Type.String({ description: 'Evidence ref proving done (evidence id, test result).', maxLength: 1_000 })),
-        note: Type.Optional(Type.String({ description: 'Why blocked, or other context.', maxLength: 1_000 })),
+        evidence: Type.Optional(
+          Type.String({
+            description:
+              'Evidence ref proving done (evidence id, test result).',
+            maxLength: 1_000,
+          }),
+        ),
+        note: Type.Optional(
+          Type.String({
+            description: 'Why blocked, or other context.',
+            maxLength: 1_000,
+          }),
+        ),
       }),
-      { minItems: 1, maxItems: 20, description: 'Requirement upserts: mark status/evidence by id, or add new ones with text.' },
+      {
+        minItems: 1,
+        maxItems: 20,
+        description:
+          'Requirement upserts: mark status/evidence by id, or add new ones with text.',
+      },
     ),
   }),
   Type.Object({
     action: Type.Literal('complete'),
     id: goalIdSchema,
-    summary: Type.Optional(Type.String({ description: 'Optional short completion summary.', maxLength: 4_000 })),
+    summary: Type.Optional(
+      Type.String({
+        description: 'Optional short completion summary.',
+        maxLength: 4_000,
+      }),
+    ),
     verification: Type.Optional(
-      Type.Array(Type.String({ maxLength: 1_000 }), { description: 'Commands/tests and their results.', maxItems: 20 }),
+      Type.Array(Type.String({ maxLength: 1_000 }), {
+        description: 'Commands/tests and their results.',
+        maxItems: 20,
+      }),
     ),
     risks: Type.Optional(
-      Type.Array(Type.String({ maxLength: 1_000 }), { description: 'Residual risks or unfinished work.', maxItems: 10 }),
+      Type.Array(Type.String({ maxLength: 1_000 }), {
+        description: 'Residual risks or unfinished work.',
+        maxItems: 10,
+      }),
     ),
   }),
   Type.Object({
     action: Type.Literal('cancel'),
     id: goalIdSchema,
     reason: Type.Optional(
-      Type.String({ description: 'Why the goal is cancelled.', maxLength: 1_000 }),
+      Type.String({
+        description: 'Why the goal is cancelled.',
+        maxLength: 1_000,
+      }),
     ),
   }),
 ])
@@ -437,7 +500,9 @@ export function goalTool(options: GoalToolOptions) {
         options.appendEntry({ action: 'begin', goal_id: id, goal, at: now })
         options.setActiveGoal(id, ctx)
         return {
-          content: [{ type: 'text', text: JSON.stringify({ action: 'begin', goal }) }],
+          content: [
+            { type: 'text', text: JSON.stringify({ action: 'begin', goal }) },
+          ],
           details: { action: 'begin', goal },
         }
       }
@@ -448,7 +513,10 @@ export function goalTool(options: GoalToolOptions) {
         if (!state) throw new Error(`goal not found: ${id}`)
         const goal: GoalDefinition = {
           ...state.goal,
-          title: params.title !== undefined ? clean(params.title, 'title', 160) : state.goal.title,
+          title:
+            params.title !== undefined
+              ? clean(params.title, 'title', 160)
+              : state.goal.title,
           objective:
             params.objective !== undefined
               ? clean(params.objective, 'objective', 2_000)
@@ -468,7 +536,9 @@ export function goalTool(options: GoalToolOptions) {
           options.setActiveGoal(id, ctx)
         }
         return {
-          content: [{ type: 'text', text: JSON.stringify({ action: 'update', goal }) }],
+          content: [
+            { type: 'text', text: JSON.stringify({ action: 'update', goal }) },
+          ],
           details: { action: 'update', goal },
         }
       }
@@ -486,10 +556,13 @@ export function goalTool(options: GoalToolOptions) {
           if (reqId) {
             const existing = requirements.find((item) => item.id === reqId)
             if (!existing) throw new Error(`unknown requirement: ${reqId}`)
-            if (requirementText) existing.text = clean(requirementText, 'requirement', 2_000)
+            if (requirementText)
+              existing.text = clean(requirementText, 'requirement', 2_000)
             if (raw.status) existing.status = raw.status
-            if (raw.evidence !== undefined) existing.evidence = raw.evidence.trim() || undefined
-            if (raw.note !== undefined) existing.note = raw.note.trim() || undefined
+            if (raw.evidence !== undefined)
+              existing.evidence = raw.evidence.trim() || undefined
+            if (raw.note !== undefined)
+              existing.note = raw.note.trim() || undefined
             updates.push({ ...existing })
           } else if (requirementText) {
             nextIndex += 1
@@ -497,25 +570,48 @@ export function goalTool(options: GoalToolOptions) {
               id: `r${nextIndex}`,
               text: clean(requirementText, 'requirement', 2_000),
               status: raw.status ?? 'pending',
-              ...(raw.evidence?.trim() ? { evidence: raw.evidence.trim() } : {}),
+              ...(raw.evidence?.trim()
+                ? { evidence: raw.evidence.trim() }
+                : {}),
               ...(raw.note?.trim() ? { note: raw.note.trim() } : {}),
             }
             requirements.push(added)
             updates.push({ ...added })
           } else {
-            throw new Error('each progress item needs an id (to update) or text (to add)')
+            throw new Error(
+              'each progress item needs an id (to update) or text (to add)',
+            )
           }
         }
-        options.appendEntry({ action: 'progress', goal_id: id, requirements: updates, at: now })
-        const done = requirements.filter((item) => item.status === 'done').length
+        options.appendEntry({
+          action: 'progress',
+          goal_id: id,
+          requirements: updates,
+          at: now,
+        })
+        const done = requirements.filter(
+          (item) => item.status === 'done',
+        ).length
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ action: 'progress', goal_id: id, done, total: requirements.length, requirements }),
+              text: JSON.stringify({
+                action: 'progress',
+                goal_id: id,
+                done,
+                total: requirements.length,
+                requirements,
+              }),
             },
           ],
-          details: { action: 'progress', goal_id: id, done, total: requirements.length, requirements },
+          details: {
+            action: 'progress',
+            goal_id: id,
+            done,
+            total: requirements.length,
+            requirements,
+          },
         }
       }
 
@@ -529,7 +625,12 @@ export function goalTool(options: GoalToolOptions) {
         })
         options.setActiveGoal(undefined, ctx)
         return {
-          content: [{ type: 'text', text: JSON.stringify({ action: 'cancel', goal_id: id }) }],
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ action: 'cancel', goal_id: id }),
+            },
+          ],
           details: { action: 'cancel', goal_id: id },
         }
       }
@@ -537,8 +638,12 @@ export function goalTool(options: GoalToolOptions) {
       const id = activeGoalId(options, params.id)
       const state = goalStateFromBranch(branch, id)
       if (!state) throw new Error(`goal not found: ${id}`)
-      const unmet = state.goal.requirements.filter((item) => item.status !== 'done')
-      const summary = params.summary?.trim() ? clean(params.summary, 'summary', 4_000) : ''
+      const unmet = state.goal.requirements.filter(
+        (item) => item.status !== 'done',
+      )
+      const summary = params.summary?.trim()
+        ? clean(params.summary, 'summary', 4_000)
+        : ''
       const verification = cleanList(params.verification, 'verification', 1_000)
       const risks = cleanList(params.risks, 'risk', 1_000)
       const completion = [
@@ -576,7 +681,11 @@ export function goalTool(options: GoalToolOptions) {
               action: 'complete',
               goal_id: id,
               review_queued: true,
-              unmet: unmet.map((item) => ({ id: item.id, text: item.text, status: item.status })),
+              unmet: unmet.map((item) => ({
+                id: item.id,
+                text: item.text,
+                status: item.status,
+              })),
             }),
           },
         ],
@@ -584,7 +693,11 @@ export function goalTool(options: GoalToolOptions) {
           action: 'complete',
           goal_id: id,
           review_queued: true,
-          unmet: unmet.map((item) => ({ id: item.id, text: item.text, status: item.status })),
+          unmet: unmet.map((item) => ({
+            id: item.id,
+            text: item.text,
+            status: item.status,
+          })),
         },
       }
     },
@@ -592,7 +705,9 @@ export function goalTool(options: GoalToolOptions) {
 }
 
 /** Rebuild the active goal after a resume or branch switch. A paused goal stays active. */
-export function activeGoalFromBranch(branch: readonly unknown[]): string | undefined {
+export function activeGoalFromBranch(
+  branch: readonly unknown[],
+): string | undefined {
   let active: string | undefined
   for (const entry of branch) {
     const custom = customGoal(entry)
@@ -601,7 +716,11 @@ export function activeGoalFromBranch(branch: readonly unknown[]): string | undef
     const id = text(custom.data.goal_id)
     if (!id) continue
     if (action === 'begin') active = id
-    else if (action === 'complete' || action === 'cancel' || action === 'supersede') {
+    else if (
+      action === 'complete' ||
+      action === 'cancel' ||
+      action === 'supersede'
+    ) {
       if (active === id) active = undefined
     }
   }

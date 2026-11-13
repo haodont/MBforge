@@ -10,6 +10,7 @@ import { Type } from 'typebox'
 
 import { askUser } from './ask.js'
 import { atomicWrite, createSerializer, readJsonFile } from './localStore.js'
+import { cleanText, errorMessage } from './text.js'
 import { improvementRenderers } from './toolRender.js'
 
 const IMPROVEMENTS_FILE_NAME = 'IMPROVEMENTS.json'
@@ -98,25 +99,9 @@ export interface ImprovementToolDetails {
 /** Local suggestion log; override with MBFORGE_IMPROVEMENTS_FILE in tests or custom layouts. */
 export function improvementsFilePath(): string {
   const override = process.env.MBFORGE_IMPROVEMENTS_FILE?.trim()
-  return override ? resolve(override) : join(getAgentDir(), IMPROVEMENTS_FILE_NAME)
-}
-
-function cleanText(
-  value: string,
-  field: string,
-  max: number,
-  singleLine = false,
-): string {
-  let text = value.replace(/\r\n?/g, '\n').trim()
-  if (singleLine) text = text.replace(/\s+/g, ' ')
-  if (!text) throw new Error(`${field} must not be empty`)
-  if (text.length > max) {
-    throw new Error(`${field} must be at most ${max} characters`)
-  }
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) {
-    throw new Error(`${field} contains control characters`)
-  }
-  return text
+  return override
+    ? resolve(override)
+    : join(getAgentDir(), IMPROVEMENTS_FILE_NAME)
 }
 
 function normalizeInput(input: ImprovementInput): ImprovementInput {
@@ -135,9 +120,7 @@ function normalizeInput(input: ImprovementInput): ImprovementInput {
     rationale: input.rationale
       ? cleanText(input.rationale, 'rationale', MAX_TEXT_CHARS)
       : '',
-    risk: input.risk
-      ? cleanText(input.risk, 'risk', MAX_RISK_CHARS)
-      : '',
+    risk: input.risk ? cleanText(input.risk, 'risk', MAX_RISK_CHARS) : '',
     files,
   }
 }
@@ -185,10 +168,7 @@ function formatImprovementPrompt(
   suggestion: ImprovementInput,
   project: string,
 ): string {
-  const lines = [
-    suggestion.title,
-    `${suggestion.area} · ${project}`,
-  ]
+  const lines = [suggestion.title, `${suggestion.area} · ${project}`]
   const block = (label: string, value: string): void => {
     if (!value) return
     lines.push('', label, ...value.split('\n').map((line) => `  ${line}`))
@@ -315,8 +295,7 @@ const improvementParameters = Type.Union([
     area: Type.Union(
       IMPROVEMENT_AREAS.map((area) => Type.Literal(area)),
       {
-        description:
-          'pipeline, capability, agent, ui, docs, or other.',
+        description: 'pipeline, capability, agent, ui, docs, or other.',
       },
     ),
     problem: Type.String({
@@ -383,7 +362,12 @@ export function improvementTool() {
     ...improvementRenderers(),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (params.action === 'propose') {
-        if (!params.title || !params.area || !params.problem || !params.change) {
+        if (
+          !params.title ||
+          !params.area ||
+          !params.problem ||
+          !params.change
+        ) {
           throw new Error(
             'suggest_improvement action "propose" requires title, area, problem, and change',
           )
@@ -491,14 +475,13 @@ export function registerImprovementTools(pi: ExtensionAPI): void {
           return `${mark} ${item.id}  ${item.area} · ${item.title}`
         })
         ctx.ui.notify(
-          [
-            `Improvement suggestions (${items.length}): ${path}`,
-            ...lines,
-          ].join('\n'),
+          [`Improvement suggestions (${items.length}): ${path}`, ...lines].join(
+            '\n',
+          ),
           'info',
         )
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorMessage(error)
         ctx.ui.notify(`Improvements unavailable: ${message}`, 'error')
       }
     },

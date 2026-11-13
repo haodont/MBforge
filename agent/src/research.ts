@@ -9,6 +9,7 @@ import {
   type CapabilityToolset,
 } from './capabilities.js'
 import { projectCwd, spawnPiText } from './piChild.js'
+import { errorMessage } from './text.js'
 import { toolRenderers } from './toolRender.js'
 
 export const RESEARCH_TOOL_NAME = 'research'
@@ -65,7 +66,8 @@ export function buildResearchArgs(input: ResearchRunnerInput): string[] {
     '--append-system-prompt',
     input.systemPrompt,
   ]
-  if (input.tools && input.tools.length > 0) args.push('--tools', input.tools.join(','))
+  if (input.tools && input.tools.length > 0)
+    args.push('--tools', input.tools.join(','))
   if (input.model) args.push('--model', input.model)
   return args
 }
@@ -102,7 +104,9 @@ export async function runResearch(
   runner: ResearchRunner = spawnResearch,
 ): Promise<string> {
   const focus = input.focus?.trim()
-  const question = focus ? `${input.question}\n\nFocus: ${focus}` : input.question
+  const question = focus
+    ? `${input.question}\n\nFocus: ${focus}`
+    : input.question
   const raw = await runner({
     cwd: input.cwd,
     question,
@@ -149,7 +153,10 @@ export async function runResearchWorkers(
   const tasks = input.tasks.slice(0, MAX_RESEARCH_TASKS)
   const concurrency = Math.max(
     1,
-    Math.min(input.concurrency ?? DEFAULT_RESEARCH_CONCURRENCY, tasks.length || 1),
+    Math.min(
+      input.concurrency ?? DEFAULT_RESEARCH_CONCURRENCY,
+      tasks.length || 1,
+    ),
   )
   const findings: Array<ResearchFinding | undefined> = new Array(tasks.length)
   let next = 0
@@ -176,25 +183,30 @@ export async function runResearchWorkers(
         findings[index] = {
           question: task.question,
           focus: task.focus,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage(error),
         }
       }
     }
   }
   await Promise.all(Array.from({ length: concurrency }, () => worker()))
-  return findings.filter((finding): finding is ResearchFinding => Boolean(finding))
+  return findings.filter((finding): finding is ResearchFinding =>
+    Boolean(finding),
+  )
 }
 
 /** Render worker findings for the parent: one clean finding, or labeled sections to synthesize. */
 function formatFindings(findings: ResearchFinding[]): string {
   if (findings.length === 1) {
     const only = findings[0]
-    return only.answer ?? `Research worker failed: ${only.error ?? 'unknown error'}`
+    return (
+      only.answer ?? `Research worker failed: ${only.error ?? 'unknown error'}`
+    )
   }
   return findings
     .map((finding, index) => {
       const focus = finding.focus ? ` (focus: ${finding.focus})` : ''
-      const body = finding.answer ?? `Worker failed: ${finding.error ?? 'unknown error'}`
+      const body =
+        finding.answer ?? `Worker failed: ${finding.error ?? 'unknown error'}`
       return `## Sub-question ${index + 1}: ${finding.question}${focus}\n\n${body}`
     })
     .join('\n\n')
@@ -228,7 +240,8 @@ export function researchTool(options: ResearchToolOptions) {
           }),
           focus: Type.Optional(
             Type.String({
-              description: 'Optional narrowing focus, for example a document or compound.',
+              description:
+                'Optional narrowing focus, for example a document or compound.',
               maxLength: 500,
             }),
           ),
@@ -253,13 +266,17 @@ export function researchTool(options: ResearchToolOptions) {
         {
           cwd: ctx.cwd,
           tasks: params.tasks,
-          model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
+          model: ctx.model
+            ? `${ctx.model.provider}/${ctx.model.id}`
+            : undefined,
           tools,
           signal,
         },
         spawnResearch,
       )
-      const failed = findings.filter((finding) => finding.error !== undefined).length
+      const failed = findings.filter(
+        (finding) => finding.error !== undefined,
+      ).length
       const summary =
         findings.length === 1
           ? 'research finding'
@@ -267,12 +284,18 @@ export function researchTool(options: ResearchToolOptions) {
               failed > 0 ? ` · ${failed} failed` : ''
             }`
       const text = formatFindings(findings)
-      return { content: [{ type: 'text', text }], details: { summary, findings } }
+      return {
+        content: [{ type: 'text', text }],
+        details: { summary, findings },
+      }
     },
   })
 }
 
-export function registerResearchTools(pi: ExtensionAPI, options: ResearchToolOptions): void {
+export function registerResearchTools(
+  pi: ExtensionAPI,
+  options: ResearchToolOptions,
+): void {
   pi.registerTool(researchTool(options))
 }
 
@@ -299,7 +322,9 @@ export async function registerResearchChild(pi: ExtensionAPI): Promise<void> {
         ? `Read-only library capabilities (${readNames.length}): ${readNames.join(', ')}. Use only these read tools; do not write or spawn subagents.`
         : 'No library capabilities are available because the backend is offline. Report that the library is unreachable instead of guessing.'
     return {
-      systemPrompt: [event.systemPrompt, note].filter((section) => section.length > 0).join('\n\n'),
+      systemPrompt: [event.systemPrompt, note]
+        .filter((section) => section.length > 0)
+        .join('\n\n'),
     }
   })
 }

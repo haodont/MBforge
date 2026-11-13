@@ -24,7 +24,11 @@ function goalData(entry: unknown): Record<string, unknown> | undefined {
   if (record.type !== 'custom' || record.customType !== GOAL_ENTRY_TYPE) {
     return undefined
   }
-  if (typeof record.data !== 'object' || record.data === null || Array.isArray(record.data)) {
+  if (
+    typeof record.data !== 'object' ||
+    record.data === null ||
+    Array.isArray(record.data)
+  ) {
     return undefined
   }
   return record.data as Record<string, unknown>

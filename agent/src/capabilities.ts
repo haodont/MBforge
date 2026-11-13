@@ -2,7 +2,10 @@ import { readFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 import { Type } from 'typebox'
-import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent'
+import {
+  defineTool,
+  type ToolDefinition,
+} from '@earendil-works/pi-coding-agent'
 import type { TSchema } from 'typebox'
 
 import {
@@ -11,6 +14,7 @@ import {
   rememberEvidence,
 } from './citations.js'
 import { backendAddress } from './backendControl.js'
+import { errorMessage } from './text.js'
 import { toolRenderers } from './toolRender.js'
 import { uiGuidelines } from './uiLinks.js'
 
@@ -50,14 +54,19 @@ interface CapabilityErrorBody {
 /** Pull Pydantic validation messages out of an MBForge error context. */
 function validationMessages(context: unknown): string[] {
   if (typeof context !== 'object' || context === null) return []
-  if (!('validation_errors' in context) || !Array.isArray(context.validation_errors)) {
+  if (
+    !('validation_errors' in context) ||
+    !Array.isArray(context.validation_errors)
+  ) {
     return []
   }
   const messages: string[] = []
   for (const item of context.validation_errors.slice(0, 3)) {
     if (typeof item !== 'object' || item === null) continue
     const loc =
-      'loc' in item && Array.isArray(item.loc) ? item.loc.map(String).join('.') : ''
+      'loc' in item && Array.isArray(item.loc)
+        ? item.loc.map(String).join('.')
+        : ''
     const msg = 'msg' in item && typeof item.msg === 'string' ? item.msg : ''
     if (msg) messages.push(loc ? `${loc}: ${msg}` : msg)
   }
@@ -76,17 +85,25 @@ function parseCapabilityError(body: string): CapabilityErrorBody | undefined {
   if (!('error' in value) || typeof value.error !== 'string') return undefined
   return {
     error: value.error,
-    detail: 'detail' in value && typeof value.detail === 'string' ? value.detail : null,
+    detail:
+      'detail' in value && typeof value.detail === 'string'
+        ? value.detail
+        : null,
     errorCode:
       'error_code' in value && typeof value.error_code === 'string'
         ? value.error_code
         : null,
-    validation: validationMessages('context' in value ? value.context : undefined),
+    validation: validationMessages(
+      'context' in value ? value.context : undefined,
+    ),
   }
 }
 
 /** One actionable next step for a known failure, so the model recovers instead of retrying blindly. */
-function recoveryHint(status: number, errorCode: string | null): string | undefined {
+function recoveryHint(
+  status: number,
+  errorCode: string | null,
+): string | undefined {
   switch (errorCode) {
     case 'capability_forbidden':
       return 'this write is gated by the capability token; report that it is blocked in this session instead of retrying'
@@ -121,14 +138,18 @@ function capabilityFailure(name: string, status: number, body: string): Error {
   const hint = recoveryHint(status, parsed?.errorCode ?? null)
   const suffix = hint ? `; next: ${hint}` : ''
   if (parsed === undefined) {
-    return new Error(`capability ${name} failed (${status}): ${body.slice(0, 400)}${suffix}`)
+    return new Error(
+      `capability ${name} failed (${status}): ${body.slice(0, 400)}${suffix}`,
+    )
   }
   const parts = [
     parsed.errorCode ? `${parsed.errorCode}: ${parsed.error}` : parsed.error,
     parsed.detail,
     ...parsed.validation,
   ].filter((part): part is string => Boolean(part))
-  return new Error(`capability ${name} failed (${status}): ${parts.join('; ')}${suffix}`)
+  return new Error(
+    `capability ${name} failed (${status}): ${parts.join('; ')}${suffix}`,
+  )
 }
 
 /** Detect a capability result that carries an inspectable image. */
@@ -154,7 +175,11 @@ function imagePayload(data: unknown): ImagePayload | undefined {
 function runIdsFromData(data: unknown): string[] {
   if (typeof data !== 'object' || data === null) return []
   const ids: string[] = []
-  if ('run_id' in data && typeof data.run_id === 'string' && data.run_id !== '') {
+  if (
+    'run_id' in data &&
+    typeof data.run_id === 'string' &&
+    data.run_id !== ''
+  ) {
     ids.push(data.run_id)
   }
   if ('run_ids' in data && Array.isArray(data.run_ids)) {
@@ -214,7 +239,8 @@ export async function loadCapabilityToolset(
   if (!manifest.success || !Array.isArray(manifest.capabilities)) {
     throw new Error('invalid capability manifest')
   }
-  const tokenPath = process.env.MBFORGE_CAPABILITY_TOKEN_FILE ?? manifest.token_path
+  const tokenPath =
+    process.env.MBFORGE_CAPABILITY_TOKEN_FILE ?? manifest.token_path
 
   const tools = manifest.capabilities.map((capability) =>
     defineTool({
@@ -334,8 +360,7 @@ async function loadToolsetWithRetry(
 }
 
 export type CapabilityReloadResult =
-  | { ok: true; count: number }
-  | { ok: false; error: string }
+  { ok: true; count: number } | { ok: false; error: string }
 
 export interface CapabilityToolsetManager {
   readonly tools: CapabilityTool[]
@@ -391,7 +416,7 @@ export function createCapabilityToolsetManager(
       try {
         await fetchAndRegister()
       } catch (error) {
-        loadError = error instanceof Error ? error.message : String(error)
+        loadError = errorMessage(error)
       }
     },
     /** Refresh the manifest; on failure the previous toolset stays active. */
@@ -399,7 +424,7 @@ export function createCapabilityToolsetManager(
       try {
         return { ok: true, count: await fetchAndRegister() }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorMessage(error)
         if (tools.length === 0) loadError = message
         return { ok: false, error: message }
       }

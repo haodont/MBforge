@@ -2,7 +2,13 @@ import type { Component } from '@earendil-works/pi-tui'
 import type { ExtensionContext, Theme } from '@earendil-works/pi-coding-agent'
 
 import { goalStateFromBranch, type GoalDefinition } from './goal.js'
-import { joinColumns, renderRow, renderSegments, wrapText, type Segment } from './uiText.js'
+import {
+  joinColumns,
+  renderRow,
+  renderSegments,
+  wrapText,
+  type Segment,
+} from './uiText.js'
 
 const STATUS_MARKER: Record<string, string> = {
   pending: '☐',
@@ -27,8 +33,7 @@ export function goalWidget(
   goalId: string,
 ): Component {
   let cache:
-    | { length: number; id: string; goal: GoalDefinition | undefined }
-    | undefined
+    { length: number; id: string; goal: GoalDefinition | undefined } | undefined
 
   const textStyle = (text: string) => theme.fg('text', text)
   const mutedStyle = (text: string) => theme.fg('muted', text)
@@ -104,7 +109,10 @@ export function goalWidget(
         { text: '⬡ ', style: accentStyle },
         { text: 'GOAL', style: (text) => theme.bold(accentStyle(text)) },
         { text: '  ' },
-        { text: `“${goal.title}”`, style: (text) => theme.bold(textStyle(text)) },
+        {
+          text: `“${goal.title}”`,
+          style: (text) => theme.bold(textStyle(text)),
+        },
       ]
       rows.push(
         renderRow(
@@ -130,7 +138,9 @@ export function goalWidget(
       }
 
       if (goal.requirements.length > 0) {
-        const done = goal.requirements.filter((item) => item.status === 'done').length
+        const done = goal.requirements.filter(
+          (item) => item.status === 'done',
+        ).length
         rows.push(
           renderSegments([
             {
@@ -151,7 +161,10 @@ export function goalWidget(
             requirement.status === 'blocked' && requirement.note
               ? ` — ${requirement.note}`
               : ''
-          const lines = wrapText(`${requirement.text}${suffix}`, Math.max(8, width - 4))
+          const lines = wrapText(
+            `${requirement.text}${suffix}`,
+            Math.max(8, width - 4),
+          )
           for (const [index, line] of lines.entries()) {
             rows.push(
               renderSegments(
@@ -168,7 +181,10 @@ export function goalWidget(
         if (goal.requirements.length > 8) {
           rows.push(
             renderSegments([
-              { text: `    … ${goal.requirements.length - 8} more`, style: dimStyle },
+              {
+                text: `    … ${goal.requirements.length - 8} more`,
+                style: dimStyle,
+              },
             ]),
           )
         }

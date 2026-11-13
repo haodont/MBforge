@@ -27,7 +27,13 @@ function toolEntry(
   return {
     type: 'custom',
     customType: GOAL_ENTRY_TYPE,
-    data: { action: 'tool', goal_id: goalId, tool, input_digest: inputDigest, status },
+    data: {
+      action: 'tool',
+      goal_id: goalId,
+      tool,
+      input_digest: inputDigest,
+      status,
+    },
   }
 }
 
@@ -58,7 +64,14 @@ test('a real-run trajectory freezes to a fixture and the behavioral gate catches
   assert.equal(trajectory.steps.length, 6)
   assert.deepEqual(
     trajectory.steps.map((step) => step.tool),
-    ['resolve_document', 'search_evidence', 'search_evidence', 'search_evidence', 'get_patent_result', 'bash'],
+    [
+      'resolve_document',
+      'search_evidence',
+      'search_evidence',
+      'search_evidence',
+      'get_patent_result',
+      'bash',
+    ],
   )
   assert.equal(trajectoryFromBranch(branch, 'goal-missing'), undefined)
   assert.equal(trajectoryFromBranch([{ type: 'message' }]), undefined)
@@ -73,7 +86,11 @@ test('a real-run trajectory freezes to a fixture and the behavioral gate catches
   }
 
   const loop = detectNoProgress(trajectory.steps, DEFAULT_REPEAT_THRESHOLD)
-  assert.deepEqual(loop, { tool: 'search_evidence', inputDigest: 'd2', count: 3 })
+  assert.deepEqual(loop, {
+    tool: 'search_evidence',
+    inputDigest: 'd2',
+    count: 3,
+  })
 
   const report = gradeTrajectory(trajectory, {
     requiredTools: ['resolve_document', 'search_evidence'],
@@ -88,11 +105,7 @@ test('a real-run trajectory freezes to a fixture and the behavioral gate catches
 
   const clean: Trajectory = {
     ...trajectory,
-    steps: [
-      trajectory.steps[0],
-      trajectory.steps[1],
-      trajectory.steps[4],
-    ],
+    steps: [trajectory.steps[0], trajectory.steps[1], trajectory.steps[4]],
   }
   const cleanReport = gradeTrajectory(clean, {
     requiredTools: ['resolve_document', 'search_evidence'],

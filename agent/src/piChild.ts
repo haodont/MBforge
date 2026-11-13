@@ -9,7 +9,8 @@ export function projectCwd(cwd: string): string {
   const parent = dirname(cwd)
   if (
     basename(cwd).toLowerCase() === 'agent' &&
-    (existsSync(join(parent, 'pyproject.toml')) || existsSync(join(parent, '.git')))
+    (existsSync(join(parent, 'pyproject.toml')) ||
+      existsSync(join(parent, '.git')))
   ) {
     return parent
   }
@@ -17,7 +18,10 @@ export function projectCwd(cwd: string): string {
 }
 
 /** Re-invoke the running pi entry, falling back to a `pi` on PATH. */
-export function piInvocation(args: string[]): { command: string; args: string[] } {
+export function piInvocation(args: string[]): {
+  command: string
+  args: string[]
+} {
   const script = process.argv[1]
   if (script && existsSync(script)) {
     return { command: process.execPath, args: [script, ...args] }

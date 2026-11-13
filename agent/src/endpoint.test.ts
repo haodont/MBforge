@@ -11,12 +11,11 @@ import { ModelRuntime } from '@earendil-works/pi-coding-agent'
 
 import {
   CUSTOM_PROVIDER_ID,
-  discoverModels,
   normalizeBaseUrl,
   parseTokenCount,
-  readCustomEndpoint,
-  saveCustomEndpoint,
-} from './endpoint.js'
+} from './endpointConfig.js'
+import { discoverModels } from './endpointDiscovery.js'
+import { readCustomEndpoint, saveCustomEndpoint } from './endpointStore.js'
 
 test('custom endpoint saves provider metadata separately from the key and stays loadable by pi', async () => {
   const agentDir = mkdtempSync(join(tmpdir(), 'mbforge-endpoint-'))
@@ -129,7 +128,13 @@ test('custom endpoint saves provider metadata separately from the key and stays 
   const updated = JSON.parse(readFileSync(modelsPath, 'utf8')) as {
     providers: Record<
       string,
-      { models: Array<{ contextWindow: number; maxTokens: number; reasoning?: boolean }> }
+      {
+        models: Array<{
+          contextWindow: number
+          maxTokens: number
+          reasoning?: boolean
+        }>
+      }
     >
   }
   assert.equal(updated.providers.custom.models[0].contextWindow, 256_000)
@@ -221,8 +226,18 @@ test('model discovery reads /v1/models, carries auth, and extracts context limit
   assert.deepEqual(requested, ['/models', '/v1/models'])
   assert.equal(authorization, 'Bearer sk-test')
   assert.deepEqual(models, [
-    { id: 'acme-small', contextWindow: 32_000, maxTokens: 4_096, reasoning: true },
-    { id: 'acme-large', contextWindow: 200_000, maxTokens: 16_384, reasoning: true },
+    {
+      id: 'acme-small',
+      contextWindow: 32_000,
+      maxTokens: 4_096,
+      reasoning: true,
+    },
+    {
+      id: 'acme-large',
+      contextWindow: 200_000,
+      maxTokens: 16_384,
+      reasoning: true,
+    },
   ])
 })
 
@@ -292,19 +307,28 @@ test('model discovery fills missing limits from /v1/models/{model}', async (t) =
     'sk-test',
   )
 
-  assert.deepEqual(
-    requests.map((request) => request.url).sort(),
-    [
-      '/v1/models',
-      '/v1/models/acme-large',
-      '/v1/models/acme-missing',
-      '/v1/models/acme-small',
-    ],
+  assert.deepEqual(requests.map((request) => request.url).sort(), [
+    '/v1/models',
+    '/v1/models/acme-large',
+    '/v1/models/acme-missing',
+    '/v1/models/acme-small',
+  ])
+  assert.ok(
+    requests.every((request) => request.authorization === 'Bearer sk-test'),
   )
-  assert.ok(requests.every((request) => request.authorization === 'Bearer sk-test'))
   assert.deepEqual(models, [
-    { id: 'acme-small', contextWindow: 200_000, maxTokens: 16_384, reasoning: true },
-    { id: 'acme-large', contextWindow: 128_000, maxTokens: 8_192, reasoning: true },
+    {
+      id: 'acme-small',
+      contextWindow: 200_000,
+      maxTokens: 16_384,
+      reasoning: true,
+    },
+    {
+      id: 'acme-large',
+      contextWindow: 128_000,
+      maxTokens: 8_192,
+      reasoning: true,
+    },
     { id: 'acme-missing' },
   ])
 })
