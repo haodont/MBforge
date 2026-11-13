@@ -169,7 +169,23 @@ def candidate_owns_designation(candidate: Any, label_key: str) -> bool:
         return label_key in candidate_label_keys(candidate)
     own = counts.get(label_key, 0)
     if own <= 0:
-        return False
+        # The page prints the series head as ``1`` as often as ``I``, so the tally
+        # holds ``1-2`` while the activity table asks for ``I-2``. Both spellings
+        # name one compound; reading the tally literally made the structure own
+        # neither and left every reading that cited either unowned (found with
+        # explain_reading on CN121717757A's I-2: counts {1-2: 2}, owns false).
+        from mbforge.service.pipeline.detection.text_label_assignment import (
+            _ocr_confusable_forms,
+        )
+
+        variants = _ocr_confusable_forms(label_key) | {label_key}
+        own = max((counts.get(form, 0) for form in variants), default=0)
+        if own <= 0:
+            return False
+        # The variant that supplied the count is this designation, not a rival.
+        return all(
+            own > count for key, count in counts.items() if key not in variants
+        )
     return all(own > count for key, count in counts.items() if key != label_key)
 
 

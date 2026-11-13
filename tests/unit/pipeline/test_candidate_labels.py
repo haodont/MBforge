@@ -117,3 +117,31 @@ def test_a_digit_headed_series_label_answers_to_the_lettered_spelling() -> None:
     # A stereochemical prefix keeps its own key and gains no series variant.
     assert "cis-I-278" not in candidate_label_keys(_Candidate(name="I-255-A"))
     assert "1" not in {key for key in keys if key != "1-256-A"}
+
+
+def test_a_tally_in_the_other_spelling_still_owns_the_designation() -> None:
+    """The page prints ``1-2``; the activity table asks for ``I-2``.
+
+    The per-drawing tally holds the spelling the page printed, so a literal read of
+    it says the structure owns nothing and every reading that cited either spelling
+    stays unowned — measured on CN121717757A's I-2, whose drawing tallies
+    ``{1-2: 2, 1-1: 1, 7-1: 1}`` and answered ``owns: false``.
+    """
+    candidate = _Candidate(
+        name="1-1",
+        properties={
+            "detection_designations": [
+                {"name": "1-2"},
+                {"name": "1-2"},
+                {"name": "1-1"},
+                {"name": "7-1"},
+            ]
+        },
+    )
+
+    assert candidate_owns_designation(candidate, "I-2") is True
+    assert candidate_owns_designation(candidate, "1-2") is True
+    # A designation outvoted by its own drawings is still not owned, in either
+    # spelling: 7-1 appears once while 1-2 appears twice.
+    assert candidate_owns_designation(candidate, "7-1") is False
+    assert candidate_owns_designation(candidate, "I-7-1") is False
