@@ -1878,3 +1878,28 @@ with padding while the box shrank. Two candidate causes, to check in this order:
 Do not reingest again until one of these is confirmed: each reingest destroys the
 detection set that would show the difference, and 94dd is now the only document
 at the regressed count (the other five keep their earlier extractions).
+
+## CORRECTION: the labels are read; they sit *inside* the detected drawing box (2026-11-13)
+
+The "p32 became fragments / MolDet split the drawing" explanation was wrong. The six
+dummy-atom crops on p32 are the 式I template at the top of the claims page; the nine
+compounds are intact and now carry `1-1` … `1-9` (evidence: `1-2` = exchange-coupled
+C25 structure at bbox 252.33,442.42,338.71,523.78). The letterless-series rule works.
+
+The regression is label *pairing geometry*. Live read of p137 returns 19 text blocks
+including `1-255-A`, `1-256-A`, `1-257-A`, `1-255-B/C/D`, `1-256-C/D`, `1-257-B/D`
+(all `kind: figno`), so the number is present and read. But the caption sits **inside**
+the detected drawing box: `1-256-A` at PDF y 372.49–380.82 → top-down 461.2–469.5,
+while I-256-A's drawing box is top-down 387.3–481.7. `_printed_at_a_drawing` (and the
+producer's head/foot bands) only look *outside* the box, so a caption printed within
+the drawing's own lower strip is neither head nor foot and never attaches.
+
+That is why the scoreboard fell 34/42 → 15/42: roughly seventy `A-R` captions in the
+compound-list pages (p137–p142) land inside their drawing's box, so their readings lost
+the structure. Designations 594 → 520, candidates 569 → 505.
+
+Fix to write: when a designation block lies inside a drawing's box, treat it as that
+drawing's caption iff no other drawing claims it and the block is in the box's lower
+strip with no other drawing's box overlapping it; keep the current head/foot rules
+first so nothing that already attaches is disturbed. Then reingest once and re-check
+the scoreboard before anything else.
